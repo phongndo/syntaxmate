@@ -29,6 +29,8 @@ jobs:
           languages: rust
           queries: security-extended
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
       - run: cargo build --all-targets --all-features --locked
       - name: Analyze
