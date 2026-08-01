@@ -91,6 +91,7 @@ jobs:
         shell: bash
         run: |
           status="$(curl --silent --show-error \
+            --user-agent 'syntaxmate-ci/0.1 (+https://github.com/phongndo/syntaxmate)' \
             --write-out '%{http_code}' \
             --output /tmp/syntaxmate-crate.json \
             https://crates.io/api/v1/crates/syntaxmate)"
