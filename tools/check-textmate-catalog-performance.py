@@ -48,6 +48,27 @@ def load_policy_floor(path=VALIDATION_POLICY):
     return floor
 
 
+def load_ci_policy(path=VALIDATION_POLICY):
+    try:
+        policy = json.loads(path.read_text())["ciPerformance"]
+        iterations = policy["iterations"]
+        language_floor = policy["minimumLanguageMbPerSecond"]
+        aggregate_floor = policy["minimumAggregateMbPerSecond"]
+    except (OSError, json.JSONDecodeError, KeyError) as error:
+        raise ValueError(f"cannot read CI performance policy from {path}: {error}") from error
+    if isinstance(iterations, bool) or not isinstance(iterations, int) or iterations < 1:
+        raise ValueError(f"{path}: ciPerformance.iterations must be a positive integer")
+    for name, value in (
+        ("minimumLanguageMbPerSecond", language_floor),
+        ("minimumAggregateMbPerSecond", aggregate_floor),
+    ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{path}: ciPerformance.{name} must be a number")
+        if not math.isfinite(value) or value < 0:
+            raise ValueError(f"{path}: ciPerformance.{name} must be finite and nonnegative")
+    return iterations, float(language_floor), float(aggregate_floor)
+
+
 def checked_corpora(path=CHECKED_MANIFEST):
     result = {}
     for block in re.split(r"(?m)^\[\[corpus\]\]\s*$", path.read_text())[1:]:
@@ -123,7 +144,12 @@ def main():
         type=float,
         help="override the policy floor (normally only useful for diagnostics)",
     )
-    parser.add_argument("--iterations", type=int, default=1)
+    parser.add_argument("--iterations", type=int)
+    parser.add_argument(
+        "--ci",
+        action="store_true",
+        help="use the shared-runner iteration count and performance floors from the policy",
+    )
     parser.add_argument("--binary", type=Path, default=BINARY)
     parser.add_argument(
         "--write-report",
@@ -139,8 +165,18 @@ def main():
         policy_floor = load_policy_floor(policy_path)
     except ValueError as error:
         parser.error(str(error))
-    floor = policy_floor if args.floor is None else args.floor
-    if not math.isfinite(floor) or floor < 0 or args.iterations < 1:
+    aggregate_floor = None
+    if args.ci:
+        if args.floor is not None or args.iterations is not None:
+            parser.error("--ci cannot be combined with --floor or --iterations")
+        try:
+            iterations, floor, aggregate_floor = load_ci_policy(policy_path)
+        except ValueError as error:
+            parser.error(str(error))
+    else:
+        iterations = 1 if args.iterations is None else args.iterations
+        floor = policy_floor if args.floor is None else args.floor
+    if not math.isfinite(floor) or floor < 0 or iterations < 1:
         parser.error("--floor must be finite and nonnegative and --iterations must be positive")
 
     built_corpora = run([sys.executable, "tools/build-textmate-corpora.py"], capture=True)
@@ -188,7 +224,7 @@ def main():
                 "--assets", "assets/grammars/languages",
                 "--scope", fixture["scope"],
                 fixture["path"],
-                str(args.iterations),
+                str(iterations),
             ],
             capture=True,
         )
@@ -198,9 +234,9 @@ def main():
             if (
                 candidate.get("schemaVersion") == 1
                 and candidate.get("mode") == "process-cold"
-                and candidate.get("iterations") == args.iterations
+                and candidate.get("iterations") == iterations
                 and candidate.get("bytesPerIteration") == fixture["bytes"]
-                and candidate.get("processedBytes") == fixture["bytes"] * args.iterations
+                and candidate.get("processedBytes") == fixture["bytes"] * iterations
                 and isinstance(candidate.get("elapsedNanoseconds"), int)
                 and not isinstance(candidate.get("elapsedNanoseconds"), bool)
                 and candidate["elapsedNanoseconds"] > 0
@@ -219,7 +255,7 @@ def main():
             "scope": fixture["scope"],
             "bytes": fixture["bytes"],
             "sha256": fixture["sha256"],
-            "processedBytes": fixture["bytes"] * args.iterations,
+            "processedBytes": fixture["bytes"] * iterations,
             "elapsedNanoseconds": elapsed_nanoseconds,
             "mbPerSecond": mb_s,
             "passed": passed,
@@ -229,7 +265,19 @@ def main():
             detail = measured.stderr.strip() or measured.stdout.strip() or "no benchmark output"
             print(f"{fixture['language']}: performance measurement failed\n{detail}", file=sys.stderr)
 
-    report = make_report(corpus, results, floor, args.iterations)
+    report = make_report(corpus, results, floor, iterations)
+    aggregate_passed = True
+    if aggregate_floor is not None:
+        aggregate = report["measurement"]["aggregateMbPerSecond"]
+        aggregate_passed = aggregate is not None and aggregate >= aggregate_floor
+        report["measurement"]["aggregateFloorMbPerSecond"] = aggregate_floor
+        report["measurement"]["aggregatePassed"] = aggregate_passed
+        if not aggregate_passed:
+            print(
+                f"aggregate throughput {aggregate!r} MB/s is below the CI floor "
+                f"of {aggregate_floor:g} MB/s",
+                file=sys.stderr,
+            )
     rendered = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
     print(rendered, end="")
     if args.write_report is not None:
@@ -243,7 +291,7 @@ def main():
         except ValueError:
             display_path = report_path
         print(f"wrote {display_path}", file=sys.stderr)
-    return int(report["failed"] != 0)
+    return int(report["failed"] != 0 or not aggregate_passed)
 
 
 if __name__ == "__main__":

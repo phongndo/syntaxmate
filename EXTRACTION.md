@@ -18,5 +18,5 @@ Syntaxmate-owned public APIs and release metadata. Its release-candidate gate
 covers all 264 catalog languages and 544 oracle cases with an empty divergence
 allowlist. The one-iteration catalog comparison on the extraction host measured
 14.519 MB/s for Syntaxmate versus 14.687 MB/s for the source baseline (a 1.1%
-difference); machine-sensitive CI uses ten iterations. Future engine,
+difference); shared-runner CI uses the calibrated floors in the validation policy. Future engine,
 catalog, and theme changes are owned and versioned by Syntaxmate.

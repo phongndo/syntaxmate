@@ -7,6 +7,11 @@
     "stressCorpusLanguages": 264
   },
   "minimumStressMbPerSecond": 2.0,
+  "ciPerformance": {
+    "iterations": 3,
+    "minimumLanguageMbPerSecond": 1.0,
+    "minimumAggregateMbPerSecond": 6.0
+  },
   "strictContractIntroduced": "2026-07-12",
   "finalPromotionBatchDate": "2026-07-14"
 }
