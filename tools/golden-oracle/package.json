@@ -7,10 +7,10 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@shikijs/langs": "3.23.0",
-    "@shikijs/themes": "3.23.0",
+    "@shikijs/langs": "4.3.1",
+    "@shikijs/themes": "4.3.1",
     "github-vscode-themes": "6.3.4",
-    "vscode-oniguruma": "1.7.0",
-    "vscode-textmate": "9.2.0"
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
   }
 }
