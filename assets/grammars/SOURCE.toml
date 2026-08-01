@@ -1,0 +1,126 @@
+schema_version = 1
+asset_mode = "vendored-tm-grammars"
+
+[source]
+name = "Shiki tm-grammars"
+package = "@shikijs/langs"
+repository = "https://github.com/shikijs/shiki"
+license = "MIT"
+package_version = "3.23.0"
+source_revision = "package:@shikijs/langs@3.23.0"
+source_commit = "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+
+[import]
+source_path = "tools/golden-oracle/node_modules/@shikijs/langs"
+generated_by = "node dynamic import of @shikijs/langs/dist/*.mjs"
+notes = "All default-exported TextMate grammar objects from the pinned package are committed as text JSON."
+
+[[additional_sources]]
+name = "Visual Studio Code built-in grammars"
+repository = "https://github.com/microsoft/vscode"
+version = "1.128.0"
+source_commit = "fc3def6774c76082adf699d366f31a557ce5573f"
+license = "MIT"
+assets = ["dart", "handlebars", "ignore", "js-regexp", "php", "pug", "r", "rst", "yaml", "yaml-1.2", "yaml-embedded"]
+notes = "Pug source.sass/source.stylus and reStructuredText source.cmake includes are renamed to retain VS Code built-in unresolved-include behavior; the canonical and behavior audits verify these transformations."
+
+[[additional_sources]]
+name = "YANG syntax highlighter"
+repository = "https://github.com/marko2276/yang-vscode-syntax"
+version = "0.1.3"
+license = "MIT"
+assets = ["yang"]
+
+[[additional_sources]]
+name = "LLVM MLIR TextMate grammar"
+repository = "https://github.com/llvm/llvm-project"
+version = "llvmorg-18.1.8"
+license = "Apache-2.0 WITH LLVM-exception"
+assets = ["mlir"]
+
+[[additional_sources]]
+name = "Bazel VS Code Starlark grammar"
+repository = "https://github.com/bazel-contrib/vscode-bazel"
+version = "0.14.0"
+source_commit = "6518f01fd1d401d0af9be2d355b3d1e68ba4efac"
+license = "MIT"
+license_notice = "assets/grammars/licenses/starlark.tmLanguage.license"
+assets = ["starlark"]
+notes = "The upstream MagicPython-derived MIT notice is vendored separately; package registration aliases and file types are merged into the vendored JSON."
+
+[[additional_sources]]
+name = "Open Policy Agent VS Code grammar"
+repository = "https://github.com/open-policy-agent/vscode-opa"
+version = "0.23.0"
+source_commit = "07cd6e94fe611e279de72570567203c81349ad3b"
+license = "Apache-2.0"
+license_notice = "assets/grammars/licenses/rego.tmLanguage.license"
+assets = ["rego"]
+
+[[additional_sources]]
+name = "CUDA C++ VS Code grammar"
+repository = "https://github.com/kriegalex/vscode-cuda"
+version = "0.1.1"
+source_commit = "c4f6f083e13c125f7cbaea6f4b8914feeb7c1275"
+license = "MIT"
+license_notice = "assets/grammars/licenses/cuda.tmLanguage.license"
+assets = ["cuda"]
+notes = "Package registration file types are merged into the vendored JSON; generic .h ownership remains with C."
+
+[[additional_sources]]
+name = "Khronos SPIR-V Tools VS Code grammar"
+repository = "https://github.com/KhronosGroup/SPIRV-Tools"
+version = "0.0.1"
+source_commit = "a153275e548fcbbcfcb5fababd5025108571364e"
+license = "Apache-2.0"
+license_notice = "assets/grammars/licenses/spirv.tmLanguage.license"
+assets = ["spirv"]
+
+[[additional_sources]]
+name = "OpenCL VS Code grammar"
+repository = "https://github.com/Galarius/vscode-opencl"
+version = "0.10.0"
+source_commit = "d01266e9e8762556e13418472415dc8c2656c3d3"
+license = "MIT"
+license_notice = "assets/grammars/licenses/opencl.tmLanguage.license"
+assets = ["opencl"]
+notes = "The upstream registration and OpenCL vocabulary are preserved in a bounded root profile that delegates C++ lexical syntax to source.cpp; this avoids the upstream grammar's duplicated C++ rules and native budget degradation."
+
+[[additional_sources]]
+name = "Metal Analyzer VS Code grammar"
+repository = "https://github.com/computer-graphics-tools/metal-analyzer"
+version = "0.1.22"
+source_commit = "f74c533b68351b4e58c286ca53d8ecc6ea92205a"
+license = "MIT"
+license_notice = "assets/grammars/licenses/metal.tmLanguage.license"
+assets = ["metal"]
+
+[[additional_sources]]
+name = "WebIDL VS Code grammar"
+repository = "https://github.com/nberlette/vscode-webidl"
+version = "0.2.0"
+source_commit = "f2a7874438e787c3a0e57bfa4b2ebe30d90884e6"
+license = "MIT"
+license_notice = "assets/grammars/licenses/webidl.tmLanguage.license"
+assets = ["webidl"]
+
+[[additional_sources]]
+name = "AssemblyScript TypeScript profile"
+repository = "https://github.com/AssemblyScript/assemblyscript"
+version = "0.28.19"
+source_commit = "282903732b48ddb2e268092384969e0c1ecfb12b"
+license = "Apache-2.0"
+license_notice = "assets/grammars/licenses/assemblyscript.tmLanguage.license"
+assets = ["assemblyscript"]
+notes = "AssemblyScript uses TypeScript lexical syntax; the public root grammar delegates to the pinned source.ts grammar and remains explicit-selection-only because .ts is ambiguous."
+
+[paths]
+languages = "assets/grammars/languages"
+licenses = "assets/grammars/licenses.json"
+coverage = "assets/grammars/coverage.toml"
+language_metadata = "assets/grammars/language-metadata.json"
+
+[policy]
+grammar_sources_committed_as_text = true
+bundle_bin_committed = false
+release_build_requires_node = false

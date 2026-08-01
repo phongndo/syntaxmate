@@ -1,0 +1,20 @@
+; A small Logo postcard with Unicode words.
+to postcard :guest
+  clearscreen
+  make "message sentence "hello :guest
+  print :message
+  label "|café 東京 λ 🚀 𝌆|
+  repeat 4 [forward 60 right 90]
+end
+
+to greet :|honored guest|
+  ifelse emptyp :|honored guest| [
+    output "friend
+  ] [
+    output word "hello :|honored guest|
+  ]
+end
+
+greet "|Ada Lovelace|
+postcard "explorer
+; Every procedure and vertical-bar word is closed.

@@ -1,0 +1,64 @@
+name: Bug or compatibility regression
+description: Report incorrect scopes, styles, detection, rendering, panic, or degradation
+title: "bug: "
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for a minimal, reproducible report. Security issues belong in private vulnerability reporting.
+  - type: input
+    id: version
+    attributes:
+      label: Syntaxmate version
+      placeholder: 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: bundle
+    attributes:
+      label: Bundle version
+      description: Available from Catalog::bundled().bundle_version().
+    validations:
+      required: false
+  - type: input
+    id: language
+    attributes:
+      label: Language and theme
+      placeholder: rust / github-dark
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Minimal source
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: status
+    attributes:
+      label: Highlight status
+      options: [Complete, Degraded, Unknown]
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include byte ranges, exact scopes, styles, or renderer output where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior and reference
+      description: Link vscode-textmate, editor, grammar, or theme evidence when available.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: Rust version, operating system, enabled features
+    validations:
+      required: true

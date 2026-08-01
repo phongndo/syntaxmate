@@ -1,0 +1,186 @@
+; Beancount grammar stress ledger — café, Ελληνικά, 日本語, 🚀, astral 𝌆
+; Global directives, comments, capture groups, and continuation boundaries
+option "title" "Aurora Observatory 🚀"
+option "operating_currency" "USD"
+option "render_commas" "TRUE"
+include "chart/accounts.beancount"
+include "journals/世界-2026.beancount" ; trailing include comment
+plugin "beancount.plugins.auto_accounts"
+plugin "beancount.plugins.implicit_prices" "{\"currency\": \"USD\"}"
+pushtag #observatory
+pushtag #mission-𝌆
+poptag #mission-𝌆
+
+; Dated open, close, and pad directives with separator variants
+2026-01-01 open Assets:Bank:Checking USD, EUR, JPY
+  booking: "Main account café"
+  active: TRUE
+2026/01/01 open Assets:Cash:Wallet USD
+  opened-on: 2026/01/01
+2026|01|01 open Liabilities:Card:Travel USD
+2026-01-01 open Equity:Opening-Balances
+2026-01-01 open Income:Salary USD
+2026-01-01 open Expenses:Food:Dining USD
+2026-01-01 open Expenses:Travel:Rail EUR, JPY
+2026-01-02 pad Assets:Bank:Checking Equity:Opening-Balances
+2026/01/02 pad Assets:Cash:Wallet Equity:Opening-Balances
+2026|01|02 pad Liabilities:Card:Travel Equity:Opening-Balances
+2026-12-30 close Expenses:Travel:Rail
+2026/12/30 close Assets:Cash:Wallet
+2026|12|31 close Liabilities:Card:Travel
+
+; Commodity directives exercise punctuation accepted by the symbol regex
+2026-01-03 commodity USD
+  name: "US Dollar"
+  precision: 0.01
+2026-01-03 commodity EUR
+2026-01-03 commodity JPY
+2026-01-03 commodity BTC
+  name: "Bitcoin 🚀"
+2026-01-03 commodity BRK'B
+2026-01-03 commodity INDEX_500
+2026-01-03 commodity GOLD-2026
+2026-01-03 commodity X.Y
+
+; Events, notes, and documents carry multilingual and astral strings
+2026-01-04 event "location" "Reykjavík — 東京"
+  source: "telemetry 🚀 𝌆"
+2026/01/05 event "weather" "aurora"
+2026|01|06 event "crew" "Ελληνικά café"
+2026-01-07 note Assets:Bank:Checking "Transfer approved 🚀"
+  reviewed: FALSE
+2026/01/08 note Liabilities:Card:Travel "Billet de train — café"
+2026|01|09 document Assets:Bank:Checking "receipts/雪-𝌆.pdf"
+  checksum: "sha256:deadbeef"
+2026-01-10 document Expenses:Travel:Rail "tickets/東京.pdf"
+
+; Prices and balances cover signs, grouping, decimals, and metadata
+2026-01-11 price BTC 42,500.50 USD
+  source: "market-feed"
+2026/01/12 price EUR +1.0750 USD
+2026|01|13 price JPY |0.0067 USD
+2026-01-14 price BRK'B 402. USD
+2026-01-15 balance Assets:Bank:Checking +12,345.67 USD
+  tolerance: 0.01 USD
+2026/01/16 balance Assets:Cash:Wallet -20 USD
+2026|01|17 balance Liabilities:Card:Travel |900. JPY
+
+; Custom directives include every value repository used by the rule
+2026-01-18 custom "audit" TRUE
+2026-01-19 custom "threshold" FALSE -1,000.25 USD
+2026/01/20 custom "review-date" 2026/02/20
+2026|01|21 custom "account" Assets:Bank:Checking
+2026-01-22 custom "number" +42.50
+2026-01-23 custom "escaped" "quote: \"yes\"; path: C:\\tmp 🚀"
+  custom-meta: "nested metadata 𝌆"
+2026-01-24 custom "mixed" TRUE 7 BTC 2026-03-04 Assets:Cash:Wallet
+
+; Completed transaction: tags, links, metadata, cost, unit price, comments
+2026-02-01 txn "North Café" "Breakfast 🚀" #food ^meal-001
+  Expenses:Food:Dining  18.75 USD {20.00 USD, 2026-02-01} @ 0.92 EUR ; receipt
+  Assets:Bank:Checking  -18.75 USD
+  category: "équipe-日本語"
+  reviewed: TRUE
+
+; Asterisk completion and total cost / total price operators
+2026-02-02 * "Exchange" "Acquire EUR 𝌆" #fx ^trade_002
+  Assets:Bank:Checking  -1,100.00 USD @@ 1,100.00 USD
+  Assets:Bank:Euro  1,000.00 EUR {{1,100.00 USD, 2026/02/02}}
+  settled: 2026/02/04
+
+; Incomplete transaction and posting-level incomplete flag
+2026-02-03 ! "Station" "Card pending"
+  ! Liabilities:Card:Travel  -900 JPY
+  Expenses:Travel:Rail  900 JPY @ 0.0067 USD
+  reason: "待機 🚀"
+
+; Padding flag and explicit P posting flag
+2026-02-04 P "System" "Padding review"
+  P Assets:Cash:Wallet  10 USD
+  Equity:Opening-Balances  -10 USD
+
+; Additional transaction flags accepted by the grammar
+2026-02-05 # "Hash flag" "Review marker" #review
+  Assets:Bank:Checking  -5 USD
+  Expenses:Food:Dining  5 USD
+2026-02-06 % "Percent flag" "Allocation"
+  Assets:Bank:Checking  -6 USD
+  Expenses:Food:Dining  6 USD
+2026-02-07 & "Ampersand flag" "Merge"
+  Assets:Bank:Checking  -7 USD
+  Expenses:Food:Dining  7 USD
+2026-02-08 ? "Question flag" "Unknown payee"
+  Assets:Bank:Checking  -8 USD
+  Expenses:Food:Dining  8 USD
+2026-02-09 C "C flag" "Cleared"
+  C Assets:Bank:Checking  -9 USD
+  Expenses:Food:Dining  9 USD
+2026-02-10 M "M flag" "Manual"
+  M Assets:Bank:Checking  -10 USD
+  Expenses:Food:Dining  10 USD
+2026-02-11 R "R flag" "Reconciled"
+  R Assets:Bank:Checking  -11 USD
+  Expenses:Food:Dining  11 USD
+2026-02-12 S "S flag" "Settled"
+  S Assets:Bank:Checking  -12 USD
+  Expenses:Food:Dining  12 USD
+2026-02-13 T "T flag" "Transferred"
+  T Assets:Bank:Checking  -13 USD
+  Expenses:Food:Dining  13 USD
+2026-02-14 U "U flag" "Unverified"
+  U Assets:Bank:Checking  -14 USD
+  Expenses:Food:Dining  14 USD
+
+; Cost forms: empty-ish components, dates, commas, and both brace depths
+2026-03-01 * "Broker" "Lot details"
+  Assets:Investments:Broker  2 BTC {42,000 USD}
+  Assets:Bank:Checking  -84,000 USD
+2026-03-02 * "Broker" "Dated lot"
+  Assets:Investments:Broker  1 BTC {2025-12-31}
+  Assets:Bank:Checking  -41,000 USD
+2026-03-03 * "Broker" "Total lot"
+  Assets:Investments:Broker  3 BTC {{120,000 USD, 2026-03-03}}
+  Assets:Bank:Checking  -120,000 USD
+2026-03-04 * "Broker" "Unit and total prices"
+  Assets:Investments:Broker  4 BTC @ 40,100 USD
+  Assets:Bank:Checking  -160,400 USD @@ 160,400 USD
+
+; Metadata values cover strings, escapes, accounts, booleans, symbols, and dates
+2026-04-01 * "Metadata" "Repository matrix 🚀 𝌆"
+  Assets:Bank:Checking  -1 USD
+  Expenses:Food:Dining  1 USD
+  text-value: "line with \"quote\" and \\ escape"
+  account-value: Assets:Bank:Checking
+  bool-true: TRUE
+  bool-false: FALSE
+  commodity-value: BTC
+  date-value: 2026|04|01
+  tag-value: #meta-tag
+  amount-value: -1,234.50 EUR
+  number-value: +99.99
+  comment-value: "before comment" ; metadata comment café
+
+; Transaction headers with zero, one, and two optional quoted captures
+2026-04-02 txn
+  Assets:Cash:Wallet  0 USD
+2026-04-03 * "Narration only"
+  Assets:Cash:Wallet  0 USD
+2026-04-04 * "Payee" "Narration" #tag-with-dash ^link_with_underscore
+  Assets:Cash:Wallet  0 USD
+
+; Deliberately unrecognized characters exercise invalid.illegal scopes
+2026-05-01 custom "illegal-tail" ~
+2026-05-02 event "kind" "value" $
+2026-05-03 open Assets:Odd:Account USD ?
+2026-05-04 price BTC 1 USD ~
+2026-05-05 balance Assets:Cash:Wallet 1 USD $
+2026-05-06 * "Illegal posting tail"
+  Assets:Cash:Wallet  1 USD ~
+  Equity:Opening-Balances  -1 USD
+  odd-key: "valid first" $
+
+; Final state transitions and top-level comment pattern
+2026-06-01 pad Assets:Bank:Checking Equity:Opening-Balances ; pad comment
+2026-06-30 close Assets:Bank:Checking ; close comment
+poptag #observatory
+; Stress fixture complete — fin, τέλος, 終, 🚀, 𝌆

@@ -1,0 +1,220 @@
+@charset "UTF-8"
+@import "reset.css"
+@require 'tokens'
+
+/* Multiline block comment exercises a persistent state.
+   Unicode remains literal: naïve café, Ελληνικά, 東京, 😀, 𝌆.
+   Delimiters inside comments are inert: { [ ( ) ] }. */
+
+accent = #3a7
+accent-dark = #173
+paper = rgb(250, 248, 242)
+ink = hsl(215, 30%, 18%)
+overlay = rgba(10, 20, 30, .65)
+gap = 1.25rem
+half-gap ?= gap / 2
+$legacy = 12px
+font-stack = "Inter", "Noto Sans", sans-serif
+feature-enabled = true
+missing-value = null
+inclusive-range = 1..4
+exclusive-range = 1...4
+escaped-text = "quote: \"yes\" and slash: \\"
+unicode-text = 'Crème brûlée — 雪 — 😀 — 𝌆'
+
+known = feature-enabled is defined
+unit-kind = gap is a 'unit'
+contained = 2 in inclusive-range
+logic = not false and true or false
+
+clamp-value(value, low = 0, high = 1)
+  if value < low
+    return low
+  else if value > high
+    return high
+  else
+    return value
+
+join-parts(first, second)
+  if length(arguments) > 1
+    return first + second
+  first
+
+rounded(radius = 8px)
+  -webkit-border-radius radius
+  border-radius radius
+
+focus-ring(color = accent)
+  outline 2px solid color
+  outline-offset 3px
+
+for offset, index in 0 .25rem .5rem 1rem 2rem
+  .space-{index}
+    padding offset
+    unless index == 0
+      margin-left index * 1px
+
+@font-face
+  font-family "Fixture Sans"
+  src local("Fixture Sans"), url("fixture.woff2") format("woff2")
+  font-weight 100 900
+  font-style normal
+
+:root
+  --fixture-accent: accent
+  --fixture-label: "色 😀 𝌆"
+  color ink
+  background-color paper
+
+html,
+body
+  min-height 100%
+  margin 0
+  font-family font-stack
+  font-size 16px
+  line-height 1.5
+
+*,
+*::before,
+*::after
+  box-sizing border-box
+
+.notice
+  padding gap
+  border-left 4px solid accent
+  background-color aliceblue
+
+.alert
+  @extend .notice
+  color crimson !important
+
+#app > main[aria-label="démo"]
+  display grid
+  grid-template-columns repeat(3, minmax(12rem, 1fr))
+  grid-template-areas "head head head" "side body body"
+  gap clamp-value(gap, .5rem, 2rem)
+  width calc(100% - (2 * gap))
+
+.card
+  rounded(12px)
+  position relative
+  padding gap
+  color var(--fixture-accent, accent-dark)
+  background linear-gradient(
+    135deg,
+    rgba(255, 255, 255, .95) 0%,
+    paper 60%,
+    #efe 100%
+  )
+  border 1px solid rgba(0, 0, 0, .12)
+  box-shadow 0 1px 2px overlay
+  transition transform 180ms ease-out, box-shadow 180ms ease-in
+  &--featured
+    border-color accent
+  &:hover,
+  &:focus-within
+    transform translate3d(0, -2px, 0) scale(1.01)
+    box-shadow 0 8px 24px rgba(0, 0, 0, .2)
+  &:focus
+    focus-ring()
+  &:not(.disabled)
+    cursor pointer
+  &:nth-child(2n+1)
+    background-color whitesmoke
+  &::before
+    content unicode-text
+    position absolute
+    inset 0 auto auto 0
+  .card__title
+    font 700 1.25rem/1.2 "Fixture Sans", sans-serif
+    text-wrap balance
+  .card__body
+    overflow hidden
+    word-break break-word
+
+.field[data-状态="ready"][lang|="zh"]
+  color #0af
+  unicode-bidi bidi-override
+  &:dir(rtl)
+    direction rtl
+  &:lang(zh-CN)
+    quotes "《" "》"
+
+input:required,
+button:enabled
+  border-color orange
+  appearance none
+
+input:checked + label::after
+  content "✓"
+  color green
+
+.counter-list
+  counter-reset section
+  > li
+    counter-increment section
+    &::marker
+      content counters(section, ".") " "
+
+.measured
+  width 10px
+  height @width
+  margin $legacy
+  opacity clamp-value(.875)
+  transform rotate(2deg) skewX(3deg)
+
+.filtered
+  filter drop-shadow(0 3px 6px rgba(0, 0, 0, .25)) brightness(1.05)
+  backdrop-filter blur(4px) saturate(120%)
+
+.timed
+  animation-timing-function cubic-bezier(.2, .8, .2, 1)
+  transition-timing-function steps(4, end)
+
+.image
+  background-image repeating-radial-gradient(
+    circle at center,
+    red 0,
+    orange 8px,
+    transparent 9px
+  )
+  mask-image url(icons/雪.svg)
+
+.generated::after
+  content attr(data-label string, "fallback 😀")
+  white-space pre-wrap
+
+@media screen and (min-width: 48rem) and (orientation: landscape)
+  .layout
+    display flex
+    flex-flow row wrap
+    justify-content space-between
+  .card
+    flex 1 1 18rem
+
+@media print
+  body
+    color black
+    background white
+  a[href]::after
+    content " (" attr(href) ")"
+
+@keyframes fixture-pulse
+  from
+    opacity 0
+    transform scale(.95)
+  50%
+    opacity 1
+    transform scale(1)
+  to
+    opacity .8
+    transform scale(.98)
+
+.animated
+  animation fixture-pulse 1.5s ease-in-out infinite alternate
+  will-change transform, opacity
+
+.legacy-braces { color: teal; background: #fff; }
+.empty-rule {}
+
+// Final top-level line forces all indentation states to dedent before EOF.

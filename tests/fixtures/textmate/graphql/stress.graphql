@@ -1,0 +1,166 @@
+# GraphQL grammar stress corpus: BMP café λ 東京; astral 🚀 𝄞 𐐷
+"legacy quoted description with café"
+"""
+Catalog operations for multilingual clients 🚀.
+The grammar treats this description as a docstring comment.
+"""
+
+scalar DateTime
+scalar JSON @specifiedBy(url: "https://example.test/json")
+directive @auth(
+  role: Role = USER,
+  scopes: [String!] = ["read", "write"]
+) on FIELD_DEFINITION | OBJECT | INTERFACE
+directive @cache(ttl: Int = 60) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+directive @trace(enabled: Boolean = true) on QUERY | MUTATION
+
+schema @trace {
+  query: Query
+  mutation: Mutation,
+  subscription: Subscription
+}
+
+# Reusable selections exercise fragments, spreads, aliases, and directives.
+fragment NodeIdentity on Node {
+  id
+  __typename
+  ... on NamedEntity {
+    display: name(locale: "fr")
+  }
+}
+
+fragment ProfileDetails on User @cache(ttl: 120) {
+  handle
+  status
+  role
+  profile {
+    displayName
+    biography
+    location
+    website
+    favoriteGlyph
+  }
+}
+
+fragment AdminDetails on Admin {
+  permissions
+  auditLog(limit: 3) {
+    id
+    action
+    at
+    payload
+  }
+}
+
+query Directory(
+  $viewerId: ID!,
+  $filter: UserFilter = {roles: [USER, ADMIN], verified: true},
+  $first: Int = 25,
+  $ratio: Float = -12.5e-2,
+  $withProfile: Boolean = true,
+  $skipAudit: Boolean = false
+) @trace(enabled: true) {
+  viewer: user(id: $viewerId) {
+    ...NodeIdentity
+    ...ProfileDetails @include(if: $withProfile)
+    greeting(format: "café 東京 🚀\n")
+    score(scale: $ratio)
+    flags(values: [true, false, null, ACTIVE])
+    settings(input: {
+      locale: "日本語",
+      retries: 3,
+      nested: {enabled: true, mode: DARK}
+    }) {
+      theme
+      density
+    }
+    friends(first: $first, after: null) {
+      totalCount
+      pageInfo {
+        hasNextPage
+        hasPreviousPage
+        startCursor
+        endCursor
+      }
+      edges {
+        cursor
+        node {
+          id,
+          name(locale: "fr")
+          status
+          ... on Admin @skip(if: $skipAudit) {
+            ...AdminDetails
+          }
+        }
+      }
+    }
+  }
+  users(filter: $filter, first: $first) {
+    totalCount
+    edges { cursor node { id name } }
+  }
+  results: search(text: "東京 café 🚀", limit: 5) {
+    ... on User {
+      id
+      handle
+    }
+    ... on Admin @skip(if: $skipAudit) {
+      permissions
+    }
+    ... @include(if: true) {
+      __typename
+    }
+  }
+}
+
+mutation UpdateDirectoryUser(
+  $id: ID!,
+  $input: UpdateUserInput! = {
+    name: "Zoë 𐐷",
+    biography: "Line one\nLine two\t\"quoted\" and \\ slash",
+    location: "München",
+    metadata: {theme: DARK, ratio: 6.022E+23, empty: null},
+    tags: [["unicode", "λ"], ["music", "𝄞"]]
+  }
+) {
+  updateUser(id: $id, input: $input) {
+    id
+    name
+    profile {
+      biography
+      favoriteGlyph
+    }
+  }
+  audit(action: UPDATE, enabled: true) { id at }
+}
+
+subscription UserEvents($id: ID!, $kinds: [EventKind!] = [CREATED, UPDATED]) {
+  userEvents(id: $id, kinds: $kinds) {
+    sequence
+    kind
+    actor { ...NodeIdentity }
+    payload
+  }
+}
+
+# Native interpolation pulls the complete JS/JSX/TS/TSX grammar closure.
+query EmbeddedHost {
+  viewer {
+    ${const jsValue = {label: "café", rocket: "🚀"}; jsValue}
+    ${interface Shape { size: number }; const typed: Shape = {size: 2}; typed}
+    ${const jsxNode = <Badge label="BMP λ / astral 𝄞" />; jsxNode}
+    ${const tsxNode: JSX.Element = <Panel count={2} />; tsxNode}
+  }
+}
+
+# Keep the type-definition state at EOF: the grammar's zero-width outer end
+# is observable only through rule state after this final, fully closed object.
+type FixtureTerminal implements Node & NamedEntity @auth(role: ADMIN) {
+  id: ID!
+  name(locale: String = "en"): String!
+  labels(limit: Int = 10): [String!]!
+  active: Boolean!
+  score: Float
+  metadata: JSON
+  createdAt: DateTime!
+}

@@ -1,0 +1,211 @@
+Workspace(
+    /* Stress fixture for a collaborative observatory.
+       It is hand-written and intentionally uses a nested comment:
+       /* scanners should remain in comment scope here */
+       The outer comment closes on this line. */
+    metadata: Metadata(
+        name: "Aurora Atlas",
+        version: "2.7.0-beta.3",
+        description: "Maps Café lights over 東京 🛰️",
+        homepage: r#"https://example.test/atlas?view="night""#,
+        license: Some("MIT OR Apache-2.0"),
+        published: true,
+        revision: 0x00ff_a12c,
+    ),
+    owner: Person(
+        id: 42,
+        handle: "north_star",
+        display_name: "Zoë Δelta 🚀",
+        initials: ['Z', 'Δ'],
+        active: true,
+        contact: Contact(
+            email: "zoe@example.test",
+            phone: None,
+            address: Some(Address(
+                street: "7 Observatory Lane",
+                city: "Montréal",
+                postal_code: "H2X 1Y4",
+                country: "CA",
+            )),
+        ),
+    ),
+    runtime: Runtime(
+        mode: Production,
+        strategy: work_stealing,
+        workers: 12,
+        stack_size: 8_388_608,
+        timeout_seconds: 2.5e1,
+        backoff: Backoff(
+            initial_ms: 125,
+            maximum_ms: 30_000,
+            multiplier: 1.75,
+            jitter: -2.5e-1,
+        ),
+        limits: Limits(
+            requests_per_minute: 1_200,
+            open_files: 0o2040,
+            capability_mask: 0b1011_0100,
+            color_key: 0xCA_FE_BA_BE,
+        ),
+    ),
+    paths: Paths(
+        root: r"/srv/aurora",
+        cache: r#"/var/cache/atlas/#tiles"#,
+        archive: r##"/mnt/archive/"2026"/raw"##,
+        template: r###"{{ object.name | default: "unknown" }}"###,
+        query: r####"select * from stars where class = "G#""####,
+        sentinel: r#####"five hashes: "#### still content"#####,
+        windows_example: "C:\\Atlas\\exports\\night",
+    ),
+    text_samples: TextSamples(
+        plain: "line one\nline two\tindented",
+        byte_header: b"RON\x20v1\x0A",
+        quote_escape: "She said: \"clear skies\".",
+        slash_escape: "solidus / and backslash \\",
+        unicode_escape: "lambda=\u{03BB}, rocket=\u{1F680}",
+        nul_escape: '\0',
+        tab_character: '\t',
+        literal_character: '界',
+    ),
+    servers: [
+        Server(
+            name: "api-primary",
+            host: "api-1.example.test",
+            port: 8_443,
+            protocol: Https,
+            weight: 1.0,
+            tags: ["public", "v2", "low-latency"],
+            health: HealthCheck(
+                path: "/health/ready",
+                interval_seconds: 15,
+                failures_before_eject: 3,
+            ),
+        ),
+        Server(
+            name: "api-secondary",
+            host: "api-2.example.test",
+            port: 8_443,
+            protocol: Https,
+            weight: 7.5e-1,
+            tags: ["public", "failover"],
+            health: HealthCheck(
+                path: "/health/live",
+                interval_seconds: 30,
+                failures_before_eject: 5,
+            ),
+        ),
+        Server(
+            name: "metrics",
+            host: "127.0.0.1",
+            port: 9_090,
+            protocol: Http,
+            weight: 2.5e-1,
+            tags: ["internal", "prometheus"],
+            health: HealthCheck(
+                path: "/-/healthy",
+                interval_seconds: 60,
+                failures_before_eject: 2,
+            ),
+        ),
+    ],
+    feature_flags: {
+        "new_search": Enabled,
+        "legacy_export": Disabled,
+        "adaptive_tiles": Percentage(37.5),
+        "staff_preview": AllowList(["north_star", "moonwatch"]),
+    },
+    localization: Localization(
+        default_locale: "en-CA",
+        fallback_locales: ["fr-CA", "ja-JP"],
+        messages: {
+            "greeting": "Bonjour, observateur!",
+            "night_mode": "Mode nuit",
+            "satellite": "人工衛星 🛰️",
+            "empty": "No observations yet.",
+        },
+        separators: Separators(
+            decimal: '.',
+            thousands: ',',
+            list: ';',
+        ),
+    ),
+    palette: Palette(
+        background: Rgba(12, 18, 32, 255),
+        foreground: Rgba(232, 240, 255, 255),
+        accent: Rgba(80, 180, 255, 255),
+        warning: Rgba(255, 190, 64, 255),
+        gradients: [
+            Stop(position: 0.0, color: "#0c1220"),
+            Stop(position: 5.0e-1, color: "#244a73"),
+            Stop(position: 1.0, color: "#50b4ff"),
+        ],
+    ),
+    pipelines: [
+        Pipeline(
+            name: "ingest-telemetry",
+            enabled: true,
+            source: Mqtt(topic: "observatory/+/telemetry", qos: 1),
+            stages: [
+                Decode(format: Json),
+                Validate(schema: "telemetry-v4"),
+                Enrich(catalog: Some("gaia-dr3")),
+                Store(bucket: "nightly-readings"),
+            ],
+        ),
+        Pipeline(
+            name: "render-sky-map",
+            enabled: true,
+            source: Schedule(cron: "17 */2 * * *"),
+            stages: [
+                Query(dataset: "visible-objects"),
+                Project(system: Equatorial),
+                Render(width: 4096, height: 2048),
+                Publish(channel: "atlas-updates"),
+            ],
+        ),
+        Pipeline(
+            name: "cold-archive",
+            enabled: false,
+            source: Schedule(cron: "0 3 * * 0"),
+            stages: [
+                Query(dataset: "expired-tiles"),
+                Compress(codec: Zstd, level: 9),
+                Store(bucket: "glacier-archive"),
+            ],
+        ),
+    ],
+    permissions: {
+        "viewer": Role(
+            scopes: ["catalog:read", "tiles:read"],
+            expires_after_days: None,
+        ),
+        "operator": Role(
+            scopes: ["catalog:write", "pipelines:run", "alerts:ack"],
+            expires_after_days: Some(90),
+        ),
+        "auditor": Role(
+            scopes: ["logs:read", "reports:export"],
+            expires_after_days: Some(30),
+        ),
+    },
+    audit: Audit(
+        destination: File(
+            path: "/var/log/atlas/audit.ronl",
+            rotate_bytes: 104_857_600,
+            keep_files: 14,
+        ),
+        redact_fields: ["contact.phone", "tokens.secret", "headers.authorization"],
+        sample_rate: 9.5e-1,
+        include_failures: true,
+    ),
+    checksums: {
+        "schema": 0x7e57_c0de,
+        "assets": 0b1101_0010_1010_0101,
+        "fixtures": 0o7_654_321,
+    },
+    notes: [
+        "All delimiters and strings close before EOF.",
+        r#"Raw text may contain /* comments */ without opening them."#,
+        "Final BMP snowman: ☃; final astral comet: ☄️",
+    ],
+)

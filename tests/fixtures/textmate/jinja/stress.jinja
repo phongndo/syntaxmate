@@ -1,0 +1,213 @@
+{#
+  Large template-only fixture for Jinja lexical coverage.
+  Unicode samples: naïve café, 東京, مرحبا, λ, 🧪, and astral 𝄞.
+#}
+{% set page_title = 'Release dashboard' %}
+{% set release = "2026.07" %}
+{% set empty = none %}
+{% set enabled = true %}
+{% set disabled = false %}
+{% set count = 1_024 %}
+{% set ratio = 6.022e23 %}
+{% set signed = -17 %}
+{% set hex_value = 0xCAFE %}
+{% set oct_value = 0o755 %}
+{% set bin_value = 0b101010 %}
+{% set names = ['Ada', "Grace", '李雷', 'Zoë', '🧑🏽‍💻'] %}
+{% set coordinates = (12.5, -8.25) %}
+{% set flags = {'stable': true, 'preview': false, 'owner': none} %}
+
+Dashboard: {{ page_title|title }} — {{ release }}
+Population: {{ count|int }}
+Scientific: {{ ratio|string|upper }}
+Signed/absolute: {{ signed }} / {{ signed|abs }}
+Radices: {{ hex_value }}, {{ oct_value }}, {{ bin_value }}
+Point: {{ coordinates.0 }}, {{ coordinates[1] }}
+Missing: {{ missing_value|default('n/a', true) }}
+Escapes: {{ 'line\nquote\' slash\\'|e }}
+Unicode: {{ 'Straße déjà vu 東京 🚀 𝄞'|upper }}
+
+{% if enabled and not disabled %}
+Feature state is enabled.
+{% elif disabled or empty is not none %}
+Feature state is explicitly disabled.
+{% else %}
+Feature state is unknown.
+{% endif %}
+
+{% if count > 100 and count <= 2_048 %}
+Count lies in the expected interval.
+{% endif %}
+{% if release.startswith('2026') %}
+Release uses the current series.
+{% endif %}
+{% if 'stable' in flags and 'legacy' not in flags %}
+Known flag set.
+{% endif %}
+{% if flags.owner is none %}
+No owner is assigned.
+{% endif %}
+{% if names is iterable and names is not string %}
+Names can be traversed.
+{% endif %}
+
+Arithmetic sum: {{ 7 + 5 }}
+Arithmetic difference: {{ 7 - 5 }}
+Arithmetic product: {{ 7 * 5 }}
+Arithmetic quotient: {{ 7 / 5 }}
+Arithmetic floor: {{ 17 // 5 }}
+Arithmetic remainder: {{ 17 % 5 }}
+Arithmetic power: {{ 2 ** 8 }}
+Arithmetic grouping: {{ ((3 + 4) * 5 - 2) / 11 }}
+Concatenation: {{ 'release-' ~ release ~ '-' ~ count }}
+Conditional: {{ 'active' if enabled else 'inactive' }}
+Comparison chain: {{ 0 < signed|abs < 20 }}
+Equality: {{ empty == none }} / {{ enabled != disabled }}
+
+{% set greeting = '  Bonjour, café!  ' %}
+Trimmed: {{ greeting|trim }}
+Lower: {{ greeting|lower }}
+Upper: {{ greeting|upper }}
+Title: {{ greeting|title }}
+Length: {{ greeting|length }}
+Replaced: {{ greeting|replace('café', 'monde')|trim }}
+Centered: {{ 'x'|center(5) }}
+Joined: {{ names|join(' · ') }}
+First/last: {{ names|first }} / {{ names|last }}
+Random-ish grammar: {{ names|batch(2, '—')|list }}
+Mapped: {{ users|map(attribute='name', default='anonymous')|list }}
+Selected: {{ users|selectattr('active')|map(attribute='name')|join(', ') }}
+Rejected: {{ users|rejectattr('deleted')|list }}
+Unique: {{ names|unique(case_sensitive=false)|list }}
+Rounded: {{ 3.14159265|round(3, 'common') }}
+Formatted: {{ '%s:%04d'|format(release, 7) }}
+Indented: {{ greeting|trim|indent(4, first=true) }}
+URL: {{ {'q': 'café & tea', 'page': 2}|urlencode }}
+
+Defined? {{ user is defined }}
+Undefined? {{ missing is undefined }}
+None? {{ empty is none }}
+Boolean? {{ enabled is boolean }}
+Number? {{ ratio is number }}
+Integer? {{ count is integer }}
+Float? {{ ratio is float }}
+String? {{ page_title is string }}
+Sequence? {{ names is sequence }}
+Mapping? {{ flags is mapping }}
+Even? {{ count is even }}
+Odd? {{ signed|abs is odd }}
+Divisible? {{ count is divisibleby 8 }}
+Same object? {{ empty is sameas(none) }}
+Escaped? {{ greeting|e is escaped }}
+
+{% set profile = namespace(total=0, labels=[]) %}
+{% for person in users|sort(attribute='name') %}
+{% set profile.total = profile.total + 1 %}
+{% set profile.labels = profile.labels + [person.name] %}
+{{ '%03d'|format(loop.index) }} {{ person.name|default('Anonymous') }}
+Role: {{ person.role|default('reader')|capitalize }}
+Status: {{ 'online' if person.active else 'offline' }}
+Loop metadata: first={{ loop.first }}, last={{ loop.last }}, depth={{ loop.depth }}
+Neighbors: {{ loop.previtem.name|default('∅') }} → {{ loop.nextitem.name|default('∅') }}
+{% if loop.changed(person.department) %}
+Department changed to {{ person.department }}.
+{% endif %}
+{% else %}
+No people were returned.
+{% endfor %}
+Total profiles: {{ profile.total }}
+Labels: {{ profile.labels|join(', ') }}
+
+{% for group, members in teams|dictsort %}
+Team {{ group|upper }}:
+{% for member in members %}
+  {{ loop.index }} / {{ loop.length }} — {{ member.name }}
+{% if member.skills %}
+  skills={{ member.skills|sort|join('+') }}
+{% endif %}
+{% endfor %}
+{% endfor %}
+
+{% macro label(text, tone='neutral', icon=none) -%}
+{%- if icon is not none -%}{{ icon }} {% endif -%}
+[{{ tone|upper }}] {{ text|trim|e }}
+{%- endmacro %}
+
+{% macro field(name, value='', required=false) %}
+field {{ name|e }}={{ value|string|e }}
+required={{ required }}
+attrs={{ kwargs|dictsort|pprint }}
+{% endmacro %}
+
+{% macro render_tree(nodes) %}
+{% for node in nodes recursive %}
+{{ '-' * loop.depth }} {{ node.title }}
+{% if node.children %}{{ loop(node.children) }}{% endif %}
+{% endfor %}
+{% endmacro %}
+
+{{ label('build passed 🧪', 'success', '✓') }}
+{{ field('nickname', user.nickname, required=true, maxlength=40, data_kind='person') }}
+{{ render_tree(navigation) }}
+
+{% macro panel(title) %}
+BEGIN {{ title|upper }}
+{{ caller('inside') }}
+END {{ title|upper }}
+{% endmacro %}
+
+{% call(location) panel('activity') %}
+Caller says {{ location }} at {{ now|default('soon') }}.
+{% endcall %}
+
+{% call(user_name='visitor') panel('welcome') %}
+Welcome, {{ user_name|title }}!
+{% endcall %}
+
+{% set captured %}
+This block is captured with {{ names|length }} multilingual names.
+It retains interpolation such as {{ release|e }}.
+{% endset %}
+Captured: {{ captured|trim|wordwrap(48) }}
+
+{% filter trim|upper|replace('🚀', 'ORBIT') %}
+  filtered block café 🚀
+  second line with 東京 and 𝄞
+{% endfilter %}
+
+{%- set compact = {'alpha': 1, 'beta': 2, 'gamma': 3} -%}
+{%- for key, value in compact.items() -%}
+{{- key ~ '=' ~ value -}}
+{%- if not loop.last -%}, {%- endif -%}
+{%- endfor -%}
+
+{% with subtotal=items|sum(attribute='price'), currency='€' %}
+Subtotal: {{ currency }}{{ subtotal|round(2) }}
+{% endwith %}
+
+{% autoescape true %}
+Safe output: {{ '<script>alert("x")</script>' }}
+Marked output: {{ '<strong>ok</strong>'|safe }}
+{% endautoescape %}
+
+{% raw %}
+Literal interpolation: {{ user.name|upper }}
+Literal statement: {% if impossible %}not parsed{% endif %}
+Literal comment markers: {# still literal here #}
+Literal Unicode: café 東京 🪐 𝄞
+{% endraw %}
+
+{# A single-line comment with {{ fake }} and {% fake %}. #}
+{#-
+  Trimmed multiline comment.
+  Operators stay inert here: == != >= <= ** // ~ |.
+-#}
+
+Final owner: {{ flags['owner'].name|default('unassigned') }}
+Dynamic lookup: {{ config|attr('release-channel')|default('stable') }}
+Slice: {{ names[1:4:2]|join(' / ') }}
+Call expression: {{ translator('hello', locale='fr_FR') }}
+Keyword data: {{ formatter(value=count, width=8, fill='0') }}
+Nested lookup: {{ matrix[row][column]|default(0) }}
+Awaiting: {{ pending|default(false) and enabled }}
+Farewell: {{ 'Καληνύχτα' }} — {{ '🌙' }}

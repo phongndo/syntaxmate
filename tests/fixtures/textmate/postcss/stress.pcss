@@ -1,0 +1,238 @@
+/*
+ * PostCSS grammar stress fixture {{coverage}}
+ * Unicode spans BMP and astral planes: café, Ελληνικά, 東京, 🚀, 𝌆.
+ * The comment deliberately crosses lines before its full closure.
+ */
+
+@charset "UTF-8";
+@import ./theme/base;
+@import "print.css" print;
+
+$prefix: orbit;
+$gap: 1.25rem !default;
+$ratio: 1.618;
+$negative: -12px;
+$enabled: true !global;
+$missing: null !optional;
+
+:root {
+  --brand-color: #a1b2c3;
+  --short-color: #0af;
+  --fluid-gap: clamp(1rem, 2vw, 3rem);
+  --duration: 250ms;
+  --frequency: 2kHz;
+  --resolution: 2dppx;
+  --angle: 0.25turn;
+  --unicode-label: "東京 🚀 𝌆";
+}
+
+@mixin elevation($level, $color: #000) {
+  box-shadow: 0 $level ($level * 2) rgba(0, 0, 0, .25);
+  border-color: $color !important;
+}
+
+@function rhythm($step) {
+  @return $step * $gap;
+}
+
+@include reset;
+
+%surface {
+  background: var(--brand-color);
+  border-radius: 8px;
+}
+
+%interactive:hover {
+  cursor: pointer;
+}
+
+html,
+body,
+main {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Inter", 'Noto Sans', sans-serif;
+}
+
+#app-shell {
+  display: grid;
+}
+
+.#{$prefix}-card,
+.card--featured,
+article.card > header:first-child {
+  @include elevation(4px, #123abc);
+  width: calc(100% - $gap);
+  max-width: min(72rem, 90vw);
+  color: rgb(12, 34, 56);
+  background-image: linear-gradient(135deg, #fff 0%, #abcdef 100%);
+}
+
+.card[data-state="ready"][lang^='en'][class~="wide"] {
+  padding: rhythm(2);
+  transition: transform 180ms ease-in-out;
+}
+
+.card[data-icon$="rocket"]::before {
+  content: "launch #{$prefix}-🚀";
+}
+
+.card:not(.disabled) > .title::after {
+  content: 'ratio #{$ratio} — 𝌆';
+}
+
+.card {
+  &:hover {
+    transform: translate3d(0, -2px, 0);
+  }
+
+  &-compact {
+    padding: $gap / 2;
+  }
+
+  &_legacy {
+    opacity: .75;
+  }
+}
+
+nav > ul li + li ~ li {
+  list-style: none;
+}
+
+svg rect,
+svg > circle,
+path:hover {
+  stroke: currentColor;
+  stroke-width: 2px;
+}
+
+input[type="text" i]:focus,
+button[aria-pressed='true'] {
+  outline: 3px solid #09f;
+  outline-offset: 2px;
+}
+
+@media screen and (min-width: 48rem) {
+  .layout {
+    grid-template-columns: repeat(12, 1fr);
+    gap: var(--fluid-gap);
+  }
+}
+
+@supports (display: grid) and (not (display: subgrid)) {
+  .fallback {
+    display: grid;
+  }
+}
+
+@container sidebar (width > 30rem) {
+  .teaser {
+    font-size: 1.125rem;
+  }
+}
+
+@keyframes orbit-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  50% {
+    transform: rotate(3.1416rad);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@font-face {
+  font-family: "Fixture Sans";
+  src: url(./fonts/fixture.woff2) format(woff2);
+  font-weight: 100 900;
+}
+
+.functions {
+  width: max(20ch, 50%);
+  height: calc(var(--fluid-gap) * 2);
+  filter: blur(2px) contrast(120%);
+  color: color-mix(in srgb, #f00 30%, #00f);
+  content: attr(data-label);
+}
+
+.operators {
+  z-index: $ratio + 1;
+  margin: 8px - 2px;
+  padding: ($gap - $negative) / 2;
+  opacity: 50%;
+  transform: scale(.9);
+}
+
+.multiline-string::before {
+  content: "first line \
+second line with 🚀 and 𝌆";
+}
+
+.multiline-single::after {
+  content: 'alpha \
+beta café';
+}
+
+.#{$prefix +
+  "-wide"} {
+  --computed: #{$gap *
+    2};
+  margin-inline: var(--computed);
+}
+
+.attribute[
+  data-mode^="wide"
+] {
+  color: #fed;
+}
+
+// A line comment with a tag {{review}} and emoji 🧪
+.escaped\:utility {
+  display: block !important;
+}
+
+.spread {
+  values: $gap, $ratio, ...;
+}
+
+.logic {
+  from: from;
+  through: through;
+  range: 1 to 4;
+  membership: $prefix in orbit;
+  condition: not false;
+}
+
+/* Another multiline state begins here.
+ * It contains apparent syntax: $ignored, #fff, and "quotes".
+ * The terminator restores normal tokenization. {{done}}
+ */
+.after-comment {
+  color: #fff;
+}
+
+// SugarSS-like indented section without braces
+.sugar-panel
+  padding: $gap
+  color: var(--brand-color)
+  &:hover
+    color: #000
+  .sugar-child
+    margin: 2em
+
+@custom-selector :--heading h1, h2, h3;
+@custom-media --narrow-window (width < 40rem);
+
+@media (--narrow-window) {
+  :--heading {
+    line-height: 1.2;
+  }
+}
+
+.final-closure {
+  animation: orbit-spin 2s linear infinite;
+  unicode-bidi: isolate;
+  content: "EOF balanced — Ω 🚀 𝌆";
+}

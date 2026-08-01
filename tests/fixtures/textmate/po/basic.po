@@ -1,0 +1,26 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: mark fixtures 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+# Translator note for the launch action.
+#. Button label shown on the welcome screen.
+#: src/app.c:12 templates/main.ui:34
+#, fuzzy, c-format
+#| msgctxt "old-menu"
+#| msgid "Old launch"
+msgctxt "menu"
+msgid ""
+"Launch café 東京 λ from C:\\tmp: "
+"\"🚀 𝌆\""
+msgstr ""
+"Launch café 東京 λ from C:\\tmp: "
+"\"🚀 𝌆\""
+
+#: src/count.c:7
+#, c-format
+msgid "One file"
+msgid_plural "%d files"
+msgstr[0] "One file"
+msgstr[1] "%d files"

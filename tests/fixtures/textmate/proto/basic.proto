@@ -1,0 +1,25 @@
+syntax = "proto3";
+package fixture.basic;
+import public "common/types.proto";
+import weak "legacy/flags.proto";
+/* BMP café 日本語; astral 🚀 𝌆. */
+option (fixture.file_info) = { label: "café 🚀", enabled: true };
+
+message Greeting {
+  reserved 9 to 11, "old_name";
+  optional string text = 1 [json_name = "display_text"];
+  repeated .fixture.basic.Tag tags = 2;
+  map<string, int32> counts = 3 [deprecated = false];
+  oneof payload {
+    bytes raw = 4;
+    Nested nested = 5;
+  }
+  message Nested { uint64 id = 1; }
+  enum State { STATE_UNSPECIFIED = 0; READY = 1 [deprecated = true]; }
+}
+
+service Greeter {
+  option deprecated = false;
+  rpc SayHello (Greeting) returns (stream Greeting);
+}
+// Unicode remains visible at EOF: Ω and 🛰️.

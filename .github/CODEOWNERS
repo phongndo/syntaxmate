@@ -1,0 +1,12 @@
+# Default review ownership
+* @phongndo
+
+# Security-sensitive runtime boundaries
+/src/engine/ @phongndo
+/src/render.rs @phongndo
+/SECURITY.md @phongndo
+
+# Vendored assets, licensing, and release automation
+/assets/ @phongndo
+/THIRD_PARTY_LICENSES.md @phongndo
+/.github/workflows/ @phongndo

@@ -1,0 +1,228 @@
+__TOC__
+<!-- Grammar-driven MediaWiki fixture; all constructs are deliberately closed. -->
+= Expedition Aurora =
+'''Expedition Aurora''' is a fictional research voyage from [[Earth]] to [[Mars]].
+The crew carries instruments labeled λ, 東京, 🚀, and 𝌆 for Unicode coverage.
+See [https://example.org/aurora mission control] and RFC 9110 for background.
+
+{{Short description|Interplanetary research expedition}}
+{{Infobox spaceflight
+| name = Expedition Aurora
+| image = Aurora_launch.svg
+| caption = ''Aurora'' leaving [[Low Earth orbit|LEO]]
+| operator = {{Agency|name=Open Space Institute|country=International}}
+| crew_size = {{{crew_size|6}}}
+| launch_date = {{Start date|2042|03|14}}
+| destination = [[Mars]]
+| status = Active
+}}
+
+== Mission overview ==
+The plan combines '''robotic scouting''' with ''human fieldwork''.
+An optional argument appears as {{{motto|Per aspera ad astra}}}.
+The localized title is -{zh-hans:曙光任务;zh-hant:曙光任務}-.
+The archive identifier is ISBN 978-1-4028-9462-6 and the study is PMID 123456.
+
+=== Objectives ===
+* Survey the [[Jezero crater]] rim.
+* Deploy {{nowrap|three weather stations}}.
+** Station Alpha measures wind.
+** Station Beta measures dust.
+** Station Gamma measures radiation.
+* Return sealed samples to orbit.
+# Complete orbital checkout.
+# Perform the transfer burn.
+## Correct course at midpoint.
+# Enter a polar science orbit.
+; Primary goal : Map subsurface ice.
+; Secondary goal : Test closed-loop agriculture.
+
+=== Crew ===
+{{Crew roster
+| commander = [[Ada Okafor]]
+| pilot = [[Lin Wei]]
+| engineer = [[Sofía Núñez]]
+| scientist = [[Ren Ito]]
+| physician = [[Marek Nowak]]
+| specialist = [[Noor Haddad]]
+}}
+Each profile uses a small nested template: {{Badge|role={{Role|science}}|color=blue}}.
+The callsign is <nowiki>[[Aurora-1]] {{literal}}</nowiki>, not wiki markup.
+
+== Flight plan ==
+{| class="wikitable sortable" style="width:100%"
+|+ Major mission events
+! Day !! Phase !! Location !! Notes
+|-
+| 0 || Launch || [[Earth]] || Engines start at 06:30 UTC.
+|-
+| 1 || Checkout || LEO || Crew verifies {{abbr|ECLSS|life support}}.
+|-
+| 4 || Departure || Translunar space || Main burn lasts 18 minutes.
+|-
+| 92 || Approach || [[Mars]] || Optical navigation begins.
+|-
+| 97 || Arrival || Areocentric orbit || Science commissioning starts.
+|}
+
+=== Navigation model ===
+The transfer approximation is <math>\Delta v = \sqrt{\mu/r_1}(\sqrt{2r_2/(r_1+r_2)}-1)</math>.
+For a vector display, the page uses:
+<math>
+\vec{r}(t) = r_x(t)\hat{i} + r_y(t)\hat{j} + r_z(t)\hat{k}
+</math>
+Both math regions close before ordinary wikitext resumes.
+
+=== Configuration sample ===
+<syntaxhighlight lang="python" line="1">
+from dataclasses import dataclass
+
+@dataclass
+class Burn:
+    name: str
+    delta_v: float
+
+burns = [Burn("departure", 3.61), Burn("capture", 2.08)]
+for burn in burns:
+    print(f"{burn.name}: {burn.delta_v:.2f} km/s 🚀")
+</syntaxhighlight>
+The injected Python block is complete and explicitly terminated.
+
+=== Telemetry schema ===
+<syntaxhighlight lang="json">
+{
+  "vehicle": "Aurora",
+  "active": true,
+  "labels": ["λ", "東京", "🚀", "𝌆"],
+  "position": {"x": 12.5, "y": -8.0, "z": 144.25}
+}
+</syntaxhighlight>
+The JSON object and the syntax-highlighting tag are both closed.
+
+== Scientific payload ==
+{| class="wikitable"
+|+ Instruments
+! Instrument !! Team !! Measurement
+|-
+| AURORA-CAM || Imaging group || Multispectral panoramas
+|-
+| DUST-λ || Atmospheres group || Particle size and charge
+|-
+| RAD-𝌆 || Health physics || Dose equivalent
+|-
+| BIO-🚀 || Astrobiology group || Sealed culture response
+|}
+
+=== Sampling procedure ===
+# Inspect the site with [[AURORA-CAM]].
+# Mark a clean perimeter.
+#* Keep exhaust vents downwind.
+#* Record the local time.
+# Drill to a depth of {{convert|12|cm}}.
+# Seal the tube and attach a barcode.
+# Place it in the return canister.
+
+<ref name="protocol">Open Space Institute, ''Sample Handling Manual'', revision 7.</ref>
+<ref name="unicode">Labels include BMP text 日本語 and astral text 🚀 𝌆.</ref>
+The handling protocol is independently reviewed.<ref name="protocol" />
+
+== Communications ==
+Mission control publishes a daily bulletin at [https://status.example.org/aurora status.example.org].
+Messages use {{lang|fr|« Bon voyage »}} and {{lang|ja|安全第一}} where appropriate.
+Signal delay is reported with {{convert|8.4|minute|abbr=on}}.
+
+<syntaxhighlight lang="xml">
+<?xml version="1.0" encoding="UTF-8"?>
+<message priority="normal">
+  <from>Mission Control</from>
+  <body>Telemetry nominal 🚀</body>
+</message>
+</syntaxhighlight>
+
+=== Procedures ===
+<nowiki>
+Raw operator examples stay literal:
+{{Abort|reason=demo}}
+[[Category:Not really categorized]]
+''not italic'' and <ref>not a real reference</ref>
+</nowiki>
+After the closing tag, [[Main Page|normal parsing]] resumes.
+
+== Template documentation ==
+<noinclude>
+This section documents a hypothetical transclusion.
+</noinclude>
+<includeonly>
+{{Mission status|state=active|vehicle=Aurora}}
+</includeonly>
+<onlyinclude>{{Purge date|{{CURRENTYEAR}}-{{CURRENTMONTH}}-{{CURRENTDAY2}}}}</onlyinclude>
+<templatestyles src="Template:Aurora/styles.css" />
+
+=== Data page ===
+<templatedata>
+{
+  "description": "Mission card",
+  "params": {
+    "vehicle": {"label": "Vehicle", "type": "string", "required": true},
+    "crew": {"label": "Crew", "type": "number", "default": 6}
+  }
+}
+</templatedata>
+
+=== Extension note ===
+<%-- [META]
+owner = #fixture-team#
+purpose = #token coverage#
+[META] --%>
+The extension comment is closed before this sentence.
+
+== Operations log ==
+{| class="wikitable"
+|+ Selected log entries
+! Timestamp !! Subsystem !! Entry
+|-
+| 2042-03-14T06:30Z || Propulsion || Launch commit received.
+|-
+| 2042-03-15T09:10Z || Guidance || Star tracker aligned on Vega.
+|-
+| 2042-03-18T14:05Z || Thermal || Radiator loop stable at 286 K.
+|-
+| 2042-06-19T21:42Z || Communications || First Mars relay handshake.
+|}
+
+=== Shift checklist ===
+* '''Guidance'''
+** Compare inertial and optical solutions.
+** Archive the residual plot.
+* '''Life support'''
+** Measure oxygen partial pressure.
+** Inspect the water separator.
+* '''Payload'''
+** Synchronize instrument clocks.
+** Downlink the priority queue.
+
+== References and notes ==
+The mission name honors dawn imagery in several languages.<ref>Editorial note with [[Dawn|an internal link]] and {{cite web|url=https://example.org/names|title=Naming guide}}.</ref>
+An empty named citation may be reused here.<ref name="unicode" />
+<references />
+
+== See also ==
+* [[Human mission to Mars]]
+* [[Interplanetary transport network]]
+* [https://example.org/data Open mission data]
+
+== External metadata ==
+<graph>
+{
+  "version": 2,
+  "width": 320,
+  "height": 180,
+  "data": [{"name": "timeline", "values": [{"day": 0}, {"day": 97}]}]
+}
+</graph>
+
+----
+Last reviewed by [[User:FixtureEditor|Fixture Editor]] ~~~~~
+__NOEDITSECTION__
+[[Category:Fictional space missions]]
+[[Category:Grammar fixtures]]

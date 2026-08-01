@@ -1,0 +1,2319 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "package": "@shikijs/langs",
+    "version": "3.23.0",
+    "derivation": "aliases and fileTypes from vendored grammar registrations"
+  },
+  "languages": [
+    {
+      "id": "abap",
+      "aliases": [],
+      "extensions": [
+        "abap"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "actionscript-3",
+      "aliases": [],
+      "extensions": [
+        "as"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "ada",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-expression",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-html",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-inline-style",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-inline-template",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-let-declaration",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-template",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-template-blocks",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "angular-ts",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "apache",
+      "aliases": [],
+      "extensions": [
+        "conf",
+        "envvars",
+        "htaccess",
+        "htgroups",
+        "htpasswd"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "apex",
+      "aliases": [],
+      "extensions": [
+        "apex",
+        "cls",
+        "trigger"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "apl",
+      "aliases": [],
+      "extensions": [
+        "apl",
+        "apla",
+        "aplc",
+        "aplf",
+        "apli",
+        "apln",
+        "aplo",
+        "dyalog",
+        "dyapp",
+        "mipage"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "applescript",
+      "aliases": [],
+      "extensions": [
+        "applescript",
+        "scpt",
+        "script editor"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "ara",
+      "aliases": [],
+      "extensions": [
+        "ara"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "asciidoc",
+      "aliases": [
+        "adoc"
+      ],
+      "extensions": [
+        "ad",
+        "adoc",
+        "asc",
+        "asciidoc"
+      ],
+      "basenames": [
+        "adoc.txt"
+      ]
+    },
+    {
+      "id": "asm",
+      "aliases": [],
+      "extensions": [
+        "asm",
+        "inc",
+        "nasm",
+        "s",
+        "yasm"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "assemblyscript",
+      "aliases": [
+        "asc"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "astro",
+      "aliases": [],
+      "extensions": [
+        "astro"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "awk",
+      "aliases": [],
+      "extensions": [
+        "awk"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "ballerina",
+      "aliases": [],
+      "extensions": [
+        "bal"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "bat",
+      "aliases": [
+        "batch"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "beancount",
+      "aliases": [],
+      "extensions": [
+        "beancount"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "berry",
+      "aliases": [
+        "be"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "bibtex",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "bicep",
+      "aliases": [],
+      "extensions": [
+        "bicep",
+        "bicepparam"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "bird2",
+      "aliases": [
+        "bird"
+      ],
+      "extensions": [
+        "bird",
+        "bird2",
+        "bird3",
+        "conf"
+      ],
+      "basenames": [
+        "bird.conf",
+        "bird2.conf",
+        "bird3.conf"
+      ]
+    },
+    {
+      "id": "blade",
+      "aliases": [],
+      "extensions": [],
+      "basenames": [
+        "blade.php"
+      ]
+    },
+    {
+      "id": "bsl",
+      "aliases": [
+        "1c"
+      ],
+      "extensions": [
+        "bsl",
+        "os"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "c",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "c3",
+      "aliases": [],
+      "extensions": [
+        "c3",
+        "c3i",
+        "c3t"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "cadence",
+      "aliases": [
+        "cdc"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "cairo",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "clarity",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "clojure",
+      "aliases": [
+        "clj"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "cmake",
+      "aliases": [],
+      "extensions": [
+        "cmake"
+      ],
+      "basenames": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
+      "id": "cobol",
+      "aliases": [],
+      "extensions": [
+        "bib",
+        "cbl",
+        "cblcpy",
+        "cblle",
+        "cblsrce",
+        "ccp",
+        "cob",
+        "cobcopy",
+        "cobol",
+        "copybook",
+        "cpy",
+        "dds",
+        "def",
+        "fd",
+        "lks",
+        "pco",
+        "pdv",
+        "scb",
+        "scbl",
+        "sel",
+        "sqlcblle",
+        "src",
+        "ss",
+        "wks"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "codeowners",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "codeql",
+      "aliases": [
+        "ql"
+      ],
+      "extensions": [
+        "ql",
+        "qll"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "coffee",
+      "aliases": [
+        "coffeescript"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "common-lisp",
+      "aliases": [
+        "lisp"
+      ],
+      "extensions": [
+        "asd",
+        "asdf",
+        "cl",
+        "l",
+        "lisp",
+        "lsp"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "coq",
+      "aliases": [],
+      "extensions": [
+        "v"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "cpp",
+      "aliases": [
+        "c++"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "cpp-macro",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "crystal",
+      "aliases": [],
+      "extensions": [
+        "cr"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "csharp",
+      "aliases": [
+        "c#",
+        "cs"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "css",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "csv",
+      "aliases": [],
+      "extensions": [
+        "csv"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "cuda",
+      "aliases": [],
+      "extensions": [
+        "cu",
+        "cuh"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "cue",
+      "aliases": [],
+      "extensions": [
+        "cue"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "cypher",
+      "aliases": [
+        "cql"
+      ],
+      "extensions": [
+        "cql",
+        "cyp",
+        "cypher"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "d",
+      "aliases": [],
+      "extensions": [
+        "d",
+        "di",
+        "dpp"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "dart",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "dax",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "desktop",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "diff",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "docker",
+      "aliases": [
+        "dockerfile"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "dotenv",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "dream-maker",
+      "aliases": [],
+      "extensions": [
+        "dm",
+        "dme"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "edge",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "elixir",
+      "aliases": [],
+      "extensions": [
+        "ex",
+        "exs"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "elm",
+      "aliases": [],
+      "extensions": [
+        "elm"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "emacs-lisp",
+      "aliases": [
+        "elisp"
+      ],
+      "extensions": [
+        "_emacs",
+        "abbrev_defs",
+        "cask",
+        "el",
+        "elc",
+        "eld",
+        "emacs",
+        "gnus",
+        "spacemacs",
+        "viper"
+      ],
+      "basenames": [
+        "emacs.desktop",
+        "Project.ede"
+      ]
+    },
+    {
+      "id": "erb",
+      "aliases": [],
+      "extensions": [
+        "erb",
+        "rhtml"
+      ],
+      "basenames": [
+        "html.erb"
+      ]
+    },
+    {
+      "id": "erlang",
+      "aliases": [
+        "erl"
+      ],
+      "extensions": [
+        "erl",
+        "escript",
+        "hrl",
+        "xrl",
+        "yrl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "es-tag-css",
+      "aliases": [],
+      "extensions": [
+        "html",
+        "js",
+        "jsx",
+        "php",
+        "res",
+        "svelte",
+        "ts",
+        "tsx",
+        "vue"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "es-tag-glsl",
+      "aliases": [],
+      "extensions": [
+        "html",
+        "js",
+        "jsx",
+        "php",
+        "res",
+        "svelte",
+        "ts",
+        "tsx",
+        "vue"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "es-tag-html",
+      "aliases": [],
+      "extensions": [
+        "html",
+        "js",
+        "jsx",
+        "php",
+        "res",
+        "svelte",
+        "ts",
+        "tsx",
+        "vue"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "es-tag-sql",
+      "aliases": [],
+      "extensions": [
+        "html",
+        "js",
+        "jsx",
+        "php",
+        "res",
+        "svelte",
+        "ts",
+        "tsx",
+        "vue"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "es-tag-xml",
+      "aliases": [],
+      "extensions": [
+        "html",
+        "js",
+        "jsx",
+        "php",
+        "res",
+        "svelte",
+        "ts",
+        "tsx",
+        "vue"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "fennel",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "fish",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "fluent",
+      "aliases": [
+        "ftl"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "fortran-fixed-form",
+      "aliases": [
+        "f",
+        "f77",
+        "for"
+      ],
+      "extensions": [
+        "f",
+        "f77",
+        "for"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "fortran-free-form",
+      "aliases": [
+        "f03",
+        "f08",
+        "f18",
+        "f90",
+        "f95"
+      ],
+      "extensions": [
+        "f03",
+        "f08",
+        "f18",
+        "f90",
+        "f95",
+        "fpp",
+        "pf"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "fsharp",
+      "aliases": [
+        "f#",
+        "fs"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "gdresource",
+      "aliases": [
+        "tres",
+        "tscn"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "gdscript",
+      "aliases": [
+        "gd"
+      ],
+      "extensions": [
+        "gd"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "gdshader",
+      "aliases": [],
+      "extensions": [
+        "gdshader"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "genie",
+      "aliases": [],
+      "extensions": [
+        "gs"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "gherkin",
+      "aliases": [],
+      "extensions": [
+        "feature"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "git-commit",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "git-rebase",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "gleam",
+      "aliases": [],
+      "extensions": [
+        "gleam"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "glimmer-js",
+      "aliases": [
+        "gjs"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "glimmer-ts",
+      "aliases": [
+        "gts"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "glsl",
+      "aliases": [],
+      "extensions": [
+        "frag",
+        "fs",
+        "fsh",
+        "fshader",
+        "geom",
+        "gs",
+        "gsh",
+        "gshader",
+        "vert",
+        "vs",
+        "vsh",
+        "vshader"
+      ],
+      "basenames": [
+        "f.glsl",
+        "g.glsl",
+        "v.glsl"
+      ]
+    },
+    {
+      "id": "gn",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "gnuplot",
+      "aliases": [],
+      "extensions": [
+        "gnuplot",
+        "gp",
+        "plot",
+        "plt"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "go",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "graphql",
+      "aliases": [
+        "gql"
+      ],
+      "extensions": [
+        "gql",
+        "graphcool",
+        "graphql",
+        "graphqls"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "groovy",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "hack",
+      "aliases": [],
+      "extensions": [
+        "hack",
+        "hh",
+        "php"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "haml",
+      "aliases": [],
+      "extensions": [
+        "haml"
+      ],
+      "basenames": [
+        "html.haml"
+      ]
+    },
+    {
+      "id": "handlebars",
+      "aliases": [
+        "hbs"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "haskell",
+      "aliases": [
+        "hs"
+      ],
+      "extensions": [
+        "hs",
+        "hs-boot",
+        "hsig"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "haxe",
+      "aliases": [],
+      "extensions": [
+        "dump",
+        "hx"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "hcl",
+      "aliases": [],
+      "extensions": [
+        "hcl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "hjson",
+      "aliases": [],
+      "extensions": [
+        "hjson"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "hlsl",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "html",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "html-derivative",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "http",
+      "aliases": [],
+      "extensions": [
+        "http",
+        "rest"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "hurl",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "hxml",
+      "aliases": [],
+      "extensions": [
+        "hxml"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "hy",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "ignore",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "imba",
+      "aliases": [],
+      "extensions": [
+        "imba",
+        "imba2"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "ini",
+      "aliases": [
+        "properties"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "java",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "javascript",
+      "aliases": [
+        "cjs",
+        "js",
+        "mjs"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "jinja",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "jinja-html",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "jison",
+      "aliases": [],
+      "extensions": [
+        "jison"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "json",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "json5",
+      "aliases": [],
+      "extensions": [
+        "json5"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "jsonc",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "jsonl",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "jsonnet",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "jssm",
+      "aliases": [
+        "fsl"
+      ],
+      "extensions": [
+        "jssm",
+        "jssm_state"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "jsx",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "julia",
+      "aliases": [
+        "jl"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "just",
+      "aliases": [],
+      "extensions": [
+        "just",
+        "justfile"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "kdl",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "kotlin",
+      "aliases": [
+        "kt",
+        "kts"
+      ],
+      "extensions": [
+        "kt",
+        "kts"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "kusto",
+      "aliases": [
+        "kql"
+      ],
+      "extensions": [
+        "csl",
+        "kql",
+        "kusto"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "latex",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "lean",
+      "aliases": [
+        "lean4"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "less",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "liquid",
+      "aliases": [],
+      "extensions": [
+        "liquid"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "llvm",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "log",
+      "aliases": [],
+      "extensions": [
+        "log"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "logo",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "lua",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "luau",
+      "aliases": [],
+      "extensions": [
+        "luau"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "make",
+      "aliases": [
+        "makefile"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "markdown",
+      "aliases": [
+        "md"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "markdown-nix",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "markdown-vue",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "marko",
+      "aliases": [],
+      "extensions": [
+        "marko"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "matlab",
+      "aliases": [],
+      "extensions": [
+        "m"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "mdc",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "mdx",
+      "aliases": [],
+      "extensions": [
+        "mdx"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "mermaid",
+      "aliases": [
+        "mmd"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "metal",
+      "aliases": [
+        "msl"
+      ],
+      "extensions": [
+        "metal"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "mipsasm",
+      "aliases": [
+        "mips"
+      ],
+      "extensions": [
+        "asm",
+        "mips",
+        "s",
+        "spim"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "mlir",
+      "aliases": [],
+      "extensions": [
+        "mlir"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "mojo",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "moonbit",
+      "aliases": [
+        "mbt",
+        "mbti"
+      ],
+      "extensions": [
+        "mbt"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "move",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "narrat",
+      "aliases": [
+        "nar"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "nextflow",
+      "aliases": [
+        "nf"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "nextflow-groovy",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "nginx",
+      "aliases": [],
+      "extensions": [
+        "conf",
+        "fastcgi_params",
+        "ngx",
+        "scgi_params",
+        "uwsgi_params"
+      ],
+      "basenames": [
+        "conf.erb",
+        "mime.types",
+        "nginx.conf"
+      ]
+    },
+    {
+      "id": "nim",
+      "aliases": [],
+      "extensions": [
+        "nim"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "nix",
+      "aliases": [],
+      "extensions": [
+        "nix"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "nushell",
+      "aliases": [
+        "nu"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "objective-c",
+      "aliases": [
+        "objc"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "objective-cpp",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "ocaml",
+      "aliases": [],
+      "extensions": [
+        "ml",
+        "mli"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "odin",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "opencl",
+      "aliases": [],
+      "extensions": [
+        "cl",
+        "ocl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "openscad",
+      "aliases": [
+        "scad"
+      ],
+      "extensions": [
+        "scad"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "pascal",
+      "aliases": [],
+      "extensions": [
+        "dfm",
+        "dpk",
+        "dpr",
+        "fmx",
+        "lfm",
+        "lpr",
+        "p",
+        "pas",
+        "pp",
+        "ppr"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "perl",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "php",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "pkl",
+      "aliases": [],
+      "extensions": [
+        "pcf",
+        "pkl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "plsql",
+      "aliases": [],
+      "extensions": [
+        "ddl",
+        "dml",
+        "pck",
+        "pkb",
+        "pkh",
+        "pks",
+        "plb",
+        "pls",
+        "sql"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "po",
+      "aliases": [
+        "pot",
+        "potx"
+      ],
+      "extensions": [
+        "po",
+        "pot",
+        "potx"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "polar",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "postcss",
+      "aliases": [],
+      "extensions": [
+        "pcss",
+        "postcss"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "powerquery",
+      "aliases": [],
+      "extensions": [
+        "pq",
+        "pqm"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "powershell",
+      "aliases": [
+        "ps",
+        "ps1"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "prisma",
+      "aliases": [],
+      "extensions": [
+        "prisma"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "prolog",
+      "aliases": [],
+      "extensions": [
+        "pl",
+        "pro"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "proto",
+      "aliases": [
+        "protobuf"
+      ],
+      "extensions": [
+        "proto"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "pug",
+      "aliases": [
+        "jade"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "puppet",
+      "aliases": [],
+      "extensions": [
+        "pp"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "purescript",
+      "aliases": [],
+      "extensions": [
+        "purs"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "python",
+      "aliases": [
+        "py"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "qml",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "qmldir",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "qss",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "r",
+      "aliases": [],
+      "extensions": [
+        "r",
+        "rprofile"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "racket",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "raku",
+      "aliases": [
+        "perl6"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "razor",
+      "aliases": [],
+      "extensions": [
+        "cshtml",
+        "razor"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "reg",
+      "aliases": [],
+      "extensions": [
+        "reg"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "regexp",
+      "aliases": [
+        "regex"
+      ],
+      "extensions": [
+        "re"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "rego",
+      "aliases": [],
+      "extensions": [
+        "rego"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "rel",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "riscv",
+      "aliases": [],
+      "extensions": [
+        "asm",
+        "riscv",
+        "s"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "ron",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "rosmsg",
+      "aliases": [],
+      "extensions": [
+        "action",
+        "msg",
+        "srv"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "rst",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "ruby",
+      "aliases": [
+        "rb"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "rust",
+      "aliases": [
+        "rs"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "sas",
+      "aliases": [],
+      "extensions": [
+        "sas"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "sass",
+      "aliases": [],
+      "extensions": [
+        "sass"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "scala",
+      "aliases": [],
+      "extensions": [
+        "scala"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "scheme",
+      "aliases": [],
+      "extensions": [
+        "rkt",
+        "sch",
+        "scm",
+        "ss"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "scss",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "sdbl",
+      "aliases": [
+        "1c-query"
+      ],
+      "extensions": [
+        "query",
+        "sdbl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "shaderlab",
+      "aliases": [
+        "shader"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "shellscript",
+      "aliases": [
+        "bash",
+        "sh",
+        "shell",
+        "zsh"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "shellsession",
+      "aliases": [
+        "console"
+      ],
+      "extensions": [
+        "sh-session"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "smalltalk",
+      "aliases": [],
+      "extensions": [
+        "st"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "solidity",
+      "aliases": [],
+      "extensions": [
+        "sol"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "soy",
+      "aliases": [
+        "closure-templates"
+      ],
+      "extensions": [
+        "soy"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "sparql",
+      "aliases": [],
+      "extensions": [
+        "rq",
+        "sparql",
+        "sq"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "spirv",
+      "aliases": [
+        "spir-v",
+        "spirv-asm"
+      ],
+      "extensions": [
+        "spvasm"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "splunk",
+      "aliases": [
+        "spl"
+      ],
+      "extensions": [
+        "spl",
+        "splunk"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "sql",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "ssh-config",
+      "aliases": [],
+      "extensions": [
+        "ssh_config",
+        "ssh/config",
+        "sshd_config"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "starlark",
+      "aliases": [
+        "bazel"
+      ],
+      "extensions": [
+        "bazel",
+        "build",
+        "bzl",
+        "bzlmod",
+        "sky",
+        "star",
+        "workspace"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "stata",
+      "aliases": [],
+      "extensions": [
+        "ado",
+        "do",
+        "mata"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "stylus",
+      "aliases": [
+        "styl"
+      ],
+      "extensions": [
+        "styl",
+        "stylus"
+      ],
+      "basenames": [
+        "css.styl",
+        "css.stylus"
+      ]
+    },
+    {
+      "id": "surrealql",
+      "aliases": [
+        "surql"
+      ],
+      "extensions": [
+        "surql",
+        "surrealql"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "svelte",
+      "aliases": [],
+      "extensions": [
+        "svelte"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "swift",
+      "aliases": [],
+      "extensions": [
+        "swift"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "system-verilog",
+      "aliases": [],
+      "extensions": [
+        "sv",
+        "svh",
+        "v",
+        "vh"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "systemd",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "talonscript",
+      "aliases": [
+        "talon"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "tasl",
+      "aliases": [],
+      "extensions": [
+        "tasl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "tcl",
+      "aliases": [],
+      "extensions": [
+        "tcl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "templ",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "terraform",
+      "aliases": [
+        "tf",
+        "tfvars"
+      ],
+      "extensions": [
+        "tf",
+        "tfvars"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "tex",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "toml",
+      "aliases": [],
+      "extensions": [
+        "toml"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "ts-tags",
+      "aliases": [
+        "lit"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "tsv",
+      "aliases": [],
+      "extensions": [
+        "tab",
+        "tsv"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "tsx",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "turtle",
+      "aliases": [],
+      "extensions": [
+        "acl",
+        "ttl",
+        "turtle"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "twig",
+      "aliases": [],
+      "extensions": [
+        "twig"
+      ],
+      "basenames": [
+        "html.twig"
+      ]
+    },
+    {
+      "id": "typescript",
+      "aliases": [
+        "cts",
+        "mts",
+        "ts"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "typespec",
+      "aliases": [
+        "tsp"
+      ],
+      "extensions": [
+        "tsp"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "typst",
+      "aliases": [
+        "typ"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "v",
+      "aliases": [],
+      "extensions": [
+        "v",
+        "vh",
+        "vsh"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "vala",
+      "aliases": [],
+      "extensions": [
+        "gs",
+        "vala",
+        "vapi"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "vb",
+      "aliases": [
+        "cmd"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "verilog",
+      "aliases": [],
+      "extensions": [
+        "v",
+        "vh"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "vhdl",
+      "aliases": [],
+      "extensions": [
+        "vhd",
+        "vhdl",
+        "vho",
+        "vht"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "viml",
+      "aliases": [
+        "vim",
+        "vimscript"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "vue",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "vue-directives",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "vue-html",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "vue-interpolations",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "vue-sfc-style-variable-injection",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "vue-vine",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "vyper",
+      "aliases": [
+        "vy"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "wasm",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "webidl",
+      "aliases": [],
+      "extensions": [
+        "idl",
+        "webidl"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "wenyan",
+      "aliases": [
+        "文言"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "wgsl",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "wikitext",
+      "aliases": [
+        "mediawiki",
+        "wiki"
+      ],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "wit",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "wolfram",
+      "aliases": [
+        "wl"
+      ],
+      "extensions": [
+        "m",
+        "mt",
+        "wl",
+        "wls",
+        "wlt"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "xml",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "xsl",
+      "aliases": [],
+      "extensions": [],
+      "basenames": []
+    },
+    {
+      "id": "yaml",
+      "aliases": [
+        "yml"
+      ],
+      "extensions": [
+        "clang-format",
+        "reek",
+        "rviz",
+        "sublime-syntax",
+        "syntax",
+        "yaml",
+        "yaml-tmlanguage",
+        "yml"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "yang",
+      "aliases": [],
+      "extensions": [
+        "yang"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "zenscript",
+      "aliases": [],
+      "extensions": [
+        "zs"
+      ],
+      "basenames": []
+    },
+    {
+      "id": "zig",
+      "aliases": [],
+      "extensions": [
+        "zig",
+        "zon"
+      ],
+      "basenames": []
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+Windows Registry Editor Version 5.00
+
+; Basic registry fixture — café, 東京, and rocket 🚀
+[HKEY_CURRENT_USER\Software\MarkSyntax\Basic]
+@="default value"
+"Title"="Grammar fixture"
+"Count"=dword:0000002a
+"Binary"=hex:00,7f,80,ff
+"Expand"=hex(2):25,00,54,00,45,00,4d,00,50,00,25,00,00,00
+"Multi"=hex(7):6f,00,6e,00,65,00,00,00,74,00,77,00,6f,00,00,00,00,00
+"LongBytes"=hex:01,02,03,04,\
+  05,06,07,08
+"Qword"=hex(b):2a,00,00,00,00,00,00,00
+"DeleteMe"=-
+
+[-HKEY_CURRENT_USER\Software\MarkSyntax\Basic\Obsolete]
+
+[HKEY_CURRENT_USER\Software\MarkSyntax\基本]
+"Rocket"="Unicode survives: λ 東京 🚀"
+; End of basic fixture

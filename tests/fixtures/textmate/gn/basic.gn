@@ -1,0 +1,23 @@
+# A compact GN build with arguments, a config, and a target.
+declare_args() {
+  enable_cafe = true
+  greeting = "Hello, 東京 🚀 𝌆"
+}
+
+config("warnings") {
+  defines = [ "GREETING=\"${greeting}\"" ]
+  cflags = [ "-Wall", "-Wextra" ]
+}
+
+source_set("core") {
+  sources = [
+    "core.cc",
+    "café.cc",
+  ]
+  configs += [ ":warnings" ]
+  if (enable_cafe && current_os != "win") {
+    defines += [ "USE_UNICODE=1" ]
+  } else {
+    defines += [ "USE_PORTABLE_PATH=1" ]
+  }
+}

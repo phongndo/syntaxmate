@@ -1,0 +1,161 @@
+// A root array exercises the grammar's top-level array context.
+[
+  # Development service configuration.
+  {
+    name: api-development
+    "display name": "Development API 🚀"
+    'deployment tier': 'local'
+    enabled: true
+    archived: false
+    replacement: null
+
+    runtime: {
+      language: rust
+      edition: 2024,
+      workers: 4
+      sampling: 0.25
+      timeoutSeconds: 1.5e2
+    }
+
+    endpoints: [
+      "http://127.0.0.1:3000"
+      'http://[::1]:3000',
+      "https://dev.example.test/v1"
+    ]
+
+    features: [true, false, null, 0, -17, 3.14159, 6.02e23]
+    labels: ["alpha", 'developer preview', "BMP café 東京 λ", "astral 🌌"]
+
+    paths: {
+      source: crates/mark-syntax/src
+      fixtures: 'tests/fixtures/textmate/hjson'
+      windows: "C:\\work\\mark\\syntax"
+    }
+
+    banner: '''
+      Mark development service
+      Fast feedback, local data, verbose diagnostics.
+      Literal Unicode: Καλημέρα — 東京 — 🚀
+      '''
+
+    # A hash comment between object members.
+    logging: {
+      level: debug
+      color: true // End-of-line slash comment.
+      format: "time=\u2603 message=\"ready\"\n"
+    }
+  },
+
+  /* Staging deliberately mixes optional and explicit separators.
+     The block also checks state carried across source lines. */
+  {
+    name: api-staging
+    "display name": 'Staging API'
+    region: eu-west-1
+    enabled: true
+
+    replicas: {
+      desired: 3,
+      minimum: 2
+      maximum: 8
+      surgeRatio: 1.25
+    }
+
+    hosts: [
+      staging-a.example.test
+      staging-b.example.test
+      'staging canary.example.test'
+    ]
+
+    checks: [
+      {name: "health", path: "/health", interval: 10}
+      {name: 'readiness', path: '/ready', interval: 2.5e1},
+      {
+        name: dependencies
+        path: "/status/dependencies"
+        interval: 60
+        required: true
+      }
+    ]
+
+    metadata: {
+      owner: platform-team
+      "cost center": "R&D"
+      'on call': 'syntax-primary'
+      locale: Français
+      city: München
+      symbol: λ
+      spacecraft: 🛰️
+    }
+
+    releaseNotes: '''
+      Candidate builds are promoted every weekday.
+      Compare parser scopes before approving production.
+
+      The blank line above is intentional.
+      '''
+
+    thresholds: [-1.0e-3, 0, 0.5, 10, 9.99E+4]
+    modes: ["safe", "strict", 'compatibility']
+  }
+
+  // Production is larger and more deeply nested.
+  {
+    name: api-production
+    "display name": "Production API"
+    enabled: true
+    maintenance: false
+    previousVersion: null
+    version: '4.2.0'
+
+    topology: {
+      primary: {
+        region: us-east-1
+        zones: ["us-east-1a", "us-east-1b", "us-east-1c"]
+      }
+      secondary: {
+        region: ap-southeast-2
+        zones: ["ap-southeast-2a", 'ap-southeast-2b']
+      }
+    }
+
+    traffic: {
+      requestsPerSecond: 12000
+      errorBudget: 0.001,
+      growthFactor: 1.08e+0
+      weights: {primary: 90, secondary: 10}
+    }
+
+    contacts: [
+      {
+        role: incident-commander
+        name: "Zoë"
+        handle: '@zoe'
+      },
+      {
+        role: database
+        name: 'Renée'
+        handle: "@db-東京"
+      }
+    ]
+
+    legal: '''
+      Production data is retained according to policy.
+      Do not paste credentials into this configuration.
+      Contact operations before changing traffic weights.
+      '''
+
+    escapes: {
+      double: "line one\nline two\tend"
+      single: 'quote: \' solidus: \/ backslash: \\'
+      bmpEscape: "\u03bb"
+      literalBmp: café-雪-λ
+      literalAstral: rocket-🚀-planet-🪐
+    }
+
+    # Explicit commas are useful for compact scalar arrays.
+    statusCodes: [200, 201, 202, 400, 404, 429, 500, 503]
+    flags: [true, true, false, null]
+    final: ready
+  }
+]

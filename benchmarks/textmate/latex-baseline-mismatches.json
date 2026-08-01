@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "fixture": "tests/fixtures/textmate/latex/hw2-theme.tex",
+  "reference": {
+    "vscode": "1.128.0",
+    "theme": "github-dark-high-contrast@6.3.4",
+    "vscodeTextmate": "9.2.0",
+    "vscodeOniguruma": "1.7.0",
+    "semanticHighlighting": false
+  },
+  "baseline": "class-based GitHub Dark High Contrast syntax palette",
+  "mismatches": [
+    {
+      "text": "\\",
+      "line": 4,
+      "range": [0, 1],
+      "scope": "support.function.be.latex punctuation.definition.function.latex",
+      "expectedSelector": "support",
+      "expectedStyle": { "foreground": "#91cbff" },
+      "coarseClass": "Punctuation",
+      "baselineStyle": { "foreground": "#f0f3f6" }
+    },
+    {
+      "text": "\\leftarrow",
+      "line": 10,
+      "range": [5, 15],
+      "scope": "constant.character.math.tex",
+      "expectedSelector": "constant.character",
+      "expectedStyle": { "foreground": "#ff9492" },
+      "coarseClass": "Constant",
+      "baselineStyle": { "foreground": "#91cbff" }
+    },
+    {
+      "text": "Bold text",
+      "line": 7,
+      "range": [8, 17],
+      "scope": "markup.bold.textbf.latex",
+      "expectedSelector": "markup.bold",
+      "expectedStyle": { "foreground": "#f0f3f6", "modifiers": ["bold"] },
+      "coarseClass": null,
+      "baselineStyle": { "foreground": "#f0f3f6", "modifiers": [] }
+    },
+    {
+      "text": "italic text",
+      "line": 7,
+      "range": [27, 38],
+      "scope": "markup.italic.textit.latex",
+      "expectedSelector": "markup.italic",
+      "expectedStyle": { "foreground": "#f0f3f6", "modifiers": ["italic"] },
+      "coarseClass": null,
+      "baselineStyle": { "foreground": "#f0f3f6", "modifiers": [] }
+    },
+    {
+      "text": "https://example.com",
+      "line": 15,
+      "range": [22, 41],
+      "scope": "markup.underline.link.latex",
+      "expectedSelector": "markup.underline",
+      "expectedStyle": { "foreground": "#f0f3f6", "modifiers": ["underline"] },
+      "coarseClass": null,
+      "baselineStyle": { "foreground": "#f0f3f6", "modifiers": [] }
+    }
+  ],
+  "currentMismatchCount": 0
+}

@@ -1,0 +1,195 @@
+---
+title: "Atlas café — 世界 🌍"
+description: "A multilingual Handlebars fixture"
+locale: en-GB
+direction: ltr
+theme: ocean
+features:
+  search: true
+  telemetry: false
+  experiments: [cards, compact-nav]
+contributors:
+  - "Zoë"
+  - "李雷"
+---
+<!doctype html>
+<html lang="{{locale}}" dir="{{direction}}" data-theme="{{theme}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}} · {{site.name}}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --space: 0.75rem;
+      --accent: hsl(194 72% 42%);
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; font: 16px/1.5 system-ui, sans-serif; }
+    .shell { width: min(72rem, 100% - 2rem); margin-inline: auto; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--space); }
+    .card { border: 1px solid color-mix(in srgb, var(--accent), transparent 60%); border-radius: .5rem; }
+    .card[aria-busy="true"] { opacity: .55; }
+    .sr-only { position: absolute; clip-path: inset(50%); }
+    @media (prefers-reduced-motion: no-preference) {
+      .card { transition: translate 160ms ease, box-shadow 160ms ease; }
+      .card:hover { translate: 0 -.125rem; box-shadow: 0 .4rem 1rem #0002; }
+    }
+  </style>
+</head>
+<body>
+  {{! @template application shell; ordinary comment }}
+  {{!--
+    @note Block comments may span lines.
+    The ignored expression {{dangerouslyRender raw}} stays comment text.
+  --}}
+  <a class="sr-only" href="#content">Skip to content</a>
+  <header class="shell">
+    <nav aria-label="Primary navigation">
+      <a href="{{url-for 'home'}}" aria-current="page">{{site.name}}</a>
+      <ul>
+        {{#each navigation as |item position|}}
+          <li data-position="{{position}}">
+            <a href="{{item.href}}" {{#if item.external}}rel="noopener" target="_blank"{{/if}}>
+              {{item.label}}
+            </a>
+          </li>
+        {{else}}
+          <li><span>No navigation entries</span></li>
+        {{/each}}
+      </ul>
+    </nav>
+  </header>
+  <main id="content" class="shell">
+    {{#with currentUser as |user|}}
+      <section aria-labelledby="welcome-heading">
+        <h1 id="welcome-heading">{{t "welcome" name=user.displayName}}</h1>
+        <p title='Signed in as {{user.handle}}'>
+          {{~user.greeting~}} — {{../site.tagline}}
+        </p>
+        {{#if user.avatar}}
+          <img src="{{user.avatar.src}}" alt="{{user.avatar.alt}}" width="64" height="64">
+        {{else if user.initials}}
+          <span class="avatar" aria-hidden="true">{{user.initials}}</span>
+        {{else}}
+          <span class="avatar" aria-label="Anonymous">?</span>
+        {{/if}}
+      </section>
+    {{else}}
+      {{> auth/sign-in prompt=(t "auth.prompt") returnTo=request.path}}
+    {{/with}}
+    <section aria-labelledby="catalog-heading">
+      <h2 id="catalog-heading">{{uppercase (t "catalog.title")}}</h2>
+      <form action="{{routes.search}}" method="get" role="search">
+        <label for="query">Search</label>
+        <input id="query" name="q" type="search" value="{{query}}" placeholder="tea, 茶, café…">
+        <select name="sort">
+          {{#each sortOptions}}
+            <option value="{{value}}" {{#if selected}}selected{{/if}}>{{label}}</option>
+          {{/each}}
+        </select>
+        <label><input type="checkbox" name="stock" {{#if filters.inStock}}checked{{/if}}> In stock</label>
+        <button type="submit" disabled={{unless canSearch "disabled"}}>Find</button>
+      </form>
+      {{#if loading}}
+        <p role="status" aria-live="polite">Loading…</p>
+      {{else}}
+        {{#if products.length}}
+          <div class="cards">
+            {{#each products as |product index|}}
+              <article class="card card--{{product.kind}}" data-index="{{@index}}" aria-busy="false">
+                <header>
+                  <h3><a href="{{url-for 'product' product.slug}}">{{product.name}}</a></h3>
+                  {{#if @first}}<span class="badge">First</span>{{/if}}
+                </header>
+                {{#if product.image}}
+                  {{> responsive-image image=product.image sizes="(min-width: 60rem) 20rem, 90vw" lazy=true}}
+                {{/if}}
+                <p>{{truncate product.summary 140 suffix="…"}}</p>
+                <p class="price">{{format-money product.price currency=../currency}}</p>
+                {{#unless product.available}}
+                  <strong class="sold-out">{{t "product.soldOut"}}</strong>
+                {{/unless}}
+                <div class="description">{{{sanitize product.descriptionHtml}}}</div>
+                <button type="button" data-add="{{product.id}}">Add {{product.name}} to basket</button>
+              </article>
+            {{/each}}
+          </div>
+        {{else}}
+          <p>{{t "catalog.empty" query=(default query "∅")}}</p>
+        {{/if}}
+      {{/if}}
+    </section>
+    {{#if (and features.recommendations currentUser)}}
+      <aside aria-label="Recommendations">
+        {{> recommendations user=currentUser limit=3}}
+      </aside>
+    {{/if}}
+    {{#each notices}}
+      {{#if (eq level "warning")}}
+        <div class="notice notice--warning" role="alert">{{message}}</div>
+      {{else}}
+        <div class="notice notice--{{level}}" role="status">{{message}}</div>
+      {{/if}}
+    {{/each}}
+  </main>
+  <footer class="shell">
+    <small>&copy; {{year}} {{site.legalName}} · 🧑🏾‍💻 🚀</small>
+    {{#if links.privacy}}<a href="{{links.privacy}}">Privacy</a>{{/if}}
+    {{> locale-picker locales=availableLocales selected=locale}}
+  </footer>
+  <script type="text/x-handlebars-template" id="toast-template">
+    <aside class="toast toast--{{kind}}" role={{default role "status"}}>
+      {{#if icon}}<span aria-hidden="true">{{icon}}</span>{{/if}}
+      <strong>{{title}}</strong>
+      <div>{{{bodyHtml}}}</div>
+      {{#each actions as |action|}}
+        <button type="button" data-action="{{action.id}}">{{action.label}}</button>
+      {{else}}
+        <button type="button" data-action="dismiss">{{t "dismiss"}}</button>
+      {{/each}}
+    </aside>
+  </script>
+  <script>
+    "use strict";
+    const root = document.documentElement;
+    const form = document.querySelector('[role="search"]');
+    const cards = [...document.querySelectorAll(".card")];
+    const state = { ready: false, count: cards.length };
+
+    function announce(message) {
+      const region = document.querySelector('[aria-live="polite"]');
+      if (region) region.textContent = message;
+    }
+
+    form?.addEventListener("submit", (event) => {
+      const query = new FormData(event.currentTarget).get("q")?.trim();
+      if (!query) {
+        event.preventDefault();
+        announce("Enter a search term — for example, café ☕");
+      }
+    });
+
+    document.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-add]");
+      if (!button) return;
+      button.disabled = true;
+      try {
+        const response = await fetch(`/basket/${encodeURIComponent(button.dataset.add)}`, { method: "POST" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        announce("Added to basket ✓");
+      } catch (error) {
+        console.error("Basket update failed", error);
+        announce("Could not update basket");
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    queueMicrotask(() => {
+      state.ready = true;
+      root.dataset.ready = String(state.ready);
+    });
+  </script>
+</body>
+</html>

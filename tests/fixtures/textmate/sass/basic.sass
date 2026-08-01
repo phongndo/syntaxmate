@@ -1,0 +1,24 @@
+@use "sass:color"
+
+$accent: #6c5ce7 !default
+$gap: 1.25rem
+$greeting: "Olá, 世界 🚀 𝌆"
+
+/* Basic indented Sass fixture
+ * with a balanced multiline comment. */
+%surface
+  border: 1px solid color.adjust($accent, $lightness: -10%)
+  border-radius: 0.5rem
+
+.card
+  @extend %surface
+  padding: $gap
+  color: $accent
+  &__title
+    font-weight: 700
+    &::after
+      content: " #{$greeting}"
+  &:hover, &:focus-visible
+    background: rgba($accent, 0.12)
+
+$fixture-complete: true

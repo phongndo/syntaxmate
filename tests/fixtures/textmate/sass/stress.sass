@@ -1,0 +1,211 @@
+@use "sass:color"
+@use "sass:list"
+@use "sass:map"
+@use "sass:math"
+@use "sass:meta"
+@use "design/tokens" as tokens with (
+  $density: compact,
+  $accent: #7c3aed
+)
+@import "legacy/reset", "print"
+
+// import css-variables from "theme/colors"
+// {{fixture-note}} Unicode and stateful constructs follow.
+// I
+/* Sass stress fixture.
+ * @param $value documents café, Ελληνικά, 火, 🚀, and 𝌆.
+ * Delimiters inside comments stay inert: ($fake, #abc, "quoted").
+ */
+
+$base-size: 1rem !default
+$ratio: 1.25
+$enabled: true
+$missing: null
+$negative-offset: -2.5px
+$angles: 45deg, .5turn, 100grad
+$timings: 120ms 0.4s
+$resolutions: 96dpi, 2dppx
+$breakpoints: (small: 30rem, medium: 48rem, wide: 72rem)
+$font-stack: (
+  "Inter var",
+  "Noto Sans",
+  system-ui,
+  sans-serif
+)
+$palette: (
+  ink: #123,
+  veil: #abcd,
+  accent: #6c5ce7,
+  glass: #112233cc,
+  nested: (quiet: #778ca3, loud: #eb3b5a)
+)
+$steps: 0.25rem, 0.5rem, 1rem, 2rem
+$asset-root: "/static/火"
+$mission: "Launch 🚀 across \
+  café, Ελληνικά, and the 𝌆 frontier"
+$single-label: 'status #{$enabled}'
+$component-prefix: "mk"
+
+@function scale-step($value, $power: 2)
+  $result: $value
+  @for $index from 1 through $power
+    $result: $result * $ratio
+  @return $result
+
+@function palette-tone($name, $fallback: black)
+  @if map.has-key($palette, $name)
+    @return map.get($palette, $name)
+  @else
+    @warn "Unknown tone `#{$name}`"
+    @return $fallback
+
+@function total($values...)
+  $sum: 0
+  @each $value in $values
+    $sum: $sum + $value
+  @return $sum
+
+@mixin frame($tone: accent, $width: 1px)
+  border: $width solid palette-tone($tone)
+  box-shadow: 0 0 0 math.div($width, 2) rgb(0 0 0 / 18%)
+  @content
+
+@mixin respond($name)
+  $width: map.get($breakpoints, $name)
+  @if $width == null
+    @error "Missing breakpoint: #{$name}"
+  @else
+    @media screen and (min-width: $width)
+      @content($width)
+
+=legacy-radius($radius)
+  -webkit-border-radius: $radius
+  border-radius: $radius
+
+%interactive-surface
+  border: 1px solid rgb(23 32 42 / 20%)
+  transition: color 160ms ease, box-shadow 160ms ease
+
+:root
+  color-scheme: light dark
+  --#{$component-prefix}-gap: #{list.nth($steps, 3)}
+  --surface: color-mix(in oklab, white 92%, rebeccapurple)
+  --mission-label: "#{$mission}"
+  --fallback: var(--missing-token, #{$base-size})
+
+html, body
+  margin: 0
+  min-block-size: 100%
+
+body
+  font:
+    family: $font-stack
+    size: clamp(1rem, 0.75rem + 1vw, 1.5rem)
+    weight: 400
+  color: palette-tone(ink)
+  background: linear-gradient(
+    135deg,
+    #fff 0%,
+    rgb(245 247 250 / 90%) 100%
+  )
+
+.#{$component-prefix}-card#featured[data-state^="réady" i]
+  @extend %interactive-surface
+  @include frame(accent, 2px)
+    outline: 1px dashed currentColor
+  +legacy-radius(0.75rem)
+  padding: total(0.5rem, 1rem)
+  margin-block: $negative-offset 2rem
+  background-image: url("#{$asset-root}/paper-🚀.svg")
+  background-size: cover
+  &#{&}--featured
+    box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 18%)
+  > header:first-child
+    display: grid
+    grid-template-columns: [icon] auto [title] minmax(0, 1fr)
+    gap: var(--#{$component-prefix}-gap)
+  &:hover, &:focus-visible
+    color: color.adjust(palette-tone(accent), $lightness: -8%)
+  &:not(.disabled)::after
+    content: " ↗ #{$mission}"
+  & + &
+    margin-block-start: list.nth($steps, 2)
+
+.card__link
+  text-decoration: none
+  &[href^="https"]::before
+    content: "🔗"
+  &[lang|="el"]
+    quotes: "«" "»"
+  :where(code, kbd)
+    font-family: ui-monospace, monospace
+
+@include respond(medium) using ($resolved-width)
+  .layout
+    max-inline-size: $resolved-width
+    grid-template-columns: repeat(12, minmax(0, 1fr))
+
+@each $name, $tone in $palette
+  @if meta.type-of($tone) == color
+    .text-#{$name}
+      color: $tone
+  @else
+    .group-#{$name}
+      color: map.get($tone, quiet)
+
+@for $index from 1 through 4
+  .stack > :nth-child(#{$index})
+    z-index: $index
+    margin-block-start: math.pow($ratio, $index) * 0.1rem
+
+$column: 1
+@while $column < 4
+  .grid-col-#{$column}
+    grid-column: span $column
+  $column: $column + 1 !global
+
+@media screen and (prefers-reduced-motion: no-preference)
+  .orbit
+    animation: orbit-𝌆 2.4s cubic-bezier(.2, .8, .2, 1) infinite alternate
+
+@supports (selector(:has(*))) and (color: oklch(70% 0.15 250))
+  .gallery:has(> figure[data-kind~="火"])
+    border-color: oklch(62% 0.18 255 / 0.8)
+
+@container card (inline-size > 32rem)
+  .card__body
+    columns: 2 18ch
+    column-rule: 1px dashed currentColor
+
+@layer reset, components, utilities
+@layer components
+  dialog[open]::backdrop
+    background-color: rgb(15 23 42 / 55%)
+    backdrop-filter: blur(0.25rem)
+
+@keyframes orbit-𝌆
+  from
+    transform: rotate(0turn) translateX(0)
+    opacity: 0.6
+  50%
+    transform: rotate(.5turn) translateX(calc(1rem + 2vw))
+  to
+    transform: rotate(1turn) translateX(0)
+    opacity: 1
+
+@font-face
+  font-family: "Fixture Sans"
+  src: local("Fixture Sans"), url("#{$asset-root}/fixture.woff2") format("woff2")
+  font-display: swap
+  unicode-range: U+0020-007E, U+03B1-03C9, U+1F680
+
+@page :first
+  size: A4 portrait
+  margin: 1.5cm
+  @top-center
+    content: "Review — #{$single-label}"
+
+@at-root .outside-shell
+  display: contents
+
+$fixture-complete: true

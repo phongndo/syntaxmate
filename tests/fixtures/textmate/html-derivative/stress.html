@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang=en-GB data-release="2026.07" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name=viewport content="width=device-width, initial-scale=1">
+  <meta name="description" content='Aurora operations for Reykjavík, 東京, and 서울.'>
+  <link rel=preconnect href="https://telemetry.example.test">
+  <link rel="stylesheet" href='/assets/mission.css' crossorigin=anonymous>
+  <title>Aurora console · λ · 🛰️ · 𐀀</title>
+  <style media="screen">
+    :root {
+      color-scheme: light dark;
+      --accent: hsl(172 70% 42%);
+      --panel-gap: clamp(.75rem, 2vw, 1.5rem);
+    }
+    body {
+      margin: 0;
+      font: 16px/1.5 system-ui, sans-serif;
+      background: color-mix(in srgb, Canvas 94%, var(--accent));
+    }
+    mission-shell[status="online"] {
+      display: grid;
+      gap: var(--panel-gap);
+    }
+    telemetry-card::part(value) { font-variant-numeric: tabular-nums; }
+    @media (min-width: 52rem) {
+      .dashboard { grid-template-columns: 2fr 1fr; }
+    }
+  </style><theme-sentinel data-loaded=true></theme-sentinel>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","name":"Aurora Console","emoji":"🌌"}
+  </script>
+</head>
+<body class=app-shell>
+  <!-- The derivative grammar runs inside this ordinary HTML document host. -->
+  <header class="masthead" data-region='is-north'>
+    <a href="#content" class=skip-link>Skip to telemetry</a>
+    <nav aria-label="Mission sections">
+      <ul>
+        <li><a href="/overview" aria-current=page>Overview</a></li>
+        <li><a href='/stations'>Stations</a></li>
+        <li><a href="/alerts?level=high&amp;region=north">Alerts</a></li>
+      </ul>
+    </nav>
+  </header>
+  <mission-shell status="online" data-build=1847 operator:name='Zoë' hydrate:on-load>
+    <main id=content class="dashboard" tabindex=-1>
+      <section aria-labelledby="summary-title">
+        <header>
+          <p class=eyebrow>Live mission · naïve link budget</p>
+          <h1 id="summary-title">Northern lights over Reykjavík 🛰️</h1>
+          <p>Thresholds: encoded 2 &lt; 4 and injected raw 5 < 8.</p>
+        </header>
+        <telemetry-grid columns=3 dense data-source="orbiter-𐀀">
+          <telemetry-card kind="temperature" trend=falling>
+            <span slot=label>Temperature</span>
+            <strong part="value">−18.4 °C</strong>
+            <small data-quality='nominal'>updated <time datetime="2026-07-12T18:42:09Z">now</time></small>
+          </telemetry-card>
+          <telemetry-card kind=velocity trend="steady" compact>
+            <span slot="label">Velocity</span>
+            <strong part=value>7.66 km/s</strong>
+            <meter min=0 max=10 value="7.66">7.66</meter>
+          </telemetry-card>
+          <telemetry-card kind='radiation' trend=rising alert:level="watch">
+            <span slot=label>Radiation λ</span>
+            <strong part='value'>0.42 μSv/h</strong>
+            <progress max=1 value=.42>42%</progress>
+          </telemetry-card>
+        </telemetry-grid>
+      </section>
+      <aside aria-labelledby=station-title>
+        <h2 id=station-title>Ground stations</h2>
+        <station-list selection="automatic">
+          <station-row code=RVK active data-city="Reykjavík">
+            <span>RVK-01</span><output>online</output>
+          </station-row>
+          <station-row code='TKY' data-city=東京>
+            <span>TKY-07</span><output>standby</output>
+          </station-row>
+          <station-row code="SCL" data-city='Santiago' disabled>
+            <span>SCL-03</span><output>maintenance</output>
+          </station-row>
+        </station-list>
+      </aside>
+      <section class="timeline" aria-labelledby='timeline-title'>
+        <h2 id=timeline-title>Contact timeline</h2>
+        <ol>
+          <li><time datetime=18:40>18:40</time> Acquisition of signal</li>
+          <li><time datetime="18:44">18:44</time> Payload handshake ✓</li>
+          <li><time datetime='18:52'>18:52</time> Downlink window closes</li>
+        </ol>
+        <contact-window start="18:40" end=18:52 band='X' pass:id=8841 />
+      </section>
+      <section aria-labelledby="table-title">
+        <h2 id=table-title>Recent packets</h2>
+        <table data-controller='packet-table'>
+          <caption>Decoded telemetry frames</caption>
+          <thead>
+            <tr><th scope=col>Sequence</th><th scope=col>Station</th><th scope=col>State</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>1845</td><td>RVK</td><td><state-pill tone=good>valid</state-pill></td></tr>
+            <tr><td>1846</td><td>RVK</td><td><state-pill tone='warn'>late</state-pill></td></tr>
+            <tr><td>1847</td><td>TKY</td><td><state-pill tone="good">valid 🚀</state-pill></td></tr>
+          </tbody>
+        </table>
+      </section>
+      <section aria-labelledby=form-title>
+        <h2 id=form-title>Operator annotation</h2>
+        <form action="/notes" method=post autocomplete=off>
+          <input type=hidden name=frame value=1847>
+          <label for=category>Category</label>
+          <select id=category name="category" required>
+            <option value="" selected disabled>Choose one</option>
+            <option value=weather>Space weather</option>
+            <option value='hardware'>Hardware</option>
+          </select>
+          <label for=note>Note</label>
+          <textarea id=note name=note rows=3 placeholder="Café, Ελληνικά, العربية…"></textarea>
+          <label><input type=checkbox name=urgent> Mark urgent</label>
+          <button type=submit data-action="notes#save">Save note</button>
+        </form>
+      </section>
+      <details open data-disclosure="orbit">
+        <summary>Orbit geometry</summary>
+        <figure>
+          <svg viewBox="0 0 160 80" role=img aria-labelledby="orbit-title" xmlns="http://www.w3.org/2000/svg">
+            <title id=orbit-title>Inclined orbit path</title>
+            <ellipse cx=80 cy=40 rx=70 ry=24 fill=none stroke="currentColor" />
+            <circle cx=116 cy=20 r=4 fill='var(--accent)' />
+            <text x=8 y=74>inclination 97.4° ✨</text>
+          </svg>
+          <figcaption>Not to scale; ascending node Ω = 42°.</figcaption>
+        </figure>
+      </details>
+      <template id="packet-row">
+        <tr data-sequence="">
+          <td data-field=sequence></td>
+          <td data-field='station'></td>
+          <td><state-pill tone=unknown>pending</state-pill></td>
+        </tr>
+      </template>
+      <dialog id=handoff aria-labelledby="handoff-title">
+        <form method=dialog>
+          <h2 id=handoff-title>Transfer control?</h2>
+          <p>Next operator: 李雷 · call sign 𝄞-𐀀.</p>
+          <button value=cancel formnovalidate>Cancel</button>
+          <button value="confirm" autofocus>Transfer</button>
+        </form>
+      </dialog>
+      <unknownwidget
+        data-alpha="one"
+        data-beta='二'
+        plain=three
+        booleanish
+        framework:event="activate"
+        dotted.bind="console.status">
+        <nested-gauge min=-10 max=10 value='3.5'></nested-gauge>
+      </unknownwidget>
+    </main>
+    <footer slot=footer>
+      <address>Control: <a href="mailto:ops@example.test">ops@example.test</a></address>
+      <small>&copy; 2026 Aurora Lab · Καληνύχτα · שלום · 🌍</small>
+    </footer>
+  </mission-shell>
+  <script type="module">
+    const shell = document.querySelector("mission-shell");
+    const template = document.querySelector("#packet-row");
+    const route = /^\/(?:frames|stations)\/(?<id>[\p{Letter}\d-]+)$/u;
+    const payload = { frame: 1847, labels: ["λ", "東京", "🛰️", "𐀀"] };
+    shell?.addEventListener("telemetry:refresh", (event) => {
+      const accepted = route.test(`/frames/${payload.frame}`);
+      console.info({ accepted, detail: event.detail, fragment: template?.content });
+    });
+    // Escaped closing-tag text must remain JavaScript until the real HTML close.
+    const closeShape = "<\\/script>";
+    document.documentElement.dataset.closeLength = String(closeShape.length);
+  </script><client-ready at="2026-07-12T18:42:10Z" state=hydrated></client-ready>
+</body>
+</html>

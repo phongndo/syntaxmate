@@ -1,0 +1,16 @@
+``` Compact SPL fixture: café, λ, 東京, 🚀, and astral 𝌆.
+Every block and quoted state closes before the pipeline ends. ```
+search index=web sourcetype=access_combined earliest=-24h
+| rex field=_raw "status=(?<status>\\d+) duration=(?<duration>\\d+)"
+| eval city=coalesce(city, "東京"), owner=lower(user)
+| eval label=if(status>=500, "café failure 🚀", 'normal λ 𝌆')
+| where status>=400 AND duration>100
+| lookup service_catalog service OUTPUTNEW team tier
+| stats count AS requests avg(duration) AS latency
+        values(city) AS cities dc(owner) AS owners BY service, status
+| eventstats sum(requests) AS all_requests BY team
+| eval share=round(100*requests/all_requests, 2)
+| sort 0 -requests, service
+| table service status team tier requests latency share cities owners
+| head 20
+| `comment(the macro comment is also fully closed)`

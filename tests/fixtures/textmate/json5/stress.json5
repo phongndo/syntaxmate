@@ -1,0 +1,158 @@
+/**
+ * Deployment catalog used to stress realistic JSON5 tokenization.
+ * It combines comments, deep containers, numeric variants, and Unicode.
+ */
+{
+  schemaVersion: '2026.07',
+  environment: "staging",
+  generated: false,
+
+  // Shared defaults are deliberately nested like a real service manifest.
+  defaults: {
+    region: 'eu-west-1',
+    replicas: +3,
+    timeoutSeconds: 12.5,
+    retryDelaySeconds: .75,
+    jitterPercent: 5.,
+    featureMask: 0x1af0,
+    maxConnections: Infinity,
+    errorBudget: NaN,
+    headers: {
+      "user-agent": 'mark-probe/2.0',
+      accept: "application/json",
+      trace: true,
+    },
+  },
+
+  services: [
+    {
+      id: 'gateway',
+      displayName: "Public Gateway 🚀",
+      enabled: true,
+      endpoints: [
+        {path: '/v1/search', methods: ['GET', 'POST']},
+        {path: '/v1/health', methods: ['GET']},
+      ],
+      rateLimit: {
+        requests: 1e4,
+        windowSeconds: 60,
+        burst: +250,
+      },
+      notes: "Routes café and 東京 traffic; snowman ☃",
+    },
+    {
+      id: "indexer",
+      displayName: 'Document Indexer',
+      enabled: true,
+      queues: {
+        incoming: 'documents.new',
+        failed: "documents.failed",
+      },
+      workers: [
+        {name: 'parser', concurrency: 0x08},
+        {name: 'writer', concurrency: 16},
+      ],
+      memoryGiB: 2.5,
+    },
+    {
+      id: 'preview',
+      displayName: "Live Preview λ",
+      enabled: false,
+      renderer: {
+        themes: ['light', 'dark', 'high-contrast'],
+        cache: {kind: 'lru', entries: 2048},
+        fallbacks: [null, 'plain-text'],
+      },
+    },
+  ],
+
+  /* Authentication providers mix quoted and unquoted property names. */
+  authentication: {
+    required: true,
+    providers: [
+      {
+        kind: 'oidc',
+        issuer: 'https://login.example.test/',
+        "client-id": "mark-staging",
+        scopes: ['openid', 'profile', 'email'],
+      },
+      {
+        kind: 'token',
+        header: 'X-Mark-Token',
+        prefix: "Bearer",
+      },
+    ],
+  },
+
+  observability: {
+    logs: {
+      level: 'debug',
+      structured: true,
+      redactFields: ['password', 'token', 'secret'],
+    },
+    metrics: {
+      enabled: true,
+      intervalSeconds: 15,
+      percentiles: [.5, .9, .95, .99],
+    },
+    tracing: {
+      sampleRate: 2.5e-2,
+      exporter: 'otlp',
+      endpoint: "https://telemetry.example.test/v1/traces",
+    },
+  },
+
+  messages: {
+    welcome: "Hello, \u03bb-user!\nReady to launch? 🚀",
+    compact: 'Columns:\tname\tstatus',
+    quoted: "Say \"ship it\" and use \\tmp\\mark",
+    slash: 'API root: https:\/\/example.test\/v1',
+    bmpLiteral: 'Résumé — Ελληνικά — 雪',
+    astralLiteral: "Music 𝄞, satellite 🛰️, rocket 🚀",
+  },
+
+  rollout: {
+    strategy: 'canary',
+    stages: [
+      {name: 'internal', traffic: .01, durationMinutes: 10},
+      {name: 'early-access', traffic: .1, durationMinutes: 30},
+      {name: 'regional', traffic: .5, durationMinutes: 120},
+      {name: 'global', traffic: 1.0, durationMinutes: 0},
+    ],
+    rollback: {
+      automatic: true,
+      maxErrorRate: 1e-2,
+      minHealthyHosts: +2,
+    },
+  },
+
+  // Values below cover signs, exponents, zero, and hexadecimal tokens.
+  numericSamples: [
+    0,
+    -0,
+    +17,
+    -42,
+    .125,
+    12.,
+    6.022e23,
+    -1.25E-3,
+    0xdecaf,
+    Infinity,
+    -Infinity,
+    NaN,
+  ],
+
+  maintenance: {
+    windows: [
+      {day: 'Tuesday', start: '02:00', minutes: 45},
+      {day: 'Saturday', start: "23:30", minutes: 90},
+    ],
+    contacts: [
+      {team: 'SRE', address: 'sre@example.test'},
+      {team: "Release", address: "release@example.test"},
+    ],
+    banner: null,
+  },
+
+  checksum: 'sha256:9f86d081884c7d659a2feaa0c55ad015',
+}

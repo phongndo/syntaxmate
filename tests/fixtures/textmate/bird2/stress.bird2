@@ -1,0 +1,233 @@
+# BIRD 2 TextMate stress fixture: café, Ελληνικά, 東京, λ, 🚀 and 𝌆.
+# It is deliberately broad and hand-written around the grammar repository rules.
+/* Block comments may
+   cross lines with Unicode: naïve façade, 雪, 🚀, 𝌆. */
+
+router id 192.0.2.10;
+log syslog all;
+debug protocols all;
+define LOCAL_AS = 64512;
+define PEER_AS = 64520;
+define HEX_TAG = 0xBEEF;
+define HOLD_TIME = 90s;
+define RETRY_TIME = 250ms;
+define MICRO_WAIT = 40us;
+define V4_LOOPBACK = 192.0.2.10;
+define V6_LOOPBACK = 2001:db8::10;
+define V4_CUSTOMERS = [ 203.0.113.0/24+, 198.51.100.0/24{25,28} ];
+define V6_CUSTOMERS = [ 2001:db8:100::/48+, 2001:db8:200::/48{56,64} ];
+define ORIGIN_RD = 64512:100;
+define TYPE_RD = 0:64512:200;
+define ADDRESS_RD = 192.0.2.10:300;
+define SHORT_BYTES = aa:bb:cc:dd;
+define DASH_BYTES = 0a-1b-2c-3d-4e;
+define LONG_BYTES = 0123456789abcdef0123456789abcdef;
+define CUSTOMER_PATH = [= 64512 64520* 64530+ 64540? =];
+
+# Function definitions live in basic.bird2: the upstream grammar's
+# function rule never pops on valid syntax (its `end` brace is consumed
+# by the nested block rule), so the perf-swept stress fixture sticks to
+# scope-balanced filters carrying the same body constructs.
+filter customer_gate {
+  if bgp_path.first = PEER_AS then accept;
+  reject;
+}
+
+filter metric_shaper {
+  int base = 50;
+  int adjustment = 25;
+  if net ~ 203.0.113.0/24 then bgp_med = base + adjustment;
+  else bgp_med = base - 5;
+  accept;
+}
+
+filter decorated_routes {
+  string label = "edge café";
+  lc marker = (LOCAL_AS, 200, 2);
+  printn "decorate \"", label, "\" 🚀 𝌆";
+  route_tools.annotate(label);
+  bgp_large_community.add(marker);
+  if defined(bgp_path) && !empty(bgp_path) then accept;
+  reject;
+}
+
+filter customer_filter {
+  string note = "customer café 東京 🚀 𝌆";
+  lc customer_mark = (LOCAL_AS, 100, 1);
+  if net ~ V4_CUSTOMERS || net ~ V6_CUSTOMERS then {
+    bgp_local_pref = 180;
+    bgp_community.add((LOCAL_AS, 100));
+    bgp_large_community.add(customer_mark);
+    accept;
+  }
+  reject;
+}
+
+filter transit_filter {
+  if bgp_path ~ CUSTOMER_PATH then reject;
+  if roa_check() = ROA_INVALID then reject;
+  if aspa_check_upstream() = ASPA_INVALID then reject;
+  bgp_med = metric_for(net, 50);
+  accept;
+}
+
+filter maintenance_filter {
+  if source = RTS_STATIC then {
+    preference = 90;
+    dest = RTD_BLACKHOLE;
+    accept;
+  }
+  error "unexpected maintenance route";
+}
+
+template bgp common_bgp {
+  local as LOCAL_AS;
+  hold time 90;
+  keepalive time 30;
+  connect retry time 5;
+  graceful restart on;
+  error wait time 5, 30;
+  password "s3cr3t-🚀";
+  authentication mac;
+  ipv4 {
+    import filter customer_filter;
+    export filter transit_filter;
+  };
+  ipv6 {
+    import filter {
+      if net.type = NET_IP6 then accept;
+      reject;
+    };
+    export where bgp_path.len < 16;
+  };
+}
+
+protocol bgp edge_one from common_bgp {
+  description "Edge one — café 🚀 𝌆";
+  neighbor 198.51.100.2 % 'xe-0/0/0' as 64520;
+  source address 192.0.2.10;
+  next hop ipv4 192.0.2.1;
+  next hop self;
+  multihop 2;
+  passive off;
+}
+
+protocol bgp edge_six from common_bgp {
+  neighbor 2001:db8:ffff::2 % 'uplink-東京' as 64530;
+  source address 2001:db8::10;
+  next hop ipv6 2001:db8::1;
+  extended next hop on;
+  role customer;
+}
+
+protocol static static_v4 {
+  ipv4;
+  route 203.0.113.128/25 blackhole;
+  route 198.51.100.128/25 unreachable;
+  route 192.0.2.128/25 prohibit;
+  route 198.51.100.42/32 via 192.0.2.1;
+}
+
+protocol kernel kernel_v4 { ipv4 { import none; export all; }; learn yes; persist on; scan time 20; }
+
+protocol device device_scan { scan time 10; }
+protocol device { scan time 60; }
+
+protocol direct direct_lan { ipv4; ipv6; interface "eth*", "lo"; }
+
+protocol rip rip_lan { ipv4 { import all; export filter customer_filter; }; interface "eth0" { mode multicast; authentication none; }; infinity 16; }
+
+protocol ospf v2 ospf_core {
+  ipv4 { import all; export where source = RTS_STATIC; };
+  area 0.0.0.0 { stub no; interface "eth1" { type broadcast; cost 10; hello 10; retransmit 5; transmit delay 1; dead 40; authentication cryptographic; }; };
+}
+protocol babel babel_mesh {
+  ipv6 { import all; export all; };
+  interface "mesh*" { type wireless; rxcost 256; hello interval 4; update interval 16; };
+}
+protocol bfd bfd_links { interface "eth*" { min rx interval 100ms; min tx interval 100ms; idle tx interval 1s; multiplier 3; }; }
+
+protocol rpki validator { roa4 { table master4; }; roa6 { table master6; }; remote "rpki.example.test" port 3323; retry keep 90; }
+
+protocol pipe leak_routes { table master4; peer table tenant4; import filter maintenance_filter; export none; }
+
+protocol l3vpn tenant_blue { vrf "blue"; rd ORIGIN_RD; import target [(rt, 64512, 100)]; export target [(rt, 64512, 100)]; mpls policy MPLS_POLICY_VRF; }
+
+filter type_matrix_filter {
+  bool enabled = true;
+  ip endpoint = 2001:db8::beef;
+  prefix aggregate_net = 203.0.113.0/24;
+  rd distinguisher = TYPE_RD;
+  pair standard_comm = (64512, 77);
+  quad router_quad = 192.0.2.77;
+  ec extended_comm = (rt, 64512, 77);
+  lc large_comm = (64512, 77, 9);
+  bytestring fingerprint = de:ad:be:ef;
+  bgpmask path_mask = [= 64512 * 64520? =];
+  bgppath saved_path = bgp_path;
+  clist communities = bgp_community;
+  eclist ext_communities = bgp_ext_community;
+  lclist large_communities = bgp_large_community;
+  set accepted_lengths = [ 24, 32, 48, 64 ];
+  enum route_kind = generic;
+  route snapshot;
+  if enabled && endpoint.is_v4 = false then reject;
+  accept;
+}
+
+filter builtin_matrix {
+  int parsed = from_hex("ff");
+  string rendered = format("AS%d", LOCAL_AS);
+  bgp_path = prepend(bgp_path, LOCAL_AS);
+  bgp_community = add(bgp_community, (LOCAL_AS, 9));
+  bgp_community = delete(bgp_community, [(LOCAL_AS, 8)]);
+  bgp_community = filter(bgp_community, [(LOCAL_AS, 9)]);
+  unset(bgp_med);
+  reset(bgp_local_pref);
+  bt_assert(parsed = 255);
+  bt_test_same(rendered, "AS64512");
+  bt_test_suite("bird2-fixture");
+  if aspa_check_downstream() != ASPA_UNKNOWN then accept;
+  reject;
+}
+
+filter attribute_filter {
+  if scope = SCOPE_HOST then preference = 200;
+  if scope = SCOPE_LINK then preference = 190;
+  if source = RTS_OSPF_IA then ospf_metric1 = 20;
+  if source = RTS_OSPF_EXT1 then ospf_metric2 = 30;
+  if dest = RTD_MULTIPATH then weight = 2;
+  if roa_check(net, bgp_path.last) = ROA_VALID then accept;
+  if bgp_origin = 0 || bgp_next_hop = 192.0.2.1 then accept;
+  if bgp_cluster_list.len >= 1 && bgp_originator_id != 0.0.0.0 then reject;
+  if ifname ~ "eth.*" && ifindex > 0 then gw = from;
+  mpls_policy = MPLS_POLICY_PREFIX;
+  reject;
+}
+
+filter operator_filter {
+  int score = 100;
+  score = (score * 2 + 5) / 3 % 7 - 1;
+  if score >= 0 && score <= 100 then print "score range", score;
+  if net !~ V4_CUSTOMERS || bgp_path.len = 0 then continue;
+  if score == 4 || score != 5 then break;
+  if 24 in [8..32] then accept;
+  reject;
+}
+
+protocol bgp anonymous_peer {
+  local as 64512;
+  neighbor 203.0.113.2 as 64496;
+  import filter type_matrix_filter;
+  export filter attribute_filter;
+}
+
+protocol perf telemetry {
+  disabled off;
+  buffer size 4096;
+  timestamps on;
+}
+
+eval from_hex("2a") = 42;
+print "fixture complete 🚀", V4_LOOPBACK, V6_LOOPBACK;
+printn 'single-quoted café 東京 𝌆';

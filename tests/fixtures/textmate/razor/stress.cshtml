@@ -1,0 +1,197 @@
+@page "/observatory/{date:datetime?}"
+@namespace Mark.Fixtures.Pages
+@model ObservatoryPageModel
+@inherits Microsoft.AspNetCore.Mvc.RazorPages.Page
+@implements IAsyncDisposable
+@using System.Collections.Generic
+@using Clock = System.DateTimeOffset
+@using static System.Math
+@inject IObservationService Observations
+@inject Microsoft.Extensions.Logging.ILogger<ObservatoryPageModel> Log
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Observer")]
+@addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@removeTagHelper Microsoft.AspNetCore.Mvc.TagHelpers.FormTagHelper, Microsoft.AspNetCore.Mvc.TagHelpers
+@tagHelperPrefix th:
+@layout ObservatoryLayout
+@preservewhitespace true
+@typeparam TReading
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@* Razor stress fixture covering Café, 東京, λ, and the astral telescope 🔭.
+   The transition-like text @@inside remains part of this closed comment. *@
+@functions {
+    private const int DefaultPageSize = 24;
+    public string FormatDegrees(double value) => $"{value:+0.000;-0.000;0.000}°";
+}
+@code {
+    [System.ComponentModel.DataAnnotations.Display(Name = "Selected night")]
+    public DateOnly SelectedDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
+}
+@{
+    // C# line comment inside a Razor code block.
+    /* Closed C# block comment spanning
+       more than one physical line. */
+    const int binaryMask = 0b1010_0110;
+    const uint hexCode = 0xCAFE_BABEu;
+    const long visitors = 9_223_372_036L;
+    const double exposure = 6.25e-3;
+    const decimal budget = 12_345.67m;
+    var now = Clock.UtcNow;
+    (string Site, int Count) summary = ("North Ridge", Model.Entries.Count);
+    string? subtitle = Model.Subtitle ?? "Uncatalogued night";
+    var title = $"{summary.Site}: {summary.Count} readings at {now:HH:mm}";
+    var safeTitle = title.Replace("\"", "&quot;", StringComparison.Ordinal);
+    var verbatimPath = @"C:\Observatory\exports\latest";
+    var squares = Enumerable.Range(1, 5).Select(n => n * n).ToArray();
+    var featured = Model.Entries.Where(e => e.Signal >= exposure).OrderByDescending(e => e.Signal).FirstOrDefault();
+    Func<double, double> normalize = value => Clamp(value / 100.0, 0.0, 1.0);
+    var badgeTemplate = @<span class="badge" data-site="@summary.Site">@summary.Count observations</span>;
+}
+<!DOCTYPE html>
+<html lang="en" data-mask="@binaryMask">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@title</title>
+    <!-- Closed HTML comment: entities such as &amp; remain illustrative. -->
+    <style>
+        :root {
+            --night: #0b1020;
+            --aurora: rgb(92 238 190 / 85%);
+        }
+        /* Closed multiline CSS comment
+           before the declaration block. */
+        body {
+            margin: 0;
+            color: #eef6ff;
+            background: linear-gradient(135deg, var(--night), #182b4d 70%);
+            font-family: system-ui, sans-serif;
+        }
+        .reading[data-alert="true"] > .signal {
+            color: var(--aurora);
+            font-weight: 700;
+        }
+        @@media (min-width: 48rem) {
+            .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.25rem; }
+        }
+    </style>
+</head>
+<body class="night" data-export='@verbatimPath'>
+    <header id="top">
+        <h1>@title</h1>
+        <p class="subtitle">@subtitle — @Model.Location?.DisplayName</p>
+        <p>@badgeTemplate</p>
+        <span title="Calculated explicitly">@(FormatDegrees(Model.Latitude))</span>
+        <span class="escaped">Contact us at support@@example.test.</span>
+    </header>
+    <main>
+        @if (Model.IsMaintenanceWindow && !Model.AllowPreview) {
+            <aside role="alert">
+                <strong>Maintenance in progress.</strong>
+                <time datetime="@now.ToString("O")">@now.ToString("u")</time>
+            </aside>
+        } else if (Model.Entries.Count == 0) {
+            <p class="empty">No observations for @SelectedDate.</p>
+        } else {
+            <section aria-labelledby="featured-title">
+                <h2 id="featured-title">Featured reading</h2>
+                @if (featured is not null) {
+                    <article class="featured" style="--strength: @(normalize(featured.Signal))">
+                        <h3>@featured.Name</h3>
+                        <p>@($"Signal {featured.Signal:N3} at {featured.CapturedAt:t}")</p>
+                    </article>
+                }
+            </section>
+        }
+        <section class="grid" aria-label="Observation cards">
+            @await foreach (var entry in Observations.StreamAsync(SelectedDate)) {
+                <article class="reading" data-alert="@(entry.Signal > 80)" data-id='@entry.Id'>
+                    <h2>@entry.Name</h2>
+                    <meter class="signal" min="0" max="100" value="@entry.Signal">@entry.Signal</meter>
+                    @switch (entry.Status) {
+                        case ObservationStatus.New:
+                            <mark>New</mark>
+                            break;
+                        case ObservationStatus.Reviewed when entry.Signal >= 50:
+                            <span class="reviewed">Reviewed high signal</span>
+                            break;
+                        default:
+                            <span class="muted">Archived</span>
+                            break;
+                    }
+                    <details>
+                        <summary>Metadata</summary>
+                        <dl>
+                            @foreach (var pair in entry.Metadata) {
+                                <dt>@pair.Key</dt>
+                                <dd>@pair.Value</dd>
+                            }
+                        </dl>
+                    </details>
+                </article>
+            }
+        </section>
+        <nav aria-label="Result pages">
+            @for (var page = 1; page <= Model.PageCount; page++) {
+                <a class="@(page == Model.CurrentPage ? "current" : null)"
+                   href="?page=@page&amp;date=@SelectedDate">@page</a>
+            }
+        </nav>
+        @{
+            var sampleIndex = 0;
+        }
+        @while (sampleIndex < squares.Length) {
+            <output data-index="@sampleIndex">@squares[sampleIndex]</output>
+            sampleIndex++;
+        }
+        @{ var retry = 0; }
+        @do {
+            retry++;
+            @:Retry probe @retry of 2
+        } while (retry < 2);
+        @try {
+            var forecast = await Observations.GetForecastAsync(SelectedDate);
+            <p class="forecast">@forecast.Summary</p>
+        } catch (TimeoutException error) when (Model.ShowDiagnostics) {
+            Log.LogWarning(error, "Forecast timed out for {Date}", SelectedDate);
+            <pre class="diagnostic">@error.Message</pre>
+        } finally {
+            Log.LogDebug("Forecast section completed");
+        }
+        @lock (Model.SyncRoot) {
+            <p data-visitors="@visitors">Visitor snapshot captured.</p>
+        }
+        @using (var scope = Model.BeginRenderScope()) {
+            <text><p class="scope">Scoped render token: @scope.Token</p></text>
+        }
+        <th:environment names="Development">
+            <aside class="development">Development diagnostics are enabled.</aside>
+        </th:environment>
+        <picture>
+            <source srcset="/images/sky.avif" type="image/avif" />
+            <img src="/images/sky.jpg" alt="Aurora over 東京 🌌" loading="lazy" />
+        </picture>
+    </main>
+    <footer>
+        <small>&copy; @now.Year North Ridge Observatory</small>
+    </footer>
+    <script type="module">
+        /* Closed JavaScript block comment describing initialization. */
+        const pageState = {
+            count: @Model.Entries.Count,
+            selected: "@SelectedDate.ToString("yyyy-MM-dd")",
+            threshold: 7.5e1,
+            labels: ["Café", "東京", "🔭"]
+        };
+        const cards = [...document.querySelectorAll(".reading")];
+        const strong = cards.filter((card) => Number(card.dataset.signal ?? 0) >= pageState.threshold);
+        // Template interpolation belongs to JavaScript, while the count came from Razor.
+        console.log(`Loaded ${cards.length} cards; ${strong.length} are strong.`);
+        document.querySelector("#top")?.addEventListener("click", (event) => {
+            event.currentTarget.classList.toggle("selected");
+        });
+    </script>
+</body>
+</html>
+@section Scripts {
+    <script src="/js/observatory.js" defer></script>
+}

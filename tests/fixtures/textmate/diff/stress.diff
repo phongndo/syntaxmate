@@ -1,0 +1,167 @@
+# Patch series exported by the release engineering workspace
+diff --git a/src/config.ts b/src/config.ts
+index 21ad6c7..8f340be 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -1,11 +1,16 @@
+ export interface Config {
+-  endpoint: string;
++  endpoint: URL;
+   retries: number;
+-  label?: string;
++  label: string;
++  locale?: string;
+ }
+ 
+-export const defaults = { endpoint: "/api", retries: 2 };
++export const defaults: Config = {
++  endpoint: new URL("https://example.test/api"),
++  retries: 3,
++  label: "Café 🚀",
++};
+ 
+ export function loadConfig(): Config {
+-  return defaults;
++  return { ...defaults, locale: navigator.language };
+ }
+diff --git a/docs/old-guide.md b/docs/guide.md
+similarity index 91%
+rename from docs/old-guide.md
+rename to docs/guide.md
+index d34db33..81c772f 100644
+--- a/docs/old-guide.md
++++ b/docs/guide.md
+@@ -1,5 +1,6 @@
+-# Old deployment guide
++# Deployment guide
+ 
+ Run `mark deploy` after reviewing the plan.
++Use `--region 東京` for the APAC example.
+ Keep credentials outside the repository.
+ See the operations handbook for rollback steps.
+diff --git a/assets/logo.png b/assets/logo.png
+new file mode 100644
+index 0000000..4d3c2b1
+Binary files /dev/null and b/assets/logo.png differ
+diff --git a/scripts/release.sh b/scripts/release.sh
+old mode 100644
+new mode 100755
+index 13cab00..b16b00b
+--- a/scripts/release.sh
++++ b/scripts/release.sh
+@@ -7 +7 @@ set -eu
+-printf 'shipping %s' "$VERSION"
+\ No newline at end of file
++printf 'shipping %s\n' "$VERSION"
+diff -u old/servers.txt new/servers.txt
+--- old/servers.txt	2026-01-14 09:20:00 +0000
++++ new/servers.txt	2026-01-15 11:45:00 +0000
+@@ -1,6 +1,7 @@
+ api-01
+-api-02
++api-03
+ worker-01
+ worker-02
+-cache-paris
++cache-paris-01
++cache-paris-02
+ monitor-01
+diff inventory.before inventory.after
+3c3
+< owner=operations
+---
+> owner=platform
+6a7,8
+> pager=primary
+> timezone=UTC
+12,13d13
+< legacy_host=old-db-01
+< legacy_port=5432
+20c20,21
+< note=Call Alice before maintenance.
+---
+> note=Open the change ticket before maintenance.
+> approver=release-manager
+diff - new/checksums.txt
+1,2c1,2
+< 04f3  artifact-linux.tar
+< 88a1  artifact-macos.tar
+---
+> 17bc  artifact-linux.tar
+> 99d2  artifact-macos.tar
+*** old/poem.txt	2026-02-01 08:00:00 +0000
+--- new/poem.txt	2026-02-02 08:00:00 +0000
+***************
+*** 1,8 ****
+  Morning over the harbor,
+  gulls above the quay.
+! The old bell wakes the city,
+- while rain obscures the bay.
+  Ferries trace the channel,
+  vendors raise their doors.
+  A bicycle passes,
+  then the market stirs.
+--- 1,9 ----
+  Morning over the harbor,
+  gulls above the quay.
+! A bronze bell wakes the city,
+! while sunlight warms the bay.
+  Ferries trace the channel,
+  vendors raise their doors.
++ Children chase the pigeons,
+  A bicycle passes,
+  then the market stirs.
+***************
+*** 15,19 ****
+  At dusk the lamps are kindled,
+- and sailors head for home.
+  The final tram is waiting,
+! its windows pale and quiet.
+  Night settles on the water.
+--- 15,20 ----
+  At dusk the lamps are kindled,
++ beneath a violet sky,
+  The final tram is waiting,
+! its windows warm and golden.
+  Night settles on the water.
++ The lighthouse answers twice.
+==== src/parser.c - revision 1.8
+ - revision 1.9 ====
+*** 40,42 ****
+  static int parse_token(Token token) {
+!     return token.kind == WORD;
+  }
+--- 40,43 ----
+  static int parse_token(Token token) {
+!     return token.kind == WORD || token.kind == NUMBER;
++     /* punctuation is handled by the caller */
+  }
+Index: lib/math.c
+===================================================================
+--- lib/math.c	(revision 184)
++++ lib/math.c	(working copy)
+@@ -8,5 +8,8 @@
+ int clamp(int value, int low, int high) {
+-    if (value < low) return low;
+-    if (value > high) return high;
++    if (low > high) return value;
++    if (value < low) {
++        return low;
++    }
++    if (value > high) return high;
+     return value;
+ }
+Only in old/generated: schema-v1.json
+Only in new/generated: schema-v2.json
+# Files below were compared after unpacking the release archives
+diff -r release-1/templates/email.txt release-2/templates/email.txt
+--- release-1/templates/email.txt	2026-03-03 10:30:00 +0000
++++ release-2/templates/email.txt	2026-03-04 16:10:00 +0000
+@@ -1,5 +1,6 @@
+ Subject: Deployment complete
+ 
+-Hello team,
++Hello team — שלום,
+ The service is available in all regions.
++Dashboard: https://status.example.test/🚀
+ Regards,

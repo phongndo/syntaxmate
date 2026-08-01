@@ -1,0 +1,43 @@
+version = 1
+
+# This corpus follows the project documentation so it stays representative.
+# Its generated manifest records exact metrics, but this index deliberately
+# does not lock them: ordinary documentation edits must not require a follow-up
+# benchmark metadata commit.
+[[corpus]]
+id = "representative-markdown"
+path = "target/textmate-performance/corpora/representative-markdown.md"
+builder = "tools/build-textmate-corpora.py"
+language = "markdown"
+scope = "text.html.markdown"
+content_contract = "dynamic"
+
+[[corpus]]
+id = "core-repeated"
+path = "target/textmate-performance/corpora/core-repeated"
+builder = "tools/build-textmate-corpora.py"
+languages = 38
+generated_languages = 39
+bytes = 3288720
+tokenizer_lines = 108596
+sha256 = "6da0835401b46a99bbc2c0c42b6464d6cb9ee401e63951dcb4bdd5fceb2fde88"
+
+# Complete catalog sweep: one stable-size member for every public stress fixture.
+[[corpus]]
+id = "catalog-repeated"
+path = "target/textmate-performance/corpora/catalog-repeated"
+builder = "tools/build-textmate-corpora.py"
+languages = 264
+bytes = 22798493
+tokenizer_lines = 770859
+sha256 = "bf91216813bb144577b3b5766d6b6434e72301c475fd8548e9e1dfe44577f195"
+
+# Xcode Command Line Tools libc++ corpus used by the checkpoint profile.
+[[corpus]]
+id = "libcxx-string"
+path = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1/string"
+language = "cpp"
+scope = "source.cpp"
+bytes = 184514
+tokenizer_lines = 4039
+sha256 = "aceb0163fe57054b02069b990dac7b0ead7ab1a9a258e12ce2ca5eb3c51e7d81"

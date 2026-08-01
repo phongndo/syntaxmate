@@ -1,0 +1,15 @@
+# Aurora Controls — compact fixture 🚀
+module Aurora.Controls
+plugin auroracontrols
+classname AuroraControlsPlugin
+typeinfo plugins.qmltypes
+depends QtQuick 2.15
+designersupported
+
+Panel 1.0 Panel.qml
+Panel 2.0 PanelV2.qml
+singleton Theme 1.0 Theme.qml
+singleton Symbols 1.0 Symbols.js
+internal PanelHelper PanelHelper.qml
+Badge 1.2 Badge.qml
+# Ελληνικά, 日本語, and café belong in comments.

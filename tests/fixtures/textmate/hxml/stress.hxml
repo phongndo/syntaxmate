@@ -1,0 +1,202 @@
+# Multi-target release build for the Aurora telemetry service.
+# Unicode metadata: café, naïve façade, 東京, λ, 🛰️, 🚀, and 𝌆.
+
+# Shared compiler inputs
+-cp src
+--class-path generated
+-p vendor
+-L hxjsonast
+--library tink_core
+-lib utest
+-D release
+--define telemetry.version=2.4.0
+-D telemetry.label=東京
+--resource assets/schema.json@schema
+-resource assets/banner-🚀.txt@banner
+--exclude experimental.internal
+--remap legacy:aurora
+--cwd .
+--verbose
+--times
+
+# Compile-time Haxe expressions exercise the embedded source.hx grammar.
+--macro include("aurora.model", true)
+--macro keep("aurora.Main")
+--macro addMetadata("@:keep", "aurora.service.*")
+--macro haxe.macro.Compiler.define("BUILD_LABEL", "café-東京-🚀")
+--macro haxe.macro.Context.warning("orbital λ 𝌆", haxe.macro.Context.currentPos())
+--macro { var targets = ["js", "hl", "cpp"]; trace(targets.map(t -> t.toUpperCase()).join(",")); }
+--macro if (haxe.macro.Context.defined("release")) haxe.macro.Compiler.exclude("aurora.debug")
+
+# Browser dashboard
+-main aurora.dashboard.Main
+--main aurora.dashboard.Admin
+-js dist/dashboard.js
+--js dist/admin.js
+--dce full
+--js-modern
+--debug
+--no-traces
+--no-inline
+--no-opt
+--macro keep("aurora.dashboard.widgets.*")
+
+--next
+# Node.js ingestion worker
+-m aurora.worker.IngestMain
+--run aurora.tools.Preflight config/release.json
+--js dist/worker.js
+--dce std
+--define nodejs
+--library hxnodejs
+--cmd node tools/write-build-info.js
+-cmd node tools/check-schema.js
+-C services/worker
+--macro include("aurora.worker")
+
+--next
+# HashLink server
+-main aurora.server.Main
+--hl dist/server.hl
+-hl dist/server-debug.hl
+--dce full
+--define hl-ver=1.14
+--resource config/server.json@serverConfig
+--macro keep("aurora.server.routes.*")
+--no-output
+
+--next
+# Native C++ telemetry collector
+-main aurora.collector.Main
+--cpp build/cpp
+-cpp build/cpp-legacy
+--cppia build/collector.cppia
+-cppia build/collector-legacy.cppia
+--c-arg -O3
+-c-arg -DAURORA_RELEASE
+--define HXCPP_M64
+--macro include("aurora.collector")
+
+--next
+# JVM archive and Java source output
+-main aurora.jvm.Main
+--jvm build/aurora.jar
+--java build/java
+-java build/java-legacy
+--java-lib lib/telemetry.jar
+--java-lib-extern lib/platform-api.jar
+-java-lib lib/compat.jar
+--define java-ver=17
+
+--next
+# C# operations console
+-main aurora.console.Main
+--cs build/cs
+-cs build/cs-legacy
+--net-lib lib/Telemetry.dll
+-net-lib lib/Compat.dll
+--net-std net-20
+-net-std net-45
+--define telemetry.console
+
+--next
+# Python analysis package
+-main aurora.analysis.Main
+--python dist/analysis.py
+-python dist/analysis-legacy.py
+--define python_version=3.12
+--macro keep("aurora.analysis.*")
+
+--next
+# Lua edge decoder
+-main aurora.edge.Main
+--lua dist/edge.lua
+-lua dist/edge-legacy.lua
+--define lua_jit
+--macro include("aurora.edge")
+
+--next
+# Neko maintenance utility
+-main aurora.maintenance.Main
+--neko dist/maintenance.n
+-neko dist/maintenance-legacy.n
+--neko-source
+--run aurora.maintenance.Verify --quiet
+
+--next
+# PHP status endpoint
+-main aurora.status.Main
+--php dist/php
+-php dist/php-legacy
+--php-front index.php
+--php-lib vendor
+--php-prefix Aurora
+
+--next
+# Legacy Flash display retained for syntax compatibility coverage
+-main aurora.display.Main
+--swf dist/display.swf
+-swf dist/display-legacy.swf
+--swf-version 11.8
+-swf-version 10
+--swf-header 1280:720:60:1122867
+-swf-header 800:600:30:0
+--swf-lib assets/components.swc
+--swf-lib-extern assets/platform.swc
+-as3 dist/as3
+--flash-strict
+--flash-use-stage
+
+--next
+# Documentation and compiler service modes
+-main aurora.docs.Main
+--xml dist/types.xml
+-xml dist/types-legacy.xml
+--json dist/types.json
+-json dist/types-legacy.json
+--display src/aurora/Main.hx@42
+--server-connect 127.0.0.1:6000
+--server-listen 6001
+--connect 6000
+--wait 6002
+--prompt
+
+--next
+# Interpreter validation pass
+-m aurora.tests.All
+--interp
+--eval
+--each
+--next
+--no-output
+--macro trace("validation 🛰️")
+
+--next
+# Tooling commands and informational compiler modes
+-run aurora.tools.Package dist
+--run aurora.tools.Publish --dry-run
+-version
+--version
+-v
+--help
+-help
+--help-defines
+--help-metas
+--haxelib-global
+-debug
+-prompt
+
+--next
+# Additional back-end compatibility switches
+-cpp build/compat-cpp
+-js dist/compat.js
+-lua dist/compat.lua
+-hl dist/compat.hl
+-python dist/compat.py
+-php dist/compat-php
+-neko dist/compat.n
+-xml dist/compat.xml
+-resource assets/compat.dat@compat
+-exclude aurora.unused
+-c-arg -Wall
+-cmd echo compatibility-complete

@@ -1,0 +1,185 @@
+# TOML stress fixture with bare keys, numbers, strings, comments, and λ🚀.
+title = "Mark fixture – café λ🚀"
+bare_key = 42
+underscored_number = 1_000_000
+float_value = -12.5e+3
+active = true
+date_time = 2026-07-07T12:34:56Z
+
+dotted.key.answer = 3.1415
+
+multiline_basic = """
+line one with "quotes"
+line two with emoji 🚀
+"""
+
+multiline_literal = '''
+C:\Users\mark\fixtures
+# not a comment inside a literal string
+'''
+
+[servers.alpha]
+host = "example.test"
+ports = [8000, 8001, 8002]
+
+# Quoted, literal, bare, and dotted keys coexist in this metadata table.
+[metadata]
+name = "syntax-stress"
+bare-key = "hyphens are allowed"
+1234 = "a numeric bare key"
+"release channel" = "nightly"
+'build.label' = 'literal quoted key containing a dot'
+"ключ" = "значение"
+"launch 🚀" = "orbital 🛰️"
+owner.name = "Ada Lovelace"
+owner.contact.email = "ada@example.test"
+owner.contact.enabled = true
+
+# Every basic-string escape accepted by TOML, plus direct Unicode.
+escaped = "backspace:\b tab:\t newline:\n formfeed:\f return:\r quote:\" slash:\\"
+unicode_escapes = "lambda=\u03BB, rocket=\U0001F680"
+literal_path = 'C:\Program Files\Mark\bin'
+literal_syntax = 'The sequence \n stays as two characters.'
+
+description = """
+This basic multiline string contains "quotes", café, and 🚀.
+A continuation joins this sentence to \
+    the next physical line without surrounding whitespace.
+Escapes still work here: \t tab, \u03BB lambda, and \\ backslash.
+"""
+
+verbatim_notice = '''
+Literal multiline strings keep C:\tmp\new and "double quotes" unchanged.
+They can include # hash marks and Unicode such as 日本語 and 🧭.
+'''
+
+# Integer forms, signs, underscores, and bases.
+[numbers.integers]
+zero = 0
+negative = -17
+grouped = 9_223_372_036_854_775_807
+hex_mask = 0xDEAD_BEEF
+octal_mode = 0o755
+binary_flags = 0b1101_0010
+
+# Fractional, exponent, and special floating-point values.
+[numbers.floats]
+fraction = 3.141_592_653_589_793
+scientific = 6.022e23
+small_exponent = 1e-9
+positive_infinity = inf
+negative_infinity = -inf
+not_a_number = nan
+
+# Offset and local date/time variants.
+[temporal]
+utc = 1979-05-27T07:32:00Z
+offset = 1979-05-27T00:32:00-07:00
+space_separated = 1979-05-27 07:32:00Z
+local_datetime = 1979-05-27T07:32:00.123
+local_date = 1979-05-27
+local_time = 07:32:00
+
+# Arrays may span lines, contain comments, and end with a comma.
+[collections]
+primes = [2, 3, 5, 7, 11]
+matrix = [[1, 2], [3, 4], [5, 6]]
+mixed = ["red", 42, true, 2026-07-12]
+hosts = [
+  "alpha.example.test", # primary
+  "beta.example.test",  # failover
+  "東京.example.test",   # internationalized fixture text
+]
+ports_by_zone = [
+  [8000, 8001],
+  [9000, 9001],
+]
+
+# Inline tables stay fully closed on one source line.
+point = { x = 12, y = -4 }
+maintainer = { name = "Renée", active = true, handle = "@renee" }
+window = { opened = 2026-07-12T09:15:00Z, retries = 3 }
+
+[database]
+engine = "postgresql"
+connection = { host = "db.example.test", port = 5432, tls = true }
+
+[database.pool]
+minimum = 2
+maximum = 20
+idle_timeout_seconds = 30.5
+
+# A dotted table header with quoted components.
+[environments."staging.eu"]
+region = "eu-central-1"
+endpoint = "https://staging.example.test/api"
+
+[environments."staging.eu".features]
+search = true
+payments = false
+experimental-ui = true
+
+[environments.production]
+region = "us-east-2"
+endpoint = "https://example.test/api"
+
+[environments.production.limits]
+requests_per_second = 1_500
+burst = 2_000
+
+# Arrays of tables with standard nested tables.
+[[products]]
+name = "Hammer"
+sku = 738_594_937
+colors = ["gray", "black"]
+
+[products.dimensions]
+length_cm = 30.0
+weight_kg = 0.75
+
+[[products]]
+name = "Nail"
+sku = 284_758_393
+colors = ["silver"]
+
+[products.dimensions]
+length_cm = 5.5
+weight_kg = 0.01
+
+[[products.reviews]]
+author = "Miyuki 🌸"
+rating = 5
+submitted = 2026-06-03T18:45:12+09:00
+comment = "丈夫で使いやすい"
+
+[[products.reviews]]
+author = "Omar"
+rating = 4
+submitted = 2026-06-11T10:30:00Z
+comment = 'Solid, simple, and reliable.'
+
+[[products]]
+name = "Screwdriver"
+sku = 123_456_789
+colors = ["red", "black"]
+
+[products.dimensions]
+length_cm = 21.25
+weight_kg = 0.22
+
+[[products.reviews]]
+author = "Zoë"
+rating = 5
+submitted = 2026-07-01T14:00:00+02:00
+comment = "Fits both Phillips and slotted sets."
+
+# Quoted table keys can contain spaces, punctuation, Unicode, and astral text.
+["service registry"."api.v2 🚀"]
+display_name = "Public API – λ"
+route = "/v2/items"
+methods = ["GET", "POST"]
+
+["service registry"."api.v2 🚀".health]
+path = "/healthz"
+interval_seconds = 15
+expected = { status = 200, body = "ok" }

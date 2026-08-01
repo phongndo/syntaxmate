@@ -1,0 +1,25 @@
+---
+title: "Café ☕ — Handlebars 🚀"
+locale: en-GB
+draft: false
+---
+<!doctype html>
+<html lang="{{locale}}">
+<head>
+  <style>.greeting { color: rebeccapurple; }</style>
+</head>
+<body class="theme-{{theme}}">
+  {{! A normal comment with @metadata }}
+  {{!-- A block comment: {{ignored helper "value"}} --}}
+  <h1>{{title}}</h1>
+  {{#if user}}
+    <p>Hello, {{uppercase user.name}} 👋🏽</p>
+    <div class="bio">{{{user.bioHtml}}}</div>
+  {{else}}
+    {{> sign-in-link returnTo=(urlencode currentPath)}}
+  {{/if}}
+  <input type="checkbox" {{#if selected}}checked{{/if}}>
+  <script>document.documentElement.dataset.ready = "true";</script>
+  <footer>{{~formatDate now pattern="yyyy-MM-dd"~}}</footer>
+</body>
+</html>

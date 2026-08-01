@@ -1,0 +1,23 @@
+{namespace example.greetings}
+{alias example.components.Badge}
+
+/**
+ * A small HTML greeting.
+ * @param user
+ */
+{template .greeting kind="html"}
+  {@param user: ?}
+  {@param? excited: bool}
+  {let $display: $user.name ?: 'traveler' /}
+  <section class="greeting" data-user="{$user.id}">
+    <h1>{msg desc="Welcome heading"}Hello, {$display}!{/msg}</h1>
+    {if $excited}
+      <strong>{print 'Ready' |changeNewlineToBr}{sp}🚀</strong>
+    {else}
+      <span>Welcome to λ station.</span>
+    {/if}
+    {call Badge.render}
+      {param label: 'Crew 雪' /}
+    {/call}
+  </section>
+{/template}

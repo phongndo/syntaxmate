@@ -1,0 +1,44 @@
+{
+  "github-vscode-themes": {
+    "version": "6.3.4",
+    "license": "MIT",
+    "repository": "https://github.com/primer/github-vscode-theme",
+    "commit": "67461974ae6d337a8cf352c277bf3908bf6b6317"
+  },
+  "@shikijs/themes": {
+    "version": "3.23.0",
+    "license": "MIT",
+    "repository": "https://github.com/shikijs/shiki",
+    "commit": "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+  },
+  "nordic.nvim": {
+    "license": "MIT",
+    "repository": "https://github.com/AlexvZyl/nordic.nvim",
+    "commit": "9fb62116b891184049c50ca6ffb0d3bc100a1a6e"
+  },
+  "vscode-dark-molokai-theme": {
+    "license": "MIT",
+    "repository": "https://github.com/nonylene/vscode-dark-molokai-theme",
+    "commit": "7a3d1da4c12d338fba19695faa8ef89c46504484"
+  },
+  "zenbones.nvim": {
+    "license": "MIT",
+    "repository": "https://github.com/zenbones-theme/zenbones.nvim",
+    "commit": "8304d8df9b823ff11e103afa62f38c39f534abe6"
+  },
+  "token": {
+    "license": "BSD-3-Clause",
+    "repository": "https://github.com/ThorstenRhau/token",
+    "commit": "696e001e9580a7fdfd9d034c9bcc9adda2ced0d5"
+  },
+  "gruvbox-material-vscode": {
+    "license": "MIT",
+    "repository": "https://github.com/sainnhe/gruvbox-material-vscode",
+    "commit": "91ff2deaecd2e89ec95ab488f4aee3f614f54031"
+  },
+  "mfd.nvim": {
+    "license": "Apache-2.0",
+    "repository": "https://github.com/kungfusheep/mfd.nvim",
+    "commit": "72ae627792960a7e490cb5242a78c570d02ba775"
+  }
+}

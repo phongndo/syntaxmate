@@ -1,0 +1,163 @@
+# Rebase 8f7e6d5 onto 1029384; realistic long todo with verification hooks.
+# Lines beginning with # are instructions or review notes from the editor.
+#
+# Commands:
+# p, pick = use commit; r, reword = use commit, but edit the commit message
+# e, edit = use commit, but stop for amending; s, squash = combine commits
+# f, fixup = combine while discarding this message; d, drop = remove commit
+# x, exec = run a shell command; b, break = stop here and continue later
+
+pick 0000001 initialize workspace metadata
+p 0000002 add license and security policy
+pick 0000003 configure continuous integration
+reword 0000004 explain supported upgrade path
+r 0000005 clarify contributor workflow
+edit 0000006 split storage abstraction
+e 0000007 verify migration boundary
+squash 0000008 fold storage review fixes
+s 0000009 fold formatting follow-up
+fixup 000000a remove temporary tracing
+f 000000b correct import order
+exec cargo fmt --all -- --check
+x cargo test -q -p mark-syntax
+
+# Parser and tokenizer series.
+pick 0000010 add incremental line tokenizer
+p 0000011 retain checkpoint state across blank lines
+reword 0000012 describe zero-width match handling
+r 0000013 document UTF-8 byte offsets
+edit 0000014 separate regex routing changes
+e 0000015 inspect fallback budget behavior
+squash 0000016 combine tokenizer benchmark setup
+s 0000017 combine benchmark naming cleanup
+fixup 0000018 repair clippy warning
+f 0000019 remove stale TODO
+exec test -f crates/mark-syntax/Cargo.toml && cargo test -p mark-syntax
+x printf 'tokenizer: %s\n' "${CI:-local}"
+
+# Documentation subjects intentionally contain non-ASCII text.
+pick 0000020 add résumé example for naïve input
+p 0000021 document café paths in Zürich
+reword 0000022 explain 東京 deployment notes
+r 0000023 preserve Ελληνικά identifiers in output
+edit 0000024 verify العربية right-to-left sample
+e 0000025 inspect हिन्दी combining marks
+squash 0000026 merge 한국어 snapshot updates
+s 0000027 merge Español punctuation cleanup
+fixup 0000028 normalize decomposed café example
+f 0000029 retain astral rocket 🚀 in changelog
+exec printf '%s\n' 'Unicode smoke: 東京 — مرحبًا — 🚀'
+x value='👩‍💻'; test -n "$value" && printf '%s\n' "$value"
+
+# Pause after the Unicode-sensitive changes for an interactive check.
+break
+b
+
+# Configuration series.
+pick 0000030 add default pager configuration
+p 0000031 expose color policy setting
+reword 0000032 rename ambiguous cache option
+r 0000033 describe precedence rules
+edit 0000034 split environment parsing
+e 0000035 validate empty environment values
+squash 0000036 fold configuration test matrix
+s 0000037 fold comments from review
+fixup 0000038 quote sample paths correctly
+f 0000039 delete obsolete feature flag
+exec env LC_ALL=C cargo test -q config::tests
+x mode=${MODE:-debug}; printf 'mode=%s\n' "$mode"
+
+# CLI series with shell pipelines and redirections.
+pick 0000040 add stdin auto-detection
+p 0000041 support explicit language selection
+reword 0000042 improve terminal error message
+r 0000043 explain broken-pipe behavior
+edit 0000044 separate pager initialization
+e 0000045 inspect terminal restoration
+squash 0000046 combine argument parser tests
+s 0000047 combine help snapshot updates
+fixup 0000048 remove unused mock
+f 0000049 correct expected exit code
+exec cargo test -q -p mark-cli 2>&1 | tee /tmp/mark-cli-tests.log
+x grep -q 'test result: ok' /tmp/mark-cli-tests.log
+
+# Theme and rendering series.
+pick 0000050 add true-color capability probe
+p 0000051 retain fallback ANSI palette
+reword 0000052 describe contrast guarantees
+r 0000053 clarify terminal width calculation
+edit 0000054 split grapheme rendering patch
+e 0000055 inspect wide glyph alignment
+squash 0000056 merge renderer regression cases
+s 0000057 merge snapshot update
+fixup 0000058 fix trailing whitespace
+f 0000059 remove debug color swatch
+exec width=$(printf '界🚀' | wc -c); test "$width" -gt 2
+x cargo test -q rendering::tests -- --nocapture
+
+# Drop two superseded experiments rather than replaying them.
+drop 0000060 prototype global mutable cache
+d 0000061 benchmark obsolete scanner
+pick 0000062 add bounded cache implementation
+p 0000063 measure process-cold throughput
+reword 0000064 state benchmark assumptions
+r 0000065 explain fixture repetition factor
+edit 0000066 tune checkpoint interval
+e 0000067 verify allocation profile
+squash 0000068 combine benchmark harness changes
+s 0000069 combine report formatting
+fixup 000006a use deterministic seed
+f 000006b silence platform-specific warning
+
+# Quoting, substitutions, conditionals, and loops exercise embedded shell.
+exec sh -c 'set -eu; test "$(git rev-parse --is-inside-work-tree)" = true'
+x if test -n "${HOME:-}"; then printf 'home=%s\n' "$HOME"; fi
+exec for crate in mark-cli mark-syntax; do cargo check -q -p "$crate" || exit; done
+x msg="release candidate 🌍"; printf '%s\n' "$msg" > /tmp/rebase-message
+exec test "$(cat /tmp/rebase-message)" = 'release candidate 🌍'
+x rm -f /tmp/rebase-message /tmp/mark-cli-tests.log
+
+# Packaging series.
+pick 0000070 include grammar license inventory
+p 0000071 sort generated asset manifest
+reword 0000072 explain reproducible archive timestamps
+r 0000073 document checksum verification
+edit 0000074 split release workflow permissions
+e 0000075 inspect prerelease artifact names
+squash 0000076 combine package smoke tests
+s 0000077 combine workflow formatting
+fixup 0000078 pin temporary action revision
+f 0000079 remove duplicate upload step
+exec test -r assets/grammars/licenses.json
+x git diff --check HEAD^
+
+  # Leading whitespace is accepted on comments and commands by this grammar.
+  pick 0000080 add indented todo regression
+	p 0000081 retain tab-indented alias coverage
+  reword 0000082 describe whitespace handling
+	r 0000083 mention editor normalization
+  exec printf '%s\n' 'indented command ✓'
+	x test -d crates/mark-syntax
+  break
+	b
+
+# Final cleanup series.
+pick 0000090 update release notes for version 1.0
+p 0000091 thank translators: Chloé, 李雷, and أمينة
+reword 0000092 summarize compatibility guarantees
+r 0000093 note emoji rendering fix 🧪
+edit 0000094 review public API names
+e 0000095 inspect final dependency graph
+squash 0000096 fold release-note typo fixes
+s 0000097 fold changelog link repair
+fixup 0000098 normalize final snapshots
+f 0000099 remove release checklist scratch file
+drop 000009a discard superseded release draft
+d 000009b discard accidental lockfile churn
+exec cargo test --workspace --all-targets
+x git diff --check 1029384..HEAD
+
+# Stop once more before publishing, then finish the todo.
+break
+b
+# End of stress interactive-rebase fixture; trailing newline is intentional.

@@ -1,0 +1,224 @@
+/* RV64 telemetry reducer: scalar core plus optional extension probes.
+ * Messages deliberately include natural Unicode: café, Δ, and 🛰️.
+ */
+.file "telemetry_reduce.S"
+.ident "orbit firmware tools 2.1"
+.option push
+.option norelax
+.equ SAMPLE_BYTES, 16
+.equ WINDOW_LIMIT, 64
+.equ STATUS_MASK, 0x8000000f
+.equ FEATURE_BITS, 0b00101101
+.section .rodata
+.balign 8
+.Lbanner:
+  .asciz "orbital café telemetry 🛰️\n"
+.Lunits:
+  .string "Δv=m/s; temperature=°C"
+.Lescapes:
+  .ascii "quote=\" slash=\\ tab=\t"
+  .byte 0, 10, 0xff, 0b10101010
+  .half 32767, -1
+  .word 0x10203040
+  .dword 0x1122334455667788
+  .float 1.25, -0.5
+  .double 3.1415926535
+.p2align 4
+.section .data
+.globl telemetry_state
+.type telemetry_state, @object
+.balign 16
+telemetry_state:
+  .dword 0
+  .word FEATURE_BITS
+  .byte 1
+  .zero 3
+.size telemetry_state, .-telemetry_state
+.section .bss
+.local sample_scratch
+.type sample_scratch, @object
+.balign 32
+sample_scratch:
+  .space 256
+.size sample_scratch, .-sample_scratch
+.comm dropped_samples,8,8
+.macro PUSH_PAIR first, second
+  addi sp, sp, -16
+  sd \first, 0(sp)
+  sd \second, 8(sp)
+.endm
+.macro POP_PAIR first, second
+  ld \first, 0(sp)
+  ld \second, 8(sp)
+  addi sp, sp, 16
+.endm
+.text
+.balign 4
+.globl telemetry_reduce
+.type telemetry_reduce, @function
+telemetry_reduce:
+  PUSH_PAIR ra, s0
+  addi sp, sp, -16
+  sd s1, 8(sp)
+  addi s0, sp, 32
+  mv s1, a0
+  li t0, WINDOW_LIMIT
+  bleu a1, t0, .Lcount_ready
+  mv a1, t0
+.Lcount_ready:
+  la t1, telemetry_state
+  lw t2, 8(t1)
+  andi t2, t2, FEATURE_BITS
+  beqz a1, .Lempty
+  li a0, 0
+  li a2, 0
+  li a3, 0
+1:
+  lbu t3, 0(s1)
+  lh t4, 2(s1)
+  lw t5, 4(s1)
+  ld t6, 8(s1)
+  add a0, a0, t6
+  sub a2, a2, t5
+  xor a3, a3, t3
+  or a3, a3, t4
+  and a3, a3, t2
+  slli a4, a3, 3
+  srli a5, a4, 1
+  srai a6, a5, 2
+  slt a7, a2, zero
+  sltu x28, a0, t6
+  addi s1, s1, SAMPLE_BYTES
+  addiw a2, a2, -1
+  addw a3, a3, t4
+  addi a1, a1, -1
+  bnez a1, 1b
+  mul a0, a0, t2
+  mulh a2, a0, a3
+  div a5, a0, t0
+  rem a7, a0, t0
+  divw t5, t4, t0
+  sw a3, 8(t1)
+  sd a0, 0(t1)
+  fence rw, rw
+  call publish_summary
+  j .Lfinish
+.Lempty:
+  li a0, -22
+  bgtz t2, .Lhave_error
+  neg a0, a0
+.Lhave_error:
+  snez a3, t2
+  not a4, a3
+  sext.w a5, a4
+.Lfinish:
+  ld s1, 8(sp)
+  addi sp, sp, 16
+  POP_PAIR ra, s0
+  ret
+.size telemetry_reduce, .-telemetry_reduce
+.local publish_summary
+.type publish_summary, @function
+publish_summary:
+  auipc t0, %pcrel_hi(.Lbanner)
+  addi a1, t0, %pcrel_lo(.Lbanner)
+  lui t1, %hi(STATUS_MASK)
+  addi t1, t1, %lo(STATUS_MASK)
+  csrrs t2, mstatus, zero
+  csrrw zero, mscratch, a0
+  csrrci t3, fcsr, 0x1f
+  fence.i
+  jalr zero, 0(ra)
+.size publish_summary, .-publish_summary
+.globl atomic_accumulate
+.type atomic_accumulate, @function
+atomic_accumulate:
+  lr.d.aq t0, (a0)
+  add t1, t0, a1
+  sc.d.rl t2, t1, (a0)
+  bnez t2, atomic_accumulate
+  amoadd.w.aqrl a2, a1, (a0)
+  amoxor.d a3, a2, (a0)
+  mv a0, t0
+  ret
+.size atomic_accumulate, .-atomic_accumulate
+.globl calibrate_fp
+.type calibrate_fp, @function
+calibrate_fp:
+  flw f0, 0(a0)
+  fld f1, 8(a0)
+  fadd.s f2, f0, f0
+  fmul.s ft3, f2, f0
+  fsqrt.s fa0, ft3
+  fadd.d f4, f1, f1
+  fdiv.d fs0, f4, f1
+  fmadd.d fa1, f4, f1, fs0
+  fcvt.d.s f5, fa0
+  fcvt.s.d f6, fa1
+  feq.s a1, f5, f6
+  flt.d a2, f4, fa1
+  fclass.d a3, fs0
+  fmv.x.d a4, f4
+  fmv.d.x f7, a4
+  fsw f6, 16(a0)
+  fsd f7, 24(a0)
+  ret
+.size calibrate_fp, .-calibrate_fp
+#ifdef ENABLE_COMPRESSED
+.option rvc
+.type compact_copy, @function
+compact_copy:
+  c.addi16sp sp, -16
+  c.sd ra, 8(sp)
+  c.li a2, 4
+2:
+  c.lw a3, 0(a0)
+  c.sw a3, 0(a1)
+  c.addi a0, 4
+  c.addi a1, 4
+  c.addi a2, -1
+  c.bnez a2, 2b
+  c.ld ra, 8(sp)
+  c.addi16sp sp, 16
+  c.jr ra
+.size compact_copy, .-compact_copy
+#else
+  // Compressed fallback is intentionally a normal tail call.
+.type compact_copy, @function
+compact_copy:
+  tail scalar_copy
+.size compact_copy, .-compact_copy
+#endif
+.type scalar_copy, @function
+scalar_copy:
+3:
+  beqz a2, 4f
+  lb t0, 0(a0)
+  sb t0, 0(a1)
+  addi a0, a0, 1
+  addi a1, a1, 1
+  addi a2, a2, -1
+  j 3b
+4:
+  jr ra
+.size scalar_copy, .-scalar_copy
+  # Privileged trap return path; installed only by machine-mode firmware.
+.section .text.trap,"ax",@progbits
+.balign 4
+.globl machine_trap_entry
+.type machine_trap_entry, @function
+machine_trap_entry:
+  csrrw sp, mscratch, sp
+  csrr t0, mcause
+  csrr t1, mepc
+  bltz t0, .Lasynchronous
+  addi t1, t1, 4
+  csrw mepc, t1
+  ecall
+.Lasynchronous:
+  sfence.vma zero, zero
+  wfi
+  csrrw sp, mscratch, sp
+  mret
+.size machine_trap_entry, .-machine_trap_entry
+.option pop

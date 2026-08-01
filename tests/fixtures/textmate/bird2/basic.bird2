@@ -1,0 +1,25 @@
+# Compact BIRD 2 fixture: café, 東京, λ, astral 🚀 and 𝌆.
+/* Comments may span lines and keep Unicode 🚀 intact. */
+router id 192.0.2.1;
+define LOCAL_AS = 64512;
+define EDGE_NET = 203.0.113.0/24;
+function is_customer(int asn) -> bool {
+  return asn = 64520;
+}
+filter edge_filter {
+  string label = "route café 東京 🚀 𝌆";
+  if net ~ [ 203.0.113.0/24+, 2001:db8::/32{48,64} ] then accept;
+  reject;
+}
+template bgp edge_template {
+  local as LOCAL_AS;
+  source address 2001:db8::1;
+  ipv4 { import filter edge_filter; export where bgp_path ~ [= 64512 64520* =]; };
+}
+protocol bgp edge_v6 from edge_template {
+  neighbor 2001:db8::2 % 'uplink🚀' as 64520;
+  next hop ipv4 192.0.2.254;
+  next hop ipv6 2001:db8::ffff;
+  extended next hop on;
+}
+print "BIRD ready: café 🚀 𝌆", LOCAL_AS;

@@ -1,0 +1,19 @@
+# Compact HXML build: café 東京 🚀
+-cp src
+-lib hxjsonast
+-D analyzer-optimize
+--macro keep("demo.Basic")
+--macro include("demo", true)
+-main demo.Basic
+-js bin/basic.js
+--dce full
+--debug
+
+--next
+# Run the same entry point under the evaluator.
+-p src
+-L utest
+-m demo.Basic
+--interp
+--macro trace("λ and 𝌆")
+--no-output

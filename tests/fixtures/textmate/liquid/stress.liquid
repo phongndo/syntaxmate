@@ -1,0 +1,200 @@
+{%- liquid
+  assign locale = request.locale.iso_code | default: 'en'
+  assign featured = collections['frontpage'].products
+  assign page_size = section.settings.page_size | default: 12
+  assign accent = section.settings.accent | default: '#5b21b6'
+  assign show_vendor = section.settings.show_vendor
+-%}
+<!doctype html>
+<html class="no-js" lang="{{ locale }}" dir="{% if request.locale.iso_code == 'ar' %}rtl{% else %}ltr{% endif %}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <title>
+    {{- page_title | escape -}}
+    {%- if current_tags %} — {{ current_tags | join: ', ' | escape }}{% endif -%}
+    {%- unless page_title contains shop.name %} — {{ shop.name | escape }}{% endunless -%}
+  </title>
+  <style>
+    :root { --accent: {{ accent }}; --gap: 1.25rem; }
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+    .card[data-sold-out="true"] { opacity: .62; }
+    @media (prefers-reduced-motion: no-preference) {
+      .card { transition: transform 160ms ease; }
+      .card:hover { transform: translateY(-2px); }
+    }
+  </style>
+  {{ content_for_header }}
+</head>
+<body id="catalog" class="template-{{ template.name | handle }}">
+  <a class="skip-link" href="#MainContent">{{ 'accessibility.skip' | t }}</a>
+  {% comment %}
+    This block documents a deliberately broad syntax fixture.
+    {{ outputs_here | do_not_render }} and {% if hidden %}nested tags{% endif %}
+  {% endcomment %}
+  <header class="site-header" data-section-id="{{ section.id }}">
+    {% capture logo_label %}
+      {{ shop.name | strip_html | escape }} — 東京 🪐
+    {% endcapture %}
+    <a href="{{ routes.root_url }}" aria-label="{{ logo_label | strip }}">
+      <strong>{{ shop.name | escape }}</strong>
+    </a>
+    <nav aria-label="Primary">
+      <ul>
+        {% for link in linklists.main-menu.links %}
+          <li class="{% if link.active %}is-active{% endif %}">
+            <a href="{{ link.url }}">{{ link.title | escape }}</a>
+            {% if link.links != blank %}
+              <ul>
+                {% for child in link.links %}
+                  <li><a href="{{ child.url }}">{{ child.title | escape }}</a></li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </header>
+  <main id="MainContent">
+    {% case template.name %}
+      {% when 'index' %}
+        <h1>{{ section.settings.home_heading | default: 'New arrivals' }}</h1>
+      {% when 'collection', 'list-collections' %}
+        <h1>{{ collection.title | escape }}</h1>
+      {% when 'search' %}
+        <h1>{{ 'search.title' | t }}</h1>
+      {% else %}
+        <h1>{{ page_title | escape }}</h1>
+    {% endcase %}
+    {% unless section.settings.notice == blank %}
+      <aside class="notice">{{ section.settings.notice | newline_to_br }}</aside>
+    {% endunless %}
+    {% assign color_names = 'violet,amber,青,red' | split: ',' %}
+    <table class="swatches">
+      {% tablerow color in color_names cols: 2 %}
+        <span class="swatch swatch--{{ color | handleize }}">{{ color | capitalize }}</span>
+      {% endtablerow %}
+    </table>
+    {% paginate collection.products by page_size %}
+      <section class="grid" aria-live="polite">
+        {% for product in collection.products %}
+          {%- assign first_variant = product.selected_or_first_available_variant -%}
+          <article class="card" data-sold-out="{{ product.available | json }}">
+            <a href="{{ product.url | within: collection }}">
+              {% if product.featured_image %}
+                {{ product.featured_image
+                  | image_url: width: 720
+                  | image_tag: loading: 'lazy', widths: '240, 480, 720', alt: product.title
+                }}
+              {% else %}
+                {{ 'product-1' | placeholder_svg_tag: 'placeholder' }}
+              {% endif %}
+              <h2>{{ product.title | strip_html | truncatewords: 12 }}</h2>
+            </a>
+            {% if show_vendor %}
+              <p class="vendor">{{ product.vendor | escape }}</p>
+            {% endif %}
+            <p class="price">
+              {% if first_variant.compare_at_price > first_variant.price %}
+                <s>{{ first_variant.compare_at_price | money_with_currency }}</s>
+              {% endif %}
+              <span>{{ first_variant.price | money }}</span>
+            </p>
+            {% liquid
+              if product.available
+                assign button_key = 'products.product.add_to_cart'
+              else
+                assign button_key = 'products.product.sold_out'
+              endif
+            %}
+            <button type="button" data-variant="{{ first_variant.id }}">
+              {{ button_key | t | upcase }}
+            </button>
+          </article>
+        {% else %}
+          <p>{{ 'collections.general.no_matches' | t }}</p>
+        {% endfor %}
+      </section>
+      <nav class="pagination" aria-label="Pagination">
+        {% if paginate.previous %}
+          <a href="{{ paginate.previous.url }}">← Previous</a>
+        {% endif %}
+        {% for part in paginate.parts %}
+          {% if part.is_link %}
+            <a href="{{ part.url }}">{{ part.title }}</a>
+          {% else %}
+            <span{% if part.title == paginate.current_page %} aria-current="page"{% endif %}>{{ part.title }}</span>
+          {% endif %}
+        {% endfor %}
+        {% if paginate.next %}
+          <a href="{{ paginate.next.url }}">Next →</a>
+        {% endif %}
+      </nav>
+    {% endpaginate %}
+    {% render 'featured-card', product: featured.first, badge: 'Editor’s pick', lazy: true %}
+    {% include 'legacy-breadcrumbs', current: collection.title %}
+    {% raw %}
+      <template id="client-template">
+        <p>{{ this_is_for_the_browser }} — raw keeps {% braces %} intact.</p>
+      </template>
+    {% endraw %}
+  </main>
+  <footer>
+    <small>&copy; {{ 'now' | date: '%Y' }} {{ shop.name | escape }}</small>
+  </footer>
+  <script type="application/json" id="product-data">
+    {
+      "shop": {{ shop.name | json }},
+      "locale": {{ locale | json }},
+      "featuredIds": [{% for item in featured limit: 5 %}{{ item.id | json }}{% unless forloop.last %},{% endunless %}{% endfor %}],
+      "message": "Unicode: café, Ελληνικά, 𠮷田, 🧭"
+    }
+  </script>
+  <script>
+    (() => {
+      const root = document.querySelector('#catalog');
+      const payload = JSON.parse(document.querySelector('#product-data').textContent);
+      root.classList.remove('no-js');
+      document.addEventListener('click', (event) => {
+        const button = event.target.closest('[data-variant]');
+        if (button) console.debug(`variant:${button.dataset.variant}`, payload.locale);
+      });
+    })();
+  </script>
+{% style %}
+  .notice {
+    border-inline-start: .25rem solid {{ section.settings.accent }};
+    padding: .75rem 1rem;
+  }
+{% endstyle %}
+{% stylesheet %}
+  .pagination { display: flex; gap: 0.75rem; justify-content: center; }
+  .pagination [aria-current="page"] { font-weight: 700; }
+{% endstylesheet %}
+{% javascript %}
+  customElements.define('fixture-note', class extends HTMLElement {
+    connectedCallback() { this.dataset.ready = 'true'; }
+  });
+{% endjavascript %}
+{% schema %}
+{
+  "name": "Catalog fixture 🪐",
+  "tag": "section",
+  "class": "catalog-section",
+  "settings": [
+    { "type": "text", "id": "home_heading", "label": "Heading", "default": "Featured 𠮷田" },
+    { "type": "color", "id": "accent", "label": "Accent", "default": "#5b21b6" },
+    { "type": "range", "id": "page_size", "min": 4, "max": 24, "step": 4, "default": 12, "label": "Products per page" },
+    { "type": "checkbox", "id": "show_vendor", "default": true, "label": "Show vendor" },
+    { "type": "richtext", "id": "notice", "label": "Notice" }
+  ],
+  "presets": [
+    { "name": "Catalog fixture", "category": "Collection" }
+  ]
+}
+{% endschema %}
+</body>
+</html>

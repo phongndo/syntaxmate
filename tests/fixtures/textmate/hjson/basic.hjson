@@ -1,0 +1,30 @@
+# A compact Hjson application document.
+{
+  app: mark
+  "release channel": 'stable'
+  'display name': "Mark Syntax 🚀"
+  unicode: café 東京 λ
+  escaped: "quote: \" slash: \\ tab: \t snowman: \u2603"
+  description: '''
+    A small configuration written in Hjson.
+    Unicode remains literal: naïve, Ελληνικά, 🚀.
+    '''
+  enabled: true
+  disabled: false,
+  fallback: null
+  limits: {
+    retries: 3
+    ratio: -0.125,
+    budget: 6.022e23
+  }
+  tags: [
+    syntax
+    'text mate',
+    "Hjson"
+  ]
+  samples: [0, -12.5e+3, true, false, null]
+  nested: {owner: {name: "Ada", active: true}, coordinates: [12.5, 48.25]}
+  // Slash comments are accepted between members.
+  /* Block comments are accepted too. */
+  ready: true # Hash comments also work after constants.
+}

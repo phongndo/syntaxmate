@@ -1,0 +1,24 @@
+AppConfig(
+    // Basic RON fixture: Café, 東京, and 🚀.
+    name: "Mark Fixture",
+    enabled: true,
+    mode: compact,
+    retries: 3,
+    ratio: -1.25e+2,
+    masks: [0xff, 0b1010_0011, 0o755],
+    window: Size(width: 1280, height: 720),
+    theme: Some(Dark),
+    labels: {
+        "welcome": "Hej, κόσμε 🌍",
+        "escaped": "tab\tquote\"unicode \u{03BB}",
+    },
+    marker: '\n',
+    bytes: b"RON\x20data",
+    path: r#"C:\fixtures\basic.ron"#,
+    note: r##"quotes "and" # hashes"##,
+    /* Nested comments are legal here:
+       /* inner comment */
+       outer comment closes below. */
+    points: [(1, 2), (3, 5)],
+    optional: None,
+)

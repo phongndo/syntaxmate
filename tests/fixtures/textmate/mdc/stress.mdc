@@ -1,0 +1,229 @@
+---
+title: Orbital field handbook
+description: Component-rich procedures for a quiet relay promotion
+published: true
+revision: 7
+owners:
+  - platform
+  - field-ops
+labels: [café, 東京, λ, 🚀, 𝌆]
+---
+
+# Orbital field handbook
+
+This MDC document mixes realistic Markdown with block and inline components.
+Unicode remains literal: café 東京 λ use BMP code points, while 🚀 𝌆 are astral.
+
+:badge{tone="success" size='small'}[Maintained] Read the [operator index][index]
+before opening a promotion window. The [stable channel]{class="channel"} remains
+the default for field terminals.
+
+[index]: https://example.test/operations "Operator documentation"
+
+## Release summary
+
+::hero-card{tone="night" data-region=orbital compact}
+#eyebrow <!-- slot marker with a balanced comment -->
+Release train 7.4
+
+#default
+The **relay console** coordinates observations from three ground stations.
+Use :icon{name="satellite" label="Relay"}[relay status] whenever the control
+room needs a compact state marker.
+
+::action-row{align="end"}
+:button{to="/releases/7.4" variant='solid'}[Open release]
+:button{to='/rollback' variant="ghost" disabled}[Rollback guide]
+::
+
+#footer
+Updated for café 東京 λ operators and the 🚀 𝌆 telemetry path.
+::
+
+Ordinary prose resumes after the hero component. Named entities &copy; and &amp;
+sit beside numeric forms &#9731; and &#x03BB; without leaving Markdown.
+
+## Station matrix
+
+::station-grid{columns="3" aria-label="Ground stations"}
+:::station-card{id="north" state="ready"}
+#title
+North ridge
+
+The receiver reports [nominal]{class="state state--ok"} signal quality.
+
+- Antenna lock: **yes**
+- Queue depth: `2`
+- Operator: :person{handle="mina"}[Mina]
+:::
+
+:::station-card{id="harbor" state='watch'}
+#title <!-- second named slot -->
+Harbor café
+
+> Watch one additional sample before declaring this station current.
+> The timestamp matters more than the row color.
+
+::metric-row{dense=true}
+:metric{label="Lag" value="42s"}[forty-two seconds]
+:metric{label='Packets' value=128}[one hundred twenty-eight]
+::
+:::
+
+:::station-card{id="tokyo" state="ready"}
+#title
+東京 uplink λ
+
+The relay payload preserves 🚀 and 𝌆 in operator annotations.
+
+```json
+{
+  "station": "tokyo",
+  "state": "ready",
+  "symbols": "café 東京 λ 🚀 𝌆"
+}
+```
+:::
+::
+
+## Promotion workflow
+
+1. Confirm every station has a fresh sample.
+2. Compare the release digest with the signed announcement.
+3. Keep an observer free to read the raw event stream.
+   - Record times in UTC.
+   - Avoid interpreting transient retries.
+
+::procedure-card{number="1" title="Prepare the window"}
+---
+owner: release-operator
+duration_minutes: 10
+requires:
+  - signed digest
+  - observer
+---
+
+#summary
+Preparation should be quiet, reversible, and easy to narrate.
+
+#default
+Run the verifier from a clean checkout:
+
+```shell
+git fetch --tags origin
+git verify-tag v7.4.0
+./scripts/release-check --environment orbital
+```
+
+::callout{tone="warning" icon='pause'}
+Do not promote when two adjacent receivers are stale. Ask
+:person{handle="field-ops"}[field operations] to classify the outage first.
+::
+
+#actions
+:button{command="verify" variant="solid"}[Run verification]
+::
+
+The component-local YAML frontmatter above is closed before its Markdown body.
+
+:::procedure-card{number="2" title="Observe promotion"}
+#summary
+Watch two refresh cycles.
+
+::::timeline{ordered=true}
+:::::timeline-item{time="21:30" state="complete"}
+The operator announces version `7.4.0` and the expected digest.
+:::::
+
+:::::timeline-item{time="21:32" state="active"}
+The observer compares :kbd[observedAt] with :kbd[receivedAt] in the raw event.
+:::::
+
+:::::timeline-item{time="21:34" state="pending"}
+The field lead records [promotion complete]{class='audit-label'} in the log.
+:::::
+::::
+
+#aside
+::note{tone="info"}
+Normal queue movement may reorder stations for one refresh. A second sample
+distinguishes expected movement from a persistent regression.
+::
+:::
+
+## Evidence and links
+
+The browser adapter narrows a response before rendering it:
+
+```typescript
+type Reading = {
+  station: string
+  observedAt: string
+  lagSeconds: number
+}
+
+export function isFresh(reading: Reading): boolean {
+  return reading.lagSeconds >= 0 && reading.lagSeconds < 90
+}
+```
+
+<!-- This HTML comment is host Markdown content, not an MDC component. -->
+
+<aside data-kind="evidence">
+  Keep screenshots with the release record, not in the incident channel.
+</aside>
+
+The reference [relay API][api] and automatic link <https://status.example.test>
+remain available beside `inline code`, **bold text**, and _emphasis_.
+
+[api]: https://api.example.test/relay "Relay API"
+
+---
+
+## Rollback boundary
+
+::rollback-panel{severity="high"}
+#trigger
+Rollback after two failed freshness checks or a station-to-region mismatch.
+
+#steps
+1. Announce the decision.
+2. Restore the previous image digest.
+3. Verify one station from each region.
+
+::code-group{label="Commands"}
+```shell
+deployctl rollback orbital --to 7.3.2
+deployctl status orbital --watch
+```
+
+```yaml
+target: orbital
+expected_version: 7.3.2
+checks: [north, harbor, tokyo]
+```
+::
+
+#footer
+:badge{tone="danger"}[Stop] Keep the rollback operator on the call until all
+three checks report a stable timestamp.
+::
+
+## Closing checklist
+
+- [x] Every block component has a matching colon delimiter.
+- [x] Inline components and attributed spans are followed by host prose.
+- [x] Frontmatter and fenced code examples are closed.
+- [ ] Publish the evidence link after peer review.
+
+::completion-card{tone="calm"}
+#title
+Window complete
+
+Thank the café and 東京 operators, preserve λ in the report, and leave the
+astral markers 🚀 𝌆 intact for the next parser run.
+
+:link-button{to="/operations/archive" external=false}[Open archive]
+::
+
+End of the operator-facing MDC handbook.

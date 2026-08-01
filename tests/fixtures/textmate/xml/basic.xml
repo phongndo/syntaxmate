@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type='text/xsl' href="catalog.xsl"?>
+<!DOCTYPE catalog [
+  <!ENTITY greeting "Grüße &amp; λ">
+  <!ENTITY rocket "&#x1F680;">
+]>
+<!-- Compact XML grammar coverage: 日本語 and café. -->
+<catalog xmlns="urn:example:catalog" xmlns:dc="http://purl.org/dc/elements/1.1/"
+         xml:lang='en' version="1.0">
+  <dc:title>&greeting; XML &rocket;</dc:title>
+  <book id="b-001" available='true' tags="syntax &amp; fixtures">
+    <name>Markup Basics</name>
+    <author given="Ada" family='Lovelace'/>
+    <summary><![CDATA[Literal <tags>, ampersands &, and astral 🌍 stay text.]]></summary>
+    <price currency="EUR">19.95</price>
+  </book>
+  <empty></empty>
+  <separator />
+  <?review status="approved" reviewer='qa'?>
+</catalog>

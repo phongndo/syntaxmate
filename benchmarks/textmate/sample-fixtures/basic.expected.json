@@ -1,0 +1,25 @@
+{
+  "categories": {
+    "allocation": {
+      "percent": 28.57,
+      "samples": 30
+    },
+    "hashing": {
+      "percent": 9.52,
+      "samples": 10
+    },
+    "other": {
+      "percent": 4.76,
+      "samples": 5
+    },
+    "substring": {
+      "percent": 19.05,
+      "samples": 20
+    },
+    "vm": {
+      "percent": 38.1,
+      "samples": 40
+    }
+  },
+  "total_samples": 105
+}

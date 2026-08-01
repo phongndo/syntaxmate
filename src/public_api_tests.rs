@@ -1,0 +1,168 @@
+use crate::{
+    Catalog, Error, GrammarRegistry, HighlightStatus, Highlighter, HtmlOptions, Theme, Tokenizer,
+    TokenizerOptions, render_html, style_document,
+};
+
+#[test]
+fn public_runtime_types_are_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<Highlighter>();
+    assert_send::<Tokenizer>();
+    assert_send::<crate::TokenizerState>();
+    assert_send::<Theme>();
+}
+
+#[test]
+fn batteries_included_api_detects_tokenizes_and_styles() {
+    let catalog = Catalog::bundled();
+    assert_eq!(catalog.detect_path("src/main.rs").as_deref(), Some("rust"));
+    assert!(catalog.languages().len() >= 264);
+
+    let mut highlighter = Highlighter::bundled().unwrap();
+    let document = highlighter
+        .highlight("rust", "fn main() {}", "github-dark")
+        .unwrap();
+    assert_eq!(document.status(), HighlightStatus::Complete);
+    assert_eq!(document.lines().len(), 1);
+    assert!(!document.lines()[0].spans().is_empty());
+}
+
+#[test]
+fn custom_grammar_and_theme_work_without_product_types() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(
+            r#"{
+                "scopeName": "source.demo",
+                "patterns": [{"match": "\\b(todo|done)\\b", "name": "keyword.demo"}]
+            }"#,
+        )
+        .unwrap();
+    let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let document = tokenizer.tokenize("todo then done");
+    assert_eq!(document.status(), HighlightStatus::Complete);
+    assert!(document.lines()[0].spans().iter().any(|span| {
+        document.lines()[0]
+            .scope_names(span.scope_stack())
+            .any(|scope| scope == "keyword.demo")
+    }));
+
+    let theme = Theme::from_json(
+        r##"{
+            "name": "Demo",
+            "tokenColors": [{
+                "scope": "keyword",
+                "settings": {"foreground": "#ff0000", "fontStyle": "bold"}
+            }]
+        }"##,
+    )
+    .unwrap();
+    assert_eq!(theme.name(), "Demo");
+
+    let highlighted = style_document(document, &theme);
+    assert!(highlighted.lines()[0].spans().iter().any(|span| {
+        span.style()
+            .foreground
+            .is_some_and(|color| color.red == 255 && color.green == 0 && color.blue == 0)
+    }));
+    let html = render_html("todo then done", &highlighted, &HtmlOptions::default()).unwrap();
+    assert!(html.as_str().contains("color:#ff0000"));
+}
+
+#[test]
+fn incremental_output_matches_complete_document_scopes() {
+    let source = "fn main() {\n    let value = \"text\";\n}";
+    let mut highlighter = Highlighter::bundled().unwrap();
+    let complete = highlighter.tokenize("rust", source).unwrap();
+    let mut session = highlighter.session("rust", "github-dark").unwrap();
+
+    for (line_index, text) in source.lines().enumerate() {
+        let incremental = session.highlight_line(text).unwrap();
+        assert_eq!(incremental.status(), HighlightStatus::Complete);
+        let incremental_scopes = incremental
+            .spans()
+            .iter()
+            .map(|span| {
+                (
+                    span.range(),
+                    span.scopes().map(str::to_owned).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let complete_scopes = complete.lines()[line_index]
+            .spans()
+            .iter()
+            .map(|span| {
+                (
+                    span.range(),
+                    complete.lines()[line_index]
+                        .scope_names(span.scope_stack())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(incremental_scopes, complete_scopes);
+    }
+}
+
+#[test]
+fn viewport_output_matches_complete_document_slice() {
+    let source = "fn first() {}\nfn second() {\n    let value = 2;\n}\n";
+    let mut full_tokenizer =
+        Tokenizer::for_bundled_language("rust", TokenizerOptions::default()).unwrap();
+    let full = full_tokenizer.tokenize(source);
+
+    let mut viewport_tokenizer =
+        Tokenizer::for_bundled_language("rust", TokenizerOptions::default()).unwrap();
+    let mut checkpoints = viewport_tokenizer.checkpoints(2);
+    let viewport = viewport_tokenizer
+        .tokenize_viewport(source, 1..4, &mut checkpoints)
+        .unwrap();
+    assert_eq!(viewport.lines().len(), 3);
+
+    for (actual, expected) in viewport.lines().iter().zip(&full.lines()[1..4]) {
+        let actual_scopes = actual
+            .spans()
+            .iter()
+            .map(|span| {
+                (
+                    span.range(),
+                    actual
+                        .scope_names(span.scope_stack())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let expected_scopes = expected
+            .spans()
+            .iter()
+            .map(|span| {
+                (
+                    span.range(),
+                    expected
+                        .scope_names(span.scope_stack())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(actual_scopes, expected_scopes);
+    }
+}
+
+#[test]
+fn tokenizer_state_cannot_cross_tokenizer_instances() {
+    let grammar = r#"{"scopeName":"source.demo","patterns":[]}"#;
+    let mut registry = GrammarRegistry::new();
+    let root = registry.add_json(grammar).unwrap();
+    let first = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let mut second = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let mut state = first.initial_state();
+
+    assert_eq!(
+        second.tokenize_line("text", &mut state).unwrap_err(),
+        Error::StateMismatch
+    );
+}

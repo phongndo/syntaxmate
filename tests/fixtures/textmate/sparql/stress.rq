@@ -1,0 +1,203 @@
+# SPARQL 1.1 query and update specimen; each section is a complete request form.
+# Turtle-host sentinels cover café, naïve, λ, 東京, 🚀, and astral 𝌆.
+BASE <https://example.org/data/>
+PREFIX ex: <https://example.org/schema/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX dct: <http://purl.org/dc/terms/>
+PREFIX geo: <http://www.opengis.net/ont/geosparql#>
+
+# A grouped SELECT exercises variables, paths, graph patterns, and expressions.
+SELECT DISTINCT ?person ?name ?band
+       (COUNT(DISTINCT ?project) AS ?projectCount)
+       (AVG(?score) AS ?averageScore)
+       (GROUP_CONCAT(DISTINCT ?tag; SEPARATOR=", ") AS ?tags)
+FROM <people>
+FROM NAMED <profiles>
+WHERE {
+  VALUES (?status ?minimum) {
+    (ex:active 10)
+    (ex:review 25.5)
+    (UNDEF 0)
+  }
+
+  ?person a foaf:Person ;
+          foaf:name ?name ;
+          ex:status ?status ;
+          ex:score ?score ;
+          ex:identifier ?identifier .
+
+  # Alternation, sequence, inverse, optional, and repetition property paths.
+  { ?person (ex:memberOf/ex:project)|(^ex:lead) ?project . }
+  UNION
+  { ?person ex:collaboratesWith+/ex:memberOf? ?project . }
+  ?project ex:tag ?tag .
+
+  OPTIONAL {
+    ?person foaf:nick ?nickname .
+    FILTER(LANGMATCHES(LANG(?nickname), "en"))
+  }
+
+  OPTIONAL {
+    ?person ex:born ?born .
+    BIND(YEAR(?born) AS ?birthYear)
+    BIND(MONTH(?born) AS ?birthMonth)
+    BIND(DAY(?born) AS ?birthDay)
+  }
+
+  GRAPH ?profileGraph {
+    ?person ex:profile [
+      ex:city ?city ;
+      geo:asWKT ?point ;
+      ex:coordinates (?latitude ?longitude)
+    ] .
+  }
+
+  SERVICE SILENT <https://query.wikidata.org/sparql> {
+    ?remote rdfs:label ?remoteLabel .
+    FILTER(LANG(?remoteLabel) = "en")
+  }
+
+  MINUS {
+    ?person ex:status ex:suspended .
+  }
+
+  FILTER(?score >= ?minimum && ?score < 1000)
+  FILTER(?status IN (ex:active, ex:review) || !BOUND(?status))
+  FILTER(?city NOT IN ("Nowhere", "Atlantis"))
+  FILTER(REGEX(STR(?name), "^[A-Z]", "i"))
+  FILTER(ISIRI(?person) && !ISBLANK(?person))
+  FILTER(ISLITERAL(?name) && SAMETERM(DATATYPE(?score), xsd:decimal))
+  FILTER EXISTS { ?person dct:created ?created . }
+  FILTER NOT EXISTS { ?person ex:deleted true . }
+
+  BIND(IF(?score >= 80, "high", "normal") AS ?band)
+  BIND(COALESCE(?nickname, ?name, "anonymous") AS ?display)
+  BIND(IRI(CONCAT("https://example.org/person/", ENCODE_FOR_URI(STR(?identifier)))) AS ?iri)
+  BIND(STRLANG(CONCAT(?display, " — café 東京 🚀 𝌆"), "en") AS ?label)
+  BIND(STRDT(STR(?score), xsd:decimal) AS ?typedScore)
+  BIND(REPLACE(LCASE(?display), "\\s+", "-") AS ?slug)
+  BIND(SUBSTR(UCASE(?display), 1, 12) AS ?shortName)
+  BIND(ABS(?score - 50) + CEIL(?score) - FLOOR(?score) AS ?distance)
+  BIND(ROUND(RAND() * 100) AS ?sampleNumber)
+  BIND(NOW() AS ?observed)
+  BIND(TZ(?observed) AS ?zone)
+  BIND(MD5(STR(?person)) AS ?md5)
+  BIND(SHA256(STR(?person)) AS ?sha256)
+
+  {
+    SELECT ?person (MAX(?revision) AS ?latestRevision)
+    WHERE {
+      ?person ex:revision ?revision .
+    }
+    GROUP BY ?person
+  }
+}
+GROUP BY ?person ?name ?band
+HAVING(COUNT(?project) > 0 && AVG(?score) >= 10)
+ORDER BY DESC(?projectCount) ASC(?name)
+LIMIT 50
+OFFSET 5
+
+# A CONSTRUCT template preserves Turtle punctuation and typed literals.
+CONSTRUCT {
+  ?person a ex:FeaturedPerson ;
+          rdfs:label ?label ;
+          ex:rank ?rank ;
+          ex:featured true .
+}
+WHERE {
+  VALUES (?person ?label ?rank) {
+    (ex:ada "Ada café"@en 1)
+    (ex:grace 'Grace λ'@en 2)
+    (ex:東京 "Tokyo 🚀 𝌆"@en 3)
+  }
+  OPTIONAL { ?person foaf:knows ?colleague . }
+}
+ORDER BY ASC(?rank)
+LIMIT 3
+
+# ASK combines dataset clauses, negation, and a decimal with an exponent.
+ASK
+FROM <metrics>
+FROM NAMED <archive>
+WHERE {
+  GRAPH <archive> {
+    ?reading ex:value ?value .
+  }
+  FILTER(?value >= -1.25e2)
+  FILTER NOT EXISTS { ?reading ex:invalid true . }
+}
+
+# DESCRIBE accepts both a variable and an explicit IRI.
+DESCRIBE ?person <https://example.org/data/ada>
+WHERE {
+  ?person foaf:name ?name .
+  VALUES ?name { "Ada" "Grace" "東京" }
+}
+ORDER BY ?name
+LIMIT 10
+
+# The remaining forms are valid SPARQL Update operations in one update request.
+LOAD SILENT <https://example.org/import/people.ttl> INTO GRAPH <imports> ;
+CREATE SILENT GRAPH <scratch> ;
+CLEAR SILENT GRAPH <scratch> ;
+COPY SILENT GRAPH <profiles> TO GRAPH <profiles-backup> ;
+ADD SILENT DEFAULT TO GRAPH <combined> ;
+MOVE SILENT GRAPH <staging> TO GRAPH <published> ;
+
+INSERT DATA {
+  GRAPH <people> {
+    ex:ada a foaf:Person ;
+           foaf:name "Ada Lovelace"@en ;
+           ex:score 98.5 ;
+           ex:active true ;
+           ex:born "1815-12-10"^^xsd:date ;
+           ex:note """A closed long literal
+with café, naïve, λ, 東京, 🚀, and 𝌆.
+Escaped quote: \" and escaped slash: \\."""@en ;
+           ex:aliases ("Ada" 'Enchantress of Numbers') ;
+           ex:contact [ foaf:mbox <mailto:ada@example.org> ] .
+    _:grace a foaf:Person ;
+            foaf:name "Grace Hopper" ;
+            ex:score +95 ;
+            ex:ratio .75 ;
+            ex:mass 6.022e23 .
+  }
+} ;
+
+DELETE DATA {
+  GRAPH <scratch> {
+    ex:obsolete ex:status "retired" .
+    ex:old-record ex:revision 0 .
+  }
+} ;
+
+WITH <people>
+DELETE {
+  ?person ex:status ex:pending ;
+          ex:reviewedAt ?oldReview .
+}
+INSERT {
+  ?person ex:status ex:active ;
+          ex:reviewedAt ?now .
+}
+USING <people>
+USING NAMED <reviews>
+WHERE {
+  ?person ex:status ex:pending .
+  OPTIONAL { ?person ex:reviewedAt ?oldReview . }
+  GRAPH <reviews> { ?person ex:approvedBy ?reviewer . }
+  BIND(NOW() AS ?now)
+  FILTER(STRLEN(STR(?reviewer)) > 0)
+} ;
+
+DELETE WHERE {
+  GRAPH <scratch> {
+    ?subject ex:temporary ?value .
+  }
+} ;
+
+DROP SILENT GRAPH <scratch>

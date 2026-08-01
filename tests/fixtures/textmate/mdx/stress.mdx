@@ -1,0 +1,217 @@
+---
+title: Harbor Observatory Release Guide
+description: A field guide for shipping the tide display without waking the whole crew.
+owners:
+  - platform
+  - field-ops
+updated: 2031-04-09
+---
+
+import { Badge, Callout, Checklist, Figure, Tabs, Tab } from './guide-components.js'
+import StatusMap from './status-map.jsx'
+export const release = { name: 'Harbor Light', version: '4.8.0', window: '21:30 UTC' }
+export const contacts = ['Mina', 'Osei', 'Ren']
+
+# Harbor Observatory release guide
+
+This is the working notebook for {release.name} **v{release.version}**. It keeps the
+weather display, buoy importer, and public map moving together without turning a
+routine evening release into a ceremony.
+
+<Badge kind="release" label={release.version} />
+
+The control room still calls the old workstation “the café,” while visiting crews
+label it 日本語 on their diagrams. Both names—and the symbols 🚀 and 𝌆—must survive
+the publishing path unchanged.
+
+## What changes tonight
+
+The release teaches the dashboard to group delayed readings by harbor entrance.
+It also makes the offline banner quieter and gives operators a direct link to the
+[tide-source runbook][runbook]. No sensor firmware changes during this window.
+
+| Area | Change | Owner | Risk |
+| :--- | :----- | :---- | ---: |
+| Map | Cluster stale buoys | Mina | Low |
+| Importer | Preserve source timestamps | Osei | Medium |
+| Kiosk | Explain offline cache age | Ren | Low |
+
+[runbook]: https://example.test/operations/tide-source "Tide source operations"
+
+> A green map is not proof of fresh water-level data.
+> Read the timestamp, then compare one buoy with the harbor master’s board.
+
+### Before the window
+
+- [x] Ask the harbor desk about dredging or channel closures.
+- [x] Save a screenshot of the current entrance markers.
+- [ ] Confirm the mirror has release tag `v4.8.0`.
+- [ ] Put the rollback operator in the call.
+  - Keep one person free to write the incident log.
+
+The short command sequence is intentionally uneventful:
+
+```shell
+git fetch --tags origin
+git verify-tag v4.8.0
+./scripts/release-check --environment harbor
+```
+
+The verifier reads this compact plan:
+
+```yaml
+environment: harbor
+release: 4.8.0
+checks:
+  - importer-lag
+  - kiosk-cache
+rollback_after_minutes: 12
+```
+
+<Callout tone="warning" title="Pause on missing observations">
+  If two adjacent buoys are stale, contact {contacts[1]} before promoting.
+  A single stale buoy can be isolated; a pair may indicate an upstream outage.
+</Callout>
+
+## Reading the evidence
+
+The dashboard summary is useful, but the raw response explains why an entrance
+changed color. Capture one sample before promotion and another afterward.
+
+```json
+{
+  "station": "north-pier",
+  "observedAt": "2031-04-09T21:24:00Z",
+  "heightMeters": 2.14,
+  "quality": "verified"
+}
+```
+
+The browser adapter narrows the response before rendering it:
+
+```typescript
+type Reading = { station: string; observedAt: string; heightMeters: number };
+
+export function ageInMinutes(reading: Reading, now: Date): number {
+  const observed = Date.parse(reading.observedAt);
+  return Math.floor((now.getTime() - observed) / 60_000);
+}
+```
+
+{/* The status map is interactive in the published operations handbook. */}
+
+<StatusMap
+  harbor="north"
+  release={release.version}
+  stations={['north-pier', 'breakwater', 'old-ferry']}
+  showFreshness
+/>
+
+### A small visual check
+
+<Figure src="./harbor-entrances.png" alt="Three marked harbor entrances">
+  Expected markers after promotion. Compare the image with the
+  [live map](https://example.test/harbor/map?mode=operator&amp;layer=freshness).
+</Figure>
+
+1. Open the north-pier marker.
+2. Read the observation time aloud.
+3. Move to the breakwater marker and compare its age.
+
+Do not mistake `receivedAt` for `observedAt`. The former can be recent even when
+the sensor payload is old. The escaped form \{station\} in this paragraph is
+documentation, not an interpolation, and &lt;unknown&gt; is an entity example.
+
+---
+
+## Promotion
+
+At {release.window}, the release operator announces the version and the observer
+answers with the latest importer lag. Promotion proceeds only when both values
+match the notebook.
+
+The service query used by the smoke check is similarly modest:
+
+```graphql
+query HarborFreshness($harbor: ID!) {
+  harbor(id: $harbor) {
+    stations { id freshness observedAt }
+  }
+}
+```
+
+<Tabs defaultValue="operator">
+  <Tab value="operator" label="Operator">
+    Run the promotion, watch importer lag, and keep the deployment event open.
+  </Tab>
+  <Tab value="observer" label="Observer">
+    Compare the map with one raw reading and narrate unexpected movement.
+  </Tab>
+</Tabs>
+
+<>
+  <Callout tone="info" title="Two-minute observation">
+    Normal queue movement can briefly reorder stations. Watch two refreshes before
+    treating a changed row as a regression.
+  </Callout>
+  <p data-stage="promotion">Current target: {release.name}</p>
+</>
+
+## Rollback boundary
+
+Rollback if the importer remains more than five minutes behind for two checks, if
+the kiosk cannot load its cached chart, or if any station moves to the wrong harbor.
+Do not rollback for a typo in the release note; fix the note separately.
+
+The worker’s rollback state is deliberately tiny:
+
+```rust
+#[derive(Debug, Clone, Copy)]
+enum ReleaseState {
+    Observing,
+    Promoted,
+    RolledBack,
+}
+```
+
+<Checklist
+  title="Rollback handoff"
+  items={['announce decision', 'restore prior image', 'verify one station']}
+  owner={contacts.at(-1)}
+/>
+
+### Notes for the incident log
+
+Use plain statements with times, for example: “21:36 UTC — north-pier fresh; old
+ferry two minutes behind.” Avoid ~~guessing~~ conclusions until the raw reading and
+import log agree. Mention @field-ops only when someone there can take an action.
+
+For a forced line break, end the instruction here.\
+Then put the observed result on its own line.
+
+The literal characters \* \_ and \# are test data, while `a * b` remains inline
+code. Named entities such as &copy; and &amp; should tokenize beside numeric &#9731;
+without changing the surrounding prose.
+
+## Closing the window
+
+Departure checklist
+-------------------
+
+1. Confirm all three entrance markers show an observation age.
+2. Close the temporary deployment event.
+3. Add the release thread to the weekly operations digest.
+4. Thank the harbor desk and return the radio.
+
+![A quiet harbor after the evening check][harbor-photo]
+
+[harbor-photo]: ./quiet-harbor.jpg "Harbor after sunset"
+
+[^timing]: All times in this guide use UTC, even when the wall clock shows local time.
+
+The window is complete when the index links to the evidence, not merely when the
+deployment tool says “done.” Keep the final note short, factual, and linked.[^timing]
+
+---
+
+{/* End of the operator-facing guide. */}

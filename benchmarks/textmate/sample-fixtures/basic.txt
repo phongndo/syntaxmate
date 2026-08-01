@@ -1,0 +1,14 @@
+Sampling process 123 for 1 second with 1 millisecond of run time between samples
+
+Call graph:
+    999 Thread_123
+
+Sort by top of stack
+    40 syntaxmate::engine::regex::backtrack::match_position_node
+    30 alloc::raw_vec::RawVec<T>::grow_one
+    20 syntaxmate::engine::regex::prefilter::LiteralSet::find
+    10 core::hash::Hasher::finish
+     5 syntaxmate::engine::tokenizer::Tokenizer::scan_line
+
+Binary Images:
+       0x1000 - 0x2000 mark

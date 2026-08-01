@@ -1,0 +1,24 @@
+{
+  "project": "mark",
+  "glyphs": "café λ 🚀 𝄞",
+  "escaped": "quote: \"; slash: \\; tab: \t",
+  "astralEscape": "\uD83D\uDEF0",
+  "active": true,
+  "archived": false,
+  "missing": null,
+  "version": 3,
+  "threshold": -12.5e+3,
+  "tags": [
+    "syntax",
+    "TextMate",
+    "夜空"
+  ],
+  "owner": {
+    "name": "Ada",
+    "roles": ["author", "reviewer"]
+  },
+  "checks": [
+    {"path": "src/lib.rs", "ok": true},
+    {"path": "tests/basic.json", "ok": false}
+  ]
+}

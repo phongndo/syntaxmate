@@ -1,0 +1,201 @@
+``` Broad SPL search fixture for realistic pipeline and multiline-state coverage.
+Unicode sentinels: café, naïve, λ, 東京, 🚀, and astral 𝌆.
+Triple-backtick comments are deliberately closed. ```
+
+search index=web sourcetype=access_combined earliest=-7d latest=now
+    (status>=400 OR action="checkout") NOT user="healthcheck"
+| fields _time host source user action status bytes duration uri_path _raw
+| rex field=_raw "request_id=(?<request_id>[A-Fa-f0-9-]+)"
+| rex max_match=0 field=_raw "tag=(?<tags>[^ ]+)"
+| regex uri_path="^/api/(v1|v2)/"
+| eval user=coalesce(user, "anonymous")
+| eval normalized=lower(trim(user)), path=urldecode(uri_path)
+| eval severity=case(status>=500, "critical", status>=400, "warning", true(), "info")
+| eval duration_ms=round(duration*1000, 2), kib=ceiling(bytes/1024)
+| eval fingerprint=sha256(request_id."|".host)
+| eval is_slow=if(duration_ms>750, true, false)
+| where isnotnull(request_id) AND (is_slow=true OR severity="critical")
+| lookup service_catalog uri_path OUTPUTNEW service owner tier
+| fillnull value="unknown" service owner tier
+| eventstats avg(duration_ms) AS service_average BY service
+| streamstats window=5 current=true avg(duration_ms) AS moving_average BY host
+| delta duration_ms AS duration_change
+| accum bytes AS cumulative_bytes
+| eval deviation=round(duration_ms-service_average, 3)
+| stats count AS requests
+        sum(bytes) AS total_bytes
+        avg(duration_ms) AS average_ms
+        median(duration_ms) AS median_ms
+        percentile95(duration_ms) AS p95_ms
+        max(duration_ms) AS maximum_ms
+        values(tags) AS tags
+        earliest(_time) AS first_seen
+        latest(_time) AS last_seen
+        BY service owner tier severity
+| sort 0 -requests, service
+| rename service AS "Service", owner AS "Team Owner"
+| table Service "Team Owner" tier severity requests total_bytes average_ms p95_ms
+| head 100
+
+``` Multivalue and JSON extraction remain a separate, readable search. ```
+search index=applications sourcetype=json_logs
+| spath input=_raw path=event.name output=event_name
+| spath input=_raw path=labels{} output=labels
+| eval fallback=spath(_raw, "message"), payload_type=typeof(_raw)
+| eval labels=mvappend(labels, "café", "東京", "🚀", "𝌆")
+| eval label_count=mvcount(labels), first_label=mvindex(labels, 0)
+| eval joined=mvjoin(mvdedup(mvsort(labels)), ",")
+| eval useful=mvfilter(match(labels, "^[[:alnum:]_-]+$"))
+| eval sequence=mvrange(0, label_count), zipped=mvzip(labels, sequence, "=")
+| mvexpand zipped limit=50
+| rex field=zipped "^(?<label>[^=]+)=(?<position>\\d+)$"
+| stats values(label) AS labels list(position) AS positions BY event_name
+| mvcombine delim="," labels
+| nomv labels
+| table event_name labels positions fallback payload_type
+
+``` Time-series commands, numeric functions, and date functions. ```
+search index=metrics metric_name="cpu.utilization"
+| bin _time span=5m
+| timechart span=5m avg(value) AS utilization BY host limit=20 useother=false
+| filldown host
+| foreach * [ eval <<FIELD>>=round('<<FIELD>>', 2) ]
+| predict utilization AS forecast algorithm=LLP5 future_timespan=12
+| trendline sma5(utilization) AS moving_average
+| eval epoch=now(), day=strftime(_time, "%Y-%m-%d")
+| eval parsed=strptime(day, "%Y-%m-%d"), age=relative_time(epoch, "-1d@d")
+| eval bounded=max(0, min(100, utilization))
+| eval root=sqrt(abs(bounded)), power=pow(root, 2), natural_log=ln(bounded+1)
+| eval angle=round(pi()*bounded/180, 6), sample=random()
+| where forecast>=0 AND searchmatch("host=*")
+
+search index=sales earliest=-30d
+| chart sum(revenue) AS revenue over region BY product limit=12
+| addtotals row=true col=true labelfield=region label="Total"
+| addcoltotals labelfield=region label="All regions"
+| transpose 12 header_field=region column_name=metric
+| untable metric product revenue
+| xyseries metric product revenue
+
+search index=sales earliest=-30d
+| top limit=10 product BY region showcount=true showperc=true
+| rare limit=5 product BY region
+
+``` Correlation with subsearches, append families, and set operations. ```
+search index=orders state="open"
+| join type=left order_id [
+    search index=payments outcome="approved"
+    | dedup order_id sortby -_time
+    | fields order_id transaction_id amount
+  ]
+| eval paid=if(isnotnull(transaction_id), "yes", "no")
+| append [
+    search index=orders state="backorder"
+    | eval paid="pending"
+  ]
+| appendcols [
+    search index=inventory
+    | stats sum(on_hand) AS total_on_hand
+  ]
+| appendpipe [
+    stats sum(amount) AS amount
+    | eval order_id="TOTAL"
+  ]
+| table order_id state paid amount total_on_hand
+
+| multisearch
+    [ search index=web status>=500 | eval stream="web" ]
+    [ search index=applications level="ERROR" | eval stream="application" ]
+| stats count earliest(_time) AS first latest(_time) AS last BY stream host
+
+| set union
+    [ search index=assets state="active" | fields asset_id ]
+    [ search index=leases expires>now() | fields asset_id ]
+
+``` Transactions, sessions, and field-shaping commands. ```
+search index=auth (action="login" OR action="logout")
+| transaction user startswith="action=login" endswith="action=logout" maxspan=8h
+| eval duration_text=tostring(duration, "duration")
+| concurrency start=_time duration=duration output=active_sessions
+| makecontinuous active_sessions span=1
+| bucket _time span=15m
+| stats count avg(duration) max(active_sessions) BY _time
+| where count>0
+
+search index=mail
+| extract pairdelim=";" kvdelim="="
+| kvform form=mail_fields
+| strcat sender " -> " recipient route
+| convert ctime(_time) dur2sec(latency) memk(size) num(priority)
+| fieldformat size=tostring(size, "commas")
+| replace "n/a" WITH null IN sender recipient
+| dedup 2 sender recipient sortby -_time
+| sort 0 sender, -priority
+| reverse
+| tail 25
+
+``` Geographic, anomaly, and classification commands. ```
+search index=network sourcetype=firewall action="allowed"
+| iplocation prefix=client_ client_ip
+| geostats latfield=client_lat lonfield=client_lon count BY destination
+| eval coordinate=printf("%.4f,%.4f", client_lat, client_lon)
+
+search index=sensors sensor="temperature"
+| bucket _time span=10m
+| stats avg(reading) AS reading BY _time device
+| anomalies field=reading threshold=0.02
+| anomalousvalue action=annotate pthresh=0.01 reading
+| outlier action=transform param=2.5 reading
+| rangemap field=reading cold=0-15 normal=16-25 hot=26-100 default=unknown
+| cluster t=0.8 labelonly=true reading
+| kmeans k=4 reading
+| table _time device reading range cluster_label CLUSTERNUM
+
+``` Generating commands and summary searches. ```
+| makeresults count=3 annotate=true
+| streamstats count AS row
+| eval greeting=case(row=1, "café", row=2, "東京 🚀", true(), "λ 𝌆")
+| eval token=md5(greeting), encoded=printf("row-%02d", row)
+| table _time row greeting token encoded
+
+| gentimes start=-3 increment=1d
+| eval day=strftime(starttime, "%F")
+| table starttime endtime day
+
+| metadata type=hosts index=web
+| sort -totalCount
+| head 20
+
+| eventcount summarize=false index=web index=applications
+| sort -count
+
+| tstats summariesonly=true count AS events
+    FROM datamodel=Web.Web
+    WHERE Web.status>=400
+    BY _time span=1h Web.src Web.dest
+| rename Web.* AS *
+
+| datamodel Web Web search
+| search Web.status>=500
+| stats count BY Web.src
+
+``` Input, output, REST, and SQL-bearing commands use fully closed strings. ```
+| inputlookup append=false service_catalog.csv
+| search enabled=true
+| outputlookup create_empty=false override_if_empty=false service_catalog_copy.csv
+
+| rest splunk_server=local /services/server/info
+| rename serverName AS server
+| table server version build os_name
+
+| dbxquery connection="analytics_readonly" query="
+SELECT service, COUNT(*) AS failures
+FROM request_log
+WHERE status >= 500 AND city IN ('café', '東京', '🚀', '𝌆')
+GROUP BY service
+ORDER BY failures DESC
+"
+| where failures>0
+| table service failures
+
+`comment(This comment macro includes punctuation: =, |, "quotes", café, and 🚀.)`

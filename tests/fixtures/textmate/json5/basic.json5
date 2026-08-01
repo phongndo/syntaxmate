@@ -1,0 +1,25 @@
+// A compact JSON5 application profile.
+{
+  appName: 'Mark Preview',
+  "release-channel": "nightly",
+  enabled: true,
+  optionalValue: null,
+  limits: {
+    retries: +3,
+    backoff: .25,
+    mask: 0xffa0,
+    upperBound: Infinity,
+    sample: NaN,
+  },
+  /** Strings include escapes and literal Unicode. */
+  labels: [
+    "BMP: café, λ, 雪; astral: 🚀, 𝄞",
+    'escaped newline: \n and tab: \t',
+    "quotes: \"double\", slash: \/, backslash: \\",
+    'Unicode escapes: \u03bb \u2603',
+  ],
+  nested: {
+    owner: {name: 'Ada', active: false},
+    paths: ['/api/v1', '/health'],
+  },
+}

@@ -1,0 +1,197 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "https://www.w3.org/TR/html4/strict.dtd">
+<html lang=en-US dir="ltr" data-build='2026.07'>
+<head>
+  <!-- Metadata exercises quoted, unquoted, and boolean-like attribute forms. -->
+  <meta charset=UTF-8>
+  <meta name="viewport" content='width=device-width, initial-scale=1'>
+  <meta http-equiv="content-security-policy" content="default-src 'self'; img-src 'self' data:">
+  <meta name=description content="Atlas café: 東京, Ελληνικά, العربية, and 🧭.">
+  <base href="https://example.test/app/" target=_self>
+  <link rel=stylesheet href='assets/site.css' media="screen and (color)">
+  <link rel="alternate" type=application/atom+xml href="feed.xml" title='Updates &amp; notes'>
+  <link rel=icon href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E">
+  <title>Atlas &mdash; field notes 𝄞</title>
+  <style media="screen">
+    @charset "UTF-8";
+    @layer reset, theme;
+    @layer theme {
+      :root { color-scheme: light dark; --ink: hsl(215 30% 18%); }
+      body { margin: 0; color: var(--ink); background: #f8fafc; }
+      nav a[href^="https://"]::after { content: " ↗"; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+      @supports (text-wrap: balance) {
+        h1, h2 { text-wrap: balance; }
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        dialog[open] { animation: reveal 180ms ease-out; }
+      }
+      @keyframes reveal {
+        from { opacity: 0; transform: translateY(.5rem); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+    }
+  </style>
+  <script type='application/ld+json'>
+    {"@context":"https://schema.org","@type":"WebSite","name":"Atlas 🗺️"}
+  </script>
+  <script defer src="assets/metrics.js" integrity='sha256-AbCdEf==' crossorigin=anonymous></script>
+</head>
+<body class=layout itemscope itemtype="https://schema.org/WebPage">
+  <!-- Navigation: entities stay encoded as &lt;, &gt;, &copy;, and &#x1F30D;. -->
+  <header id=top>
+    <a class="skip-link" href=#content>Skip to content</a>
+    <nav aria-label='Primary'>
+      <ul>
+        <li><a href="./">Home</a></li>
+        <li><a href=archive.html rel='next'>Archive</a></li>
+        <li><a href="https://example.org/maps?q=Zürich&amp;lang=de">Maps</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main id="content" tabindex=-1>
+    <article class='field-note' data-region="北極" data-index=7>
+      <header>
+        <p class=eyebrow>Expedition log <time datetime="2026-07-12T09:30:00+02:00">12 July</time></p>
+        <h1 itemprop='headline'>Signals from Reykjavík 🌌</h1>
+      </header>
+      <section aria-labelledby=summary-heading>
+        <h2 id="summary-heading">Summary &amp; coordinates</h2>
+        <p>Temperature: −3&nbsp;°C; bearing: 48&deg;; range: 12&frac12;&nbsp;km.</p>
+        <p><strong>Clear</strong>, <em>windy</em>, and <mark>aurora likely</mark>; code <code>α-42</code>.</p>
+        <blockquote cite='https://example.test/log/7'>
+          <p>“North of the fjord, the sky became violet.”</p>
+          <footer>— <cite>Zoë Nguyễn</cite></footer>
+        </blockquote>
+      </section>
+      <figure>
+        <picture>
+          <source type=image/avif srcset="ice-480.avif 480w, ice-960.avif 960w">
+          <source media='(min-width: 50rem)' srcset='ice-wide.webp 2x'>
+          <img src=ice.jpg alt="Blue ice beneath an aurora 🧊" width=960 height="540" loading=lazy decoding='async'>
+        </picture>
+        <figcaption>Waypoint <data value='64.1466,-21.9426'>RVK-07</data>.</figcaption>
+      </figure>
+      <section class="grid" aria-label="Measurements">
+        <table>
+          <caption>Hourly readings</caption>
+          <colgroup><col span=1><col class='numeric' span="2"></colgroup>
+          <thead>
+            <tr><th scope=col>Time</th><th scope='col'>°C</th><th scope="col">Wind</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope=row><time datetime=09:00>09:00</time></th><td>−3.2</td><td>18 km/h</td></tr>
+            <tr><th scope='row'><time datetime="10:00">10:00</time></th><td>−2.8</td><td>21 km/h</td></tr>
+          </tbody>
+          <tfoot><tr><th scope=row>Mean</th><td>−3.0</td><td>19.5 km/h</td></tr></tfoot>
+        </table>
+        <aside aria-label='Legend'>
+          <h2>Legend</h2>
+          <dl>
+            <dt>RVK</dt><dd>Reykjavík station</dd>
+            <dt>Kp</dt><dd>Planetary geomagnetic index</dd>
+          </dl>
+        </aside>
+      </section>
+      <form id=report-form action="submit" method=post enctype='multipart/form-data' autocomplete=on>
+        <fieldset>
+          <legend>Send a sighting</legend>
+          <input type=hidden name=csrf value='λ-🚀'>
+          <label for=name>Name</label>
+          <input id=name name="observer" type=text required minlength=2 placeholder='Ada Lovelace'>
+          <label>Email <input name=email type="email" autocomplete=email></label>
+          <label for=region>Region</label>
+          <select id=region name='region' multiple size=3>
+            <optgroup label="Atlantic">
+              <option value=is selected>Iceland</option>
+              <option value=gl>Greenland</option>
+            </optgroup>
+            <option value=other disabled>Other</option>
+          </select>
+          <label>Visibility <input name=visibility type=range min=0 max="10" step='.5' value=8></label>
+          <label><input type=checkbox name=verified checked> Verified in person</label>
+          <label><input type=radio name=units value=metric checked> Metric</label>
+          <label><input type='radio' name=units value=imperial> Imperial</label>
+          <label for=notes>Notes</label>
+          <textarea id=notes name="notes" rows=3 cols='40'>Colors: green &amp; violet.</textarea>
+          <input name=photo type=file accept="image/*" capture=environment>
+          <button type=submit name=action value='publish'>Publish</button>
+          <button type=reset disabled>Reset</button>
+        </fieldset>
+      </form>
+      <details open>
+        <summary>Vector and formula details</summary>
+        <svg viewBox="0 0 120 60" width=240 height='120' role=img aria-labelledby="svg-title svg-desc" xmlns="http://www.w3.org/2000/svg">
+          <title id=svg-title>Aurora arc</title>
+          <desc id='svg-desc'>A gradient curve above three stars.</desc>
+          <defs>
+            <linearGradient id="glow"><stop offset=0 stop-color='#22c55e'/><stop offset="1" stop-color="violet"/></linearGradient>
+          </defs>
+          <path d="M5 45 Q60 0 115 45" fill=none stroke='url(#glow)' stroke-width=4/>
+          <g fill="gold"><circle cx=25 cy=42 r=2/><circle cx="60" cy="28" r='3'/><circle cx=96 cy=42 r=2/></g>
+          <text x=6 y=57 font-size="8">λ = 557.7 nm ✨</text>
+        </svg>
+        <math xmlns='http://www.w3.org/1998/Math/MathML' display=block>
+          <mrow><mi>E</mi><mo>=</mo><mi>h</mi><mo>⁢</mo><mi>ν</mi><mo>+</mo><msup><mi>mc</mi><mn>2</mn></msup></mrow>
+        </math>
+      </details>
+      <atlas-reading data-json='{"kp":5,"valid":true}' data-label="夜空">
+        <span slot=label>Live Kp</span><output name=kp for="report-form">5</output>
+      </atlas-reading>
+      <template id='reading-row'>
+        <tr class=reading><td data-field="time"></td><td data-field='value'></td></tr>
+      </template>
+      <dialog id=confirm aria-labelledby='dialog-title'>
+        <form method=dialog>
+          <h2 id=dialog-title>Publish this sighting?</h2>
+          <p>The report includes Unicode: naïve, 中文, 🛰️, and 𐀀.</p>
+          <button value=cancel formnovalidate>Cancel</button>
+          <button value="confirm" autofocus>Confirm</button>
+        </form>
+      </dialog>
+    </article>
+  </main>
+  <footer>
+    <address>Questions: <a href='mailto:crew@example.test?subject=Atlas%20log'>crew@example.test</a></address>
+    <small>&copy; 2026 Atlas Lab · Καληνύχτα · שלום · 🌍</small>
+  </footer>
+  <script type="module">
+    const form = document.querySelector("#report-form");
+    const template = document.querySelector("template#reading-row");
+    const payload = { station: "RVK", symbols: ["λ", "🛰️", "𐀀"] };
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      console.info(`queued ${payload.station}`, structuredClone(payload), template?.content);
+    });
+    // A regex, division, optional chaining, and an escaped closing-tag-shaped string.
+    const tagLike = "<\\/script>";
+    const score = /^(?:Kp-)?\d+(?:\.\d+)?$/u.test("Kp-5") ? 10 / 2 : 0;
+    document.documentElement.dataset.score = String(score + tagLike.length);
+  </script>
+</body>
+</html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>TextMate stress – café λ🚀</title>
+  <style>
+    :root { --accent: #c0ffee; --label: "café"; }
+    .card[data-state="✓"]::before { content: "λ🚀"; }
+    @media (min-width: 40rem) {
+      body { font-family: system-ui, sans-serif; }
+    }
+  </style>
+  <script type="module">
+    const route = /^\/api\/(?<name>[\p{Letter}-]+)$/u;
+    const ratio = 10 / 2 / 5;
+    console.log(`route=${route.test("/api/café")}`, ratio);
+  </script>
+</head>
+<body>
+  <!-- Multi-line HTML comment
+       with non-ASCII text λ🚀. -->
+  <main class="card" data-state="✓">
+    <h1>Hello <span data-name="λ">world</span></h1>
+  </main>
+</body>
+</html>

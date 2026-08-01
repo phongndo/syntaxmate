@@ -1,0 +1,22 @@
+// Compact KQL coverage: café, λ, 東京, 🚀, 𝌆
+let lookback = 7d;
+let threshold = 1.5e3;
+let decorate = (name:string, score:real) { strcat(name, ": ", tostring(round(score, 2))) };
+let banner = ```
+multiline café and λ
+東京 launches 🚀 with 𝌆
+```;
+let Events = datatable(Timestamp:datetime, User:string, Score:real, Active:bool, Id:guid, Delay:timespan, Meta:dynamic)
+[
+    datetime(2026-07-12T10:30:00Z), "Ada\" Lovelace", 42.5, true, guid(01234567-89ab-cdef-0123-456789abcdef), 250ms, dynamic({"city":"東京","tags":["kql","🚀"]}),
+    now(-1h), 'Grace\' Hopper', 0x2A, false, guid(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee), 1.5s, dynamic({"note":"café \\ λ","glyph":"𝌆"})
+];
+Events
+| where Timestamp between (ago(lookback) .. now()) and Score >= threshold / 100.0
+| where User contains "a" or User in~ ("ADA", "grace")
+| extend Label = decorate(User, Score), Day = startofday(Timestamp), Payload = tostring(Meta)
+| mv-expand Tag = Meta.tags to typeof(string)
+| summarize Total=count(), Average=avg(Score), Tags=make_set(Tag) by Day, Active
+| project Day, Active, Total, Average, Tags, banner
+| sort by Average desc nulls last
+| take 10

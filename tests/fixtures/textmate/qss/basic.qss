@@ -1,0 +1,19 @@
+/* Compact Qt style sheet — café 🚀 */
+QWidget {
+    background-color: #20242a;
+    color: rgb(232, 238, 245);
+    font-family: "Noto Sans";
+}
+
+QPushButton#launchButton[featured="true"]:hover {
+    border: 1px solid #5af;
+    border-radius: 6px;
+    padding: 0.5em 12px;
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 1,
+                                stop: 0 #345, stop: 1 rgba(80, 120, 255, 90%));
+}
+
+QPushButton::menu-indicator:pressed {
+    image: url(icons/launch.png);
+    subcontrol-position: right center;
+}

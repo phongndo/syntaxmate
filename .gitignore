@@ -1,0 +1,8 @@
+/target
+/fuzz/target
+/fuzz/artifacts
+/tools/golden-oracle/node_modules
+.DS_Store
+*.profraw
+__pycache__/
+*.pyc

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title><%= h(@page_title || "ERB basics 🚀") %></title>
+  <style>.notice { color: <%= @accent || "rebeccapurple" %>; }</style>
+</head>
+<body data-user-id="<%= current_user&.id %>">
+  <!-- Host HTML comment with <span>markup</span>. -->
+  <%# This ERB comment is not rendered. %>
+  <% if current_user -%>
+    <h1>Hello, <%= h current_user.name %>!</h1>
+    <p class="notice"><%== @trusted_welcome_html %></p>
+    <% current_user.notifications.each do |notification| %>
+      <article id="notice-<%= notification.id %>"><%= notification.message %></article>
+    <% end %>
+  <% else %>
+    <a href="<%= login_path(next: request.fullpath) %>">Sign in</a>
+  <% end -%>
+</body>
+</html>

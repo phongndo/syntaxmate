@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" data-theme="{{ theme ?? 'light' }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="café λ 東京 🚀 𝌆">
+  <title>{{ page.title }} · Edge stress</title>
+  <style>
+    :root {
+      --accent: #663399;
+      --gap: 1rem;
+    }
+    body {
+      color: #202124;
+      font-family: system-ui, sans-serif;
+    }
+    .grid {
+      display: grid;
+      gap: var(--gap);
+    }
+    .notice[data-state="ready"] {
+      border-inline-start: 0.25rem solid var(--accent);
+    }
+  </style>
+</head>
+<body class="app" data-user-id="{{ auth.user?.id ?? 0 }}">
+  {{--
+    Multiline Edge comment with HTML-looking <fake-tag attr="value">.
+    BMP text café λ 東京 and astral text 🚀 𝌆 stay comment content.
+  --}}
+  @{{ this.mustache + ' is escaped' }}
+
+  @layout('layouts/main')
+  @set('section', 'dashboard')
+  @@!trace
+
+  <header class="site-header" aria-label="{{ labels.header }}">
+    <a href="/" class="brand">Mark &amp; Edge</a>
+    @if(auth.user)
+      <nav aria-label="Primary">
+        <a href="/dashboard" @if(active === 'dashboard') aria-current="page" @endif>
+          Dashboard
+        </a>
+        <a href="/reports" title="{{ labels.reports }}">Reports</a>
+      </nav>
+    @else
+      <a href="/login">Sign in</a>
+    @endif
+  </header>
+
+  @if(
+    auth.user &&
+    auth.user.enabled
+  )
+    <main id="content" class="grid">
+      <h1>
+        {{
+          auth.user.profile?.displayName ??
+          'Anonymous'
+        }}
+      </h1>
+
+      <section class="notice" data-state="{{ status.kind }}">
+        <h2>{{ status.heading }}</h2>
+        <p>{{ status.message }}</p>
+        <div class="trusted-copy">
+          {{{
+            status.trustedHtml
+          }}}
+        </div>
+      </section>
+
+      @each(project in projects)
+        <article class="card" data-index="{{ $loop.index }}">
+          <header>
+            <h2>{{ project.name }}</h2>
+            @if(project.featured)
+              <strong class="badge">Featured</strong>
+            @endif
+          </header>
+          <p>{{ project.summary ?? 'No summary' }}</p>
+          <dl>
+            <dt>Owner</dt>
+            <dd>{{ project.owner.name }}</dd>
+            <dt>Tasks</dt>
+            <dd>{{ project.tasks.length }}</dd>
+          </dl>
+          @unless(project.archived)
+            <a href="/projects/{{ project.slug }}">Open project</a>
+          @endunless
+        </article>
+      @else
+        <p class="empty">No projects were found.</p>
+      @endeach
+
+      @component('components/panel', { title: labels.activity })
+        @slot('heading')
+          <span>Recent activity</span>
+        @endslot
+        <ol class="activity-list">
+          @each(event in activity)
+            <li data-kind="{{ event.kind }}">
+              <time datetime="{{ event.isoTime }}">{{ event.relativeTime }}</time>
+              <span>{{ event.description }}</span>
+            </li>
+          @endeach
+        </ol>
+      @endcomponent
+
+      @switch(account.plan)
+        @case('free')
+          <p>Free plan</p>
+        @break
+        @case('team')
+          <p>Team plan</p>
+        @break
+        @default
+          <p>Custom plan</p>
+      @endswitch
+
+      <form method="post" action="/preferences" novalidate>
+        {{ csrfField() }}
+        <fieldset>
+          <legend>Preferences</legend>
+          <label for="locale">Locale</label>
+          <select id="locale" name="locale">
+            @each(locale in locales)
+              <option value="{{ locale.code }}" @if(locale.selected) selected @endif>
+                {{ locale.label }}
+              </option>
+            @endeach
+          </select>
+          <label>
+            <input type="checkbox" name="alerts" @if(settings.alerts) checked @endif>
+            Receive alerts
+          </label>
+          <button type="submit">Save</button>
+        </fieldset>
+      </form>
+    </main>
+  @elseif(auth.pending)
+    <main aria-busy="true">
+      <p>Loading account…</p>
+    </main>
+  @else
+    <main>
+      <p>Account unavailable.</p>
+    </main>
+  @endif
+
+  @include('partials/footer', {
+    year: new Date().getFullYear(),
+    label: 'café λ 東京 🚀 𝌆'
+  })
+
+  <template id="dialog-template">
+    <dialog aria-labelledby="dialog-title">
+      <h2 id="dialog-title">{{ labels.dialogTitle }}</h2>
+      <p>{{{ dialog.safeBody }}}</p>
+      <button value="close" formmethod="dialog">Close</button>
+    </dialog>
+  </template>
+
+  <script type="module">
+    const root = document.querySelector('.app');
+    const template = document.querySelector('#dialog-template');
+    root?.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target instanceof HTMLButtonElement) {
+        console.log(`button:${target.value || 'none'}`);
+      }
+    });
+    window.fixture = { root, template, unicode: 'café λ 東京 🚀 𝌆' };
+  </script>
+</body>
+</html>

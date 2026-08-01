@@ -1,0 +1,28 @@
+---
+title: A Small Launch Note
+audience: maintainers
+draft: false
+---
+
+import { Callout, Metric } from './components.js'
+export const launchDay = '2031-04-12'
+
+# Launch notebook 🚀
+
+Welcome to the **café review** for 日本語 readers; the rare sign 𝌆 is preserved too.
+
+<Callout tone="calm" icon="telescope" compact>
+  We ship on {launchDay}, after checking the [runbook](./runbook) &amp; changelog.
+  <Metric label="open tasks" value={2 + 1} />
+</Callout>
+
+> Keep the rollback path boring and the status message honest.
+
+- [x] Pin the image digest
+- [ ] Upload ![a tiny launch patch](./launch-patch.png "mission patch")
+
+Use `npm run verify`, write \*literal stars\*, and keep the entity &copy; in snapshots.
+
+---
+
+{/* This note is visible to maintainers in source, not in the rendered page. */}

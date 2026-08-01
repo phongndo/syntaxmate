@@ -1,0 +1,27 @@
+/// Compact Prisma schema: café, 日本語, and 🚀.
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["views", "relationJoins"] // inline fixture note
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN @map("管理员_𝌆")
+}
+
+model User {
+  id          Int      @id @default(autoincrement())
+  email       String   @unique
+  displayName String?  @map("display_name")
+  role        Role     @default(USER)
+  posts       Post[]
+  @@index([email, role], map: "user_lookup")
+}
+
+type UserId = String @db.Uuid
+// End of the small grammar-driven fixture.

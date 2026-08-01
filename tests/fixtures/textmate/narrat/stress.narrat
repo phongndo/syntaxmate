@@ -1,0 +1,174 @@
+// Narrat grammar stress fixture: a complete museum quest scene.
+boot:
+  var $hero "Mira"
+  var $gallery "café 東京 λ"
+  var $artifact "🚀 𝌆"
+  var $visits 0
+  set $active true
+  set $missing null
+  set $future undefined
+  talk guide "Welcome, %{hero}, to %{gallery}."
+  think hero "The emblem looks like %{artifact}."
+  log "boot sequence complete"
+  clear_dialog
+  set_screen "museum"
+  empty_layer "overlay"
+  set_button "map" "Open map" "show_map"
+  play "museum_theme"
+  pause "museum_theme"
+  play "museum_theme"
+  enable_notifications
+  notify "New exhibit available"
+  set_stat "curiosity" 4
+  add_stat "curiosity" 1
+  var $curiosity (get_stat_value "curiosity")
+  add_level "history" 1
+  set_level "navigation" 2
+  add_xp "history" 35
+  var $history_level (get_level "history")
+  var $history_xp (get_xp "history")
+  var $first_roll (roll "history" 8)
+  add_item "museum_pass" 1
+  add_item "notebook" 1
+  enable_interaction "bronze_door"
+  start_quest "lost_comet"
+  start_objective "lost_comet" "inspect_hall"
+  save "museum-entry"
+  jump entrance
+
+entrance:
+  talk guide "Choose where to begin."
+  choice:
+    "Inspect the hall":
+      run inspect_hall
+    "Check supplies":
+      run inventory_check
+    "Study numbers":
+      run math_lab
+    "Rest a moment":
+      wait 300
+      jump entrance
+
+inspect_hall:
+  set $visits ($visits + 1)
+  think hero "Visit %{visits}; stay alert."
+  var $door_open (has_item? "museum_pass")
+  if ($door_open && $active)
+    talk guide "Your pass opens the bronze door."
+    disable_interaction "bronze_door"
+    complete_objective "lost_comet" "inspect_hall"
+    start_objective "lost_comet" "decode_plaque"
+    run decode_plaque
+  else
+    talk guide "A valid pass is required."
+    enable_interaction "bronze_door"
+    return
+
+decode_plaque:
+  var $line_a "Orbit"
+  var $line_b "of"
+  var $line_c "Wonders"
+  var $joined (join " " $line_a $line_b $line_c)
+  var $caption (concat $joined ": " $artifact)
+  talk guide "%{caption}"
+  text_field "translation" "Enter a translation"
+  if ($caption != "")
+    notify "Plaque decoded"
+    complete_objective "lost_comet" "decode_plaque"
+    start_objective "lost_comet" "recover_emblem"
+    jump vault
+  else
+    talk guide "Try another reading."
+    return
+
+inventory_check:
+  var $passes (item_amount? "museum_pass")
+  var $has_notes (has_item? "notebook")
+  talk hero "Passes: %{passes}"
+  if ($has_notes == true)
+    remove_item "notebook" 1
+    add_item "field_journal" 1
+    notify "Notebook upgraded"
+  else
+    add_item "notebook" 1
+  return
+
+math_lab:
+  var $negative (neg 12)
+  var $distance (abs $negative)
+  var $die (random 1 6)
+  var $ratio (random_float 0 1)
+  var $sample (random_from_args 3 5 8 13)
+  var $low (min $distance $sample)
+  var $high (max $distance $sample)
+  var $bounded (clamp $high 0 10)
+  var $down (floor $ratio)
+  var $nearest (round $ratio)
+  var $up (ceil $ratio)
+  var $root (sqrt 144)
+  talk curator "Values: %{low}, %{high}, %{bounded}, %{root}."
+  if ($die >= 4)
+    add_xp "history" 10
+  else
+    add_xp "navigation" 5
+  if ($root <= 12)
+    think hero "The square root checks out."
+  if ($distance > 0)
+    think hero "Absolute distance is positive."
+  if (!$active || $future == undefined)
+    set $active true
+  var $scaled (($root * 2) / 3)
+  var $adjusted ($scaled - 1)
+  talk curator "Adjusted result: %{adjusted}."
+  return
+
+vault:
+  var $quest_live (quest_started? "lost_comet")
+  var $decode_live (objective_started? "lost_comet" "recover_emblem")
+  if ($quest_live && $decode_live)
+    talk keeper "The vault recognizes your progress."
+    run vault_choice
+  else
+    jump entrance
+
+vault_choice:
+  choice:
+    "Take the emblem":
+      add_item "comet_emblem" 1
+      complete_objective "lost_comet" "recover_emblem"
+      complete_quest "lost_comet"
+      save_prompt "Save your completed quest?"
+      jump epilogue
+    "Leave it protected":
+      talk keeper "Wisdom can mean restraint."
+      wait 200
+      return
+
+epilogue:
+  var $done (quest_completed? "lost_comet")
+  var $recovered (objective_completed? "lost_comet" "recover_emblem")
+  if ($done && $recovered)
+    talk guide "The museum records %{hero} as a trusted explorer."
+    set_level "history" 3
+    add_xp "history" 100
+    disable_notifications
+    stop "museum_theme"
+    set_screen "credits"
+  else
+    talk guide "There are mysteries left to solve."
+  return
+
+show_map:
+  set_screen "map"
+  talk guide "The map marks the entrance, lab, and vault."
+  set_button "close_map" "Return" "entrance"
+  return
+
+quiet_exit:
+  disable_interaction "bronze_door"
+  disable_notifications
+  stop "museum_theme"
+  save "quiet-exit"
+  return
+
+// All quoted strings and nested parenthesized expressions are closed.

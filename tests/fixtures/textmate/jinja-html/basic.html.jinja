@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="{{ locale|default('en') }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ page.title|striptags|title }}</title>
+  <style>.badge { color: {{ theme.accent|default('#6750a4') }}; }</style>
+</head>
+<body class="page page--{{ section|e }}" data-user='{{ user.id|default("guest") }}'>
+  <!-- HTML comment around {{ harmless }} -->
+  {# Jinja comment: naïve café 🚀 #}
+  {% if user is defined and user.active -%}
+  <h1>Hello, {{ user.name|default('friend', true)|e }}!</h1>
+  <ul>
+    {% for item in items %}
+    <li><a href="{{ item.url|e }}" data-index="{{ loop.index }}">{{ item.label }}</a></li>
+    {% else %}
+    <li class="empty">Nothing here.</li>
+    {% endfor %}
+  </ul>
+  {%- endif %}
+  <script>const greeting = {{ {'text': 'こんにちは 🌍'}|tojson }};</script>
+  {% raw %}<template>{{ client_side_value }}</template>{% endraw %}
+</body>
+</html>

@@ -1,0 +1,211 @@
+{delpackage example.aurora}
+{namespace example.aurora.dashboard}
+{alias example.aurora.components.StatusBadge as Badge}
+{alias example.aurora.components.TelemetryRow}
+
+/**
+ * Renders the mission control dashboard.
+ * @param mission
+ * @param rows
+ * @param? compact
+ */
+{template .dashboard kind="html"}
+  {@param mission: ?}
+  {@param rows: list<map<string, any>>}
+  {@param? compact: bool}
+  {@param? selectedId: string}
+
+  {let $title: $mission.name ?: 'Untitled mission' /}
+  {let $panelClass}
+    dashboard-panel
+    {if $compact} dashboard-panel--compact{/if}
+  {/let}
+
+  <main
+      id="{xid 'mission-dashboard'}"
+      class="{$panelClass} {css missionDashboard}"
+      data-mission="{$mission.id}"
+      aria-busy="{if $mission.loading}true{else}false{/if}">
+    <header class="dashboard-header">
+      <p class="dashboard-kicker">Mission control{sp}·{sp}λ station</p>
+      <h1>{$title}</h1>
+      {if $mission.subtitle != null and $mission.subtitle != ''}
+        <p class="dashboard-subtitle">{$mission.subtitle}</p>
+      {elseif $mission.loading}
+        <p class="dashboard-subtitle">Loading telemetry…</p>
+      {else}
+        <p class="dashboard-subtitle">Telemetry ready.</p>
+      {/if}
+    </header>
+
+    {switch $mission.state}
+      {case 'nominal'}
+        <div class="state state--ok" role="status">Nominal</div>
+      {case 'warning'}
+        <div class="state state--warning" role="alert">Review required</div>
+      {case 'offline'}
+        <div class="state state--offline" role="alert">Link offline</div>
+      {default}
+        <div class="state state--unknown" role="status">Unknown state</div>
+    {/switch}
+
+    {msg desc="Last contact label"}
+      Last contact: {$mission.lastContact}
+    {/msg}
+
+    <nav aria-label="Mission sections">
+      <ul class="tabs">
+        {foreach $tab in $mission.tabs}
+          <li class="tabs__item">
+            <a
+                href="{$tab.href}"
+                class="{if $tab.active}is-active{/if}"
+                aria-current="{if $tab.active}page{else}false{/if}">
+              {$tab.label |truncate:24}
+            </a>
+          </li>
+        {ifempty}
+          <li class="tabs__empty">No sections configured.</li>
+        {/foreach}
+      </ul>
+    </nav>
+
+    <section class="telemetry" aria-labelledby="telemetry-heading">
+      <h2 id="telemetry-heading">Telemetry</h2>
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Channel</th>
+            <th scope="col">Reading</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          {foreach $row in $rows}
+            {call TelemetryRow.render variant="$row.kind"}
+              {param row: $row /}
+              {param selected: $row.id == $selectedId /}
+              {param missionName}
+                <span class="visually-hidden">{$title}</span>
+              {/param}
+            {/call}
+          {ifempty}
+            <tr>
+              <td colspan="3">No telemetry samples.</td>
+            </tr>
+          {/foreach}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="gauges">
+      <h2>Signal windows</h2>
+      {for $index in range(0, 4)}
+        <meter
+            min="0"
+            max="100"
+            value="{$mission.signals[$index]}">
+          {$mission.signals[$index]} percent
+        </meter>
+      {/for}
+    </section>
+
+    <aside class="summary">
+      {call Badge.render data="all" variant="compact"}
+        {param label: $mission.state /}
+        {param count: length($rows) /}
+      {/call}
+      {delcall example.aurora.extraSummary variant="$mission.kind"}
+        {param mission: $mission /}
+      {/delcall}
+    </aside>
+
+    <footer>
+      <span>{css dashboardFooter}</span>
+      <span id="{xid 'build-id'}">Build {$mission.build}</span>
+      <span title="Unicode samples">BMP λ 雪 · astral 🚀 𐀀</span>
+      {nil}
+    </footer>
+  </main>
+{/template}
+
+// A line comment between complete top-level declarations.
+/**
+ * Renders one telemetry table row.
+ * @param row
+ * @param selected
+ * @param? missionName
+ */
+{template .telemetryRow kind="html"}
+  {@param row: map<string, any>}
+  {@param selected: bool}
+  {@param? missionName: html}
+  <tr
+      id="row-{$row.id}"
+      class="telemetry-row {if $selected}is-selected{/if}"
+      data-channel="{$row.channel}">
+    <th scope="row">
+      {$row.label}
+      {if $missionName}<small>{$missionName}</small>{/if}
+    </th>
+    <td>
+      {if $row.value == null}
+        <em>n/a</em>
+      {else}
+        {$row.value}{sp}{$row.unit}
+      {/if}
+    </td>
+    <td>
+      {call Badge.render variant="$row.state"}
+        {param label: $row.state /}
+      {/call}
+    </td>
+  </tr>
+{/template}
+
+/** A compact status badge used by transcript examples. */
+{template .statusText kind="html"}
+  {@param state: string}
+  {@param? details: string}
+  <span class="status status--{$state}">
+    {switch $state}
+      {case 'ok'}Ready
+      {case 'warn'}Caution
+      {default}Unknown
+    {/switch}
+    {if $details}{sp}<small>{$details |truncate:40}</small>{/if}
+  </span>
+{/template}
+
+/** Demonstrates content parameters and escaped source examples. */
+{template .help kind="html"}
+  {@param topic: string}
+  {let $example kind="html"}
+    <code>{literal}{if $ready}launch();{/if}{/literal}</code>
+  {/let}
+  <article class="help" data-topic="{$topic}">
+    <h2>{msg desc="Help title"}Operator help{/msg}</h2>
+    <p>Example:{sp}{$example}</p>
+    <p>Escapes: {'line\nnext'}{sp}{lb}value{rb}{sp}{\t}</p>
+    <p>{print bidiSpanWrap($topic) |bidiSpanWrap}</p>
+  </article>
+{/template}
+
+/** Delegate implementation for mission-specific notices. */
+{deltemplate example.aurora.extraSummary variant="science" kind="html"}
+  {@param mission: ?}
+  <section class="science-summary">
+    <h2>Science payload</h2>
+    {if hasData($mission.payload)}
+      <p>{$mission.payload.name}: {$mission.payload.samples} samples</p>
+    {else}
+      <p>No payload data available.</p>
+    {/if}
+  </section>
+{/deltemplate}
+
+/** Final closed template verifies the file returns to its root context. */
+{template .footerNote kind="html"}
+  {@param year: int}
+  <small class="footer-note">© {$year} Aurora Operations · 🛰️</small>
+{/template}

@@ -1,0 +1,16 @@
+{
+  "name": "syntaxmate-golden-oracle",
+  "private": true,
+  "description": "Dev-only pinned vscode-textmate + vscode-oniguruma oracle. Not part of release builds; used by tools/golden-dump.mjs and tools/regex-conformance.mjs.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@shikijs/langs": "3.23.0",
+    "@shikijs/themes": "3.23.0",
+    "github-vscode-themes": "6.3.4",
+    "vscode-oniguruma": "1.7.0",
+    "vscode-textmate": "9.2.0"
+  }
+}

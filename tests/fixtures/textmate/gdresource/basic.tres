@@ -1,0 +1,22 @@
+[gd_resource type="Resource" script_class="LaunchProfile" load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://profiles/launch_profile.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://icons/rocket.png" id="2_icon"]
+
+[sub_resource type="Gradient" id="Gradient_sky"]
+offsets = PackedFloat32Array(0, 0.5, 1)
+colors = PackedColorArray(0.03, 0.08, 0.2, 1, 0.2, 0.7, 1, 1, 0.95, 0.55, 0.2, 1)
+
+[resource]
+script = ExtResource("1_script")
+display_name = "Café launch 🚀"
+icon = ExtResource("2_icon")
+enabled = true
+launch_count = 3
+thrust = 1.25e+2
+origin = Vector3(0, 1.5, -4)
+tint = Color(0.2, 0.7, 1, 1)
+checkpoints = PackedVector2Array(0, 0, 32, 16, 64, 8)
+metadata = {"operator": "Zoë", "site": "東京", "verified": true}
+gradient = SubResource("Gradient_sky")
+notes = "Line one\nLine two with λ and 雪"

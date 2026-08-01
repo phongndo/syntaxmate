@@ -1,0 +1,219 @@
+/*
+ * Nebula desktop theme
+ * Unicode coverage: Ελληνικά, 日本語, café, and astral 🚀.
+ */
+
+QWidget {
+    background-color: #20242a;
+    color: rgb(232, 238, 245);
+    font-family: "Noto Sans";
+    font-size: 10pt;
+    widget-animation-duration: 180;
+}
+
+QMainWindow, QDialog, QMessageBox {
+    background: palette(window);
+    selection-background-color: palette(highlight);
+    selection-color: palette(highlighted-text);
+}
+
+QGroupBox::title:enabled {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding-left: 8px;
+    color: hsl(210, 65%, 72%);
+}
+
+QLabel#heroTitle[role="heading"] {
+    color: #aabbccdd;
+    font: bold italic 14pt 'Noto Sans';
+    text-decoration: underline;
+    qproperty-caption: "星雲 Nebula 🚀";
+}
+
+QPushButton, QToolButton, QRadioButton, QCheckBox {
+    min-width: 72px;
+    min-height: 24px;
+    padding: 4px 10px;
+    border: 1px solid darkgray;
+    background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #556677, stop: .45 #445566,
+                                stop: 1 rgba(30, 36, 44, 85%));
+}
+
+QPushButton:hover, QToolButton:hover {
+    color: white;
+    background-color: rgba(80, 130, 240, 75%);
+}
+
+QPushButton:pressed, QToolButton:checked {
+    background-color: hsva(215, 70%, 70%, 90%);
+    border-style: inset;
+}
+
+QPushButton#danger-button:focus {
+    outline: 2px dashed red;
+    outline-offset: 2px;
+    outline-radius: 5px;
+}
+
+QPushButton::menu-indicator {
+    image: url(icons/menu-arrow.png);
+    subcontrol-origin: padding;
+    subcontrol-position: right center;
+    width: 12px;
+    height: 12px;
+}
+
+QCheckBox::indicator:checked, QRadioButton::indicator:on,
+QCheckBox::indicator:unchecked, QRadioButton::indicator:off {
+    image: url(icons/check-on.svg);
+    background-color: blue;
+}
+
+QComboBox[editable="true"]:focus {
+    padding-right: 24px;
+    lineedit-password-character: 9679;
+    lineedit-password-mask-delay: 500;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: 1px solid darkblue;
+}
+
+QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+    background-color: #fff;
+    color: black;
+    border-bottom: 2px solid #6699cc;
+    padding-bottom: 3px;
+    selection-background-color: cyan;
+}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    image: url(icons/up.svg);
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    image: url(icons/down.svg);
+}
+
+QAbstractItemView[alternatingRowColors="true"], QTreeView::branch:has-children:closed,
+QHeaderView::section:horizontal:first {
+    alternate-background-color: #28303a;
+    gridline-color: #3c4652;
+    show-decoration-selected: true;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 14px;
+    margin-top: 14px;
+    margin-bottom: 14px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: rgba(140, 150, 165, 80%);
+    min-height: 24px;
+    border-radius: 7px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 14px;
+    background: none;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+                                stop: 0 green, stop: 1 darkgreen);
+}
+
+QSlider::handle:horizontal:pressed {
+    width: 16px;
+    margin: -6px 0;
+    border-radius: 8px;
+    background-color: #6af;
+}
+
+QDial {
+    background: qconicalgradient(cx: .5, cy: .5, angle: 90,
+                                 stop: 0 magenta, stop: .75 darkmagenta,
+                                 stop: 1 magenta);
+}
+
+QProgressBar::chunk {
+    background: qradialgradient(cx: .5, cy: .5, radius: .8,
+                                fx: .4, fy: .4,
+                                stop: 0 yellow, stop: 1 darkyellow);
+    width: 8px;
+}
+
+QMenuBar::item:selected, QMenu::item:selected {
+    background-color: rgba(70, 110, 180, 90%);
+    color: bright-text;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: midlight;
+    margin-left: 8px;
+    margin-right: 8px;
+}
+
+QMenu::right-arrow, QMenu::left-arrow {
+    image: url(icons/submenu.svg);
+}
+
+QTabWidget::pane {
+    border-top: 2px ridge #567;
+    position: absolute;
+    top: -1px;
+}
+
+QTabBar::tab:selected:only-one {
+    background-color: color1;
+    margin-bottom: 0;
+}
+
+QTabBar::scroller, QToolBox::tab, QSplitter::handle {
+    image-position: center;
+    spacing: 3px;
+}
+
+QDockWidget::close-button:closable, QDockWidget::float-button:floatable {
+    icon-size: 16px;
+    dockwidget-close-icon: url(icons/close.svg);
+    titlebar-normal-icon: url(icons/restore.svg);
+}
+
+QDialogButtonBox {
+    dialogbuttonbox-buttons-have-icons: true;
+    button-layout: 0;
+    dialog-ok-icon: url(icons/ok.svg);
+    dialog-cancel-icon: url(icons/cancel.svg);
+}
+
+QMessageBox {
+    messagebox-text-interaction-flags: 5;
+    titlebar-show-tooltips-on-buttons: on;
+    messagebox-warning-icon: url(icons/warning.svg);
+}
+
+QToolBar:movable, QStatusBar, QSizeGrip, QToolTip {
+    background-attachment: fixed;
+    background-clip: padding;
+    background-origin: content;
+    background-position: bottom right;
+    background-repeat: no-repeat;
+}

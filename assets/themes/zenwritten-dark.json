@@ -1,0 +1,186 @@
+{
+  "name": "Zenwritten Dark",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#191919",
+    "editor.foreground": "#BBBBBB",
+    "editorCursor.foreground": "#C9C9C9",
+    "editor.lineHighlightBackground": "#222222",
+    "editor.findMatchBackground": "#65435E",
+    "statusBar.background": "#303030",
+    "diffEditor.insertedLineBackground": "#232D1A",
+    "diffEditor.removedLineBackground": "#3E2225",
+    "gitDecoration.addedResourceForeground": "#819B69",
+    "gitDecoration.deletedResourceForeground": "#DE6E7C",
+    "gitDecoration.modifiedResourceForeground": "#6099C0"
+  },
+  "tokenColors": [
+    {
+      "name": "Vim Comment",
+      "scope": [
+        "comment"
+      ],
+      "settings": {
+        "fontStyle": "italic",
+        "foreground": "#686868"
+      }
+    },
+    {
+      "name": "Vim Constant",
+      "scope": [
+        "constant",
+        "variable.other.constant"
+      ],
+      "settings": {
+        "fontStyle": "italic",
+        "foreground": "#8B8B8B"
+      }
+    },
+    {
+      "name": "Vim Boolean",
+      "scope": [
+        "constant.language.boolean"
+      ],
+      "settings": {
+        "fontStyle": "italic",
+        "foreground": "#BBBBBB"
+      }
+    },
+    {
+      "name": "Vim String",
+      "scope": [
+        "string"
+      ],
+      "settings": {
+        "fontStyle": "italic",
+        "foreground": "#8B8B8B"
+      }
+    },
+    {
+      "name": "Vim Number",
+      "scope": [
+        "constant.numeric"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#8B8B8B"
+      }
+    },
+    {
+      "name": "Vim Identifier",
+      "scope": [
+        "variable",
+        "support.variable"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#9E9E9E"
+      }
+    },
+    {
+      "name": "Vim Function",
+      "scope": [
+        "entity.name.function",
+        "support.function"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#BBBBBB"
+      }
+    },
+    {
+      "name": "Vim Statement",
+      "scope": [
+        "keyword",
+        "storage",
+        "keyword.operator"
+      ],
+      "settings": {
+        "fontStyle": "bold",
+        "foreground": "#BBBBBB"
+      }
+    },
+    {
+      "name": "Vim PreProc",
+      "scope": [
+        "meta.preprocessor",
+        "keyword.control.import"
+      ],
+      "settings": {
+        "fontStyle": "bold",
+        "foreground": "#BBBBBB"
+      }
+    },
+    {
+      "name": "Vim Type",
+      "scope": [
+        "entity.name.type",
+        "entity.name.class",
+        "support.type",
+        "support.class"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#969696"
+      }
+    },
+    {
+      "name": "Vim Special",
+      "scope": [
+        "constant.character.escape",
+        "support.constant",
+        "support.type.property-name"
+      ],
+      "settings": {
+        "fontStyle": "bold",
+        "foreground": "#939393"
+      }
+    },
+    {
+      "name": "Vim Delimiter",
+      "scope": [
+        "punctuation"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#7C7C7C"
+      }
+    },
+    {
+      "name": "Vim Added",
+      "scope": [
+        "markup.inserted"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#819B69"
+      }
+    },
+    {
+      "name": "Vim Removed",
+      "scope": [
+        "markup.deleted"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#DE6E7C"
+      }
+    },
+    {
+      "name": "Vim Changed",
+      "scope": [
+        "markup.changed"
+      ],
+      "settings": {
+        "fontStyle": "",
+        "foreground": "#6099C0"
+      }
+    }
+  ],
+  "markSource": {
+    "repository": "https://github.com/zenbones-theme/zenbones.nvim",
+    "commit": "8304d8df9b823ff11e103afa62f38c39f534abe6",
+    "path": "colors/zenwritten.vim",
+    "background": "dark"
+  }
+}

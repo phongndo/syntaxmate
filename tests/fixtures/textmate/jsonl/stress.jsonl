@@ -1,0 +1,150 @@
+{"event":"request.received","request_id":"req-0001","method":"GET","path":"/v1/users/42","at":"2026-07-12T09:00:00.001Z"}
+{"event":"request.completed","request_id":"req-0001","status":200,"duration_ms":18.42,"bytes":7421,"cached":false}
+{"event":"request.received","request_id":"req-0002","method":"POST","path":"/v1/search","query":{"text":"café near 東京","limit":25},"at":"2026-07-12T09:00:01.104Z"}
+{"event":"request.completed","request_id":"req-0002","status":201,"duration_ms":47.8,"bytes":1204,"cached":null}
+{"event":"auth.denied","request_id":"req-0003","reason":"expired_token","principal":null,"retryable":false}
+{"event":"rate_limit.checked","request_id":"req-0004","quota":{"limit":1000,"remaining":998,"reset_s":58},"allowed":true}
+{"event":"proxy.forwarded","request_id":"req-0005","upstream":"api-eu-2","attempts":[{"n":1,"status":503},{"n":2,"status":200}]}
+{"event":"response.sent","request_id":"req-0005","headers":{"content-type":"application/json","x-trace-id":"7f3a9c"},"status":200}
+{"event":"request.failed","request_id":"req-0006","error":{"code":"E_CONNRESET","message":"peer closed connection","stack":null},"duration_ms":-0.0}
+{"event":"health.sample","service":"gateway","healthy":true,"latency_ms":0.875,"load":6.4e-1,"sequence":9007199254740991}
+{"kind":"user.created","id":"usr_01J2A","name":"Miyuki 佐藤","email":"miyuki@example.test","verified":true}
+{"kind":"user.updated","id":"usr_01J2A","changes":{"display_name":{"from":"Miyuki","to":"みゆき 🌸"},"timezone":{"from":"UTC","to":"Asia/Tokyo"}}}
+{"kind":"user.created","id":"usr_01J2B","name":"Óscar Núñez","email":"oscar@example.test","verified":false}
+{"kind":"user.preferences","id":"usr_01J2B","preferences":{"theme":"dark","locale":"es-MX","digest":null,"channels":["email","push"]}}
+{"kind":"user.deleted","id":"usr_01J2C","hard":false,"reason":"requested","retention_days":30}
+{"kind":"session.started","session_id":"ses-a81","user_id":"usr_01J2A","device":{"family":"mobile","os":"iOS","trusted":true}}
+{"kind":"session.refreshed","session_id":"ses-a81","expires_in":3.6e3,"scopes":["profile:read","posts:write"]}
+{"kind":"session.ended","session_id":"ses-a81","duration_s":1842,"cause":"logout"}
+{"kind":"profile.imported","id":"usr_01J2D","bio":"Line one\nLine two\twith tab","website":"https:\/\/例え.test\/~user"}
+{"kind":"identity.linked","id":"usr_01J2D","providers":[{"name":"github","uid":4815},{"name":"oidc","uid":"00u-ßeta"}],"primary":"oidc"}
+{"metric":"cpu.utilization","host":"edge-01","value":0.73125,"unit":"ratio","tags":{"region":"eu-west-1","arch":"arm64"}}
+{"metric":"memory.used","host":"edge-01","value":8589934592,"unit":"bytes","capacity":17179869184}
+{"metric":"disk.free","host":"edge-02","mount":"/var/lib/data","value":1.099511627776e12,"unit":"bytes"}
+{"metric":"temperature","sensor":"rack-7/top","value":-4.25,"unit":"°C","calibrated":true}
+{"metric":"requests.total","service":"checkout","value":120045,"unit":"count","window_s":60}
+{"metric":"queue.depth","queue":"email-outbound","value":0,"unit":"messages","oldest_age_s":null}
+{"metric":"network.rx","interface":"eth0","samples":[1204,985,1107,0,2048],"unit":"bytes/s"}
+{"metric":"percentiles","name":"db.query","values":{"p50":2.1,"p90":7.75,"p99":31.004},"unit":"ms"}
+{"metric":"coordinates","satellite":"🛰️-7","position":{"x":-1.2345E+6,"y":6.789e5,"z":0.001},"frame":"ECEF"}
+{"metric":"counter.delta","name":"cache.evictions","before":4294967295,"after":3,"delta":-4294967292,"reset":true}
+{"order_id":"ord-10001","customer":{"id":"cus-17","tier":"gold"},"currency":"USD","subtotal":89.5,"tax":7.16,"total":96.66}
+{"order_id":"ord-10002","customer":{"id":"cus-18","tier":null},"currency":"EUR","items":[],"subtotal":0,"total":0}
+{"order_id":"ord-10003","items":[{"sku":"BOOK-λ","qty":2,"price":14.95},{"sku":"PEN-BLUE","qty":3,"price":1.25}],"discount":5}
+{"order_id":"ord-10004","shipping":{"name":"Zoë Faßbinder","city":"München","postal":"80331","country":"DE"},"gift":false}
+{"order_id":"ord-10005","shipping":{"name":"李雷","city":"北京市","postal":"100000","country":"CN"},"gift":true,"message":"生日快乐 🎂"}
+{"order_id":"ord-10006","payment":{"provider":"card","last4":"0042","authorized":true,"risk_score":2.5e-3},"status":"paid"}
+{"order_id":"ord-10007","payment":{"provider":"bank","authorized":false,"failure":{"code":"DECLINED","detail":null}},"status":"pending"}
+{"order_id":"ord-10008","refunds":[{"id":"ref-1","amount":12.5,"reason":"damaged"},{"id":"ref-2","amount":3,"reason":"postage"}],"status":"partially_refunded"}
+{"order_id":"ord-10009","dimensions_cm":{"length":12.4,"width":8.0,"height":0.75},"weight_kg":1.2E-1,"fragile":true}
+{"order_id":"ord-10010","timeline":[{"state":"created","at":"2026-07-10T12:00:00Z"},{"state":"shipped","at":"2026-07-11T08:30:00Z"},{"state":"delivered","at":null}]}
+{"level":"info","logger":"scheduler","message":"job started","context":{"job":"daily-rollup","run":4815162342}}
+{"level":"warn","logger":"scheduler","message":"job exceeded soft limit","elapsed_s":301.5,"limit_s":300}
+{"level":"error","logger":"worker","message":"cannot open \"report.csv\"","error":{"errno":13,"name":"EACCES"}}
+{"level":"debug","logger":"parser","message":"escape sample: \\ \" \/ \b \f \n \r \t","enabled":true}
+{"level":"info","logger":"unicode","message":"BMP: Ångström Ω Ж 中 한글","normalized":"NFC"}
+{"level":"info","logger":"unicode","message":"Astral: 😀 𐍈 𝄞 🧑🏽‍💻","utf16_units":23}
+{"level":"trace","logger":"lexer","token":{"kind":"string","lexeme":"\uD834\uDD1E","range":[104,116]},"next":null}
+{"level":"fatal","logger":"database","message":"primary unavailable","hosts":["db-a","db-b","db-c"],"attempt":3}
+{"level":"info","logger":"backup","message":"snapshot complete","size_bytes":7.205759403792794e16,"ratio":9.87E-1}
+{"level":"notice","logger":"audit","message":"field was redacted","fields":{"password":"***","token":null},"actor":"system"}
+{"repo":"mark","commit":"a1b2c3d","branch":"main","author":{"name":"Ada","email":"ada@example.test"},"signed":true}
+{"repo":"mark","commit":"b2c3d4e","branch":"feature/jsonl","subject":"Add JSON Lines fixture","parents":["a1b2c3d"]}
+{"repo":"mark","commit":"c3d4e5f","branch":"fix\/windows-path","subject":"Handle C:\\tmp\\data.jsonl","files":4}
+{"repo":"syntax","commit":"d4e5f6a","branch":"release/v2","stats":{"additions":120,"deletions":-18,"files":7}}
+{"repo":"syntax","commit":"e5f6a7b","branch":"main","checks":[{"name":"lint","ok":true},{"name":"test","ok":true},{"name":"coverage","ok":null}]}
+{"repo":"docs","commit":"f6a7b8c","subject":"Translate guide to Ελληνικά","labels":["documentation","i18n","good first issue"]}
+{"repo":"mobile","commit":"07b8c9d","subject":"Support foldable 📱","build":{"number":2048,"variant":"beta","min_sdk":28}}
+{"repo":"infra","commit":"18c9d0e","subject":"Scale workers","deployment":{"from":3,"to":12,"regions":["iad","fra","sin"]}}
+{"repo":"web","commit":"29d0e1f","subject":"Fix <script> rendering","review":{"approvals":2,"changes_requested":false}}
+{"repo":"api","commit":"3ae1f20","subject":"Deprecate v1","trailers":{"breaking-change":"clients must use v2","ticket":"API-900"}}
+{"sensor_id":"weather-001","observed_at":"2026-07-12T10:00:00Z","temperature_c":21.75,"humidity":0.62,"condition":"partly cloudy"}
+{"sensor_id":"weather-002","observed_at":"2026-07-12T10:00:05Z","temperature_c":-12,"humidity":0.15,"condition":"clear"}
+{"sensor_id":"weather-003","observed_at":"2026-07-12T10:00:10Z","temperature_c":35.125,"humidity":1.0,"condition":"rain","rain_mm":4.8}
+{"sensor_id":"buoy-α","position":{"lat":37.7749,"lon":-122.4194},"wave_m":2.3,"battery":7.5e-1}
+{"sensor_id":"quake-17","position":{"lat":-33.8688,"lon":151.2093,"depth_km":10.25},"magnitude":4.2,"reviewed":false}
+{"sensor_id":"lab-μ","channels":{"a":[0.001,0.002,0.003],"b":[-1,-0.5,0]},"saturated":false}
+{"sensor_id":"garden-🌱","soil":{"moisture":0.44,"ph":6.8,"ec":1.2},"valve":{"open":true,"seconds":45}}
+{"sensor_id":"air-009","pollutants":{"pm2_5":12.4,"pm10":21,"no2":8.2e-3},"aqi":42}
+{"sensor_id":"power-7","phases":[{"v":230.1,"a":5.2},{"v":229.8,"a":5.1},{"v":231,"a":0}],"frequency_hz":50}
+{"sensor_id":"gps-42","fix":null,"satellites":0,"hdop":9.99E+2,"last_position":{"lat":0,"lon":0}}
+{"type":"feature","geometry":{"type":"Point","coordinates":[-73.9857,40.7484]},"properties":{"name":"Empire State Building","height_m":381}}
+{"type":"feature","geometry":{"type":"LineString","coordinates":[[0,0],[1.5,2.25],[-3,4]]},"properties":{"road":"B42","open":true}}
+{"type":"feature","geometry":{"type":"Polygon","coordinates":[[[0,0],[10,0],[10,10],[0,10],[0,0]]]},"properties":{"area":100}}
+{"type":"feature","geometry":null,"properties":{"name":"unlocated asset","reason":"awaiting survey"}}
+{"type":"place","id":"loc-tokyo","names":{"ja":"東京","en":"Tokyo","fr":"Tōkyō"},"population":14094034}
+{"type":"place","id":"loc-reykjavik","names":{"is":"Reykjavík"},"position":{"lat":64.1466,"lon":-21.9426}}
+{"type":"route","id":"r-17","waypoints":[{"name":"A","xy":[0,0]},{"name":"B","xy":[3,4]}],"distance":5}
+{"type":"tile","z":18,"x":154321,"y":197654,"bounds":[-180,-85.0511,180,85.0511]}
+{"type":"projection","name":"Web Mercator","epsg":3857,"parameters":{"central_meridian":0,"scale":1}}
+{"type":"collection","bbox":[-10.5,-5.25,20.75,40.125],"features":[],"complete":false}
+{"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7","operation":"GET /cart","duration_ns":8200000}
+{"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"b7ad6b7169203331","parent":"00f067aa0ba902b7","operation":"redis.get","duration_ns":410000}
+{"trace_id":"70f5c2","span_id":"db-01","operation":"SELECT","attributes":{"db.system":"postgresql","db.rows":17,"db.statement":null}}
+{"trace_id":"70f5c2","span_id":"http-02","operation":"POST https:\/\/payments.example\/charge","status":{"code":"ERROR","message":"timeout"}}
+{"trace_id":"8ac91e","span_id":"render-1","operation":"template.render","events":[{"name":"start","t":0},{"name":"compiled","t":1.75},{"name":"finish","t":2.1}]}
+{"trace_id":"8ac91e","span_id":"render-2","operation":"emoji.shape","attributes":{"text":"👩‍🚀","graphemes":1,"utf16_units":5}}
+{"trace_id":"9bd02f","span_id":"queue-1","operation":"publish","links":[{"trace_id":"upstream-1","span_id":"producer-4"}],"sampled":true}
+{"trace_id":"9bd02f","span_id":"queue-2","operation":"consume","baggage":{"tenant":"north","priority":"high"},"sampled":false}
+{"trace_id":"ace130","span_id":"compute","operation":"vector.sum","attributes":{"input":[1e-9,2E+9,-3.5],"output":1999999996.5}}
+{"trace_id":"bdf241","span_id":"root","operation":"nightly","children":[],"status":{"code":"OK","message":""}}
+{"document_id":"doc-001","title":"JSON Lines Handbook","revision":7,"published":true,"keywords":["JSON","streaming","records"]}
+{"document_id":"doc-002","title":"Unicode — from Ω to 🚀","revision":12,"published":false,"author":"София"}
+{"document_id":"doc-003","title":"Quoted \"phrases\" and backslashes \\ everywhere","revision":1,"published":null}
+{"document_id":"doc-004","title":"Control escapes","excerpt":"first\nsecond\r\nthird\tindented\fpage\bX","bytes":41}
+{"document_id":"doc-005","title":"Escaped code points","excerpt":"\u0041\u00DF\u6771\uD83D\uDE80","encoding":"UTF-8"}
+{"document_id":"doc-006","sections":[{"heading":"Intro","words":120},{"heading":"Details","words":840},{"heading":"End","words":0}],"complete":true}
+{"document_id":"doc-007","metadata":{"license":{"id":"CC-BY-4.0","url":"https:\/\/creativecommons.org\/licenses\/by\/4.0\/"}},"attachments":[]}
+{"document_id":"doc-008","translations":{"en":{"title":"Water"},"ar":{"title":"ماء"},"hi":{"title":"पानी"}},"rtl":true}
+{"document_id":"doc-009","annotations":[{"range":[0,4],"kind":"bold"},{"range":[5,12],"kind":"link","target":"#ref"}],"valid":true}
+{"document_id":"doc-010","custom":{"line\nbreak":"escaped key","quote\"key":"value","snowman\u2603":"☃"},"revision":-1}
+{"job_id":"job-100","task":"thumbnail","input":{"bucket":"media","key":"images/été/海.png"},"attempt":1,"priority":10}
+{"job_id":"job-101","task":"email","input":{"to":["a@example.test","b@example.test"],"template":"welcome"},"attempt":2,"priority":5}
+{"job_id":"job-102","task":"cleanup","input":{},"attempt":0,"scheduled_at":null,"priority":-10}
+{"job_id":"job-103","task":"transcode","progress":{"frames":18421,"total":50000,"ratio":0.36842},"cancelled":false}
+{"job_id":"job-104","task":"simulation","parameters":{"seed":18446744073709551615,"epsilon":2.220446049250313e-16},"deterministic":true}
+{"job_id":"job-105","task":"archive","chunks":[{"part":1,"bytes":1048576},{"part":2,"bytes":1048576},{"part":3,"bytes":17}],"compressed":true}
+{"job_id":"job-106","task":"notify","result":{"delivered":false,"code":429,"retry_after_s":30},"next_attempt":3}
+{"job_id":"job-107","task":"index","result":{"documents":90210,"terms":7.1E+6,"duration_s":82.04},"warnings":[]}
+{"job_id":"job-108","task":"render","worker":"gpu-🎨","resources":{"cpu":2,"memory_mb":4096,"gpu":1},"labels":{"tier":"batch"}}
+{"job_id":"job-109","task":"reconcile","dependencies":["job-100","job-101","job-102"],"state":"blocked","result":null}
+{"message_id":"msg-001","room":"general","sender":"alice","text":"Hello, world!","mentions":[]}
+{"message_id":"msg-002","room":"general","sender":"bob","text":"Ship it 🚀","reactions":{"👍":3,"🎉":1}}
+{"message_id":"msg-003","room":"国际化","sender":"chloé","text":"Bonjour à toutes et à tous","edited":true}
+{"message_id":"msg-004","room":"dev","sender":"dana","text":"Use `\"quoted\"` JSON strings and \\ escapes","thread":null}
+{"message_id":"msg-005","room":"dev","sender":"eli","text":"first line\nsecond line\t(tab)","attachments":[{"name":"log.txt","size":2048}]}
+{"message_id":"msg-006","room":"music","sender":"𝄞","text":"Now playing: Symphony № 5","duration_s":1980.5}
+{"message_id":"msg-007","room":"games","sender":"player𐍈","text":"score update","score":-2147483648,"lives":0}
+{"message_id":"msg-008","room":"support","sender":"agent-7","text":"See https:\/\/example.test\/help?q=jsonl","resolved":false}
+{"message_id":"msg-009","room":"ops","sender":"bot","text":"deploy complete","cards":[{"title":"production","facts":{"nodes":12,"healthy":12}}]}
+{"message_id":"msg-010","room":"random","sender":"eve","text":"Escaped emoji: \uD83D\uDE03; literal: 😃","flags":{"pinned":false,"silent":true}}
+{"experiment":"search-ranking","variant":"control","subject":"anon-001","outcome":{"clicked":true,"rank":1,"dwell_s":12.8}}
+{"experiment":"search-ranking","variant":"treatment-a","subject":"anon-002","outcome":{"clicked":false,"rank":null,"dwell_s":0}}
+{"experiment":"checkout-copy","variant":"B","subject":"anon-003","outcome":{"converted":true,"revenue":129.99},"currency":"GBP"}
+{"experiment":"color-contrast","variant":"high","subject":"anon-004","outcome":{"score":4.5,"responses":[5,4,5,4]}}
+{"experiment":"compression","variant":"zstd","subject":"file-005","outcome":{"before":10485760,"after":3145728,"ratio":0.3}}
+{"experiment":"numeric-edge","variant":"exponents","values":[1e0,1E+10,-1e-10,9.999999e99],"finite":true}
+{"experiment":"empty-shapes","variant":"baseline","values":[{},[],"",null,false,0],"accepted":true}
+{"experiment":"nested-arrays","variant":"grid","values":[[[1],[2,3]],[[4,5,6]]],"dimensions":[2,2,null]}
+{"experiment":"key-escapes","variant":"syntax","values":{"solidus\/":"slash","backslash\\":"reverse","unicode\u03BB":"lambda"}}
+{"experiment":"unicode-literals","variant":"coverage","values":{"bmp":"é Ω 中","astral":"🚀 𐍈 𝄞","combined":"é"}}
+{"audit_id":"aud-001","actor":{"type":"user","id":"u-7"},"action":"file.read","resource":"/reports/Q2.jsonl","allowed":true}
+{"audit_id":"aud-002","actor":{"type":"service","id":"backup"},"action":"file.write","resource":"s3://archive/2026/07","allowed":true}
+{"audit_id":"aud-003","actor":null,"action":"login.failed","source_ip":"2001:db8::1","allowed":false,"reason":"unknown user"}
+{"audit_id":"aud-004","actor":{"type":"admin","id":"root"},"action":"policy.update","diff":{"added":["read"],"removed":["delete"]}}
+{"audit_id":"aud-005","actor":{"type":"user","id":"u-8"},"action":"secret.view","resource":"vault://prod/key","allowed":false,"risk":0.999}
+{"audit_id":"aud-006","actor":{"type":"robot","id":"🤖"},"action":"maintenance.start","window":{"from":"02:00","to":"02:15"},"approved":true}
+{"audit_id":"aud-007","actor":{"type":"user","id":"u-9"},"action":"name.change","before":"José","after":"ホセ","allowed":true}
+{"audit_id":"aud-008","actor":{"type":"system","id":"kernel"},"action":"clock.adjust","delta_ns":-450000,"automatic":true}
+{"audit_id":"aud-009","actor":{"type":"service","id":"export"},"action":"record.skip","record":1842,"reason":"field \"id\" missing"}
+{"audit_id":"aud-010","actor":{"type":"service","id":"retention"},"action":"records.purge","count":6.7e4,"dry_run":false}
+{"batch":"import-20260712","row":1,"data":{"sku":"A-1","quantity":4,"price":9.99},"errors":[]}
+{"batch":"import-20260712","row":2,"data":{"sku":"B-2","quantity":0,"price":0},"errors":[{"field":"quantity","code":"MINIMUM"}]}
+{"batch":"import-20260712","row":3,"data":{"sku":null,"quantity":-2,"price":1e2},"errors":[{"field":"sku","code":"REQUIRED"},{"field":"quantity","code":"NEGATIVE"}]}
+{"batch":"import-20260712","row":4,"data":{"sku":"λ-4","quantity":1,"price":12.3456},"errors":null}
+{"batch":"import-20260712","row":5,"data":{"sku":"🚲-5","quantity":2,"price":750},"warnings":["oversize"],"accepted":true}
+{"batch":"import-20260712","row":6,"data":{"sku":"C\\6","quantity":6,"price":0.06},"checksum":"sha256:00ff"}
+{"batch":"import-20260712","row":7,"data":{"sku":"D\"7","quantity":7,"price":7E+7},"checksum":null}
+{"batch":"import-20260712","row":8,"data":{"sku":"E/8","quantity":8,"price":8e-8},"source":{"file":"part-01.jsonl","line":8}}
+{"batch":"import-20260712","row":9,"data":{"sku":"F-9","quantity":9,"price":9.0},"source":{"file":"part-01.jsonl","line":9},"accepted":false}
+{"batch":"import-20260712","row":10,"summary":{"read":10,"accepted":7,"rejected":3,"duration_s":0.045},"complete":true}

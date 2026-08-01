@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "oracle": {
+    "vscodeTextmate": "9.2.0",
+    "vscodeOniguruma": "1.7.0",
+    "semanticHighlighting": false
+  },
+  "theme": "github-dark-high-contrast",
+  "fixtureFiles": 546,
+  "publicLanguages": 264,
+  "fixtureLanguageLabels": 265,
+  "fixtureTokens": 466480,
+  "uniqueScopeStacks": 60901,
+  "mismatches": []
+}

@@ -1,0 +1,230 @@
+# Broad GN syntax fixture: scopes, calls, targets, interpolation, and Unicode.
+import("//build/config/compiler/compiler.gni")
+import("//build/config/rust.gni")
+
+declare_args() {
+  enable_feature = true
+  enable_plugins = false
+  max_jobs = 8
+  retry_offset = -2
+  product_name = "Mark café 東京 🚀 𝌆"
+  optional_backend = "builtin"
+}
+
+assert(max_jobs >= 1, "max_jobs must be positive")
+assert(optional_backend != "", "a backend is required")
+
+build_metadata = {
+  owner = "syntax@example.test"
+  channel = "nightly"
+  unicode_label = "café/東京/🚀/𝌆"
+}
+
+common_sources = [
+  "app/main.cc",
+  "app/runtime.cc",
+  "app/text_café.cc",
+]
+platform_sources = [ "app/portable.cc" ]
+
+if (current_os == "linux" || current_os == "android") {
+  platform_sources += [ "app/posix.cc" ]
+} else if (current_os == "win") {
+  platform_sources += [ "app/win.cc" ]
+} else {
+  platform_sources += [ "app/fallback.cc" ]
+}
+
+all_sources = common_sources + platform_sources
+all_sources -= [ "app/obsolete.cc" ]
+headers = filter_include(all_sources, [ "*.h", "*.cc" ])
+non_tests = filter_exclude(all_sources, [ "*_test.cc" ])
+source_names = process_file_template(non_tests, [ "{{source_name_part}}" ])
+joined_names = string_join(",", source_names)
+split_backend = string_split(optional_backend, ":")
+normalized_name = string_replace(product_name, " ", "_")
+
+config("warnings") {
+  cflags = [ "-Wall", "-Wextra" ]
+  cflags_cc = [ "-Wold-style-cast" ]
+  if (is_clang) {
+    cflags += [ "-Wthread-safety" ]
+  }
+}
+
+config("feature_flags") {
+  defines = [
+    "PRODUCT_NAME=\"${product_name}\"",
+    "OWNER=\"${build_metadata.owner}\"",
+  ]
+  if (enable_feature) {
+    defines += [ "ENABLE_FEATURE=1" ]
+  } else {
+    defines += [ "ENABLE_FEATURE=0" ]
+  }
+}
+
+config("paths") {
+  include_dirs = [
+    "include",
+    "$root_gen_dir/include",
+  ]
+  lib_dirs = [ "$root_out_dir/lib" ]
+  libs = [ "m" ]
+}
+
+pool("slow_actions") {
+  depth = 2
+}
+
+template("unicode_component") {
+  assert(defined(invoker.sources), "sources are required for $target_name")
+  source_set(target_name) {
+    forward_variables_from(invoker,
+                           "*",
+                           [ "extra_defines", "public_configs" ])
+    configs += [
+      ":warnings",
+      ":feature_flags",
+      ":paths",
+    ]
+    if (defined(invoker.extra_defines)) {
+      defines += invoker.extra_defines
+    }
+    output_name = "${target_name}_unicode"
+  }
+}
+
+unicode_component("core") {
+  sources = all_sources
+  extra_defines = [
+    "CAFÉ_TEXT=1",
+    "TOKYO_TEXT=1",
+  ]
+  public = [ "include/core/api.h" ]
+}
+
+action("generate_version") {
+  script = "//tools/generate_version.py"
+  inputs = [ "//VERSION" ]
+  outputs = [ "$target_gen_dir/generated/version.h" ]
+  args = [
+    "--input=" + rebase_path(inputs[0], root_build_dir),
+    "--output=" + rebase_path(outputs[0], root_build_dir),
+    "--name=$normalized_name",
+    "--literal-dollar=\$HOME",
+    "--quote=\"GN\"",
+    "--slash=\\",
+    "--line=$0x0A",
+  ]
+  pool = ":slow_actions"
+}
+
+action_foreach("compile_schema") {
+  script = "//tools/compile_schema.py"
+  sources = [
+    "schemas/app.json",
+    "schemas/東京.json",
+  ]
+  outputs = [ "$target_gen_dir/{{source_name_part}}.cc" ]
+  args = [
+    "{{source}}",
+    "{{output}}",
+    "--jobs=$max_jobs",
+  ]
+  deps = [ ":generate_version" ]
+}
+
+copy("copy_resources") {
+  sources = [
+    "resources/café.txt",
+    "resources/東京.txt",
+    "resources/rocket-🚀.txt",
+    "resources/tetragram-𝌆.txt",
+  ]
+  outputs = [ "$target_out_dir/resources/{{source_file_part}}" ]
+}
+
+generated_file("source_manifest") {
+  outputs = [ "$target_gen_dir/sources.json" ]
+  data = source_names
+  output_conversion = "json"
+  deps = [ ":core" ]
+}
+
+bundle_data("sample_bundle_data") {
+  sources = [ "resources/app.icns" ]
+  outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
+}
+
+source_set("plugin_api") {
+  sources = [ "plugins/api.cc" ]
+  public = [ "plugins/api.h" ]
+  visibility = [ ":*" ]
+  testonly = false
+}
+
+foreach(plugin, [ "audio", "video", "東京" ]) {
+  source_set("${plugin}_plugin") {
+    sources = [ "plugins/${plugin}.cc" ]
+    deps = [ ":plugin_api" ]
+    defines = [ "PLUGIN_NAME=\"$plugin\"" ]
+    if (!enable_plugins) {
+      visibility = [ ":disabled_plugins" ]
+    }
+  }
+}
+
+group("disabled_plugins") {
+  deps = []
+  if (enable_plugins) {
+    deps += [
+      ":audio_plugin",
+      ":video_plugin",
+      ":東京_plugin",
+    ]
+  }
+}
+
+executable("mark_app") {
+  sources = [ "app/entry.cc" ]
+  deps = [
+    ":compile_schema",
+    ":copy_resources",
+    ":core",
+    ":generate_version",
+  ]
+  public_deps = [ ":plugin_api" ]
+  configs += [ ":feature_flags" ]
+  ldflags = [ "-Wl,--as-needed" ]
+  output_dir = "$root_out_dir/bin"
+  output_name = "mark-$target_cpu"
+}
+
+rust_library("rust_bridge") {
+  crate_name = "mark_bridge"
+  crate_root = "rust/lib.rs"
+  sources = [
+    "rust/lib.rs",
+    "rust/ffi.rs",
+  ]
+  rustflags = [ "--cfg=gn_build" ]
+  deps = [ ":core" ]
+}
+
+group("all") {
+  deps = [
+    ":mark_app",
+    ":rust_bridge",
+    ":source_manifest",
+  ]
+}
+# Calls and comparisons that commonly appear in build selection logic.
+toolchain_cpu = get_label_info(current_toolchain, "target_cpu")
+app_dir = get_path_info("app/main.cc", "dir")
+expected_outputs = get_target_outputs(":generate_version")
+is_supported = label_matches(":mark_app", [ ":*" ])
+if (max_jobs <= 16 && max_jobs > retry_offset && is_supported) {
+  print("building $product_name from $app_dir for $toolchain_cpu")
+  print("outputs: $expected_outputs")
+}

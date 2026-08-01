@@ -1,0 +1,213 @@
+module observatory.fixture
+
+/* Observatory configuration stress fixture.
+ * BMP text: naïve café, λ, Ж, 中.
+ * Astral text: 🪐 🚀 𐐀.
+ */
+
+import "pkl:math"
+import "pkl:reflect"
+import "./shared/telemetry.pkl"
+
+@ModuleInfo { minPklVersion = "0.25.0" }
+open class Entity {
+  fixed id: String
+  hidden localLabel: String = "entity"
+}
+
+abstract class Sensor extends Entity {
+  abstract reading: Number
+  external calibrated: Boolean
+}
+
+class Gauge<out Value> extends Sensor {
+  value: Value
+  reading: Number = 0
+}
+
+class Sink<in Value> {
+  accepted: Value?
+}
+
+typealias Identifier = String
+typealias MaybeNumber = Int | Float | null
+typealias Handler = (String, Int) -> Boolean
+typealias GaugeOrSink = Gauge<Int> | Sink<Int>?
+
+const schemaVersion = 7
+fixed title: String = "Sky Ledger"
+hidden internalCode = 0xCA_FE
+local defaultLimit = 1_024
+external environmentName: String
+
+unicodeBmp = "café λ Ж 中"
+unicodeAstral = "planets 🪐, rocket 🚀, letter 𐐀"
+λvalue = 3.141_592
+中counter = 0b1010_0011
+𐐀value = 0o755
+
+decimalZero = 0
+decimalGrouped = 9_223_372_036
+hexLower = 0xdead_beef
+hexUpper = 0XCAFE
+binary = 0b1101_0010
+octal = 0o644
+fraction = 12.50
+leadingFraction = .625
+scientific = 6.022_140_76e23
+signedExponent = 1E-9
+
+truth = true
+falsehood = false
+absence = null
+bottom: never
+mystery: unknown
+acceptsAnything = mystery is unknown
+acceptsNothing = mystery is never
+
+function clamp(value: Float, low: Float, high: Float): Float =
+  if (value < low) low else if (value > high) high else value
+
+function classify(value: Int): String =
+  let (normalized = value ?? 0) if (normalized >= 90) "excellent" else "review"
+
+function castReading(value: unknown): Number = value as Number
+function requireName(value: String?): String = value!!
+function safeName(value: String?): String = value ?? "anonymous"
+function pipeline(value: Int): Int = value |> (it -> it + 1)
+
+operators = new Dynamic {
+  add = 8 + 5
+  subtract = 8 - 5
+  multiply = 8 * 5
+  divide = 8 / 5
+  truncate = 8 ~/ 5
+  modulo = 8 % 5
+  power = 2 ** 8
+  compare = 8 >= 5 && 5 <= 8
+  equality = 8 == 8 || 8 != 5
+  negated = !false
+}
+
+references = new Dynamic {
+  current = this
+  parent = outer
+  inherited = super
+  namespace = module
+}
+
+escaped = "quote \" slash \\ newline\n tab\t return\r λ=\u{03bb} \(title)"
+raw0 = "ordinary \(schemaVersion)"
+raw1 = #"one hash: "quoted", \n literal, interpolate \#(title)"#
+raw2 = ##"two hashes: #"inside"#, interpolate \##(schemaVersion)"##
+raw3 = ###"three hashes: ##"inside"##, newline \###n"###
+raw4 = ####"four hashes: ###"inside"###, tab \####t"####
+raw5 = #####"five hashes: ####"inside"####, quote \#####""#####
+raw6 = ######"six hashes: #####"inside"#####, newline \######n, rocket 🚀"######
+
+multiline0 = """
+  Ordinary multiline text.
+  Interpolation: \(title); escape: \n.
+  Unicode: café 中 🪐.
+  """
+
+multiline1 = #"""
+  Raw level one keeps \n literal.
+  It can interpolate with \#(title).
+  """#
+
+multiline2 = ##"""
+  Raw level two contains #"quoted"#.
+  Escape recognized here: \##t.
+  """##
+
+multiline3 = ###"""
+  Raw level three contains ##"quoted"##.
+  Interpolation: \###(schemaVersion).
+  """###
+
+multiline4 = ####"""
+  Raw level four contains ###"quoted"###.
+  BMP λ and astral 𐐀 remain text.
+  """####
+
+multiline5 = #####"""
+  Raw level five contains ####"quoted"####.
+  Backslashes \path\to\stars stay raw.
+  """#####
+
+multiline6 = ######"""
+  Raw level six contains #####"quoted"#####.
+  Final multiline raw value 🚀.
+  """######
+
+/* A second block comment spans lines.
+   Delimiter-like stars ** and slashes // are harmless here.
+*/
+
+readText = read("file:notes.txt")
+optionalText = read?("env:OPTIONAL_NOTE")
+nullableText = read??("prop:possiblyMissing")
+debugged = trace("schema", schemaVersion)
+
+function validate(value: Int): Int =
+  if (value < 0) throw("negative reading") else value
+
+sourceUri = import("./shared/source.pkl")
+typedSensor = new Gauge<Int> {
+  id = "sensor-01"
+  value = 42
+  calibrated = true
+}
+
+dynamicSensor = new {
+  name = "aurora"
+  `display-name` = "Aurora λ"
+  ["emoji-🚀"] = "launch"
+  [schemaVersion] = title
+}
+
+targets = new Listing {
+  "Mercury"
+  "Vénus"
+  "地球"
+  "Mars 🪐"
+}
+
+indexedTargets = new Mapping {
+  for (index, target in targets) {
+    [index] = target
+  }
+}
+
+visibleTargets = new Listing {
+  for (target in targets) {
+    when (target != "Mercury") {
+      target
+    }
+  }
+}
+
+settings {
+  endpoint = "https://example.invalid/api"
+  timeout: Int = 30
+  retry {
+    maximum = 4
+    delay = 1.5
+  }
+}
+
+amended = (new Dynamic {
+  alpha = 1
+  beta = 2
+}) {
+  beta = 20
+  gamma = 30
+}
+
+annotationValue = @Deprecated { message = "fixture only" }
+qualified = math.pi
+safeAccess = dynamicSensor.?missing
+rangeLike = new Listing { 1; 2; 3 }
+
+finalSummary = "\(title): \(targets.length) targets; module=\(module)"

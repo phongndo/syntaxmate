@@ -1,0 +1,150 @@
+# Repository-wide fallback; later matching rules take precedence
+* @northstar/core-maintainers
+
+# Repository administration
+/.github/ @northstar/developer-experience
+/.github/CODEOWNERS @northstar/developer-experience @northstar/security
+/.github/ISSUE_TEMPLATE/ @northstar/community
+/.github/dependabot.yml @northstar/supply-chain
+/.github/workflows/ @northstar/release-engineering @northstar/security
+/.github/workflows/mobile-*.yml @northstar/mobile-release
+/.github/actions/** @northstar/developer-experience
+/CODE_OF_CONDUCT.md @northstar/community
+/CONTRIBUTING.md @northstar/developer-experience
+/SECURITY.md @northstar/security security@example.com
+/LICENSE* @northstar/legal
+
+# Build systems and workspace metadata
+/Makefile @northstar/build-infrastructure
+/package.json @northstar/javascript-platform
+/pnpm-lock.yaml @northstar/javascript-platform @northstar/supply-chain
+/Cargo.toml @northstar/rust-platform
+/Cargo.lock @northstar/rust-platform @northstar/supply-chain
+/go.sum @northstar/go-platform @northstar/supply-chain
+/uv.lock @northstar/python-platform @northstar/supply-chain
+/.tool-versions @northstar-developer-tools
+/.devcontainer/** @northstar/developer-experience
+**/BUILD.bazel @northstar/build-infrastructure
+**/*.bzl @northstar/build-infrastructure
+
+# Shared libraries
+/packages/design-system/ @northstar/design-systems
+/packages/design-system/src/icons/ @northstar-brand
+/packages/feature-flags/ @northstar/runtime-platform
+/packages/i18n/ @northstar/localization
+/packages/protocol/ @northstar-api-foundations
+/packages/testing/ @northstar-quality-engineering
+**/*.generated.ts @northstar-code-generation
+**/*.generated.go @northstar-code-generation
+
+# Web applications
+/apps/admin/ @northstar-admin-console
+/apps/admin/src/audit/ @northstar-security @northstar-admin-console
+/apps/customer/ @northstar-web-product
+/apps/customer/src/account/ @northstar-identity
+/apps/customer/src/checkout/ @northstar-commerce
+/apps/status-page/ @northstar-reliability
+**/*.tsx @northstar-web-platform
+**/*.css @northstar-design-systems
+**/*.scss @northstar-design-systems
+
+# Backend services
+/services/accounts/ @northstar-identity
+/services/audit-log/ @northstar-security
+/services/checkout/ @northstar-commerce
+/services/feature-gateway/ @northstar-runtime-platform
+/services/inventory/ @northstar-fulfillment
+/services/orders/ @northstar-commerce @northstar-fulfillment
+/services/payments/ @northstar-payments @northstar-security
+/services/search/ @northstar-discovery
+**/migrations/** @northstar-database-reliability
+**/openapi.yaml @northstar-api-foundations
+**/*.proto @northstar-api-foundations
+
+  # Mobile and desktop clients
+/clients/android/ @northstar-android
+/clients/android/app/src/main/AndroidManifest.xml @northstar-android @northstar-security
+/clients/ios/ @northstar-ios
+/clients/ios/**/*.entitlements @northstar-ios @northstar-security
+/clients/desktop/ @northstar-desktop
+/clients/desktop/src-tauri/ @northstar-rust-platform @northstar-desktop
+  /clients/shared-kotlin/ @northstar-mobile-platform
+**/*.xcodeproj/** @northstar-ios
+**/*.xcworkspace/** @northstar-ios
+
+# Infrastructure and operations
+/infra/ @northstar-infrastructure
+/infra/aws/ @northstar-cloud-foundations
+/infra/aws/iam/ @northstar-security @northstar-cloud-foundations
+/infra/kubernetes/ @northstar-container-platform
+/infra/kubernetes/production/ @northstar-sre
+/infra/modules/network/ @northstar-networking
+/infra/terraform/ @northstar-cloud-foundations
+/deploy/ @northstar-release-engineering
+/deploy/charts/ @northstar-container-platform
+/deploy/environments/prod/ @northstar-sre
+/ops/alerts/ @northstar-observability @northstar-sre
+/ops/dashboards/ @northstar-observability
+/ops/runbooks/ @northstar-sre
+**/Dockerfile @northstar-container-platform
+**/*.tf @northstar-cloud-foundations
+**/*.tfvars @northstar-cloud-foundations @northstar-security
+
+# Data, analytics, and machine learning
+/data/contracts/ @northstar-data-platform
+/data/dbt/ @northstar-analytics-engineering
+/data/pipelines/ @northstar-data-platform
+/data/quality/ @northstar-data-quality
+/ml/features/ @northstar-machine-learning
+/ml/models/ @northstar-machine-learning
+/ml/notebooks/ @northstar-applied-science
+/ml/serving/ @northstar-ml-platform
+**/*.sql @northstar-analytics-engineering
+**/*.ipynb @northstar-applied-science
+**/schema.avsc @northstar-data-platform
+
+# Documentation and customer-facing content
+/docs/ @northstar-documentation
+/docs/api/ @northstar-developer-relations @northstar-api-foundations
+/docs/architecture/ @northstar-architecture
+/docs/runbooks/ @northstar-sre
+/docs/security/ @northstar-security
+/docs/tutorials/ @northstar-developer-relations
+/website/ @northstar-docs-platform
+/website/blog/ @northstar-developer-relations @northstar-comms
+/website/legal/ @northstar-legal
+*.md @northstar-documentation
+*.mdx @northstar-docs-platform
+
+# Localization paths include non-ASCII and astral characters
+/locales/ @northstar-localization i18n@example.com
+/locales/ar/ @northstar-arabic-reviewers
+/locales/日本語/ @northstar-japanese-reviewers
+/locales/한국어/ @northstar-korean-reviewers
+/locales/português/ @northstar-portuguese-reviewers
+/docs/🚀-getting-started/ @northstar-developer-relations
+/fixtures/emoji/🧪/** @northstar-quality-engineering
+**/*.po translations@example.org
+
+# Security-sensitive material and dependency policy
+/.secretlintrc* @northstar-security
+/.trivyignore @northstar-security @northstar-container-platform
+/certificates/ @northstar-security
+/config/production/ @northstar-sre @northstar-security
+/policies/ @northstar-security @northstar-legal
+/scripts/rotate-keys.* @northstar-security
+**/auth/** @northstar-identity @northstar-security
+**/permissions/** @northstar-security
+**/sbom*.json @northstar-supply-chain
+
+# Tests, examples, and generated outputs
+/e2e/ @northstar-quality-engineering
+/e2e/checkout/ @northstar-commerce @northstar-quality-engineering
+/examples/ @northstar-developer-relations
+/fixtures/ @northstar-quality-engineering
+/performance/ @northstar-performance
+/testdata/ @northstar-quality-engineering
+**/__snapshots__/** @northstar-quality-engineering
+**/*.snap @northstar-quality-engineering
+/vendor/generated/
+/dist/

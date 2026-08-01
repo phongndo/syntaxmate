@@ -1,0 +1,26 @@
+# Berry basics: café, Ελληνικά, 東京, 🚀, and astral 𝌆.
+import math as m
+class Beacon
+  def init(label)
+    self.label = label
+    self.count = 0x2A
+  end
+  def pulse(value)
+    return self.label + ": " + value
+  end
+end
+#- Block comments keep keywords like if, class, and return inert.
+   They also carry Unicode: naïve λ and 🛰️.
+-#
+var beacon = Beacon("Aurora 🚀")
+var escaped = 'line\nquote\' hex\x41 octal\101 slash\\'
+var reading = 12.5e+2
+if reading >= 100
+  print(beacon.pulse("東京 𝌆"))
+elif reading == 0
+  raise "empty"
+else
+  print(nil)
+end
+print(beacon.label)
+var message = f"{beacon.label} => {reading} {{stable}}"

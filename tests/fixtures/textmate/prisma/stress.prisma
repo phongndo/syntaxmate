@@ -1,0 +1,224 @@
+/// Broad grammar fixture for Prisma tokenization.
+// Unicode BMP: café, Ελληνικά, 日本語.
+/* Astral symbols: 🚀 and 𝌆.
+   This block comment deliberately crosses a line. */
+
+generator client {
+  provider = "prisma-client-js"
+  output = "../generated/${env("CLIENT_FLAVOR")}/client"
+  previewFeatures = ["views", "relationJoins", "fullTextSearch"]
+  binaryTargets = [
+    "native",
+    env("PRISMA_TARGET"),
+    [true, false, 0xBEEF, +17, -2.5e+3, .75F, 42UL]
+  ]
+  engineType = engine(binary, retries(3), enabled(true)) // nested functions
+  seed = 6.022e+23D
+  path = "C:\\prisma\\schema"
+  banner = "first line with café and 🚀
+second line with 日本語 and 𝌆"
+  /* config-local comment */
+}
+
+generator docs {
+  provider = "prisma-docs-generator"
+  title = "Schema ${format(project_name)}"
+  flags = [alpha, beta, true, false, 0, 12., .5, -9E-2]
+}
+
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL") // assignment comment
+  relationMode = foreignKeys
+}
+
+datasource archive {
+  provider = "sqlite"
+  url = "file:./archive.db?mode=rwc"
+}
+
+/// User-facing states.
+enum Role {
+  USER
+  EDITOR @map("content_editor")
+  ADMIN @map("管理员_🚀")
+  SERVICE
+  @@map("roles")
+}
+
+enum PostState {
+  DRAFT
+  REVIEW @map("in-review")
+  PUBLISHED
+  ARCHIVED
+}
+
+enum Locale {
+  EN_US
+  FR_FR @map("français")
+  JA_JP @map("日本語")
+}
+
+type UserId = String @db.Uuid
+type Money = Decimal @db.Decimal(19, 4)
+type Payload = Json @map("payload_json")
+
+/// Composite address exercises the `type {}` model branch.
+type Address {
+  line1 String
+  line2 String?
+  city String @map("city_name")
+  postalCode String @db.VarChar(24)
+  country String @default("日本")
+  coordinates Float[]
+}
+
+view ActiveUser {
+  id Int @unique
+  email String
+  role Role
+  displayName String? @map("display_name")
+  lastSeenAt DateTime? @db.Timestamptz(6)
+  @@map("active_users")
+  @@index([role, lastSeenAt(sort: Desc)], type: BTree)
+}
+
+/// Main account model.
+model User {
+  id Int @id @default(autoincrement())
+  publicId String @unique @default(uuid()) @db.Uuid
+  email String @unique(map: "uq_user_email") @db.VarChar(320)
+  displayName String? @map("display_name")
+  passwordHash Bytes @map("password_hash")
+  reputation BigInt @default(0)
+  balance Decimal @default(0.00) @db.Decimal(19, 4)
+  rating Float? @default(+4.5)
+  verified Boolean @default(false)
+  preferences Json @default("{}")
+  bornAt DateTime? @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  role Role @default(USER)
+  locale Locale @default(EN_US)
+  address Address?
+  posts Post[] @relation("AuthoredPosts")
+  comments Comment[]
+  profile Profile?
+  @@id([id, publicId], name: "user_identity")
+  @@index([email, role], map: "ix_user_lookup", type: Hash)
+  @@map("app_users")
+}
+
+model Profile {
+  id Int @id
+  userId Int @unique
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  biography String? @db.Text
+  website String? @db.VarChar(2048)
+  avatar Bytes?
+  social Json?
+  labels String[]
+  userTags String[]? @map("user_tags")
+  @@index([website(length: 64, sort: Asc)], type: BTree)
+}
+
+/* Posts combine relations, arrays, functions, and block attributes. */
+model Post {
+  id BigInt @id @default(autoincrement())
+  slug String @unique
+  title String @db.VarChar(200)
+  body String @db.Text
+  excerpt String?
+  state PostState @default(DRAFT)
+  searchTerms String[] @map("search_terms")
+  metadata Json? @default(dbgenerated("json_build_object('source', 'fixture')"))
+  score Float @default(-1.25e+2)
+  price Decimal? @db.Decimal(12, 2)
+  authorId Int
+  author User @relation("AuthoredPosts", fields: [authorId], references: [id], map: "fk_post_author")
+  comments Comment[]
+  categories Category[] @relation("PostCategories")
+  publishedAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([authorId, slug], name: "author_slug")
+  @@index([state, publishedAt(sort: Desc)], map: "ix_post_state")
+  @@fulltext([title, body], map: "ft_post_text")
+}
+
+model Comment {
+  id Int @id @default(autoincrement())
+  postId BigInt
+  authorId Int?
+  body String @db.Text
+  sentiment Float? @default(.0)
+  post Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  parentId Int?
+  parent Comment? @relation("Thread", fields: [parentId], references: [id])
+  replies Comment[] @relation("Thread")
+  @@index([postId, parentId])
+}
+
+model Category {
+  id Int @id
+  name String @unique
+  description String?
+  posts Post[] @relation("PostCategories")
+  parentId Int?
+  parent Category? @relation("Tree", fields: [parentId], references: [id])
+  children Category[] @relation("Tree")
+  @@map("内容_categories")
+}
+
+model Tag {
+  id Int @id
+  label String @unique @db.VarChar(80)
+  color String @default("#3366ff")
+  aliases String[]
+  enabled Boolean @default(true)
+  @@index([label(sort: Asc)], type: BTree)
+}
+
+model AuditEvent {
+  id String @id @default(cuid())
+  actorId Int?
+  action String
+  payload Json
+  checksum Bytes
+  sequence BigInt @default(0x10)
+  ratio Float @default(1.0F)
+  happenedAt DateTime @default(now())
+  actor User? @relation(fields: [actorId], references: [id], onDelete: NoAction)
+  @@index([happenedAt(sort: Desc), action])
+  @@map("audit_events_𝌆")
+}
+
+model BinaryAsset {
+  id Int @id
+  data Bytes
+  size BigInt
+  mime String @db.VarChar(255)
+  digest String @unique
+  ownerId Int?
+  owner User? @relation(fields: [ownerId], references: [id])
+  @@ignore
+}
+
+model GrammarEdges {
+  legacyColon: String!
+  optionalList String[]?
+  relationTarget User
+  allNumbers Decimal @default(sequence([0xCAFE, -0, +3, 10., .125, 1e9, 2E-4, 7L, 8u, 9UL]))
+  nested Json @default(builder(items: [alpha, [beta, false]], note: "${join(["café", "🚀"])}"))
+  vendor String @db.VarChar(size: 191, mode: strict)
+  dotted String @custom.namespace.rule(flag: true)
+  /// A triple-slash comment inside a model.
+  // A double-slash comment inside a model.
+  /* A final multi-line
+     comment before block attributes. */
+  @@index([optionalList], map: "edges_${env("SUFFIX")}")
+}
+
+// End of the hand-written stress schema.

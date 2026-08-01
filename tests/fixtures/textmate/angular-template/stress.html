@@ -1,0 +1,176 @@
+Angular interpolation fragment root pin: host text begins outside every expression.
+<section class="account-overview" aria-labelledby="account-heading">
+  <header>
+    <p class="eyebrow">Workspace {{ workspace.slug }}</p>
+    <h1 id="account-heading">{{ account?.displayName ?? 'Guest account' }}</h1>
+    <p>{{ 'café · 東京 · é · 𝌆 · 🚀' }}</p>
+  </header>
+
+  <dl class="identity-grid">
+    <div>
+      <dt>Identifier</dt>
+      <dd>{{ account.id }}</dd>
+    </div>
+    <div>
+      <dt>Owner</dt>
+      <dd>{{ account.owner?.profile?.name || 'Unassigned' }}</dd>
+    </div>
+    <div>
+      <dt>Plan</dt>
+      <dd>{{ account.plan.name | titlecase }}</dd>
+    </div>
+    <div>
+      <dt>Seats</dt>
+      <dd>{{ usedSeats + pendingSeats }} / {{ seatLimit }}</dd>
+    </div>
+  </dl>
+
+  <section class="metrics" aria-label="Usage metrics">
+    <article>
+      <h2>Storage</h2>
+      <strong>{{ bytesUsed / 1024 / 1024 | number:'1.0-1' }} MB</strong>
+      <small>{{ bytesUsed >= warningThreshold ? 'Review usage' : 'Within allowance' }}</small>
+    </article>
+    <article>
+      <h2>Requests</h2>
+      <strong>{{ requestsToday * 100 / requestLimit | number:'1.1-1' }}%</strong>
+      <small>{{ requestLimit - requestsToday }} remaining</small>
+    </article>
+    <article>
+      <h2>Reliability</h2>
+      <strong>{{ uptime ?? 0 }}%</strong>
+      <small>{{ incidents === 0 && monitored ? 'All systems normal' : 'Needs attention' }}</small>
+    </article>
+  </section>
+
+  <p class="numeric-samples">
+    Build markers: {{ 42 }}, {{ 3.1415 }}, {{ .75 }}, {{ 6.02e23 }},
+    {{ 0x2A }}, {{ 0b101010 }}, {{ NaN }}, and {{ Infinity }}.
+  </p>
+  <p class="literal-samples">
+    Flags: {{ true }}, {{ false }}, {{ null }}, {{ undefined }}, and {{ this }}.
+  </p>
+  <p class="escaped-copy">
+    {{ "Double quote: \"ready\"" }} / {{ 'Path C:\\cache and café' }}
+  </p>
+
+  <section class="billing" aria-labelledby="billing-heading">
+    <h2 id="billing-heading">Billing estimate</h2>
+    <p>{{ currencySymbol + (subtotal + tax - credits) }}</p>
+    <p>{{ subtotal % billingInterval }}</p>
+    <p>{{ discount > 0 ? subtotal * (1 - discount) : subtotal }}</p>
+    <p>{{ invoice?.total ?? estimate(subtotal, taxRate) | currency:currencyCode:'symbol' }}</p>
+    <p>{{ formatMoney(
+      calculateTotal(
+        lineItems | activeItems,
+        taxRate,
+        credits
+      ),
+      currencyCode
+    ) }}</p>
+  </section>
+
+  <table class="permissions">
+    <caption>{{ account.displayName }} permissions</caption>
+    <thead>
+      <tr><th>Capability</th><th>Decision</th><th>Source</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Reports</td>
+        <td>{{ permissions?.reports === true ? 'Allowed' : 'Denied' }}</td>
+        <td>{{ permissionsSource || 'default policy' }}</td>
+      </tr>
+      <tr>
+        <td>Exports</td>
+        <td>{{ role === 'owner' || role === 'admin' ? 'Allowed' : 'Review' }}</td>
+        <td>{{ role | uppercase }}</td>
+      </tr>
+      <tr>
+        <td>Billing</td>
+        <td>{{ 'billing' in permissions ? 'Configured' : 'Inherited' }}</td>
+        <td>{{ policyVersion >= minimumPolicyVersion }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <section class="collections">
+    <h2>Collection summaries</h2>
+    <p>{{ [true, false, null, undefined] | json }}</p>
+    <p>{{ [primaryRegion, backupRegion, account?.region] | compact | join:' · ' }}</p>
+    <p>{{ [
+      account.id,
+      account.owner?.id ?? 'none',
+      formatDate(
+        account.createdAt,
+        locale
+      ),
+      [usedSeats, pendingSeats, seatLimit]
+    ] | json }}</p>
+  </section>
+
+  <section class="operators">
+    <h2>Operator coverage</h2>
+    <p>{{ featureMask & requiredMask }}</p>
+    <p>{{ featureMask | optionalMask }}</p>
+    <p>{{ featureMask ^ experimentalMask }}</p>
+    <p>{{ ~disabledMask }}</p>
+    <p>{{ shard << 2 }} / {{ packedFlags >> 1 }} / {{ unsignedFlags >>> 1 }}</p>
+    <p>{{ version !== previousVersion && version <= supportedVersion }}</p>
+    <p>{{ account instanceof EnterpriseAccount ? 'Enterprise' : 'Standard' }}</p>
+  </section>
+
+  <section class="labels">
+    <h2>Generated labels</h2>
+    <p>{{ `Account ${account.id}: ${account.displayName} 🚀` }}</p>
+    <p>{{ `Usage ${
+      formatPercent(
+        usedSeats / seatLimit
+      )
+    } for 東京` }}</p>
+    <p>{{ tag`owner:${account.owner?.id ?? 'none'}` }}</p>
+  </section>
+
+  <section class="calls">
+    <h2>Calls and access</h2>
+    <p>{{ formatter.format(account.balance) }}</p>
+    <p>{{ registry?.resolve('billing')?.label ?? fallbackLabel }}</p>
+    <p>{{ chooseRegion(primaryRegion, backupRegion, locale) }}</p>
+    <p>{{ normalize(
+      account?.owner?.profile?.name,
+      locale,
+      true
+    ) | uppercase }}</p>
+    <p>{{ (usedSeats + pendingSeats) * (trial ? 0 : seatPrice) }}</p>
+    <p>{{ ((active && verified) || override) ? 'enabled' : 'disabled' }}</p>
+  </section>
+
+  <section class="type-coverage">
+    <h2>Grammar type forms</h2>
+    <p>{{ account as Account }}</p>
+    <p>{{ regionCode as 'us' | 'eu' | '東京' }}</p>
+    <p>{{ coordinates as [number, number] }}</p>
+    <p>{{ response as Result<Account> }}</p>
+    <p>{{ callback as (value: Account) => string }}</p>
+    <p>{{ model as { id: string; active: boolean } }}</p>
+    <p>{{ key as keyof Account }}</p>
+    <p>{{ factory as typeof createAccount }}</p>
+  </section>
+
+  <aside title="{{ tooltip ?? 'Account help' }}" data-label="host attribute text">
+    <h2>{{ heading | default:'Need help?' }}</h2>
+    <p>Email {{ supportAddress }} or call {{ supportPhone }}.</p>
+    <!-- In this standalone fragment grammar, {{ commentExpression }} is still interpolated. -->
+    <code>{ single braces and &lt;host-tags&gt; remain root host text }</code>
+  </aside>
+
+  <footer>
+    <p>{{ void pendingOperation }}</p>
+    <p>{{ typeof account }}</p>
+    <p>{{ delete transientCache.preview }}</p>
+    <p>{{ await statusPromise | async }}</p>
+    <p>{{ sequenceA, sequenceB, finalValue }}</p>
+    <small>{{ `Rendered at ${clock.now()} for ${locale}` }}</small>
+  </footer>
+</section>
+Final plain host line: template.ng root restored after every balanced interpolation.

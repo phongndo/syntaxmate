@@ -1,0 +1,25 @@
+%YAML 1.2
+---
+title: "Mark syntax 🚀"
+description: 'A colon: stays text'
+enabled: true
+attempts: 3
+threshold: 1.25e-2
+empty: null
+labels: [parser, "café", 𝄞]
+defaults: &defaults
+  timeout: 30
+  path: /tmp/mark
+jobs:
+  - name: tokenize
+    config: *defaults
+    command: "mark inspect --scope source.yaml"
+    retries: 2
+    environment: {MODE: strict, TRACE: false}
+  - name: publish
+    note: "Preserve # in text; astral glyph: 𐐷\n"
+    when: {branch: main, clean: false}
+mapping:
+  ? "complex key"
+  : value
+...

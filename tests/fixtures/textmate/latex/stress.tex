@@ -1,0 +1,181 @@
+\documentclass[
+  11pt,
+  twoside
+]{book}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\renewcommand{\chaptername}{Experiment}
+\DeclareRobustCommand{\productname}{Mark}
+\newrobustcmd{\pair}[2][,]{\langle #1 #2\rangle}
+\input{shared/preamble}
+\include{chapters/frontmatter}
+
+\begin{document}
+% A percent comment closes at the synthetic line ending.
+\chapter[Scopes]{Scope-aware typesetting 🚀}
+\label{chap:scopes}
+Text remains readable in Ελληνικά, 日本語, café, and astral 𝌆.
+An escaped percent \% is text, while the rest is a comment. % trailing note
+\section*{Commands and groups}
+\emph{Italic text with \textbf{nested bold} inside.}
+\textit{A second italic form} and \texttt{raw-ish \{braces\}}.
+\textbf{Bold text with a nested {plain group}.}
+\marginpar[outer note]{inner note with \emph{style}}
+Body text has a footnote[7]{Nested {content} and $x_7$.}
+\newline
+\pagebreak
+\textcopyright\quad \texttrademark\quad \texteuro
+\foo_bar:n { expl3 token }
+\cs_new_protected:Npn \demo_render:n #1 { #1 }
+\tl_set:Nn \l_demo_title_tl {Unicode 🚀 title}
+\seq_map_inline:Nn \l_demo_items_seq {##1}
+
+\section{Links, labels, citations, and references}
+\label{sec:links}
+\zlabel[user]{eq:energy}
+\url{https://example.test/a_b?q=tex}
+\path{chapters/intro.tex}
+\url{https://example.test/reference}
+\hyperref[chap:scopes]{the opening chapter}
+\path{images/cover.png}
+\cite{knuth:1984}
+\parencite[see][p.~42]{lamport:1994}
+\textcite<prenote>[postnote]{unicode:🚀}
+\autocites{alpha:1}{beta_2}{gamma-三}
+\bibentry{knuth.1984}
+Chapter~\ref{chap:scopes}, Section~\autoref{sec:links}, and \pageref{sec:links}.
+Compare \crefrange{eq:first}{eq:last} and \Cref{tab:results}.
+
+\section[Mathematics]{Inline and display mathematics}
+Dollar math $a_n = \sum_{k=0}^{n} k^2$ ends here.
+Parenthesized math \(E = mc^2\) also ends here.
+Escaped currency costs \$5 outside math.
+\[
+  f(x) = \frac{1}{\sqrt{2\pi}} e^{-x^2/2}
+\]
+$$
+  \left|\vect{x}\right|^2 = \vect{x}\cdot\vect{x}
+$$
+\begin{equation}
+  e^{i\pi}+1=0
+  \label{eq:first}
+\end{equation}
+\begin{align*}
+  a &= b + c \\
+  d &= e - f
+\end{align*}
+\begin{gathered}
+  x + y = 3 \\
+  x - y = 1
+\end{gathered}
+\begin{pmatrix}
+  1 & 0 \\
+  0 & 1
+\end{pmatrix}
+\begin{empheq}[box=\fbox]{align}
+  u+v &= w
+\end{empheq}
+
+\section{Lists and tables}
+\begin{enumerate}
+  \item First item with \cite{first:key}.
+  \item Second item with nested material:
+  \begin{description}
+    \item[term] a definition with \ref{eq:first}.
+  \end{description}
+\end{enumerate}
+\begin{tabular}{l>{$}c<{$}}
+  name & value \\
+  alpha & \alpha + 1 \\
+  rocket 🚀 & \infty
+\end{tabular}
+\begin{longtable}{lr}
+  key & count \\
+  one & 1 \\
+  two & 2
+\end{longtable}
+
+\section{Balanced specialty environments}
+\begin{frame}{A beamer-like frame}
+  \frametitle{Nested title}
+  Frame content with $x+y$.
+\end{frame}
+\begin{tikzpicture}[scale=0.5]
+  \draw (0,0) -- (1,1);
+\end{tikzpicture}
+\begin{theorem}[Unicode case]
+  For every $\varepsilon>0$, choose $\delta>0$.
+\end{theorem}
+\begin{mpost}
+  draw origin--(10,10);
+\end{mpost}
+
+\section{Verbatim forms}
+Inline \verb|a_{b} % not a comment| follows ordinary text.
+Starred \verb*+spaces  stay  raw+ ends at its delimiter.
+\Verb\scantokens{raw \macro{payload}}
+\mintinline{python}|print("λ🚀")|
+\pythoninline{value = {"key": 3}}
+\begin{verbatim}
+if (x < y) { printf("% raw 🚀"); }
+\section{not a real section here}
+\end{verbatim}
+\begin{VerbatimOut}{generated.txt}
+literal output with \commands and % signs
+\end{VerbatimOut}
+\begin{alltt}
+Mostly raw, but \textbf is recognized by the grammar.
+\end{alltt}
+\begin{comment}
+Everything here is comment content, including $math$ and 🚀.
+\end{comment}
+
+\section{Embedded and missing scopes}
+% The vendored grammar routes this body through the absent source.asy include.
+\begin{minted}[linenos]{asy}
+size(100);
+pair A=(0,0), B=(1,1);
+draw(A--B, red);
+label("🚀", B);
+\end{minted}
+\cacheMeCode[asy]{draw(unitcircle);}
+\begin{pycode}
+message = "embedded Python closure"
+print(message)
+\end{pycode}
+\directlua{tex.print("inline Lua")}
+
+\section{Song and layout specialties}
+\begin{songs}{2}
+\beginsong{Orbit}[by={Ada},sr={demo}]
+\[C]Ground control to ^the Unicode crew 🚀
+\endsong
+\end{songs}
+\begin{minipage}{0.45\textwidth}
+General environments recurse into \LaTeX{} commands.
+\end{minipage}
+\footnote{A final note with \url{https://example.test/end}.}
+\clearpage
+
+\section{Multiline arguments}
+\href
+  {https://example.test/multiline}
+  {a link split across lines}
+\newcommand{\multiline}[2][default]{
+  \textbf{#1}: \emph{#2}
+}
+\marginpar[
+  short
+]{
+  A longer nested margin note.
+}
+\subsection{Final checks}
+The range \ref{eq:first}--\ref{eq:last} stays linked.
+\begin{equation}
+  z = x + y
+  \label{eq:last}
+\end{equation}
+% Final comment with combining text: é and emoji 🛰️.
+\end{document}

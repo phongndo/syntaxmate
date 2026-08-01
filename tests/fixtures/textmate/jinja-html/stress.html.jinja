@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="{{ request.locale|default('en-GB') }}" dir="{% if rtl %}rtl{% else %}ltr{% endif %}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ page.summary|striptags|truncate(155)|e }}">
+  <link rel="canonical" href="{{ page.canonical_url|e }}">
+  <link rel="stylesheet" href="{{ asset_url('app.css') }}">
+  <title>{% block title %}{{ page.title|default('Field Notes') }} · Atlas{% endblock %}</title>
+  <!--[if lt IE 9]><script src="/legacy/html5shiv.js"></script><![endif]-->
+  <style>
+    :root {
+      --accent: {{ theme.accent|default('#6d28d9') }};
+      --space: clamp(1rem, 2vw, 2.5rem);
+    }
+    html { color-scheme: light dark; scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, "Noto Sans", sans-serif;
+      background: {{ theme.background|default('rgb(250 250 252)') }};
+    }
+    .shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space); }
+    .card[data-featured="true"] { border-inline-start: .3rem solid var(--accent); }
+    @media (min-width: 48rem) {
+      .shell { grid-template-columns: 16rem minmax(0, 1fr); }
+    }
+    @supports (text-wrap: balance) {
+      h1, h2 { text-wrap: balance; }
+    }
+  </style>
+  {% block head_extra %}{% endblock %}
+</head>
+<body id="top" class="theme-{{ theme.name|default('system')|lower }}{% if preview %} is-preview{% endif %}">
+  {# This comment contains delimiters as prose: {{ value }}, {% tag %}, and café 🧭. #}
+  <a class="skip-link" href="#content">Skip to content</a>
+  {% macro icon(name, label='') -%}
+  <svg class="icon icon--{{ name|e }}" role="img" aria-label="{{ label|e }}" viewBox="0 0 24 24">
+    <use href="#icon-{{ name|e }}"></use>
+  </svg>
+  {%- endmacro %}
+  {% macro nav_link(item, extra_class=None) %}
+  <a href="{{ item.href|e }}"
+     class="nav__link{% if item.active %} is-active{% endif %} {{ extra_class|default('', true) }}"
+     {% if item.active %}aria-current="page"{% endif %}
+     data-key='{{ item.key|default("unknown")|e }}'>
+    {{ icon(item.icon|default('dot'), item.label) }}
+    <span>{{ item.label|e }}</span>
+  </a>
+  {% endmacro %}
+  <header class="masthead" data-build="{{ build.id }}">
+    <a class="brand" href="{{ url_for('home') }}" title='Back to {{ site.name|e }}'>
+      <strong>{{ site.name|upper }}</strong>
+      <span lang="ja">地図帳</span>
+    </a>
+    <nav aria-label="Primary">
+      <ul class="nav">
+        {% for item in navigation if item.visible %}
+        <li class="nav__item">{{ nav_link(item) }}</li>
+        {% else %}
+        <li class="nav__item nav__item--empty">No destinations</li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </header>
+  <div class="shell">
+    <aside aria-labelledby="filters-title">
+      <h2 id="filters-title">Filters</h2>
+      <form action="{{ request.path }}" method="get">
+        <label for="query">Search</label>
+        <input id="query" name="q" type="search" value="{{ request.args.q|default('')|e }}" placeholder="e.g. nebula ✨">
+        <fieldset>
+          <legend>Topics</legend>
+          {% for topic in topics %}
+          <label>
+            <input type="checkbox" name="topic" value="{{ topic.slug }}" {% if topic.slug in selected_topics %}checked{% endif %}>
+            {{ topic.name }} <small>({{ topic.count|int }})</small>
+          </label>
+          {% endfor %}
+        </fieldset>
+        <button type="submit">Apply {{ icon('filter') }}</button>
+      </form>
+    </aside>
+    <main id="content" tabindex="-1">
+      {% block content %}
+      <header class="hero">
+        <p class="eyebrow">{{ page.kicker|default('Dispatch') }}</p>
+        <h1>{{ page.title|e }}</h1>
+        {% if page.subtitle is string and page.subtitle|length > 0 %}
+        <p>{{ page.subtitle|e }}</p>
+        {% elif page.draft %}
+        <p class="notice" role="status">Draft preview</p>
+        {% else %}
+        <p>Stories from around the world: São Paulo, Zürich, and 東京.</p>
+        {% endif %}
+      </header>
+      {%- set visible_articles = articles|selectattr('published')|list -%}
+      {% if visible_articles is iterable and visible_articles|length %}
+      <section class="cards" aria-label="Articles">
+        {% for article in visible_articles|sort(attribute='published_at', reverse=true) %}
+        <article id="article-{{ article.id }}" class="card" data-featured="{{ article.featured|lower }}">
+          <header>
+            <p><time datetime="{{ article.published_at.isoformat() }}">{{ article.published_at|dateformat('%d %B %Y') }}</time></p>
+            <h2><a href="{{ article.url }}">{{ article.title|e }}</a></h2>
+          </header>
+          {% if article.image is mapping %}
+          <picture>
+            <source srcset="{{ article.image.avif }} 1x, {{ article.image.avif_2x }} 2x" type="image/avif">
+            <img src="{{ article.image.src|e }}" alt="{{ article.image.alt|default('', true)|e }}" loading="lazy">
+          </picture>
+          {% endif %}
+          <p>{{ article.excerpt|striptags|truncate(180, true, '…') }}</p>
+          <ul class="tags" aria-label="Tags">
+            {% for tag in article.tags|default([]) %}
+            <li><a href="/tags/{{ tag|urlencode }}">#{{ tag|replace('-', ' ')|title }}</a></li>
+            {% endfor %}
+          </ul>
+          <footer>
+            <span>{{ article.reading_minutes|round(0, 'ceil')|int }} min read</span>
+            {% if article.author is not none %}<span>by {{ article.author.name }}</span>{% endif %}
+          </footer>
+        </article>
+        {% if loop.index is divisibleby 3 %}
+        <aside class="promo">{{ promos[loop.index0 % promos|length].copy }}</aside>
+        {% endif %}
+        {% endfor %}
+      </section>
+      {% else %}
+      <section class="empty-state">
+        <h2>No matching stories</h2>
+        <p>Try removing a filter or searching for “ocean”.</p>
+      </section>
+      {% endif %}
+      {% endblock content %}
+    </main>
+  </div>
+  {% block footer %}
+  <footer class="site-footer">
+    <p>&copy; {{ now().year }} {{ site.legal_name|e }} — made with ☕ and 🛰️.</p>
+    <details>
+      <summary>Debug context</summary>
+      <pre>{{ {'locale': request.locale, 'route': request.endpoint}|tojson(indent=2) }}</pre>
+    </details>
+  </footer>
+  {% endblock %}
+  {% raw %}
+  <template id="client-card">
+    <article class="card" data-id="{{ client.id }}">
+      <h2>{{ client.title }}</h2>
+      <p>Literal client template: ${state.message}</p>
+    </article>
+  </template>
+  {% endraw %}
+  <script type="application/json" id="page-data">
+    {{ page_data|tojson }}
+  </script>
+  <script type="module">
+    const root = document.documentElement;
+    const config = {{ {'api': api_url, 'locale': request.locale, 'emoji': '🧪'}|tojson }};
+    const cards = [...document.querySelectorAll(".card[data-featured]")];
+    const formatter = new Intl.NumberFormat(config.locale, { maximumFractionDigits: 1 });
+    cards.forEach((card, index) => {
+      card.style.setProperty("--order", String(index));
+      card.addEventListener("click", (event) => {
+        if (event.target.closest("a, button")) return;
+        console.debug(`Card ${card.id}: ${formatter.format(index + 1)}`);
+      });
+    });
+    async function refresh() {
+      try {
+        const response = await fetch(`${config.api}/articles?limit=10`, {
+          headers: { "Accept": "application/json", "X-Page": {{ page.number|default(1)|tojson }} }
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+      } catch (error) {
+        console.error("Refresh failed", error);
+        return null;
+      }
+    }
+    {% if auto_refresh -%}
+    window.setInterval(refresh, {{ refresh_seconds|default(60)|int }} * 1000);
+    {%- else -%}
+    console.info("Auto-refresh disabled");
+    {%- endif %}
+  </script>
+  <noscript><p>This page works without JavaScript, but live updates are disabled.</p></noscript>
+</body>
+</html>

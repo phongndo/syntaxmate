@@ -1,0 +1,28 @@
+= AsciiDoc Fixture
+:author: Fixture Team
+:project: Mark
+:icons: font
+
+Unicode review: café λ 東京 🚀 𝌆 and {project}.
+
+== Inline and lists
+
+Text has *strong*, _emphasis_, `monospace`, #mark#, H~2~O, and x^2^.
+
+* bullet with https://example.test[link]
+** nested bullet
+. ordered item
+- [x] checked task
+
+[cols="1,1",options="header"]
+|===
+|Name |Value
+|BMP |café λ 東京
+|Astral |🚀 𝌆
+|===
+
+[source,javascript]
+----
+const greeting = "café λ 東京 🚀 𝌆";
+console.log(greeting);
+----

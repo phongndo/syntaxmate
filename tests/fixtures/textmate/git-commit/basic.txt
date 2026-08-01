@@ -1,0 +1,30 @@
+Keep Unicode subjects visible in previews 🚀
+
+Commit summaries now preserve names such as Zoë and 東京 when the editor
+reloads a draft. Keep the body concise and retain intentional blank lines.
+
+Signed-off-by: Avery Chen <avery@example.test>
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# On branch feature/unicode-preview
+# Your branch is up to date with 'origin/feature/unicode-preview'.
+#
+# Changes to be committed:
+#	modified:   src/preview.rs
+#	new file:   tests/unicode_preview.rs
+#	deleted:    tests/legacy_ascii.rs
+#	renamed:    docs/preview.txt -> docs/preview.md
+# Untracked files:
+#	note:       scratch/review-notes.txt
+diff --git a/src/preview.rs b/src/preview.rs
+index 5d7e3a1..9c421ef 100644
+--- a/src/preview.rs
++++ b/src/preview.rs
+@@ -18,4 +18,5 @@ pub fn subject(draft: &Draft) -> String {
+     let first = draft.lines().next().unwrap_or_default();
+-    first.trim().to_owned()
++    let normalized = first.trim_end_matches(['\r', '\n']);
++    normalized.to_owned()
+ }

@@ -1,0 +1,21 @@
+// Basic DAX fixture: café λ 東京 🚀 𝌆
+DEFINE
+    VAR MinimumSales = 1000
+    VAR Caption = "café λ 東京 🚀 𝌆"
+    MEASURE Sales[Total Sales] := SUM ( Sales[Amount] )
+    MEASURE Sales[Visible Sales] :=
+        CALCULATE (
+            [Total Sales],
+            Sales[Amount] >= MinimumSales
+        )
+EVALUATE
+VAR Years = { 2024, 2025, 2026 }
+VAR Result =
+    FILTER (
+        Sales,
+        Sales[Year] IN Years && NOT ISBLANK ( Sales[Amount] )
+    )
+RETURN
+    SELECTCOLUMNS ( Result, "Label", Caption, "Amount", Sales[Amount] )
+ORDER BY [Amount]
+

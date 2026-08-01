@@ -1,0 +1,231 @@
+@charset "UTF-8";
+
+/* CSS stress fixture.
+ * Multi-line comment with non-ASCII text: café λ🚀.
+ * This stylesheet models a responsive article shell with print, motion, and container-query adaptations.
+ * The cascade is partitioned into reset, base, component, and utility layers with explicit precedence.
+ * Design tokens describe spacing, brand color, surface contrast, typography, and international labels.
+ * Selectors cover relationships, attributes, namespaces, language ranges, state, and structural matching.
+ * Layout examples combine intrinsic grid tracks, logical dimensions, safe-area insets, and aspect ratios.
+ * Color examples span hexadecimal, legacy rgba(), modern rgb(), hsl(), hwb(), oklch(), and color-mix().
+ * Generated content includes Ελληνικά, 東京, हिन्दी, café, a compass 🧭, and the musical symbol 𝄞.
+ * Motion declarations pair transforms with reduced-motion overrides and independently animated properties.
+ * Print rules define named pages, running headers, physical margins, and custom counter presentation.
+ * Resource values demonstrate local fonts, relative URLs, fragments, query strings, and image-set formats.
+ * At-rule coverage includes character encoding, imports, namespaces, cascade layers, registered properties, fonts, and counters.
+ * Conditional groups test feature support, selector support, viewport media, output media, containers, pages, and keyframes.
+ * Attribute selectors exercise exact, token, language-prefix, starts-with, ends-with, namespace, and case-insensitive matching.
+ * Pseudo-class coverage includes any-link, not(), is(), where(), has(), lang(), focus-within, user-invalid, checked, and modal.
+ * Pseudo-elements cover generated content, list markers, placeholders, dialog backdrops, and print margin boxes.
+ * Escaped identifiers begin with digits, contain punctuation, encode a Unicode code point, and coexist with native Unicode names.
+ * Sizing values use rem, vw, svh, vi, cqi, percentages, physical print units, ratios, and unitless interpolation parameters.
+ * Functional values include var(), env(), calc(), min(), max(), clamp(), attr(), repeat(), minmax(), and cubic-bezier().
+ * Images combine linear and conic gradients, transparency, wide-gamut colors, typed image-set candidates, and relative resources.
+ * Typography exercises family fallback, ranged weights, variable-font axes, decoration geometry, hyphenation, and strict line breaking.
+ * Logical properties keep inline and block flow correct for left-to-right, right-to-left, and vertical writing environments.
+ * Grid declarations provide named lines, named areas, intrinsic tracks, automatic fitting, alignment, and responsive gaps.
+ * Animation declarations include delays, easing, iteration, direction, fill mode, transform origins, and user preference overrides.
+ * Generated quotation marks use CSS hexadecimal escapes with a narrow no-break space and language-sensitive presentation.
+ * Custom properties retain token streams for later substitution while registered properties add syntax and inheritance contracts.
+ * URL values preserve relative segments, Unicode filenames, fragments, queries, media types, and resolution descriptors.
+ * Fallback declarations remain meaningful in light, dark, reduced-motion, print, monochrome, wide-gamut, and legacy environments.
+ * Every comment, quoted string, selector function, value function, declaration list, and at-rule block returns to the root state.
+ */
+
+@import url("./theme.css") layer(theme) supports(display: grid) screen and (width >= 30rem);
+@namespace svg url("http://www.w3.org/2000/svg");
+@layer reset, base, components, utilities;
+
+@property --brand-hue {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 210;
+}
+
+@font-face {
+  font-family: "Fixture Sans Ω";
+  src: local("Fixture Sans"), url("../fonts/fixture.woff2?#v1") format("woff2");
+  font-display: swap;
+  font-weight: 100 900;
+  unicode-range: U+0020-007E, U+03A0-03FF, U+1F600-1F64F;
+}
+
+@counter-style circled-greek {
+  system: fixed;
+  symbols: "α" "β" "γ" "δ";
+  suffix: " · ";
+}
+
+:root {
+  --gap: clamp(1rem, 2vw, 3rem);
+  --label: "café";
+  --brand: oklch(62% 0.18 var(--brand-hue));
+  --surface: color-mix(in oklab, white 88%, var(--brand));
+  --escaped\-token: "quote: \"; slash: \\; 雪 and 🧭";
+  color-scheme: light dark;
+  font-family: "Fixture Sans Ω", system-ui, sans-serif;
+}
+
+@layer reset {
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(html, body) { margin: 0; min-block-size: 100%; }
+  button, input, select, textarea { font: inherit; }
+}
+
+@layer base {
+  body {
+    margin-inline: auto;
+    padding-block: max(1rem, env(safe-area-inset-top));
+    padding-inline: max(1rem, env(safe-area-inset-left));
+    color: light-dark(rgb(24 28 35), rgb(232 238 245));
+    background-color: var(--surface, #f5f7fa);
+    line-height: 1.5;
+  }
+
+  a:any-link:not([aria-disabled="true"]) {
+    color: color(display-p3 0.1 0.35 0.8 / 90%);
+    text-decoration: underline 0.08em from-font;
+    text-underline-offset: 0.2em;
+  }
+}
+
+@supports (display: grid) {
+  .grid > .item[data-kind="π"]::before {
+    content: "λ🚀";
+    color: hsl(210deg 60% 45% / 0.85);
+  }
+}
+
+@supports selector(article:has(> h2)) and (color: oklch(50% 0.1 120)) {
+  main:is(#content, .contenido, .内容) > article:has(> h2 + p) {
+    border-inline-start: 0.25rem solid var(--brand);
+  }
+}
+
+@layer components {
+  #\31 23-panel.card:is(.featured, .caf\00E9):not(.disabled) {
+    container: card / inline-size;
+    inline-size: min(100% - 2rem, 72ch);
+    margin-inline: auto;
+    border: 1px solid rgb(0 0 0 / 12%);
+    border-radius: calc(var(--gap) / 3);
+    box-shadow: 0 0.5rem 2rem rgb(20 30 50 / 0.15);
+    overflow: clip;
+  }
+
+  nav[aria-label~="主要"] > ul > li + li::marker {
+    content: "◆ ";
+    color: rebeccapurple;
+  }
+
+  svg|a[href^="https://"][href$=".例" i] {
+    cursor: pointer;
+  }
+
+  .雪[data-state|="open"] ~ .🧭-status::after {
+    content: attr(data-label) " ↗";
+    white-space: pre-wrap;
+  }
+}
+
+@container card (width > 40rem) {
+  .card__body {
+    display: grid;
+    grid-template-columns: [media-start] minmax(12rem, 1fr) [media-end content-start] 2fr [content-end];
+    grid-template-areas: "image copy";
+    gap: min(4cqi, var(--gap));
+    align-items: center;
+  }
+}
+
+@media screen and (min-width: 48rem) {
+  .card {
+    background: linear-gradient(135deg, #fff, rgba(0, 0, 0, 0.1));
+    transform: translate3d(0, calc(var(--gap) / 2), 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce), print and (monochrome) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@page chapter {
+  size: A4 portrait;
+  margin: 20mm 18mm 24mm 22mm;
+
+  @top-center {
+    content: "第 " counter(page, circled-greek) " 页 — λ";
+  }
+}
+
+@keyframes pulse {
+  from { opacity: 0.4; }
+  50% { opacity: 1; }
+  to { opacity: 0.4; }
+}
+
+@keyframes orbit-🪐 {
+  0% { transform: rotate(0turn) translateX(0) scale(1); }
+  35%, 65% { transform: rotate(0.5turn) translateX(clamp(1rem, 5vw, 4rem)) scale(1.05); }
+  100% { transform: rotate(1turn) translateX(0) scale(1); }
+}
+
+@layer utilities {
+  .layout\/grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+    gap: var(--gap, 1rem);
+    place-content: start center;
+  }
+
+  .stack > * + * { margin-block-start: var(--gap); }
+  [dir="rtl"] .flip\:rtl { transform: scaleX(-1); }
+  :lang(ja, zh-Hans) { line-break: strict; word-break: normal; }
+}
+
+.hero {
+  min-block-size: clamp(20rem, 60svh, 48rem);
+  padding: calc(1rem + 2vi) max(1rem, 5vw);
+  background-image:
+    linear-gradient(to right, rgb(10 20 40 / 0.8), transparent 70%),
+    image-set(url("../img/星空.avif") type("image/avif") 1x, url('../img/sky@2x.webp') 2x);
+  background-position: center;
+  background-size: cover;
+}
+
+.spectrum::before {
+  content: "Δx = " attr(data-delta) " — 👩🏽‍💻";
+  display: block;
+  aspect-ratio: 16 / 9;
+  background: conic-gradient(from 0.25turn at 50% 50%, red, #0f08, hwb(240 10% 5% / 0.7), red);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 2rem) 100%, 2rem 100%);
+}
+
+form:focus-within :is(input[type="email"], input[type='url']):user-invalid {
+  outline: 2px solid color-mix(in srgb, crimson 75%, transparent);
+  outline-offset: 0.2rem;
+  caret-color: currentColor;
+}
+
+input::placeholder { color: rgb(80 90 100 / 60%); }
+input:checked + label { font-variation-settings: "wght" 700, "wdth" 95; }
+dialog:modal::backdrop { background: rgb(0 0 0 / 55%); backdrop-filter: blur(0.35rem); }
+
+.motion {
+  animation: 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) 120ms infinite alternate both pulse;
+  transform-origin: center bottom;
+  translate: calc(sin(30deg) * 1rem) min(2vh, 1rem);
+  rotate: 0.025turn;
+  scale: 1 0.98;
+  will-change: transform, opacity;
+}
+
+.prose > :first-child { margin-block-start: 0; }
+.prose > :last-child { margin-block-end: 0; }
+.prose p:nth-child(2n + 1 of .note) { hyphens: auto; }
+.prose q[lang|="fr"]::before { content: "«\202F"; }
+.prose q[lang|="fr"]::after { content: "\202F»"; }

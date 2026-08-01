@@ -1,0 +1,20 @@
+/* Basic Rel fixture with block-comment punctuation. */
+module catalog
+  // Unicode remains source text: café, λ, 東京, 🚀
+  entity Person
+  bound person_id
+
+  def person = (1, "Ada"); (2, "Grace"); (3, "東京 🚀")
+  def active = (1, true); (2, false); (3, true)
+  def status = (1, :ready); (2, :paused); (3, :ready)
+
+  @inline
+  def adult[id] = exists(age: person_age(id, age) and age >= 18)
+
+  def greeting[id, name] =
+    if person(id, name) then "hello, \"friend\"" else "unknown"
+
+  /* A regular block comment. */
+  def visible[id] = active(id, true) and not status(id, :paused)
+  def output[id, name] = person(id, name) and visible(id)
+end

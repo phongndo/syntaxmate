@@ -1,0 +1,11 @@
+{
+  "languageAssets": {
+    "bash": "shellscript"
+  },
+  "cases": [
+    {
+      "language": "cpp",
+      "fixture": "tests/fixtures/textmate/cpp/libcxx_vector.cpp"
+    }
+  ]
+}

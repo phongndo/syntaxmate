@@ -1,0 +1,185 @@
+; Godot resource corpus: observatory scene data, Unicode λ 東京, astral 🛰️ 🚀
+[gd_resource type="Resource" script_class="MissionCatalog" load_steps=18 format=3]
+
+[ext_resource type="Script" path="res://missions/mission_catalog.gd" id="1_catalog"]
+[ext_resource type="Texture2D" path="res://art/starmap.webp" id="2_starmap"]
+[ext_resource type="AudioStream" path="res://audio/launch.ogg" id="3_launch"]
+[ext_resource type="Shader" path="res://shaders/orbit.gdshader" id="4_shader"]
+[ext_resource type="PackedScene" path="res://scenes/probe.tscn" id="5_probe"]
+
+[sub_resource type="GDScript" id="GDScript_inline"]
+script/source = "@tool
+extends Resource
+class_name InlineMission
+
+@export var title: String = \"Aurora\"
+@export var altitude: float = 240.0
+var tags: Array[String] = [\"science\", \"orbit\"]
+
+func summary(prefix: String) -> String:
+	return prefix + \" :: \" + title
+"
+
+[sub_resource type="Shader" id="Shader_inline"]
+code = "shader_type canvas_item;
+render_mode unshaded;
+
+uniform vec4 sky_color : source_color = vec4(0.05, 0.12, 0.3, 1.0);
+uniform float pulse : hint_range(0.0, 2.0) = 0.5;
+
+void fragment() {
+    float glow = 0.5 + 0.5 * sin(TIME * pulse);
+    COLOR = vec4(sky_color.rgb * glow, sky_color.a);
+}
+"
+
+[sub_resource type="Gradient" id="Gradient_twilight"]
+offsets = PackedFloat32Array(0, 0.2, 0.55, 1)
+colors = PackedColorArray(0.01, 0.02, 0.08, 1, 0.08, 0.2, 0.5, 1, 0.7, 0.25, 0.5, 1, 1, 0.7, 0.2, 1)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture_sky"]
+gradient = SubResource("Gradient_twilight")
+width = 512
+height = 256
+fill_from = Vector2(0.5, 1)
+fill_to = Vector2(0.5, 0)
+
+[sub_resource type="Curve" id="Curve_throttle"]
+min_value = 0.0
+max_value = 1.0
+_data = [Vector2(0, 0), 0.0, 1.8, 0, 0, Vector2(0.35, 0.72), 1.1, 0.4, 0, 0, Vector2(1, 1), 0.2, 0.0, 0, 0]
+point_count = 3
+
+[sub_resource type="Curve2D" id="Curve_orbit"]
+_data = {"points": PackedVector2Array(-0.2, 0.8, 0, 0, 64, 12, -0.5, 0.4, 0.5, -0.4, 128, -16, -0.8, -0.2, 0.2, 0.8, 192, 8)}
+point_count = 3
+
+[sub_resource type="AtlasTexture" id="Atlas_probe"]
+atlas = ExtResource("2_starmap")
+region = Rect2(32, 16, 64, 64)
+filter_clip = true
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_orbit"]
+shader = ExtResource("4_shader")
+shader_parameter/tint = Color(0.18, 0.72, 1, 1)
+shader_parameter/radius = 48.5
+shader_parameter/enabled = true
+
+[sub_resource type="AudioStreamRandomizer" id="Audio_launches"]
+random_pitch = 1.08
+random_volume_offset_db = 1.5
+streams_count = 2
+stream_0/stream = ExtResource("3_launch")
+stream_0/weight = 1.0
+stream_1/stream = ExtResource("3_launch")
+stream_1/weight = 0.35
+
+[sub_resource type="Animation" id="Animation_reset"]
+resource_name = "RESET"
+length = 0.0
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Probe:position")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {"times": PackedFloat32Array(0), "transitions": PackedFloat32Array(1), "update": 0, "values": [Vector2(0, 0)]}
+
+[sub_resource type="Animation" id="Animation_launch"]
+resource_name = "launch"
+length = 4.5
+step = 0.1
+tracks/0/type = "bezier"
+tracks/0/path = NodePath("Probe:position:y")
+tracks/0/keys = {"handle_modes": PackedInt32Array(0, 0), "points": PackedFloat32Array(0, 0, 0, 0, 1.5, 4.5, -240, -1.2, 0, 0), "times": PackedFloat32Array(0, 4.5)}
+tracks/1/type = "method"
+tracks/1/path = NodePath(".")
+tracks/1/keys = {"times": PackedFloat32Array(0.2, 4.4), "transitions": PackedFloat32Array(1, 1), "values": [{"args": ["liftoff 🚀"], "method": &"announce"}, {"args": ["orbit"], "method": &"announce"}]}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_main"]
+_data = {&"RESET": SubResource("Animation_reset"), &"launch": SubResource("Animation_launch")}
+
+[sub_resource type="Environment" id="Environment_space"]
+background_mode = 1
+background_color = Color(0.008, 0.012, 0.04, 1)
+ambient_light_source = 3
+ambient_light_color = Color(0.25, 0.35, 0.55, 1)
+ambient_light_energy = 0.65
+tonemap_mode = 2
+glow_enabled = true
+
+[sub_resource type="StandardMaterial3D" id="Material_hull"]
+resource_name = "Probe hull — 星舟"
+albedo_color = Color(0.72, 0.78, 0.86, 1)
+metallic = 0.8
+roughness = 0.24
+emission_enabled = true
+emission = Color(0.05, 0.4, 1, 1)
+emission_energy_multiplier = 2.25
+
+[sub_resource type="BoxMesh" id="Mesh_probe"]
+material = SubResource("Material_hull")
+size = Vector3(1.5, 0.6, 2.75)
+
+[sub_resource type="BoxShape3D" id="Shape_probe"]
+size = Vector3(1.5, 0.6, 2.75)
+
+[sub_resource type="Resource" id="Resource_primary"]
+script = SubResource("GDScript_inline")
+title = "Polar survey 🛰️"
+coordinates = Vector3(78.2232, 15.6469, 240)
+priority = 0x2A
+channel_mask = 0b1111_0000
+file_mode = 0o755
+temperature_limit = -2.5e1
+precision = +6.022e+23
+positive_limit = +inf
+invalid_sample = nan
+call_sign = StringName("AURORA")
+target_path = NodePath("Stations/東京/LaunchPad")
+waypoints = PackedVector3Array(0, 0, 0, 24, 8, -12, 64, 32, -48)
+flags = PackedInt32Array(1, 2, 4, 8)
+labels = PackedStringArray("ready", "naïve", "λ", "🚀")
+metadata = {"operator": "Zoë", "verified": true, "attempts": 3, "nested": {"site": "São Paulo", "night": true}}
+
+[sub_resource type="Resource" id="Resource_backup"]
+script = ExtResource("1_catalog")
+title = 'Lunar relay'
+coordinates = Vector3(-12.5, 44, 360)
+priority = 7
+target_path = NodePath("Stations/Moon/Relay")
+waypoints = PackedVector3Array(-4, 2, 0, -8, 5, 3)
+metadata = {"operator": "Miyuki", "verified": false}
+
+[resource]
+script = ExtResource("1_catalog")
+catalog_name = "Observatory Mission Catalog"
+catalog_version = 12
+enabled = true
+primary = SubResource("Resource_primary")
+backup = SubResource("Resource_backup")
+probe_scene = ExtResource("5_probe")
+starmap = SubResource("GradientTexture_sky")
+orbit_curve = SubResource("Curve_orbit")
+throttle_curve = SubResource("Curve_throttle")
+probe_texture = SubResource("Atlas_probe")
+probe_material = SubResource("ShaderMaterial_orbit")
+launch_audio = SubResource("Audio_launches")
+animations = SubResource("AnimationLibrary_main")
+environment = SubResource("Environment_space")
+mesh = SubResource("Mesh_probe")
+collision_shape = SubResource("Shape_probe")
+missions = Array[Resource]([SubResource("Resource_primary"), SubResource("Resource_backup")])
+launch_windows = [Dictionary({"name": "dawn", "hour": 5.5}), Dictionary({"name": "dusk", "hour": 19.75})]
+transform_2d = Transform2D(1, 0, 0, 1, 24, 48)
+transform_3d = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 8, 12)
+basis = Basis(1, 0, 0, 0, 1, 0, 0, 0, 1)
+rotation = Quaternion(0, 0.382683, 0, 0.92388)
+bounds = AABB(-8, -4, -16, 16, 8, 32)
+plane = Plane(0, 1, 0, 0)
+identifier = RID()
+notes = """Mission notes:
+Keep the café instruments warm.
+Confirm 東京 telemetry and λ calibration.
+Astral payload markers: 🚀 🛰️ 🌌
+"""

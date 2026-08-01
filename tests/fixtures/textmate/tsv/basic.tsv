@@ -1,0 +1,13 @@
+sample_id	date	site	taxon	count	observer	method	quality	marker	note
+S-001	2025-03-14	São Paulo	Turdus rufiventris	3	Ana Silva	point count	verified	🐦	dawn chorus
+S-002	2025-03-15	القاهرة	Falco tinnunculus	1	نور حسن	visual	probable	🪶	roof ledge
+S-003	2025-03-16	京都	Prunus × yedoensis	12	𠮷田 葵	transect	verified	🌸	満開
+S-004	2025-03-17	Αθήνα	Erinaceus roumanicus		Γ. Νικολάου	camera trap	unreviewed	🦔	
+S-005	2025-03-18	Reykjavík	Fratercula arctica	27	Zoë Jónsdóttir	colony scan	verified	🧭	wind 18 m/s
+S-006	2025-03-19	Null Island		0	Sam Lee	calibration	rejected	🧪	control record
+S-007	2025-03-20	Ravenna	𐍈 manuscript moth	1	Maeve O'Connor	light trap	probable	🔦	astral letter in label
+S-008	2025-03-21	Montréal	Danaus plexippus	5	Renée Côté	net survey	verified	🦋	first spring record
+S-009	2025-03-22	Dakar	Adansonia digitata	2	Amélie Diop	plot survey	verified	🌳	seedlings
+S-010	2025-03-23	Atacama	Mars analog sample	1	Orbital Team	remote sensor	verified	🛰️	astronaut 🧑‍🚀 test
+S-011	2025-03-24	München	Apis mellifera	18	Lena Weiß	flower watch	probable	🐝	café courtyard
+S-012	2025-03-25	北京	Pica serica	4	李雷	acoustic	verified	🎙️	清晨

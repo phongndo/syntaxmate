@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Angular host café 🚀 𝌆</title>
+</head>
+<body>
+  <app-shell data-locale="日本語">
+    <header class="hero">Hello {{ user.name }}</header>
+    @let greeting = 'bonjour';
+    @if (ready) {
+      <section aria-label="東京">Ready</section>
+    }
+    <widget-card [value]="count" (save)="store()">
+      <span title="astral 𝌆">content</span>
+    </widget-card>
+  </app-shell>
+  <unknown:panel data-id="42" />
+</body>
+</html>

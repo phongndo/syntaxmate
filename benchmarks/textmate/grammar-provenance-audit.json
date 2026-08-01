@@ -1,0 +1,2856 @@
+{
+  "schemaVersion": 1,
+  "publicLanguages": 264,
+  "grammarAssets": 268,
+  "shiki": {
+    "version": "3.23.0",
+    "commit": "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+  },
+  "vscode": {
+    "version": "1.128.0",
+    "commit": "fc3def6774c76082adf699d366f31a557ce5573f"
+  },
+  "vscodeUpstreamVerified": false,
+  "assets": [
+    {
+      "language": "abap",
+      "scopeName": "source.abap",
+      "canonicalSha256": "18ed42200344af143f3aea9442d8fcb8032ed7ff9022ce5620eb78fbb57d5f89",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:abap.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "actionscript-3",
+      "scopeName": "source.actionscript.3",
+      "canonicalSha256": "3f6281972284d0e434ef4ab7758fb61b7147dcba2fd7ca600ea0452b5e36c767",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:actionscript-3.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ada",
+      "scopeName": "source.ada",
+      "canonicalSha256": "8fecfe6247526929917e3a6a6f3c8d4992ab5dddcb5e6cd3676afd46379542f0",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ada.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "angular-expression",
+      "scopeName": "expression.ng",
+      "canonicalSha256": "cbdd6a304c9b8dad5854bb692e1369fb84effd4866d0ac18a4ca65aa6344d3c5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-expression.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "angular-html",
+      "scopeName": "text.html.derivative.ng",
+      "canonicalSha256": "1d0b67e1b8fc150f3c3dd3d3cc0a25ecf38406dd2cda11483e9933a0c8260d2a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-html.mjs",
+      "dependencies": [
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "angular-inline-style",
+      "scopeName": "inline-styles.ng",
+      "canonicalSha256": "4d3a4e39cc7c71990e743ed51ce10ff43a9566909c6c507fd07890c2840eac9f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-inline-style.mjs",
+      "dependencies": [
+        "source.css.scss"
+      ]
+    },
+    {
+      "language": "angular-inline-template",
+      "scopeName": "inline-template.ng",
+      "canonicalSha256": "88ff3a7620132cca3d20bf4dab0ce2b7fe57b95cb7db3a1990ffaccbbbcd6205",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-inline-template.mjs",
+      "dependencies": [
+        "template.ng",
+        "text.html.derivative.ng"
+      ]
+    },
+    {
+      "language": "angular-let-declaration",
+      "scopeName": "template.let.ng",
+      "canonicalSha256": "cc70f39cea84cfa833991bd20943a89de17b8af578f100e654934bc323df1756",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-let-declaration.mjs",
+      "dependencies": [
+        "expression.ng"
+      ]
+    },
+    {
+      "language": "angular-template",
+      "scopeName": "template.ng",
+      "canonicalSha256": "fed2b3cc564dc3c264334907e811b9d574b7bc8154ed34a4b598526400ac5909",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-template.mjs",
+      "dependencies": [
+        "expression.ng"
+      ]
+    },
+    {
+      "language": "angular-template-blocks",
+      "scopeName": "template.blocks.ng",
+      "canonicalSha256": "ea2444480d0b6afc10580588aa11a0cef9bd819a266b12dcc6298c5bc59e2b7f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-template-blocks.mjs",
+      "dependencies": [
+        "expression.ng",
+        "template.ng",
+        "text.html.derivative.ng"
+      ]
+    },
+    {
+      "language": "angular-ts",
+      "scopeName": "source.ts.ng",
+      "canonicalSha256": "e377d0c8956f8d2408a84352e3cf3b413715883c5e6d7bd184784d2da8230039",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:angular-ts.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "apache",
+      "scopeName": "source.apacheconf",
+      "canonicalSha256": "102fd3d5916e57782f09b2a5d330d95a8ed6130fd152fe1dc60c15090975f95f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:apache.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "apex",
+      "scopeName": "source.apex",
+      "canonicalSha256": "f1b8a8cf56b93c2d1bc25a38356cd45da923e641f2e1ff20ff93113545b71332",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:apex.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "apl",
+      "scopeName": "source.apl",
+      "canonicalSha256": "7d5fe5bf23ead5cb77a19758a8d5509dead6931121081e506d4a10c6403f9f78",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:apl.mjs",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.json",
+        "text.html.basic",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "applescript",
+      "scopeName": "source.applescript",
+      "canonicalSha256": "359dc629b053e3d6d58afcbe4da20bcfa9917ff3a4da8825da8703036357997e",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:applescript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ara",
+      "scopeName": "source.ara",
+      "canonicalSha256": "8856ce7804da517c8ac3fe5ef9527395d0e1f4639cdbbad0537d21d618d5275a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ara.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "asciidoc",
+      "scopeName": "text.asciidoc",
+      "canonicalSha256": "e98b37b39c65ddaa04320c0fcec4e0275bac28a8cdc49f986c991b85b2695fd8",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:asciidoc.mjs",
+      "dependencies": [
+        "source.abap",
+        "source.asp.vb.net",
+        "source.batchfile",
+        "source.c",
+        "source.clojure",
+        "source.coffee",
+        "source.cpp",
+        "source.cs",
+        "source.css",
+        "source.css.less",
+        "source.css.scss",
+        "source.dart",
+        "source.diff",
+        "source.dockerfile",
+        "source.elixir",
+        "source.erlang",
+        "source.fsharp",
+        "source.go",
+        "source.groovy",
+        "source.haskell",
+        "source.ini",
+        "source.java",
+        "source.js",
+        "source.js.regexp",
+        "source.json",
+        "source.json.comments",
+        "source.julia",
+        "source.kotlin",
+        "source.lua",
+        "source.makefile",
+        "source.objc",
+        "source.perl",
+        "source.perl.6",
+        "source.php",
+        "source.powershell",
+        "source.python",
+        "source.r",
+        "source.regexp.python",
+        "source.rst",
+        "source.ruby",
+        "source.rust",
+        "source.scala",
+        "source.shell",
+        "source.sql",
+        "source.swift",
+        "source.ts",
+        "source.tsx",
+        "source.twig",
+        "source.yaml",
+        "source.yang",
+        "text.bibtex",
+        "text.csv",
+        "text.git-commit",
+        "text.git-rebase",
+        "text.html.basic",
+        "text.html.handlebars",
+        "text.html.markdown",
+        "text.log",
+        "text.pug",
+        "text.tex.latex",
+        "text.xml",
+        "text.xml.xsl"
+      ]
+    },
+    {
+      "language": "asm",
+      "scopeName": "source.asm.x86_64",
+      "canonicalSha256": "d92bba9026e51dde8dbb8b9f6332703cc51a3b24bb83d350c0e82420738b89e0",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:asm.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "assemblyscript",
+      "scopeName": "source.assemblyscript",
+      "canonicalSha256": "d920e6d028c05a83ade1d6a617ba2557a1393d6d272c58a18821512c7553df44",
+      "target": "pinned-package",
+      "reference": "https://github.com/AssemblyScript/assemblyscript@0.28.19:mark profile: source.ts",
+      "dependencies": [
+        "source.ts"
+      ]
+    },
+    {
+      "language": "astro",
+      "scopeName": "source.astro",
+      "canonicalSha256": "adc61f2304dfa07ec396226c90cf6a9eb4941d91a6477a821cda40f07143942c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:astro.mjs",
+      "dependencies": [
+        "source.css",
+        "source.css.less",
+        "source.css.postcss",
+        "source.css.scss",
+        "source.js",
+        "source.json",
+        "source.sass",
+        "source.stylus",
+        "source.ts",
+        "source.tsx"
+      ]
+    },
+    {
+      "language": "awk",
+      "scopeName": "source.awk",
+      "canonicalSha256": "1c2abcc931e4c6c5a84151356b948dead48bc41d8bb5cf0966d2d737d0fd0f3d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:awk.mjs",
+      "dependencies": [
+        "source.regexp"
+      ]
+    },
+    {
+      "language": "ballerina",
+      "scopeName": "source.ballerina",
+      "canonicalSha256": "2fd214c5394695b9ee1480495f0ade8db27863030164f20ed1cd5a241b529ca9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ballerina.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "bat",
+      "scopeName": "source.batchfile",
+      "canonicalSha256": "3bff060838b9bf5f86d36af9351340b5129facc3fa857807e534b30171d60b79",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:bat.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "beancount",
+      "scopeName": "text.beancount",
+      "canonicalSha256": "98e9b4220f8599bb13eb268d5fa522e964f2dd98c8674cd7b6d24af809132840",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:beancount.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "berry",
+      "scopeName": "source.berry",
+      "canonicalSha256": "384415292cc01e9faf4d7db045575e60d013f7410e34e37a7da80de70678be61",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:berry.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "bibtex",
+      "scopeName": "text.bibtex",
+      "canonicalSha256": "34c6d78b13fac6712f116116dfd34ca947c2cb7bd428440828ff05d29a7c4479",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:bibtex.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "bicep",
+      "scopeName": "source.bicep",
+      "canonicalSha256": "747636edc8c7d67ba11bfb94249cb683bd3d36f4ca90c771c6cf27b42b4c4cf9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:bicep.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "bird2",
+      "scopeName": "source.bird2",
+      "canonicalSha256": "b66f3d210da731c00c97c2d856c8925ce4456c411770ae993732e5a194874905",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:bird2.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "blade",
+      "scopeName": "text.html.php.blade",
+      "canonicalSha256": "4a01231f2e8fbcac0723b682738fc19c0f5ff12464fda499b54107f92648774b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:blade.mjs",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.json",
+        "source.sql",
+        "text.html.basic",
+        "text.html.derivative",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "bsl",
+      "scopeName": "source.bsl",
+      "canonicalSha256": "89d9dd362a774c1a448a180f9860da6d448dd88c00c5497dddda0c931811c9d0",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:bsl.mjs",
+      "dependencies": [
+        "source.sdbl"
+      ]
+    },
+    {
+      "language": "c",
+      "scopeName": "source.c",
+      "canonicalSha256": "92d4d83b5fa9a53320ae48a09412fe0300dc4823fc292989132c83646d4f9b2f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:c.mjs",
+      "dependencies": [
+        "source.arm",
+        "source.asm",
+        "source.x86",
+        "source.x86_64"
+      ]
+    },
+    {
+      "language": "c3",
+      "scopeName": "source.c3",
+      "canonicalSha256": "44ce486e2a82615c1e2ba7b0b44b653e8fd15a6e75cdff0c2fffd33ca8183bd6",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:c3.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "cadence",
+      "scopeName": "source.cadence",
+      "canonicalSha256": "3febcdc663ae4563fc819a019a92da1a2a634b3ea2b804a1a502479f255a7834",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cadence.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "cairo",
+      "scopeName": "source.cairo0",
+      "canonicalSha256": "c9138d6227754cdc8f0e67a953246e69e27d3ad70cd949a8ad79f2002261136a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cairo.mjs",
+      "dependencies": [
+        "source.cairo0",
+        "source.python"
+      ]
+    },
+    {
+      "language": "clarity",
+      "scopeName": "source.clar",
+      "canonicalSha256": "aecfe850cc1735130068d44fe5adb1276c7c714bd156c9380e6a9d3b58e84e98",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:clarity.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "clojure",
+      "scopeName": "source.clojure",
+      "canonicalSha256": "56219ce791f9e0c3892ef6c63287ee88b7dd5f131003f2cc83f0ff38213778a5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:clojure.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "cmake",
+      "scopeName": "source.cmake",
+      "canonicalSha256": "01eb7724425d8e0d5758e0c67947583dc9a1bcb7c3d52311affcbad71b42d3f2",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cmake.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "cobol",
+      "scopeName": "source.cobol",
+      "canonicalSha256": "06125eea341e53b6643799a175a47875e073d74427044a86985b042390f73d9e",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cobol.mjs",
+      "dependencies": [
+        "source.java",
+        "source.openesql",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "codeowners",
+      "scopeName": "text.codeowners",
+      "canonicalSha256": "470b07636c0ef77233f16754a7af26a7a784b405744a80085ca81bf226752496",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:codeowners.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "codeql",
+      "scopeName": "source.ql",
+      "canonicalSha256": "5bab8fcb85183e3679fc1a72ae714a45f94356a656daf286124e5afefa3988a3",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:codeql.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "coffee",
+      "scopeName": "source.coffee",
+      "canonicalSha256": "1410bb5ea3edf82f660b841583f6c7d5a40a83f69567488b68aa61888ac38aed",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:coffee.mjs",
+      "dependencies": [
+        "source.js",
+        "source.js.regexp"
+      ]
+    },
+    {
+      "language": "common-lisp",
+      "scopeName": "source.commonlisp",
+      "canonicalSha256": "9e5c5ecfb8e4b1e9c321df88825162522e7c4d1ec958ceca060e3eee78b59f91",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:common-lisp.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "coq",
+      "scopeName": "source.coq",
+      "canonicalSha256": "1f0a395a6da076f7d985251b2f91b2d47e497e8f076b0ada9a6d4e20f44bb62c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:coq.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "cpp",
+      "scopeName": "source.cpp",
+      "canonicalSha256": "f5c7ad398940e53b6ebf789a6d123197e9d48aaf46cac5533502754da6ae7298",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cpp.mjs",
+      "dependencies": [
+        "source.arm",
+        "source.asm",
+        "source.cpp.embedded.macro",
+        "source.glsl",
+        "source.regexp.python",
+        "source.sql",
+        "source.x86",
+        "source.x86_64"
+      ]
+    },
+    {
+      "language": "cpp-macro",
+      "scopeName": "source.cpp.embedded.macro",
+      "canonicalSha256": "88e7542d40c7ecd67a8adfddcf2f14138d722906b553458795a8d8b894133fac",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cpp-macro.mjs",
+      "dependencies": [
+        "source.arm",
+        "source.asm",
+        "source.cpp",
+        "source.cpp.embedded.macro",
+        "source.glsl",
+        "source.regexp.python",
+        "source.sql",
+        "source.x86",
+        "source.x86_64"
+      ]
+    },
+    {
+      "language": "crystal",
+      "scopeName": "source.crystal",
+      "canonicalSha256": "81ce713681860ea1bf18e89618b870689a791c5f9a22a4c8fe0e797caa47dd5b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:crystal.mjs",
+      "dependencies": [
+        "source.c",
+        "source.c++",
+        "source.crystal",
+        "source.css",
+        "source.js",
+        "source.js.jquery",
+        "source.shell",
+        "source.sql",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "csharp",
+      "scopeName": "source.cs",
+      "canonicalSha256": "e4d1ebaeab8970b1b60e628e1ea9f2ffc25b188bb4195f9568810f9875537ba0",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:csharp.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "css",
+      "scopeName": "source.css",
+      "canonicalSha256": "8941f8087cadea88ca37ba4efe54f50077c5858e878fc1829efea4d30f2cbb48",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:css.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "csv",
+      "scopeName": "text.csv",
+      "canonicalSha256": "21675400a9fadf3fee4cfc2fc4983c6b9006dee5ff090077b77a408510b3372a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:csv.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "cuda",
+      "scopeName": "source.cuda-cpp",
+      "canonicalSha256": "eab06b207ec7dfbff650602abbb52e55c33f355bbcc7c2c080e502dde7baca2f",
+      "target": "pinned-package",
+      "reference": "https://github.com/kriegalex/vscode-cuda@0.1.1:syntaxes/cuda.tmLanguage.json",
+      "dependencies": [
+        "source.cpp"
+      ]
+    },
+    {
+      "language": "cue",
+      "scopeName": "source.cue",
+      "canonicalSha256": "4b24bfd4d6c05faba3372139139f5ff67c37ab519c971ba577c1b09e3ddddef5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cue.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "cypher",
+      "scopeName": "source.cypher",
+      "canonicalSha256": "9da83e7f842834dddf9ac5ef81b9044134234d29eb71225d087071ed86a0e050",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:cypher.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "d",
+      "scopeName": "source.d",
+      "canonicalSha256": "981f448fb47d5f7ecb42aaec6379479b0068ae81557e917db1fca1f56361c40c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:d.mjs",
+      "dependencies": [
+        "source.d"
+      ]
+    },
+    {
+      "language": "dart",
+      "scopeName": "source.dart",
+      "canonicalSha256": "f1ce4d08f5c035787ef139e63a14bdb7f05d7a996ec86138570d4f9f7bc485b5",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/dart/syntaxes/dart.tmLanguage.json",
+      "dependencies": []
+    },
+    {
+      "language": "dax",
+      "scopeName": "source.dax",
+      "canonicalSha256": "1131ded53648703f7254d4b0addd334678652b80c031f8ad626d2123dda5fa83",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:dax.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "desktop",
+      "scopeName": "source.desktop",
+      "canonicalSha256": "491a73fc05e773c2599771ce59e1e0c895816879309524c5e4c4320cc41a12ee",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:desktop.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "diff",
+      "scopeName": "source.diff",
+      "canonicalSha256": "256843a66b11cd0193a0cf34425474bce6f773a14e29beb6e87fba251701f8fd",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:diff.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "docker",
+      "scopeName": "source.dockerfile",
+      "canonicalSha256": "e66f66f31c36354abf5a58b6126ed9ed4a8c3c0f75251f5096d9a1aa96203111",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:docker.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "dotenv",
+      "scopeName": "source.dotenv",
+      "canonicalSha256": "c974b3c3b610a2953cb296d3c0ecb272f4a772eadca04228ee941792f36c4ed5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:dotenv.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "dream-maker",
+      "scopeName": "source.dm",
+      "canonicalSha256": "812189419294edb1e504b03b2d499d84a7ce69b212f41e205b8009bc6d32e06f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:dream-maker.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "edge",
+      "scopeName": "text.html.edge",
+      "canonicalSha256": "b366e6b7931ded20b247aee57a3dc28d310f568b9510a4a42b1b2ab62d298202",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:edge.mjs",
+      "dependencies": [
+        "source.ts",
+        "text.html.basic",
+        "text.html.derivative"
+      ]
+    },
+    {
+      "language": "elixir",
+      "scopeName": "source.elixir",
+      "canonicalSha256": "c6c43d3789e65393d5a88fba7cb7c8473b75d03151ae3eff5961d0a492dc4ddc",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:elixir.mjs",
+      "dependencies": [
+        "text.elixir",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "elm",
+      "scopeName": "source.elm",
+      "canonicalSha256": "f960e90953db9c2a7392b3f62736455cf307475dbed519d8b8284c35d7e3c8b4",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:elm.mjs",
+      "dependencies": [
+        "source.glsl"
+      ]
+    },
+    {
+      "language": "emacs-lisp",
+      "scopeName": "source.emacs.lisp",
+      "canonicalSha256": "5a61f39081fb1be452e174532308f0190326b7ddf1068390da5302659eecccb3",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:emacs-lisp.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "erb",
+      "scopeName": "text.html.erb",
+      "canonicalSha256": "56ed3768062f6be96c3c2b744c43821124ab2ac955e5007b624cb0fe47cc18eb",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:erb.mjs",
+      "dependencies": [
+        "source.ruby",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "erlang",
+      "scopeName": "source.erlang",
+      "canonicalSha256": "0e261441892869676958ed75214b84c3ad958dda43d9f8a8f4882ff9207139c5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:erlang.mjs",
+      "dependencies": [
+        "text.html.markdown"
+      ]
+    },
+    {
+      "language": "es-tag-css",
+      "scopeName": "inline.es6-css",
+      "canonicalSha256": "30adb217e0f66d7ebb81c37af34f5cafa313e303fbc92d48eef5f2e9b8ae1afc",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:es-tag-css.mjs",
+      "dependencies": [
+        "inline.es6-htmlx",
+        "source.css",
+        "source.js",
+        "source.ts",
+        "string.quoted.other.template.js"
+      ]
+    },
+    {
+      "language": "es-tag-glsl",
+      "scopeName": "inline.es6-glsl",
+      "canonicalSha256": "b0620b598b57d1083bd977ab5d7716828b4f45717165d068a783b0c1211e7acc",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:es-tag-glsl.mjs",
+      "dependencies": [
+        "inline.es6-htmlx",
+        "source.glsl",
+        "source.js",
+        "source.ts",
+        "string.quoted.other.template.js"
+      ]
+    },
+    {
+      "language": "es-tag-html",
+      "scopeName": "inline.es6-html",
+      "canonicalSha256": "e7497be6458d7fdf11f67212ef2b4e031388d3b6faa2dab5da03929c92d5a9d2",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:es-tag-html.mjs",
+      "dependencies": [
+        "inline.es6-htmlx",
+        "source.js",
+        "source.ts",
+        "string.quoted.other.template.js",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "es-tag-sql",
+      "scopeName": "inline.es6-sql",
+      "canonicalSha256": "a67596c1a01987e9427755eeb5ec7e79d5361f6edf54cee66309818907b02129",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:es-tag-sql.mjs",
+      "dependencies": [
+        "source.plpgsql.postgres",
+        "source.sql",
+        "source.ts"
+      ]
+    },
+    {
+      "language": "es-tag-xml",
+      "scopeName": "inline.es6-xml",
+      "canonicalSha256": "0efbf43ece4eae65566ab8f51388024cc6170dfb77ea9ad606ae438a982eb3f9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:es-tag-xml.mjs",
+      "dependencies": [
+        "text.xml"
+      ]
+    },
+    {
+      "language": "fennel",
+      "scopeName": "source.fnl",
+      "canonicalSha256": "bd7ee794f1e8d8939d03706bf9d557a7a5f880014e58e42fa28d78c5a7c0b744",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:fennel.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "fish",
+      "scopeName": "source.fish",
+      "canonicalSha256": "dc072382dd838cd5da87a628f401778adbcf11c602ab3c7a822d2dd611457449",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:fish.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "fluent",
+      "scopeName": "source.ftl",
+      "canonicalSha256": "0569734e4ec6625c30b8ad3e1a2cb46d6bbbd8045115a95456a542c6046b4188",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:fluent.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "fortran-fixed-form",
+      "scopeName": "source.fortran.fixed",
+      "canonicalSha256": "d9036da7c8ea21743c1aeb076d15f32c9e0bc5a377f364aff5351d2c86e56a2c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:fortran-fixed-form.mjs",
+      "dependencies": [
+        "source.fortran.free"
+      ]
+    },
+    {
+      "language": "fortran-free-form",
+      "scopeName": "source.fortran.free",
+      "canonicalSha256": "e223a07fa9a24f26dfca2fcca08ff7c4c19dbb0f0faf6c268362846175040ae1",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:fortran-free-form.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "fsharp",
+      "scopeName": "source.fsharp",
+      "canonicalSha256": "da6b6580b0583e3a5750fca44c10b641cfdef2036feb7f1a32d52d25ff014241",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:fsharp.mjs",
+      "dependencies": [
+        "text.html.markdown"
+      ]
+    },
+    {
+      "language": "gdresource",
+      "scopeName": "source.gdresource",
+      "canonicalSha256": "951e09b932650c0577a1b86143fa3f57e4bcc72e9547f1afc6bd8707d564181d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:gdresource.mjs",
+      "dependencies": [
+        "source.gdscript",
+        "source.gdshader"
+      ]
+    },
+    {
+      "language": "gdscript",
+      "scopeName": "source.gdscript",
+      "canonicalSha256": "bbc8a6227f17c11fa4f40af61d39e6d1033fcb32ec42d81eefeeaaff55de14fc",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:gdscript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "gdshader",
+      "scopeName": "source.gdshader",
+      "canonicalSha256": "6f66e4f8ad185496eab29299cdcb922ce33b3cf55b1a015ab36cc18c8b1b0684",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:gdshader.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "genie",
+      "scopeName": "source.genie",
+      "canonicalSha256": "38ae5ba8299d649433e2ccccc3d1947f967f343324d6f5b26de322bb4a55b55d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:genie.mjs",
+      "dependencies": [
+        "text.html.javadoc"
+      ]
+    },
+    {
+      "language": "gherkin",
+      "scopeName": "text.gherkin.feature",
+      "canonicalSha256": "5ef9454b6f115b14aaf9479f3e08054e616408e6209a6d74219b832facbf04ee",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:gherkin.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "git-commit",
+      "scopeName": "text.git-commit",
+      "canonicalSha256": "6ae78cb726d0769d052dff7f1933d38c51cb9135813e44d7a28794bf83d7adea",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:git-commit.mjs",
+      "dependencies": [
+        "source.diff"
+      ]
+    },
+    {
+      "language": "git-rebase",
+      "scopeName": "text.git-rebase",
+      "canonicalSha256": "d0dec2ab1c5e969b185e05f3ee6ebcb7f55ac92687535d4bfaa845b2fb8f0582",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:git-rebase.mjs",
+      "dependencies": [
+        "source.shell"
+      ]
+    },
+    {
+      "language": "gleam",
+      "scopeName": "source.gleam",
+      "canonicalSha256": "624ffafa6357197ac7c9e5af6bada946bdd84ae47f85ee543515382b3ba2007b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:gleam.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "glimmer-js",
+      "scopeName": "source.gjs",
+      "canonicalSha256": "c6046726c243b5bcac12e046c1c9e077a716b1c6d91e0d75f6bb052b1bcc1c3f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:glimmer-js.mjs",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.ts",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "glimmer-ts",
+      "scopeName": "source.gts",
+      "canonicalSha256": "ae9f77782f539de7800404e019e24299987530855b1a78cd0fed010e8c926f6a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:glimmer-ts.mjs",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.ts",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "glsl",
+      "scopeName": "source.glsl",
+      "canonicalSha256": "52d48f6505d6dc1f9d96b37b2df15e6311b82703fade2eca2f76b824201427a1",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:glsl.mjs",
+      "dependencies": [
+        "source.c"
+      ]
+    },
+    {
+      "language": "gn",
+      "scopeName": "source.gn",
+      "canonicalSha256": "6f9ed6190cc733e191d9e261a90639353abb9682cc79f9f18838664bd4ba96ee",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:gn.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "gnuplot",
+      "scopeName": "source.gnuplot",
+      "canonicalSha256": "f37309fb7c9650c9f22792f145a48e52e93e9367c26a5e9100790a4cf51d1236",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:gnuplot.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "go",
+      "scopeName": "source.go",
+      "canonicalSha256": "3dc0c29d97b57bcd714c29773fc7d4e73512cb18dd1d4e1ceb1eed87a301ab6b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:go.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "graphql",
+      "scopeName": "source.graphql",
+      "canonicalSha256": "936df9328c5e26b7961cf95a61f86965ce98417c681bca05509c70e27682b9b6",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:graphql.mjs",
+      "dependencies": [
+        "source.js",
+        "source.js.jsx",
+        "source.ts",
+        "source.tsx"
+      ]
+    },
+    {
+      "language": "groovy",
+      "scopeName": "source.groovy",
+      "canonicalSha256": "78ae6be76d00601a6b3f91b22052b402a2fe58dc241778dcbee77837c4cf25e5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:groovy.mjs",
+      "dependencies": [
+        "text.html.javadoc"
+      ]
+    },
+    {
+      "language": "hack",
+      "scopeName": "source.hack",
+      "canonicalSha256": "9138cdcbd576e4a7e5dec99a56e78f17640636a9d8fd31bbde450b7742397d3b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:hack.mjs",
+      "dependencies": [
+        "source.sql",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "haml",
+      "scopeName": "text.haml",
+      "canonicalSha256": "219188790c05b13ca5ce0a9e889bfef2fb58579d5da45f3f018ebfff8b7fb30d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:haml.mjs",
+      "dependencies": [
+        "source.coffee",
+        "source.css",
+        "source.js",
+        "source.ruby",
+        "source.sass",
+        "source.scss",
+        "text.haml",
+        "text.html.markdown",
+        "text.html.php",
+        "text.plain"
+      ]
+    },
+    {
+      "language": "handlebars",
+      "scopeName": "text.html.handlebars",
+      "canonicalSha256": "37f526b62a665c9e6823c3b1cdfc2bfeb09dd64c88c0b52fc29b4cbaacb95664",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/handlebars/syntaxes/Handlebars.tmLanguage.json",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.yaml",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "haskell",
+      "scopeName": "source.haskell",
+      "canonicalSha256": "4b2bbe3a7ff15990a23e9deeb3427a010cac81f094466a2a1a25622edd67ad12",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:haskell.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "haxe",
+      "scopeName": "source.hx",
+      "canonicalSha256": "2e2960dfe07f8209fd27e5ceb26b388f47dc9f372231d51237555e0ea14eaf74",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:haxe.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "hcl",
+      "scopeName": "source.hcl",
+      "canonicalSha256": "d534ba88d85acfc9a7adc3eb367d3759409d4e522040b139e3a8d8177daa0ecb",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:hcl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "hjson",
+      "scopeName": "source.hjson",
+      "canonicalSha256": "2f8c3ec2cef0bbbf039583c51bbd67b4d9972cf12c6cc1600fd9d4edf0bcbab9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:hjson.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "hlsl",
+      "scopeName": "source.hlsl",
+      "canonicalSha256": "6582a4cd8f28ef245abce0410658976a44b6fcc031551bd409f53c43db79e49c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:hlsl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "html",
+      "scopeName": "text.html.basic",
+      "canonicalSha256": "57de192a75ee43f7fd385f99431f7169aab92e81bdf6a36dad30f54889d4e575",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:html.mjs",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "html-derivative",
+      "scopeName": "text.html.derivative",
+      "canonicalSha256": "2856f8ec0f0fc915367b8fcd995120af33778287b99c47ee5888b99ea45d60e9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:html-derivative.mjs",
+      "dependencies": [
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "http",
+      "scopeName": "source.http",
+      "canonicalSha256": "8c45487851d0c07ef6ef0e55b301868240da4904b9552f78c868f1abbdda387b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:http.mjs",
+      "dependencies": [
+        "source.graphql",
+        "source.json",
+        "source.shell",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "hurl",
+      "scopeName": "source.hurl",
+      "canonicalSha256": "4b159c92ef970f3c5c37dc1671433f5017d883445562ecc4e7f11e716629e10c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:hurl.mjs",
+      "dependencies": [
+        "source.graphql",
+        "text.csv",
+        "text.json",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "hxml",
+      "scopeName": "source.hxml",
+      "canonicalSha256": "d10a22bba50ec8969f796e3d1c216ff2e3911fbf6751703431d194ec6b8750a9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:hxml.mjs",
+      "dependencies": [
+        "source.hx"
+      ]
+    },
+    {
+      "language": "hy",
+      "scopeName": "source.hy",
+      "canonicalSha256": "9c98574b54512bbb9ff934a4dfd27197ebcc1c5206deab99ef95c3b2ceb47621",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:hy.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ignore",
+      "scopeName": "source.ignore",
+      "canonicalSha256": "e4abfbb62912a41c2fbdbe57f01c952e387af8b5082b78bc1700d6ee46064136",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/git-base/syntaxes/ignore.tmLanguage.json",
+      "dependencies": []
+    },
+    {
+      "language": "imba",
+      "scopeName": "source.imba",
+      "canonicalSha256": "d34dfee5dd47251a1da039150178edec40ba923be583561fb3de620f2d296c5e",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:imba.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ini",
+      "scopeName": "source.ini",
+      "canonicalSha256": "c7dcd071ffccc5b4582bad2d8704e7eb4ed2938588911fbfe1fe4c4d7d11d2ab",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ini.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "java",
+      "scopeName": "source.java",
+      "canonicalSha256": "e80b07bc37436b92c451766b708fc30b7fb2e631511dc0837a093b5a90798fcd",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:java.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "javascript",
+      "scopeName": "source.js",
+      "canonicalSha256": "64e78e8674d9110aaf05f4811a5a16c5bf70799d57811108631a6f438ff4614c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:javascript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "jinja",
+      "scopeName": "source.jinja",
+      "canonicalSha256": "8510df66ac8f27ebb13a34c6a0decb661e60faf96bef060c07861de081998177",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jinja.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "jinja-html",
+      "scopeName": "text.html.jinja",
+      "canonicalSha256": "d65be69f0130298aeac51d44f278cf2865b278bf49beb87da72d06fecfd05e2c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jinja-html.mjs",
+      "dependencies": [
+        "source.jinja",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "jison",
+      "scopeName": "source.jison",
+      "canonicalSha256": "7b320a292e39ccb25b0f6a8460b11f653732b4a81dee4dc06cec6d3484b8467b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jison.mjs",
+      "dependencies": [
+        "source.jisonlex",
+        "source.js"
+      ]
+    },
+    {
+      "language": "js-regexp",
+      "scopeName": "source.js.regexp",
+      "canonicalSha256": "a9b87020c897a0f3735fa65b6ecded1fcc24203ebc674674fcd64d8f4856b7e6",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/javascript/syntaxes/Regular Expressions (JavaScript).tmLanguage",
+      "dependencies": []
+    },
+    {
+      "language": "json",
+      "scopeName": "source.json",
+      "canonicalSha256": "265030d70a20a2d86ce3110c80f2e3499b9a6f7ad1ea3daeb11f89897c7bdb06",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:json.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "json5",
+      "scopeName": "source.json5",
+      "canonicalSha256": "fcd93b9b47e8b7e71aaca9b221c5c1213b7bfa0c5b785bca00bda058cd540fe9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:json5.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "jsonc",
+      "scopeName": "source.json.comments",
+      "canonicalSha256": "6ad016e60fb0a05ede5c72f07263d35e4443a31a3b1b9a776ea20a4fd36667dc",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jsonc.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "jsonl",
+      "scopeName": "source.json.lines",
+      "canonicalSha256": "1ff014eaa1708875b2f05a8866c660a62253540f53b6249396b7481a6019eddd",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jsonl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "jsonnet",
+      "scopeName": "source.jsonnet",
+      "canonicalSha256": "ae7d77b58e7168d424a15462ee4baf72b6e6e9cb2c43441f6702c1e6a696bda9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jsonnet.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "jssm",
+      "scopeName": "source.jssm",
+      "canonicalSha256": "1d8fefd2c9f10336f67a73dab0a24be59e7deb59d2616a7978c2d55ce2eeceae",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jssm.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "jsx",
+      "scopeName": "source.js.jsx",
+      "canonicalSha256": "b99b366b77cc6e161e0b096b73f2257f18b86cb0bc0e6c5d635aab7a079f3117",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:jsx.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "julia",
+      "scopeName": "source.julia",
+      "canonicalSha256": "3f8f7c03f825f45f66ba2c1c2acf8eeef9f5edc75bb50a2a18e5a198e1751e22",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:julia.mjs",
+      "dependencies": [
+        "source.cpp",
+        "source.js",
+        "source.python",
+        "source.r",
+        "source.sql"
+      ]
+    },
+    {
+      "language": "just",
+      "scopeName": "source.just",
+      "canonicalSha256": "2478e25bcae07cd7895a405d248121e4cb45cfc04c98aea323a220a9548b1686",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:just.mjs",
+      "dependencies": [
+        "source.js",
+        "source.perl",
+        "source.python",
+        "source.ruby",
+        "source.shell",
+        "source.ts"
+      ]
+    },
+    {
+      "language": "kdl",
+      "scopeName": "source.kdl",
+      "canonicalSha256": "a5589e1beffb4fc8c9ae5fb9fa9d607b9f7fd74b055979a9a065c75477026d0f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:kdl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "kotlin",
+      "scopeName": "source.kotlin",
+      "canonicalSha256": "50531cd728353a2dd35a7a7c3b6684b15c70cb719391123f3f04f8d173f48b3f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:kotlin.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "kusto",
+      "scopeName": "source.kusto",
+      "canonicalSha256": "9efcfa1e47fe8e30c92fb371df75553458a41f934745ee7c9375b74b608b131b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:kusto.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "latex",
+      "scopeName": "text.tex.latex",
+      "canonicalSha256": "95419d1cbd434af00c6e786664739028b9dd71419bc6a97b8b6c659403093be4",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:latex.mjs",
+      "dependencies": [
+        "source.asy",
+        "source.asymptote",
+        "source.cpp.embedded.latex",
+        "source.css",
+        "source.dot",
+        "source.gnuplot",
+        "source.haskell",
+        "source.java",
+        "source.js",
+        "source.julia",
+        "source.lua",
+        "source.python",
+        "source.ruby",
+        "source.rust",
+        "source.scala",
+        "source.shell",
+        "source.ts",
+        "source.yaml",
+        "text.html.basic",
+        "text.tex",
+        "text.tex.latex",
+        "text.tex.markdown_latex_combined",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "lean",
+      "scopeName": "source.lean4",
+      "canonicalSha256": "718c99703ea73172220af07dc9c4d37aea4a09d1b86f8559e5807424357ec1a9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:lean.mjs",
+      "dependencies": [
+        "source.lean4.markdown"
+      ]
+    },
+    {
+      "language": "less",
+      "scopeName": "source.css.less",
+      "canonicalSha256": "1352728043f6c8906ec76468bfc3a897f81e7f8d2829436ab4af4eed186fe4eb",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:less.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "liquid",
+      "scopeName": "text.html.liquid",
+      "canonicalSha256": "a5fb89a1f8466b260868f727de8f580dca1d4ed5df0a4d38daab6711e2f4439d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:liquid.mjs",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.json",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "llvm",
+      "scopeName": "source.llvm",
+      "canonicalSha256": "5cfe36861dd2be785bf6acaaad25b0c901b7f38fe31fd2d4a3282bf459d28e96",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:llvm.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "log",
+      "scopeName": "text.log",
+      "canonicalSha256": "bb2c7ba798400f5749b1a758d54cd899b417e17fc7f21c7d03126ab21387ad66",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:log.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "logo",
+      "scopeName": "source.logo",
+      "canonicalSha256": "e9b0e672b4ffc49e359080c131c84b291f25eb554eb6e4b35859caa917e60174",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:logo.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "lua",
+      "scopeName": "source.lua",
+      "canonicalSha256": "35f12b92153f861bb712a5d6dbeb3262fed7c9a6cf1b5ce2ba61a75c8beb6091",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:lua.mjs",
+      "dependencies": [
+        "source.c",
+        "source.lua"
+      ]
+    },
+    {
+      "language": "luau",
+      "scopeName": "source.luau",
+      "canonicalSha256": "7f2cbd04a7605b21cf627281555646a485201a93ab7c10a4ba09e34728fe35f5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:luau.mjs",
+      "dependencies": [
+        "source.luau"
+      ]
+    },
+    {
+      "language": "make",
+      "scopeName": "source.makefile",
+      "canonicalSha256": "c94381316c031fe8d41c4b1b540db6cc6d5cb01c0c5814f0355553aa0e6a0b15",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:make.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "markdown",
+      "scopeName": "text.html.markdown",
+      "canonicalSha256": "0ff68b98c5c9ade48c341f19c7a48713dbf4f4185563412a076993c3cd9eaf2b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:markdown.mjs",
+      "dependencies": [
+        "source.abap",
+        "source.asp.vb.net",
+        "source.batchfile",
+        "source.c",
+        "source.clojure",
+        "source.coffee",
+        "source.cpp",
+        "source.cs",
+        "source.css",
+        "source.css.less",
+        "source.css.scss",
+        "source.dart",
+        "source.diff",
+        "source.dockerfile",
+        "source.elixir",
+        "source.erlang",
+        "source.fsharp",
+        "source.go",
+        "source.groovy",
+        "source.ignore",
+        "source.ini",
+        "source.java",
+        "source.js",
+        "source.js.regexp",
+        "source.json",
+        "source.json.comments",
+        "source.json.lines",
+        "source.julia",
+        "source.lua",
+        "source.makefile",
+        "source.objc",
+        "source.perl",
+        "source.perl.6",
+        "source.php",
+        "source.powershell",
+        "source.python",
+        "source.r",
+        "source.regexp.python",
+        "source.rst",
+        "source.ruby",
+        "source.rust",
+        "source.scala",
+        "source.shell",
+        "source.sql",
+        "source.swift",
+        "source.ts",
+        "source.tsx",
+        "source.twig",
+        "source.yaml",
+        "source.yang",
+        "text.bibtex",
+        "text.git-commit",
+        "text.git-rebase",
+        "text.html.basic",
+        "text.html.derivative",
+        "text.html.handlebars",
+        "text.html.markdown",
+        "text.log",
+        "text.pug",
+        "text.tex.latex",
+        "text.xml",
+        "text.xml.xsl"
+      ]
+    },
+    {
+      "language": "markdown-nix",
+      "scopeName": "markdown.nix.codeblock",
+      "canonicalSha256": "df6ae4f31dd46b779ad8fcb5e634962a9ff1108268b5f18f60cf2248bd150d23",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:markdown-nix.mjs",
+      "dependencies": [
+        "source.nix"
+      ]
+    },
+    {
+      "language": "markdown-vue",
+      "scopeName": "markdown.vue.codeblock",
+      "canonicalSha256": "aab94514da0c813986566897b9434d460bf9114362439fe048155f760f1c15ee",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:markdown-vue.mjs",
+      "dependencies": [
+        "text.html.vue"
+      ]
+    },
+    {
+      "language": "marko",
+      "scopeName": "text.marko",
+      "canonicalSha256": "9491cfe67bd7a2ae253a4a07a2239be92933d0f40831ebd7e281fc88941f1d23",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:marko.mjs",
+      "dependencies": [
+        "source.css",
+        "source.css.less",
+        "source.css.scss",
+        "source.ts"
+      ]
+    },
+    {
+      "language": "matlab",
+      "scopeName": "source.matlab",
+      "canonicalSha256": "cb1ff74ce6105c49aa45578e3be733b1586a7a63549d8d533c02af7355561358",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:matlab.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "mdc",
+      "scopeName": "text.markdown.mdc.standalone",
+      "canonicalSha256": "0efaad1599f8a964e021218fc53b919a9eebe5d1bfdede2e79f93eb992b67abc",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:mdc.mjs",
+      "dependencies": [
+        "source.yaml",
+        "text.html.derivative",
+        "text.html.markdown"
+      ]
+    },
+    {
+      "language": "mdx",
+      "scopeName": "source.mdx",
+      "canonicalSha256": "a6f55bd3d7b2bbb830a7391156edbe19e4ce1119105807deb825b3ded04847be",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:mdx.mjs",
+      "dependencies": [
+        "source.c",
+        "source.c++",
+        "source.clojure",
+        "source.coffee",
+        "source.cpp",
+        "source.cs",
+        "source.css",
+        "source.css.less",
+        "source.css.scss",
+        "source.diff",
+        "source.dockerfile",
+        "source.elixir",
+        "source.elm",
+        "source.erlang",
+        "source.gfm",
+        "source.gitconfig",
+        "source.go",
+        "source.graphql",
+        "source.haskell",
+        "source.ini",
+        "source.java",
+        "source.js",
+        "source.json",
+        "source.julia",
+        "source.kotlin",
+        "source.lua",
+        "source.makefile",
+        "source.mdx",
+        "source.objc",
+        "source.perl",
+        "source.python",
+        "source.r",
+        "source.raku",
+        "source.ruby",
+        "source.rust",
+        "source.scala",
+        "source.shell",
+        "source.sql",
+        "source.swift",
+        "source.toml",
+        "source.ts",
+        "source.tsx",
+        "source.vbnet",
+        "source.yaml",
+        "text.html.asciidoc",
+        "text.html.basic",
+        "text.html.markdown",
+        "text.html.markdown.source.gfm.apib",
+        "text.html.php",
+        "text.md",
+        "text.python.console",
+        "text.shell-session",
+        "text.xml",
+        "text.xml.svg"
+      ]
+    },
+    {
+      "language": "mermaid",
+      "scopeName": "markdown.mermaid.codeblock",
+      "canonicalSha256": "d4a666f20ee43905d439abf5fd1ffc8cae10d8df58d6d433b9b621be162e1bbe",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:mermaid.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "metal",
+      "scopeName": "source.metal",
+      "canonicalSha256": "afb56276b9e6a17031c661e8e9b11e5d5370575adab8154d84b357fe09921432",
+      "target": "pinned-package",
+      "reference": "https://github.com/computer-graphics-tools/metal-analyzer@0.1.22:editors/code/syntaxes/metal.tmLanguage.json",
+      "dependencies": []
+    },
+    {
+      "language": "mipsasm",
+      "scopeName": "source.mips",
+      "canonicalSha256": "d64a6473a3546a57e6fd73538ae7f9e0c0842c85ffcd42867f723d542fdc268a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:mipsasm.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "mlir",
+      "scopeName": "source.mlir",
+      "canonicalSha256": "1b6eafbb63ebaf09b4fff24cd48b4a37b1a17b5b2a468b705e58aec849fb2bab",
+      "target": "pinned-package",
+      "reference": "https://github.com/llvm/llvm-project@llvmorg-18.1.8:mlir/utils/textmate/mlir.json",
+      "dependencies": []
+    },
+    {
+      "language": "mojo",
+      "scopeName": "source.mojo",
+      "canonicalSha256": "d5c89acbf11a1652e1326236fc2d8defa8a37ee85e67e073dba62c8579d45fa1",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:mojo.mjs",
+      "dependencies": [
+        "source.mojo"
+      ]
+    },
+    {
+      "language": "moonbit",
+      "scopeName": "source.moonbit",
+      "canonicalSha256": "862ff47a07ec0e79de2c81f0c9267ce40dd64a683074e3365090c54ba9432463",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:moonbit.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "move",
+      "scopeName": "source.move",
+      "canonicalSha256": "56f39e524deae8ec780819f77ab4843d4595f9b9ec395902bf9d3a7fe1554104",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:move.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "narrat",
+      "scopeName": "source.narrat",
+      "canonicalSha256": "e8deef9c2cae3dbc0386da7eb9dbb7b71049f607e75f10f818f5c016be61b278",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:narrat.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "nextflow",
+      "scopeName": "source.nextflow",
+      "canonicalSha256": "648c5c9f6938e33793dd98aea6482c043a85b44b2cdc0d65c8e04bbd541a3f95",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:nextflow.mjs",
+      "dependencies": [
+        "source.nextflow-groovy"
+      ]
+    },
+    {
+      "language": "nextflow-groovy",
+      "scopeName": "source.nextflow-groovy",
+      "canonicalSha256": "a2d5216f4c935dd13bd70eea6cc67ec1ba5df62380540f8ed539fdaa8b557c0a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:nextflow-groovy.mjs",
+      "dependencies": [
+        "text.html.javadoc"
+      ]
+    },
+    {
+      "language": "nginx",
+      "scopeName": "source.nginx",
+      "canonicalSha256": "6776779f29a7d9fab0cd9c9a2513235d5f14cdd84167c6fbd92669f77c535e0e",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:nginx.mjs",
+      "dependencies": [
+        "source.lua"
+      ]
+    },
+    {
+      "language": "nim",
+      "scopeName": "source.nim",
+      "canonicalSha256": "a3c32f4dab8f73aef55dba2148165325c66f8dbcabc2d6d5bcb2c1470d49507c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:nim.mjs",
+      "dependencies": [
+        "source.asm",
+        "source.c",
+        "source.css",
+        "source.glsl",
+        "source.js",
+        "source.nim",
+        "text.html.basic",
+        "text.html.markdown",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "nix",
+      "scopeName": "source.nix",
+      "canonicalSha256": "cc7e882d3259a47e3eddda31d1665f5fa99de338276427a1f97dcfbb83ca5bed",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:nix.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "nushell",
+      "scopeName": "source.nushell",
+      "canonicalSha256": "6671eab1b7f79c5b3a8052582e84e0d84aacb54e2b22fe69eb2290219233f9af",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:nushell.mjs",
+      "dependencies": [
+        "source.nushell"
+      ]
+    },
+    {
+      "language": "objective-c",
+      "scopeName": "source.objc",
+      "canonicalSha256": "9c10cbf7e0d3cf8ad7d672b6f4c431d2b59cd6e38320c4525b321c82b6751e2a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:objective-c.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "objective-cpp",
+      "scopeName": "source.objcpp",
+      "canonicalSha256": "9e06b5f120328ea56505b4575758d324395bad88af2c797c36158cbdc0cbc45f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:objective-cpp.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ocaml",
+      "scopeName": "source.ocaml",
+      "canonicalSha256": "7750216955f532f8e7ccc12e7b88da36019857f243483ca1165124500698dc4b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ocaml.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "odin",
+      "scopeName": "source.odin",
+      "canonicalSha256": "6e632c5e5affdaa564aa67c1ac1de77a12957d4e893501a9fe07237b4d6f135a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:odin.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "opencl",
+      "scopeName": "source.opencl",
+      "canonicalSha256": "606a7e262a9c92ebda19030c3cc012700f8057880c1aba8b5a6bc2c80f3ddf16",
+      "target": "pinned-package",
+      "reference": "https://github.com/Galarius/vscode-opencl@0.10.0:contributes/opencl.tmLanguage.json",
+      "dependencies": [
+        "source.cpp"
+      ]
+    },
+    {
+      "language": "openscad",
+      "scopeName": "source.scad",
+      "canonicalSha256": "8bd11ce99eaecb1b343d75fb592e27c7b680e76b494bf7d282a814fd6cf1826a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:openscad.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "pascal",
+      "scopeName": "source.pascal",
+      "canonicalSha256": "dcbeab7bccbd5d73c50472f078d7c9aa7cbb821abf2fab9a84d36d4a58122c52",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:pascal.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "perl",
+      "scopeName": "source.perl",
+      "canonicalSha256": "b77a5c5bf5cbf4390f65b006094a7a61690fe34b63455ee0d6afea0a441853df",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:perl.mjs",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.postscript",
+        "source.sql",
+        "text.html.basic",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "php",
+      "scopeName": "source.php",
+      "canonicalSha256": "cb763ddb8a83293ae57dce27dfe19cbda8200307d58563b777567cbe37aa523c",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/php/syntaxes/php.tmLanguage.json",
+      "dependencies": [
+        "source.css",
+        "source.js",
+        "source.json",
+        "source.sql",
+        "text.html.basic",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "pkl",
+      "scopeName": "source.pkl",
+      "canonicalSha256": "548aced5dffb746bd6a9d555bc69193f4774aec114d2bea26118eb20ab256f8c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:pkl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "plsql",
+      "scopeName": "source.plsql.oracle",
+      "canonicalSha256": "df263091a38aec36e3937008d74acaf5ece12777a752db474efc75e2a3739c69",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:plsql.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "po",
+      "scopeName": "source.po",
+      "canonicalSha256": "f44e14e911ac42ca4dd7d822af32b4102f191c2d1d4240a908459c136eb23168",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:po.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "polar",
+      "scopeName": "source.polar",
+      "canonicalSha256": "b2f406326c1a5f25dbb809658c720e438455f10a420ff5d955670f16cc8ba417",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:polar.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "postcss",
+      "scopeName": "source.css.postcss",
+      "canonicalSha256": "25d475645626325e3a7a982684fecbdb5458fe86db79d144387ea67a9c04fd82",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:postcss.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "powerquery",
+      "scopeName": "source.powerquery",
+      "canonicalSha256": "f6dec85d2f45aa7e972b0363f882702d6933eaac6dd57ce640f16ec1e3604aa7",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:powerquery.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "powershell",
+      "scopeName": "source.powershell",
+      "canonicalSha256": "c38f930e86f6377520a2760f14e957717e3e0aaafb44a634aacf55d708270fda",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:powershell.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "prisma",
+      "scopeName": "source.prisma",
+      "canonicalSha256": "f21ddf4a2576826edb27f5ceb6f05bf7034da7478e7cea49c58d8f6b1c351a63",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:prisma.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "prolog",
+      "scopeName": "source.prolog",
+      "canonicalSha256": "05ebb1a26e4ff112bd70c9bf2fbf32d58eb84e601a595273d2288e05ea00e7dc",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:prolog.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "proto",
+      "scopeName": "source.proto",
+      "canonicalSha256": "ab373063b3a2436a3988e70e67a5d28dba4a203447d66c79318fdf3c907147cf",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:proto.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "pug",
+      "scopeName": "text.pug",
+      "canonicalSha256": "728206fffec4f4bfb90e2faadd05c179b9df777693eba2528306e1b348ef9da5",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/pug/syntaxes/pug.tmLanguage.json",
+      "dependencies": [
+        "source.coffee",
+        "source.css",
+        "source.css.scss",
+        "source.js",
+        "source.less",
+        "source.sass.vscode-unavailable",
+        "source.stylus.vscode-unavailable",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "puppet",
+      "scopeName": "source.puppet",
+      "canonicalSha256": "7fe0865e109077afa2dea40eccf729f9348c34c061b444031ab6749dc5abc6a9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:puppet.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "purescript",
+      "scopeName": "source.purescript",
+      "canonicalSha256": "72f2dd3695f2c0f670a011eda5166f95df1b5a3a575a0c4822982dbf27225e8e",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:purescript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "python",
+      "scopeName": "source.python",
+      "canonicalSha256": "63daccacc60546770fdae84981c77a698eeded8af40457ccc19c1e671df5a9c3",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:python.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "qml",
+      "scopeName": "source.qml",
+      "canonicalSha256": "3ed7230c367b1463bd76c57938ee07fe50ce87864979bbc44dcffe7501b0c9d9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:qml.mjs",
+      "dependencies": [
+        "source.js"
+      ]
+    },
+    {
+      "language": "qmldir",
+      "scopeName": "source.qmldir",
+      "canonicalSha256": "70821290ed4af542dd75753bcbb981efde4178fade4e7fc448b7ab4e0603417b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:qmldir.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "qss",
+      "scopeName": "source.qss",
+      "canonicalSha256": "cab4a22d50b94be23ed24db90c4e6c082480e048711bd373c622c41048168b50",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:qss.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "r",
+      "scopeName": "source.r",
+      "canonicalSha256": "5bf7d23ee52a4c52b6e51223afd84bd2a82c049d59df7a75ae580c81aed8fa3a",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/r/syntaxes/r.tmLanguage.json",
+      "dependencies": [
+        "source.r"
+      ]
+    },
+    {
+      "language": "racket",
+      "scopeName": "source.racket",
+      "canonicalSha256": "9bd08de5b567828d4b818cc696f02f7385e409d3b8fb9f7fb7ec36e952d8a764",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:racket.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "raku",
+      "scopeName": "source.perl.6",
+      "canonicalSha256": "c599b477dab3954b569d43a101ffbb86f78a2085837391f97379bda682ad7f75",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:raku.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "razor",
+      "scopeName": "text.aspnetcorerazor",
+      "canonicalSha256": "86e4855e36bc9a1a78c96c688fbe0e2eccccf2f9260dc60d037dfa765b56fcc6",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:razor.mjs",
+      "dependencies": [
+        "source.cs",
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "reg",
+      "scopeName": "source.reg",
+      "canonicalSha256": "920b4938b79ff56ef42eee8680cb758850228bc9b17464750279851174581c46",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:reg.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "regexp",
+      "scopeName": "source.regexp.python",
+      "canonicalSha256": "800d8481e3db574f7113f2a382a2b1d6f691acb1223924fcec432356c3263ceb",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:regexp.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "rego",
+      "scopeName": "source.rego",
+      "canonicalSha256": "041971ce992d277353add44e44197ff049c5a0da22434a67df0d6befae8a90b2",
+      "target": "pinned-package",
+      "reference": "https://github.com/open-policy-agent/vscode-opa@0.23.0:syntaxes/Rego.tmLanguage",
+      "dependencies": []
+    },
+    {
+      "language": "rel",
+      "scopeName": "source.rel",
+      "canonicalSha256": "29bf290207f2db7f6ba4f4fb1363c459b8825ee4928b5a938406c9040dba46fb",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:rel.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "riscv",
+      "scopeName": "source.riscv",
+      "canonicalSha256": "a08ba02a6945aa3a4ec4cde4f7a7163dab5ba8c792ba033d519657d32e73c9d8",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:riscv.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ron",
+      "scopeName": "source.ron",
+      "canonicalSha256": "981824270ad9b96602733c5c31c11dc2ed49d3aaa0e4bfcfab2105dd6e1aa761",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ron.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "rosmsg",
+      "scopeName": "source.rosmsg",
+      "canonicalSha256": "203e18711b08e61df53d39dac7e121157634bf707bdfd011d00ce22cc93658a4",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:rosmsg.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "rst",
+      "scopeName": "source.rst",
+      "canonicalSha256": "acf05a776e6c79063c76de11d1bb45d5989444d0af3d78bb23b4322af2e2ada2",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/restructuredtext/syntaxes/rst.tmLanguage.json",
+      "dependencies": [
+        "source.cmake.vscode-unavailable",
+        "source.cpp",
+        "source.dts",
+        "source.js",
+        "source.kconfig",
+        "source.python",
+        "source.ruby",
+        "source.shell",
+        "source.yaml",
+        "text.html.derivative"
+      ]
+    },
+    {
+      "language": "ruby",
+      "scopeName": "source.ruby",
+      "canonicalSha256": "53e6a9bd5878465e2d14889abfc4b3050380d1e8b751163a78486f1729030aca",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ruby.mjs",
+      "dependencies": [
+        "source.c",
+        "source.cpp",
+        "source.css",
+        "source.graphql",
+        "source.js",
+        "source.js.jquery",
+        "source.lua",
+        "source.ruby",
+        "source.shell",
+        "source.sql",
+        "source.yaml",
+        "text.haml",
+        "text.html.basic",
+        "text.slim",
+        "text.xml"
+      ]
+    },
+    {
+      "language": "rust",
+      "scopeName": "source.rust",
+      "canonicalSha256": "433ca90db0d2c72b965645c3089d23f989313c01717bfc0f7adc40cbe6d42fe5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:rust.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "sas",
+      "scopeName": "source.sas",
+      "canonicalSha256": "2abc5dae3dde64be30a3a6205fa6ece5bb5de451f9e8ccde6f3078f16e1ba216",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:sas.mjs",
+      "dependencies": [
+        "source.sql"
+      ]
+    },
+    {
+      "language": "sass",
+      "scopeName": "source.sass",
+      "canonicalSha256": "32cf3a1080a248f75be8c3c55c9b852d7aaedc92cb6399a97ea8083d0512f969",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:sass.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "scala",
+      "scopeName": "source.scala",
+      "canonicalSha256": "afb86401c429948924c207718cf879aa320dc033a96abcbb9fa4eb01cc98c078",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:scala.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "scheme",
+      "scopeName": "source.scheme",
+      "canonicalSha256": "9309522d98f75a726a4ffe9e8607490123912c7fa9ccab4b08ad5b6906adcb27",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:scheme.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "scss",
+      "scopeName": "source.css.scss",
+      "canonicalSha256": "9ef3e80d6940ba93ddf9c65c312091c731567a0c2df87dbe579a05045214cbb2",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:scss.mjs",
+      "dependencies": [
+        "source.css",
+        "source.sassdoc"
+      ]
+    },
+    {
+      "language": "sdbl",
+      "scopeName": "source.sdbl",
+      "canonicalSha256": "8e379ac856ed4e052eac8a6e04a955e78ddeca980a100e3fc66fa155558a5140",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:sdbl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "shaderlab",
+      "scopeName": "source.shaderlab",
+      "canonicalSha256": "1176a429539863ee66330631fc8605b96bc6c113ad4c0d03fabce20eb6d0e810",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:shaderlab.mjs",
+      "dependencies": [
+        "source.hlsl"
+      ]
+    },
+    {
+      "language": "shellscript",
+      "scopeName": "source.shell",
+      "canonicalSha256": "29f1660a7887d01877d9004669c5a925a4f479cb47b20b418946be76406e814d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:shellscript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "shellsession",
+      "scopeName": "text.shell-session",
+      "canonicalSha256": "7e1408c9433bf884d2990361e6c045e8312f13f88be09553cbe1d90b8aabed9d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:shellsession.mjs",
+      "dependencies": [
+        "source.shell"
+      ]
+    },
+    {
+      "language": "smalltalk",
+      "scopeName": "source.smalltalk",
+      "canonicalSha256": "3bd4bbbc1011d6dd454b74df62efd4b8aee5e4670f1a87d8f8eb2bd69058970b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:smalltalk.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "solidity",
+      "scopeName": "source.solidity",
+      "canonicalSha256": "1078ac358609963c49e7775d91e3d69f982c52c1150db36dfe7b1993bc7aa45c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:solidity.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "soy",
+      "scopeName": "text.html.soy",
+      "canonicalSha256": "6df766918502584c85939c3a5afc21156e272257b0528473cbd3ffdefeba95e1",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:soy.mjs",
+      "dependencies": [
+        "text.html.basic"
+      ]
+    },
+    {
+      "language": "sparql",
+      "scopeName": "source.sparql",
+      "canonicalSha256": "0b8f59c6f8ccf923f3eb3dc94db97112d8e13aa354de0e78aeea3594d6dd6fe3",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:sparql.mjs",
+      "dependencies": [
+        "source.turtle"
+      ]
+    },
+    {
+      "language": "spirv",
+      "scopeName": "source.spirv",
+      "canonicalSha256": "ab632edfa2cf0a1c5ece50e8d6b6dbc7d830a2241f3fe22f24de3114fd473f01",
+      "target": "pinned-package",
+      "reference": "https://github.com/KhronosGroup/SPIRV-Tools@0.0.1:utils/vscode/spirv.json",
+      "dependencies": []
+    },
+    {
+      "language": "splunk",
+      "scopeName": "source.splunk_search",
+      "canonicalSha256": "e0e59336a1d7316db6cc9cf2e940e07d4ded80c7d3f156d7c9da61500061fa43",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:splunk.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "sql",
+      "scopeName": "source.sql",
+      "canonicalSha256": "ba2f88f9ac0291bf277230adb737baa52da4317e71099d0fa3060b539268d671",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:sql.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ssh-config",
+      "scopeName": "source.ssh-config",
+      "canonicalSha256": "fca0131fcdca0d7bfe9283486824720dd887e029a86f7fb5ab0da05566073fc8",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ssh-config.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "starlark",
+      "scopeName": "source.starlark",
+      "canonicalSha256": "1495214fbffe6012b34fa7288df5617b9ff493641d104bcf18cd03c155f3cfbb",
+      "target": "pinned-package",
+      "reference": "https://github.com/bazel-contrib/vscode-bazel@0.14.0:syntaxes/starlark.tmLanguage.json",
+      "dependencies": []
+    },
+    {
+      "language": "stata",
+      "scopeName": "source.stata",
+      "canonicalSha256": "03531c82d1ee090718513783db649bb294b748356c37272b23df52c2b703d7d7",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:stata.mjs",
+      "dependencies": [
+        "source.sql"
+      ]
+    },
+    {
+      "language": "stylus",
+      "scopeName": "source.stylus",
+      "canonicalSha256": "c21084ea0ed9a0cb4de22ca3534945f198e4f502defd38b04433b87011072a44",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:stylus.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "surrealql",
+      "scopeName": "source.surrealql",
+      "canonicalSha256": "6067305df8eb596ee41aaa9c77d822a4562432b69c1a028a225d248dc9b2768b",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:surrealql.mjs",
+      "dependencies": [
+        "source.js"
+      ]
+    },
+    {
+      "language": "svelte",
+      "scopeName": "source.svelte",
+      "canonicalSha256": "dcf33629af6c725b52ff324032b883cc74eae79ee980e41a0e9bede0a9d73e56",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:svelte.mjs",
+      "dependencies": [
+        "source.coffee",
+        "source.css",
+        "source.css.less",
+        "source.css.postcss",
+        "source.css.scss",
+        "source.js",
+        "source.sass",
+        "source.stylus",
+        "source.ts",
+        "text.html.markdown",
+        "text.pug"
+      ]
+    },
+    {
+      "language": "swift",
+      "scopeName": "source.swift",
+      "canonicalSha256": "b7bf1e167e939539c796c7b4da5695ee16c4607320ffbd7a83ce35354c6fcc6f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:swift.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "system-verilog",
+      "scopeName": "source.systemverilog",
+      "canonicalSha256": "1571d59ad73fd9b03881bad50354eeff648e1e06e818ae00fd1195f0a9d53f0e",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:system-verilog.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "systemd",
+      "scopeName": "source.systemd",
+      "canonicalSha256": "dac3d03353f33a3f9e8e8b44aa472540d0415286d346086fc207940d0d935e97",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:systemd.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "talonscript",
+      "scopeName": "source.talon",
+      "canonicalSha256": "f26174a0c9b3913939d28af08b66c9bd9490444acf3f50a660db4981586f5003",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:talonscript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "tasl",
+      "scopeName": "source.tasl",
+      "canonicalSha256": "707cfabfc56554b737e030d854424bcce7c547bd0871ef609a49736f6c85a307",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:tasl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "tcl",
+      "scopeName": "source.tcl",
+      "canonicalSha256": "fda5ac9a8bc9b46ce1ab793d727f6ad11a8560d949c072732390e2ad7d5eac1a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:tcl.mjs",
+      "dependencies": [
+        "source.tcl"
+      ]
+    },
+    {
+      "language": "templ",
+      "scopeName": "source.templ",
+      "canonicalSha256": "c2c7b9eaec7e1f5d9c73a4088d377fe6efafcfae367ee14391e1a9deca730732",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:templ.mjs",
+      "dependencies": [
+        "source.css",
+        "source.go",
+        "source.js"
+      ]
+    },
+    {
+      "language": "terraform",
+      "scopeName": "source.hcl.terraform",
+      "canonicalSha256": "3465d76d61ad5311eb4ec2d94e5d3c045ed7c2d5cb2e4bcc1ed3b171a6e87af6",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:terraform.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "tex",
+      "scopeName": "text.tex",
+      "canonicalSha256": "963c806ad077e502c0f88d8d454864764f446672564a94439d7d92d0d4910f1a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:tex.mjs",
+      "dependencies": [
+        "source.r"
+      ]
+    },
+    {
+      "language": "toml",
+      "scopeName": "source.toml",
+      "canonicalSha256": "b534839b4f9fb78c307cc2d61798c2f8eb3878d224e36fd7f725d37a9c19fc29",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:toml.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "ts-tags",
+      "scopeName": "source.ts.tags",
+      "canonicalSha256": "b428cdf6e639487e1f367fd66bb88b004ef8444322dd487e2172dd4366f9eadf",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:ts-tags.mjs",
+      "dependencies": [
+        "source.ts"
+      ]
+    },
+    {
+      "language": "tsv",
+      "scopeName": "text.tsv",
+      "canonicalSha256": "8f8ab36c3ba373cc66b1a572d240eaef3b0acfdab6c2048046821e37f093da1c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:tsv.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "tsx",
+      "scopeName": "source.tsx",
+      "canonicalSha256": "04f53791d7dade0c6c6cb1a7461d9ececdf56569d6cd612b99ea553312cd3cff",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:tsx.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "turtle",
+      "scopeName": "source.turtle",
+      "canonicalSha256": "ae325ed494cce91724ed84b5c7c9f0ca553881caf08752af3a6f4eb57376d68a",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:turtle.mjs",
+      "dependencies": [
+        "source.srs"
+      ]
+    },
+    {
+      "language": "twig",
+      "scopeName": "text.html.twig",
+      "canonicalSha256": "63e7404bc349a565e48925f4a9dcdf601fb16119bdf3deef59daa46fa3ab7596",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:twig.mjs",
+      "dependencies": [
+        "source.css",
+        "source.css.scss",
+        "source.js",
+        "source.php",
+        "source.python",
+        "source.ruby"
+      ]
+    },
+    {
+      "language": "twig-source",
+      "scopeName": "source.twig",
+      "canonicalSha256": "e6f37212395736fb551cc516c6bbc497a2d349b00f001d65bffa34c2a6d64508",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:twig.mjs",
+      "dependencies": [
+        "source.css",
+        "source.css.scss",
+        "source.js",
+        "source.php",
+        "source.python",
+        "source.ruby"
+      ]
+    },
+    {
+      "language": "typescript",
+      "scopeName": "source.ts",
+      "canonicalSha256": "417faf677b1254180f0c2b8427a8c387c52beedc863a3ccd2fbf428cbbed1a03",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:typescript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "typespec",
+      "scopeName": "source.tsp",
+      "canonicalSha256": "06da73af37c4bcf2ba600a42a5b8ccb606bd258ff031b0aef6b4c02f818104ee",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:typespec.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "typst",
+      "scopeName": "source.typst",
+      "canonicalSha256": "4f9b3669ca2da74f5e880d1d8e176b3d289979eb861bd8c4bb4cbd5fccf9d269",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:typst.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "v",
+      "scopeName": "source.v",
+      "canonicalSha256": "8912d8dbf1a0d5a5f464c900e5302825c6f15a59b0ba96a373c8a7106c37beed",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:v.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "vala",
+      "scopeName": "source.vala",
+      "canonicalSha256": "b7aa3c2ee3e228e6af7eaedb9772be51f4777f0b960a1fc1e70b2bb4cbacb0a9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vala.mjs",
+      "dependencies": [
+        "text.html.javadoc"
+      ]
+    },
+    {
+      "language": "vb",
+      "scopeName": "source.asp.vb.net",
+      "canonicalSha256": "e0d943c8259b0916f87ca47f9338fa5596ddf5e7e2ce42dd1b90e76197decdce",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vb.mjs",
+      "dependencies": [
+        "source.asp.vb.net"
+      ]
+    },
+    {
+      "language": "verilog",
+      "scopeName": "source.verilog",
+      "canonicalSha256": "45bc3475e38627f8dacd51d78ffb3a220ac2bb506b23a6ddc3e545496942002f",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:verilog.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "vhdl",
+      "scopeName": "source.vhdl",
+      "canonicalSha256": "cbca328e9523981f968cf1b9f8f3556e5715fcb688b1300b5ff6f4abfa176726",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vhdl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "viml",
+      "scopeName": "source.viml",
+      "canonicalSha256": "cdf3b982bffbbc9d0583d6c2ff5a5aad7d691a5f195ff163c89481fe94c585a5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:viml.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "vue",
+      "scopeName": "text.html.vue",
+      "canonicalSha256": "8f5eb0d6b83e8203a60380d42658c02402385e6cf004d0271e04d5f5cd3590d3",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vue.mjs",
+      "dependencies": [
+        "source.coffee",
+        "source.css",
+        "source.css.less",
+        "source.css.scss",
+        "source.graphql",
+        "source.js",
+        "source.js.jsx",
+        "source.json",
+        "source.json.comments",
+        "source.json5",
+        "source.postcss",
+        "source.sass",
+        "source.stylus",
+        "source.toml",
+        "source.ts",
+        "source.tsx",
+        "source.yaml",
+        "text.html.basic",
+        "text.html.derivative",
+        "text.html.markdown",
+        "text.html.vue",
+        "text.pug"
+      ]
+    },
+    {
+      "language": "vue-directives",
+      "scopeName": "vue.directives",
+      "canonicalSha256": "213f56eba72efdab2d82b2b337f9bafd311e6cd5bdc222c350b4749ff07bef20",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vue-directives.mjs",
+      "dependencies": [
+        "text.html.vue"
+      ]
+    },
+    {
+      "language": "vue-html",
+      "scopeName": "text.html.vue-html",
+      "canonicalSha256": "9c3de155f6a80d0e7c5b7f326ebbfaa01155e71597edcef92046384628f5afb9",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vue-html.mjs",
+      "dependencies": [
+        "source.js",
+        "source.vue"
+      ]
+    },
+    {
+      "language": "vue-interpolations",
+      "scopeName": "vue.interpolations",
+      "canonicalSha256": "f67793a5f891a2f31eb0245f6bf708458cc497bdca65511dfe0c9eb6cddbf0d8",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vue-interpolations.mjs",
+      "dependencies": [
+        "text.html.vue"
+      ]
+    },
+    {
+      "language": "vue-sfc-style-variable-injection",
+      "scopeName": "vue.sfc.style.variable.injection",
+      "canonicalSha256": "60534b5bfa75f169e564a63e730c0b76e26c7a03f25e9370f1a97726c9add501",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vue-sfc-style-variable-injection.mjs",
+      "dependencies": [
+        "source.js"
+      ]
+    },
+    {
+      "language": "vue-vine",
+      "scopeName": "source.vue-vine",
+      "canonicalSha256": "7054199d951c0529ad2ab746aae3b5db1987f678174c77f3d0777c017bf8c81d",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vue-vine.mjs",
+      "dependencies": [
+        "source.css",
+        "source.css.less",
+        "source.css.postcss",
+        "source.css.sass",
+        "source.css.scss",
+        "source.js",
+        "source.stylus",
+        "source.vue"
+      ]
+    },
+    {
+      "language": "vyper",
+      "scopeName": "source.vyper",
+      "canonicalSha256": "eadbec8404f182c35dd36112068dc9cf6307fb86d2711114ded395bbe8c10916",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:vyper.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "wasm",
+      "scopeName": "source.wat",
+      "canonicalSha256": "1172e26e1208ca881dcca830c1831cde55d76529d04ea3f86d57e3446ef354d7",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:wasm.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "webidl",
+      "scopeName": "source.webidl",
+      "canonicalSha256": "98c935a4209fa038f9b31a5ab0a31f9c908704184e2d14ff72e9ea3628f24a85",
+      "target": "pinned-package",
+      "reference": "https://github.com/nberlette/vscode-webidl@0.2.0:syntaxes/webidl.tmLanguage.json",
+      "dependencies": []
+    },
+    {
+      "language": "wenyan",
+      "scopeName": "source.wenyan",
+      "canonicalSha256": "7610cae9706ffc8d1910be9dc2eb9c15c4dad5a1079cdee8b9b413a6a38cc422",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:wenyan.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "wgsl",
+      "scopeName": "source.wgsl",
+      "canonicalSha256": "5c3d59f551a036bdbe518e263d78a0f8c3c01b13d341c87fbeaffbef0be05228",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:wgsl.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "wikitext",
+      "scopeName": "source.wikitext",
+      "canonicalSha256": "56d98605063a65caecedec6b4b48214cb876bcf6e19728266b241e92b8cfcea0",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:wikitext.mjs",
+      "dependencies": [
+        "source.asp.vb.net",
+        "source.batchfile",
+        "source.c",
+        "source.clojure",
+        "source.coffee",
+        "source.cpp",
+        "source.cs",
+        "source.css",
+        "source.css.less",
+        "source.css.scss",
+        "source.dart",
+        "source.diff",
+        "source.dockerfile",
+        "source.elixir",
+        "source.erlang",
+        "source.fsharp",
+        "source.go",
+        "source.groovy",
+        "source.ini",
+        "source.java",
+        "source.js",
+        "source.json",
+        "source.json.comments",
+        "source.julia",
+        "source.lua",
+        "source.makefile",
+        "source.objc",
+        "source.perl",
+        "source.perl.6",
+        "source.php",
+        "source.powershell",
+        "source.python",
+        "source.r",
+        "source.ruby",
+        "source.rust",
+        "source.scala",
+        "source.shell",
+        "source.sql",
+        "source.swift",
+        "source.ts",
+        "source.yaml",
+        "text.bibtex",
+        "text.html.basic",
+        "text.html.handlebars",
+        "text.html.markdown",
+        "text.html.markdown.math",
+        "text.pug",
+        "text.tex.latex",
+        "text.xml",
+        "text.xml.xsl"
+      ]
+    },
+    {
+      "language": "wit",
+      "scopeName": "source.wit",
+      "canonicalSha256": "5ce2b1ff1afe1716be09e38b59c32ced614e57274b80a73fd97c7ca36d2bbe6e",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:wit.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "wolfram",
+      "scopeName": "source.wolfram",
+      "canonicalSha256": "47ad762eae839f5f4fcf2e2259664f480339f0c3366613623f09e32d35e9a957",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:wolfram.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "xml",
+      "scopeName": "text.xml",
+      "canonicalSha256": "d1d88e501f584aa20b90ba5a2aee1369e11a0a19e8ddec6b883598b7c82cbc23",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:xml.mjs",
+      "dependencies": [
+        "source.java"
+      ]
+    },
+    {
+      "language": "xsl",
+      "scopeName": "text.xml.xsl",
+      "canonicalSha256": "a7ea4a742388c7f6119e07fbc5fec123cc1e44f36dd6e4d7924d3b068dd5446c",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:xsl.mjs",
+      "dependencies": [
+        "text.xml"
+      ]
+    },
+    {
+      "language": "yaml",
+      "scopeName": "source.yaml",
+      "canonicalSha256": "ee975e92737ba97f2d949cbe19a15983a13e86ae85338eee1c840127ca159e7c",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/yaml/syntaxes/yaml.tmLanguage.json",
+      "dependencies": [
+        "source.yaml.1.2",
+        "source.yaml.embedded"
+      ]
+    },
+    {
+      "language": "yaml-1.2",
+      "scopeName": "source.yaml.1.2",
+      "canonicalSha256": "36da3f87806eae6fba7f9a01191512dd103ecd59dfe31b64583142060659955d",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/yaml/syntaxes/yaml-1.2.tmLanguage.json",
+      "dependencies": [
+        "source.yaml",
+        "source.yaml.1.0",
+        "source.yaml.1.1",
+        "source.yaml.1.2",
+        "source.yaml.1.3"
+      ]
+    },
+    {
+      "language": "yaml-embedded",
+      "scopeName": "source.yaml.embedded",
+      "canonicalSha256": "2bb1a5162d551dbb2486c911c4c0b0dc7423c4eb093b375a478e39cd66d3523f",
+      "target": "vscode-built-in",
+      "reference": "microsoft/vscode@fc3def6774c76082adf699d366f31a557ce5573f:extensions/yaml/syntaxes/yaml-embedded.tmLanguage.json",
+      "dependencies": [
+        "source.yaml",
+        "source.yaml.1.2"
+      ]
+    },
+    {
+      "language": "yang",
+      "scopeName": "source.yang",
+      "canonicalSha256": "2d265da885b7e0a4a51e1955bb6f75bb988e71b9739f2300313d6a1abe12db5e",
+      "target": "pinned-package",
+      "reference": "marko2276.yang@0.1.3:https://raw.githubusercontent.com/marko2276/yang-vscode-syntax/master/syntaxes/yang.tmLanguage",
+      "dependencies": []
+    },
+    {
+      "language": "zenscript",
+      "scopeName": "source.zenscript",
+      "canonicalSha256": "419be1cb0b35400beb319cba810ba164adb2b69bd048b63a5f4ac8c15c5c9fa5",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:zenscript.mjs",
+      "dependencies": []
+    },
+    {
+      "language": "zig",
+      "scopeName": "source.zig",
+      "canonicalSha256": "a4b74b24b7d5955b4de9b880db3ed06ffd6e91aa7b6e53e404f58b8c9dd18149",
+      "target": "pinned-package",
+      "reference": "@shikijs/langs@3.23.0:zig.mjs",
+      "dependencies": []
+    }
+  ]
+}

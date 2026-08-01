@@ -1,0 +1,22 @@
+title = "Basic TOML 🚀"
+enabled = true
+count = 3
+ratio = 1.5
+released = 2026-07-12
+tags = ["grammar", "fixture", "unicode"]
+
+[owner]
+name = "Mark"
+email = "mark@example.test"
+
+[database]
+ports = [8000, 8001]
+connection = { host = "localhost", secure = false }
+
+[[database.replicas]]
+name = "primary"
+region = "eu-west"
+
+[[database.replicas]]
+name = "backup"
+region = "ap-south"

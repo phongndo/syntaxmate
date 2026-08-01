@@ -1,0 +1,166 @@
+# Mark Studio desktop entry
+# Hand-written coverage for freedesktop keys, localized values, and actions.
+
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Mark Studio
+Name[en_GB]=Mark Studio
+Name[pt_BR]=Estúdio Mark
+Name[ja]=Mark スタジオ
+Name[ar]=استوديو مارك
+Name[zh_CN]=Mark 工作室 🚀
+GenericName=Syntax-aware diff viewer
+GenericName[de]=Syntaxbewusster Diff-Betrachter
+GenericName[fr]=Visionneuse de différences syntaxique
+GenericName[el]=Πρόγραμμα προβολής διαφορών
+Comment=Review patches with fast TextMate highlighting
+Comment[es]=Revisa parches con resaltado TextMate rápido
+Comment[ja]=高速な TextMate 強調表示で差分を確認します
+Comment[uk]=Переглядайте зміни з підсвічуванням синтаксису
+Comment[emoji]=Unicode outside the BMP: 🧪 𝄞 🌍
+Icon=dev.mark.MarkStudio
+Hidden=false
+NoDisplay=false
+DBusActivatable=true
+TryExec=/usr/bin/mark-studio
+Exec=/usr/bin/mark-studio --new-window %F
+Path=/home/developer/Projects
+Terminal=false
+StartupNotify=true
+StartupWMClass=dev.mark.MarkStudio
+PrefersNonDefaultGPU=false
+Encoding=UTF-8
+
+# Desktop visibility and interfaces
+OnlyShowIn=GNOME;KDE;X-Cinnamon;
+NotShowIn=Old;
+Implements=org.freedesktop.Application;org.example.Mark.Review;
+Actions=NewWindow;OpenWorkspace;SafeMode;PrivateReview;
+MimeType=text/plain;text/markdown;text/x-rust;application/json;
+Categories=Development;Utility;Graphics;
+Keywords=diff;patch;review;syntax;git;TextMate;
+Keywords[pt_BR]=diferença;revisão;sintaxe;
+Keywords[ja]=差分;レビュー;構文;
+X-GNOME-UsesNotifications=true
+X-GNOME-SingleWindow=false
+X-KDE-SubstituteUID=false
+X-KDE-Protocols=file;https;
+X-AppStream-Ignore=false
+
+# A quoted executable and every supported desktop field code shape
+Exec="/opt/Mark Studio/bin/mark-studio" --profile "Team Review" %F
+X-Mark-OpenSingle=/usr/bin/mark-studio --reuse %f
+X-Mark-OpenMany=/usr/bin/mark-studio --add %F
+X-Mark-OpenUrl=/usr/bin/mark-studio --url %u
+X-Mark-OpenUrls=/usr/bin/mark-studio --urls %U
+X-Mark-WithIcon=/usr/bin/mark-studio --icon %i
+X-Mark-TranslatedName=/usr/bin/mark-studio --label %c
+X-Mark-DesktopFile=/usr/bin/mark-studio --launcher %k
+X-Mark-DeprecatedCode=/usr/bin/mark-studio --legacy %d
+X-Mark-LongOptions=/usr/bin/mark-studio --inspect --wait --line=12
+
+# URLs, paths, booleans, and custom metadata
+URL=https://example.test/mark/download?channel=stable
+X-Mark-Documentation=https://docs.example.test/mark#desktop
+X-Mark-ReleaseChannel=stable
+X-Mark-UpdateInterval=6h
+X-Mark-MaxRecent=20
+X-Mark-FeaturePreview=true
+X-Mark-AllowTelemetry=false
+X-Mark-Theme=night
+X-Mark-Emoji=🔎
+X-Mark-Astral=rocket-🚀-clef-𝄞
+
+[Desktop Action NewWindow]
+Name=Open a New Window
+Name[de]=Neues Fenster öffnen
+Name[ja]=新しいウィンドウを開く
+Icon=window-new
+Exec=/usr/bin/mark-studio --new-window %U
+
+[Desktop Action OpenWorkspace]
+Name=Open Workspace
+Name[pt_BR]=Abrir espaço de trabalho
+Name[ar]=افتح مساحة العمل
+Comment=Choose a folder containing a Git repository
+Icon=folder-git
+Exec="/usr/bin/mark-studio" --workspace %F
+
+[Desktop Action SafeMode]
+Name=Start Without Extensions
+Name[fr]=Démarrer sans extensions
+Comment=Disable plugins and third-party grammars
+Icon=security-high
+Exec=/usr/bin/mark-studio --safe-mode --verbose %f
+
+[Desktop Action PrivateReview]
+Name=Open Private Review
+Name[es]=Abrir revisión privada
+Comment=Start with telemetry and history disabled
+Icon=changes-prevent
+Exec=/usr/bin/mark-studio --private --no-telemetry %u
+
+# Theme settings are recognized as desktop keywords by this grammar.
+[X-Mark Appearance]
+GtkTheme=Adwaita-dark
+MetacityTheme=Adwaita
+IconTheme=Papirus-Dark
+CursorTheme=Bibata-Modern-Ice
+ButtonLayout=close,minimize,maximize:
+ApplicationFont=Inter 11
+X-Mark-CodeFont=JetBrains Mono 13
+X-Mark-HighContrast=false
+
+[X-Mark Preview]
+Name=Preview Worker
+Version=2.7
+Exec=/usr/libexec/mark-preview --socket "/tmp/mark preview.sock" %F
+Terminal=true
+Categories=Development;Science;Education;
+X-Mark-WorkerCount=4
+X-Mark-TimeoutMs=2500
+X-Mark-LocaleSample=naïve café — Καλημέρα
+
+# Category vocabulary covered in plausible launcher metadata
+[X-Mark Category Samples]
+Categories=AudioVideo;Audio;Video;Development;Education;Game;Graphics;Network;Office;Science;Settings;System;Utility;
+
+# Additional desktop-entry value boundaries
+[X-Mark Value Samples]
+Version=2026.07
+X-Mark-True=true
+X-Mark-False=false
+X-Mark-NearTrue=untrue
+X-Mark-NearFalse=falsehood
+X-Mark-SemicolonList=alpha;beta;gamma;
+X-Mark-QuotedText="spaces; semicolons; and # are inside a quoted span"
+X-Mark-Empty=
+X-Mark-Equals=a=b=c
+X-Mark-Localized[eo]=Rapida revizio
+X-Mark-Localized[sr@latin]=Brzi pregled
+
+ # Indented comments are accepted by the layout rule.
+	# So are comments beginning with a tab.
+[X-Mark Integration]
+X-Mark-BusName=dev.mark.MarkStudio
+X-Mark-ObjectPath=/dev/mark/MarkStudio
+X-Mark-Interface=org.freedesktop.Application
+X-Mark-SupportedSchemes=file;https;ssh;
+X-Mark-Environment=MARK_THEME=night
+X-Mark-Launch=/usr/bin/env MARK_SAFE=1 mark-studio --wait %F
+
+[Desktop Action Diagnostics]
+Name=Collect Diagnostics
+Name[zh_TW]=收集診斷資料
+Comment=Create a local report; no files are uploaded
+Icon=utilities-system-monitor
+Exec=/usr/bin/mark-studio --diagnostics --output "/tmp/mark report.json" %f
+Terminal=true
+OnlyShowIn=GNOME;KDE;
+
+# Balanced final section verifies that heading state has ended.
+[X-Mark Final]
+X-Mark-Checksum=sha256:0123456789abcdef
+X-Mark-GeneratedBy=hand-written fixture
+X-Mark-Complete=true

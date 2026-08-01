@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="{{ request.locale.iso_code | default: 'en' }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ page_title | escape | append: ' · Atelier 🪐' }}</title>
+  <style>.badge { color: rebeccapurple; }</style>
+</head>
+<body class="template-{{ template.name | handleize }}">
+  {%- assign greeting = 'Hello, 世界' -%}
+  {% capture heading %}{{ greeting }}, {{ customer.first_name | default: 'friend' }}!{% endcapture %}
+  {% if product.available and product.price > 0 %}
+    <h1>{{ heading | strip | escape }}</h1>
+  {% elsif product.tags contains 'preview' %}
+    <p>Preview for 𠮷田</p>
+  {% else %}
+    <p>Sold out.</p>
+  {% endif %}
+  <ul>
+    {% for tag in product.tags limit: 3 %}
+      <li data-index="{{ forloop.index0 }}">{{ tag | capitalize }}</li>
+    {% else %}
+      <li>No tags</li>
+    {% endfor %}
+  </ul>
+  {% comment %}Liquid inside comments: {{ ignored | upcase }}{% endcomment %}
+  <script>const title = {{ product.title | json }};</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+__NOTOC__
+= Orbital Sandbox =
+This '''compact''' page links [[Spaceflight|spaceflight 🚀]] with ''café λ'' and 𝌆.
+{{Infobox mission
+| name = Orbital Sandbox
+| target = [[Moon]]
+| crew = {{{crew|3}}}
+}}
+== Highlights ==
+* Launch from [[Cape Canaveral]]
+** Track [https://example.org/mission live telemetry]
+# Verify {{convert|42|km}}
+; Status : Nominal <ref name="status">Reviewed in {{CURRENTYEAR}}.</ref>
+{| class="wikitable"
+|+ Mission facts
+! Item !! Value
+|-
+| Vehicle || ''Aurora''
+|-
+| Payload || 東京 experiment 🚀
+|}
+Literal markup: <nowiki>{{not a template}} and [[not a link]]</nowiki>.
+Equation: <math>E = mc^2</math>.
+<syntaxhighlight lang="python">
+message = "Grüße from 𝌆 🚀"
+print(message)
+</syntaxhighlight>
+----
+Signed by ~~~~

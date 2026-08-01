@@ -1,0 +1,209 @@
+; Logo grammar stress fixture: a tiny turtle-art workshop.
+; It exercises declarations, controls, primitives, variables, words, and comments.
+make "palette.list ["red "green "blue "gold]
+make "unicode.note "|café 東京 λ 🚀 𝌆|
+global "drawing.count
+make "drawing.count 0
+
+to safe.color :candidate
+  ifelse memberp :candidate :palette.list [
+    output :candidate
+  ] [
+    output "black
+  ]
+end
+
+to polygon :sides :length
+  if lessp :sides 3 [stop]
+  repeat :sides [
+    forward :length
+    right quotient 360 :sides
+  ]
+end
+
+to centered.polygon :sides :length :shade
+  local "old.position
+  local "old.heading
+  make "old.position pos
+  make "old.heading heading
+  penup
+  back quotient :length 2
+  pendown
+  setpencolor safe.color :shade
+  polygon :sides :length
+  penup
+  setpos :old.position
+  setheading :old.heading
+  pendown
+end
+
+to spiral :steps :distance :turn
+  ifelse equalp :steps 0 [
+    stop
+  ] [
+    forward :distance
+    right :turn
+    spiral difference :steps 1 sum :distance 2 :turn
+  ]
+end
+
+to petals :count :radius
+  repeat :count [
+    arc 60 :radius
+    right quotient 360 :count
+  ]
+end
+
+to frame :width :height
+  repeat 2 [
+    forward :width
+    right 90
+    forward :height
+    right 90
+  ]
+end
+
+to describe.point :point
+  print sentence "x item 1 :point
+  print sentence "y item 2 :point
+  show count :point
+end
+
+to choose.step :index
+  output item sum 1 modulo :index 4 [10 20 30 40]
+end
+
+to draw.grid :rows :columns
+  local "row
+  local "column
+  make "row 0
+  repeat :rows [
+    make "column 0
+    repeat :columns [
+      polygon 4 choose.step :column
+      penup
+      forward 50
+      pendown
+      make "column sum :column 1
+    ]
+    penup
+    back product :columns 50
+    right 90
+    forward 50
+    left 90
+    pendown
+    make "row sum :row 1
+  ]
+end
+
+to inventory :items
+  if emptyp :items [output "none]
+  print first :items
+  output inventory butfirst :items
+end
+
+to classify :value
+  ifelse numberp :value [
+    ifelse greaterp :value 100 [output "large] [output "small]
+  ] [
+    ifelse wordp :value [output "word] [output "collection]
+  ]
+end
+
+to announce :title :value
+  type word :title ":
+  print :value
+  wait 1
+end
+
+to turtle.status
+  announce "heading round heading
+  announce "position pos
+  announce "pen penmode
+  announce "visible shownp
+end
+
+to property.demo :artist
+  pprop :artist "medium "turtle
+  pprop :artist "caption "|café 東京 λ 🚀 𝌆|
+  print gprop :artist "medium
+  print gprop :artist "caption
+  remprop :artist "medium
+end
+
+to queue.demo :tasks
+  local "work
+  make "work :tasks
+  queue "work "sketch
+  push "work "prepare
+  print dequeue "work
+  print pop "work
+end
+
+to angle.table :angles
+  foreach :angles [
+    print sentence ? sin ?
+    print sentence ? cos ?
+  ]
+end
+
+to guarded.run :instruction.list
+  catch "workshop.error [
+    run :instruction.list
+  ]
+end
+
+to count.up :limit
+  for [i 1 :limit 1] [
+    print :i
+  ]
+end
+
+to countdown :start
+  localmake "remaining :start
+  while [greaterp :remaining 0] [
+    show :remaining
+    localmake "remaining difference :remaining 1
+  ]
+end
+
+to wait.for.key
+  do.until [
+    wait 1
+  ] [keyp]
+end
+
+to paint.scene
+  clearscreen
+  hideturtle
+  setbackground 7
+  setpensize [2 2]
+  home
+  centered.polygon 5 70 "gold
+  right 18
+  petals 6 40
+  penup
+  setxy -120 -100
+  pendown
+  frame 240 200
+  showturtle
+  make "drawing.count sum :drawing.count 1
+end
+
+to workshop
+  print "|Welcome to the turtle workshop|
+  paint.scene
+  turtle.status
+  describe.point pos
+  count.up 3
+  countdown 3
+  angle.table [0 30 45 60 90]
+  property.demo "artist
+  queue.demo ["measure "draw "review]
+  print classify 144
+  print uppercase "finished
+  print lowercase "DONE
+end
+
+workshop
+; End of the hand-authored workshop; all procedures are closed.

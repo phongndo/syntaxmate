@@ -1,0 +1,23 @@
+!!! 5
+%html{ lang: "en" }
+  %head
+    %meta(charset="utf-8")/
+    %title= "Haml basics — café 🚀"
+  %body#app.shell(data-locale="日本語" aria-live="polite")
+    - user = { name: "李雷", admin: true }
+    / A rendered Haml comment
+      Comments may contain %fake.tags and #{ignored_code}.
+    %header.hero
+      %h1= "Hello, #{user[:name]}!"
+      %p.lead Plain text with BMP Ω and astral 𝌆.
+    - if user[:admin]
+      %strong.badge(role="status") Administrator
+    - else
+      %em Guest
+    %a.button{ href: "/launch", data: { turbo: false } } Launch
+    %input(type="checkbox" checked=true disabled=false)/
+    :javascript
+      const greeting = "こんにちは 🌍";
+      console.log(greeting);
+    -# Silent note: interpolation #{not_evaluated}
+    %footer= Time.now.year

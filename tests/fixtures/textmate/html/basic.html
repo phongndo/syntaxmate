@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Basic fixture 🚀</title>
+  <style>
+    :root { --accent: rebeccapurple; }
+    .card { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <!-- Semantic elements, attributes, and embedded grammars. -->
+  <main class="card" data-state="ready">
+    <h1>Hello <em>world</em></h1>
+    <button type="button">Launch</button>
+  </main>
+  <script type="module">
+    const button = document.querySelector("button");
+    button?.addEventListener("click", () => console.log("🚀"));
+  </script>
+</body>
+</html>

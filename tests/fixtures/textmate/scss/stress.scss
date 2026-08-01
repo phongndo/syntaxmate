@@ -1,0 +1,220 @@
+/* SCSS stress fixture: modules, stateful constructs, and Unicode.
+ * This hand-authored source keeps comments and blocks balanced while testing
+ * café, Ελληνικά, CJK 火, an emoji 🚀, and the astral symbol 𝌆.
+ */
+
+@forward "design/tokens" show $spacing-scale, $brand-colors, rhythm;
+@forward "design/helpers" as helper-* hide deprecated-shadow;
+@use "sass:color";
+@use "sass:list";
+@use "sass:map";
+@use "sass:math";
+@use "sass:meta";
+@use "design/theme" as theme with (
+  $accent: #6c5ce7,
+  $density: "comfortable"
+);
+
+// Scalars, lists, nested maps, interpolation, and escaped multiline strings.
+$base-size: 1rem !default;
+$ratio: 1.25;
+$feature-enabled: true;
+$empty-value: null;
+$breakpoints: (small: 30rem, medium: 48rem, wide: 72rem);
+$font-stack: ("Inter var", "Noto Sans", system-ui, sans-serif);
+$space: 0.25rem 0.5rem 1rem 2rem;
+$brand-colors: (
+  "ink": #17202a,
+  "accent": hsl(252deg 72% 60%),
+  "signal": rgb(255 99 71 / 85%),
+  "nested": (quiet: #778ca3, loud: #eb3b5a)
+);
+$asset-root: "/static/v2";
+$mission: "Launch 🚀 beyond \
+  the 𝌆 frontier";
+$component-prefix: "mk";
+
+/* A second multiline comment deliberately spans tokenizer calls.
+   It mentions interpolation literally: #{$component-prefix}, braces { },
+   and punctuation that must remain comment text: // $not-a-variable. */
+
+@function fluid-step($minimum, $maximum, $factor: 2vw) {
+  @if not math.compatible($minimum, $maximum) {
+    @error "Incompatible units: #{$minimum} versus #{$maximum}";
+  }
+
+  $delta: math.div($maximum - $minimum, 2);
+  @return clamp($minimum, calc(#{$minimum} + #{$factor}), $maximum + $delta);
+}
+
+@function contrast-tone($background, $threshold: 55%) {
+  $lightness: color.channel($background, "lightness", $space: hsl);
+  @if $lightness > $threshold {
+    @return map.get($brand-colors, "ink");
+  } @else {
+    @return white;
+  }
+}
+
+@mixin respond-above($name) {
+  $width: map.get($breakpoints, $name);
+  @if $width == null {
+    @warn "Unknown breakpoint `#{$name}`";
+  } @else {
+    @media (width >= #{$width}) {
+      @content ($width);
+    }
+  }
+}
+
+@mixin focus-ring($color: map.get($brand-colors, "accent"), $inset: false) {
+  outline: 0.15rem solid color.adjust($color, $alpha: -0.15);
+  outline-offset: if($inset, -0.25rem, 0.2rem);
+  @content;
+}
+
+@mixin logical-spacing($values...) {
+  $count: list.length($values);
+  @if $count == 1 {
+    padding-block: list.nth($values, 1);
+    padding-inline: list.nth($values, 1);
+  } @else if $count >= 2 {
+    padding-block: list.nth($values, 1);
+    padding-inline: list.nth($values, 2);
+  }
+}
+
+:root {
+  color-scheme: light dark;
+  --#{$component-prefix}-gap: #{list.nth($space, 3)};
+  --surface: color-mix(in oklab, white 92%, rebeccapurple);
+  --mission-label: "#{$mission}";
+  --responsive-size: clamp(1rem, calc(0.75rem + 1.5vi), 2rem);
+  --empty-fallback: var(--missing-token, #{$base-size});
+}
+
+%interactive-surface {
+  border: 1px solid rgb(23 32 42 / 20%);
+  border-radius: math.div($base-size, 2);
+  transition: color 160ms ease, box-shadow 160ms ease;
+}
+
+.#{$component-prefix}-card {
+  @extend %interactive-surface;
+  @include logical-spacing(1rem, fluid-step(1rem, 2rem));
+  container: card / inline-size;
+  font-family: $font-stack;
+  color: contrast-tone(#f8f9fa);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 96%), transparent),
+    url("#{$asset-root}/textures/paper-🚀.svg") center / cover;
+
+  &#{&}--featured,
+  &[data-state="ready" i] {
+    box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 18%);
+  }
+
+  > header:first-child {
+    display: grid;
+    grid-template-columns: [icon] auto [title] minmax(0, 1fr);
+    gap: var(--#{$component-prefix}-gap);
+  }
+
+  :where(h2, h3):not(.visually-hidden) {
+    margin-block: 0;
+    font-size: var(--responsive-size);
+    text-wrap: balance;
+  }
+
+  &__link {
+    color: map.get($brand-colors, "accent");
+    text-decoration-thickness: from-font;
+
+    &:is(:hover, :focus-visible) {
+      @include focus-ring($inset: true) {
+        text-decoration-style: wavy;
+      }
+    }
+
+    &::after {
+      content: " ↗ 🚀";
+      unicode-bidi: isolate;
+    }
+  }
+
+  @include respond-above(medium) using ($resolved-width) {
+    max-inline-size: calc(#{$resolved-width} + 12ch);
+  }
+}
+// Parent utility blocks also exercise flow-control closure before their `}`.
+.palette-utilities {
+  @each $name, $value in $brand-colors {
+    @if meta.type-of($value) == "color" {
+      &.text-#{$name} { color: $value; }
+    }
+  }
+}
+@for $index from 1 through 4 {
+  .stack > :nth-child(#{$index}) {
+    z-index: $index;
+    margin-block-start: math.pow($ratio, $index) * 0.1rem;
+  }
+}
+.column-utilities {
+  $column: 1;
+  @while $column != 4 {
+    &.grid-col-#{$column} { grid-column: span $column; }
+    $column: $column + 1;
+  }
+}
+@layer reset, components, utilities;
+@layer components {
+  dialog[open]::backdrop {
+    background-color: rgb(15 23 42 / 55%);
+    backdrop-filter: blur(0.25rem);
+  }
+}
+
+@supports (selector(:has(*))) and (color: oklch(70% 0.15 250)) {
+  .gallery:has(> figure[data-kind|="火"]) {
+    border-color: oklch(62% 0.18 255 / 0.8);
+  }
+}
+
+@container card (inline-size > 32rem) {
+  .#{$component-prefix}-card__body {
+    columns: 2 18ch;
+    column-rule: 1px dashed currentColor;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) and (hover: hover) {
+  .orbit {
+    animation: orbit-𝌆 2.4s cubic-bezier(.2, .8, .2, 1) infinite alternate;
+  }
+}
+
+@keyframes orbit-𝌆 {
+  from { transform: rotate(0turn) translateX(0); opacity: 0.6; }
+  50% { transform: rotate(.5turn) translateX(calc(1rem + 2vw)); }
+  to { transform: rotate(1turn) translateX(0); opacity: 1; }
+}
+
+@font-face {
+  font-family: "Fixture Sans";
+  src: local("Fixture Sans"), url("#{$asset-root}/fixture.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+0020-007E, U+03B1-03C9, U+1F680;
+}
+
+@property --progress {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0;
+}
+
+@page :first {
+  size: A4 portrait;
+  margin: 1.5cm;
+  @top-center { content: "Review copy — #{$mission}"; }
+}

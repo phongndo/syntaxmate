@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding='UTF-8'?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN">
+<!-- Vue-rendered mission console fragment, exercised as a standalone grammar root. -->
+<![CDATA[bootstrap payload: <mission id="aurora"> café 東京 λ 🚀 𝌆 ]]>
+<div
+  id="mission-console"
+  class='app-shell theme-orbit'
+  data-build=20260712
+  data-region="東京"
+  :class="[{ offline: !online }, themeClass]"
+  @keyup.esc="closeOverlay()">
+  <header class="masthead" aria-labelledby=mission-title>
+    <div class=brand-row>
+      <MissionMark aria-label='Aurora mission'></MissionMark>
+      <div>
+        <p class="eyebrow">Operations &amp; telemetry</p>
+        <h1 id=mission-title>{{ mission.name }}</h1>
+        <p title="Operator {{ operator.name }}">
+          café · 東京 · λ · 🚀 · 𝌆
+        </p>
+      </div>
+      <StatusLight :tone="online ? 'good' : 'critical'"></StatusLight>
+    </div>
+    <nav aria-label="Primary navigation">
+      <a
+        v-for="link in navigation"
+        :key="link.href"
+        :href="link.href"
+        :class="{ active: route === link.href }"
+        @click.prevent="navigate(link.href)">
+        {{ link.label }}
+      </a>
+    </nav>
+  </header>
+
+  <!-- Quoted, single-quoted, boolean, and unquoted host attributes. -->
+  <main id='workspace' class=workspace tabindex=-1 data-ready>
+    <aside class="sidebar" :aria-label="`${stations.length} stations`">
+      <form class=filters @submit.prevent="applyFilters()">
+        <label for=station-query>Find a station</label>
+        <input
+          id=station-query
+          name="query"
+          type=search
+          :value="query"
+          placeholder='Reykjavík or 東京'
+          autocomplete=off
+          @input="query = $event.target.value" />
+        <label for=status-filter>Status</label>
+        <select id="status-filter" v-model="statusFilter">
+          <option value=all>All stations</option>
+          <option value='online'>Online</option>
+          <option value="maintenance">Maintenance</option>
+        </select>
+        <button type=submit :disabled='query.length > 80'>Apply</button>
+      </form>
+
+      <ul class=station-list v-if="filteredStations.length">
+        <li
+          v-for="(station, stationIndex) in filteredStations"
+          :key="station.code"
+          :data-index=stationIndex
+          :class="['station', { selected: station.code === selectedCode }]">
+          <button
+            type="button"
+            @click="selectStation(station.code)"
+            :aria-pressed="station.code === selectedCode">
+            <strong>{{ station.code }}</strong>
+            <span>{{ station.city }}</span>
+            <small>{{ station.status }}</small>
+          </button>
+        </li>
+      </ul>
+      <EmptyNotice v-if="!filteredStations.length">
+        No stations match &quot;{{ query }}&quot;.
+      </EmptyNotice>
+    </aside>
+
+    <section class="dashboard" aria-labelledby="telemetry-title" v-bind:aria-busy="refreshing">
+      <header class=section-heading>
+        <div>
+          <p class=eyebrow>Live pass {{ pass.number }}</p>
+          <h2 id="telemetry-title">Telemetry for {{ selectedStation.city }}</h2>
+        </div>
+        <button @click="refresh()" :disabled="refreshing">
+          {{ refreshing ? 'Refreshing…' : 'Refresh' }}
+        </button>
+      </header>
+
+      <TelemetryGrid :columns=visibleColumns data-layout='responsive'>
+        <TelemetryCard
+          v-for="metric in metrics"
+          :key="metric.id"
+          :tone="metric.alert ? 'warning' : 'normal'"
+          data-source=orbiter>
+          <template #header="{ compact }">
+            <span :title="metric.description">{{ metric.label }}</span>
+            <Badge v-if="compact" value='live'></Badge>
+          </template>
+          <output :id="`metric-${metric.id}`" class=value>
+            {{ formatMetric(metric.value, metric.unit) }}
+          </output>
+          <progress
+            v-if="metric.maximum"
+            min=0
+            :max="metric.maximum"
+            :value="metric.value">
+            {{ metric.value }}%
+          </progress>
+          <template #footer="slotProps">
+            <time :datetime="metric.updatedAt">{{ slotProps.relativeTime }}</time>
+          </template>
+        </TelemetryCard>
+      </TelemetryGrid>
+
+      <!-- Same-line empty pairs select the grammar's paired-tag rules. -->
+      <InlineProbe data-state="ready"></InlineProbe>
+      <span id=between-tag-probe class='quiet'></span>
+
+      <section class=timeline aria-labelledby='timeline-title'>
+        <h2 id=timeline-title>Contact timeline</h2>
+        <ol>
+          <li v-for="event in timeline" :key=event.id>
+            <time :datetime='event.timestamp'>{{ event.clock }}</time>
+            <span>{{ event.summary }}</span>
+            <mark v-if="event.important">priority</mark>
+          </li>
+        </ol>
+      </section>
+
+      <section class="packet-table" aria-labelledby=packets-title>
+        <h2 id=packets-title>Recent packets</h2>
+        <table>
+          <caption>Decoded frames for {{ selectedCode }}</caption>
+          <thead>
+            <tr>
+              <th scope=col>Sequence</th>
+              <th scope='col'>Received</th>
+              <th scope="col">State</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="packet in packets" :key="packet.sequence">
+              <td>{{ packet.sequence }}</td>
+              <td><time :datetime=packet.receivedAt>{{ packet.clock }}</time></td>
+              <td>
+                <StatePill :tone="packet.valid ? 'good' : 'bad'">
+                  {{ packet.valid ? 'valid' : 'rejected' }}
+                </StatePill>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <details :open="showDiagnostics" data-panel=diagnostics>
+        <summary>Link diagnostics</summary>
+        <dl>
+          <template v-for="entry in diagnostics" :key="entry.name">
+            <dt>{{ entry.name }}</dt>
+            <dd :class="entry.state">{{ entry.value }}</dd>
+          </template>
+        </dl>
+        <pre aria-label="Raw frame">{{ rawFrame }}</pre>
+      </details>
+
+      <svg viewBox="0 0 240 100" role=img aria-labelledby=orbit-title>
+        <title id=orbit-title>Current orbital pass</title>
+        <path :d="orbitPath" fill=none stroke='currentColor'></path>
+        <circle :cx="satellite.x" :cy="satellite.y" r=5 class=satellite></circle>
+        <text x=8 y=92>{{ selectedStation.code }} → {{ mission.vehicle }}</text>
+      </svg>
+    </section>
+  </main>
+
+  <ModalDialog
+    v-if="overlay === 'handoff'"
+    id="handoff-dialog"
+    :open="true"
+    @close="overlay = null">
+    <template #title>Transfer control?</template>
+    <p>Next operator: {{ nextOperator.name }} &mdash; call sign {{ nextOperator.callSign }}.</p>
+    <template #actions="{ close }">
+      <button type=button @click="close('cancel')">Cancel</button>
+      <button type='button' autofocus @click="confirmHandoff()">Transfer</button>
+    </template>
+  </ModalDialog>
+
+  <footer class=site-footer>
+    <address>
+      Control: <a href="mailto:ops@example.test">ops@example.test</a>
+    </address>
+    <small title='Copyright {{ mission.owner }}'>
+      &copy; {{ year }} {{ mission.owner }} · signal &#955; · rocket &#x1F680;
+    </small>
+    <img src=/assets/mission-mark.svg alt="" width=24 height='24' loading=lazy />
+  </footer>
+</div>

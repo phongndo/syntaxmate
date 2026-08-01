@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en" data-grammar-root="text.html.derivative.ng">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <base href="/operations/">
+  <title>{{ workspace.name }} · Dispatch board</title>
+  <link rel="preconnect" href="https://fonts.example.test">
+  <link rel="stylesheet" href="/assets/dispatch.css">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --accent: #5b5bd6;
+    }
+
+    .status-card[data-state="delayed"] {
+      border-inline-start: 0.25rem solid rgb(190 55 45 / 80%);
+    }
+  </style>
+  <script type="module">
+    const bootRecord = {
+      locale: "ja-JP",
+      message: "café · 東京 · é · 𝌆 · 🚀"
+    };
+    window.dispatchBoot = bootRecord;
+  </script>
+</head>
+<body class="theme-system">
+  <!-- Standalone Angular HTML grammar root; every nested host state closes below. -->
+  <app-shell
+    #shell
+    data-product="Dispatch"
+    [class.is-offline]="connection.offline"
+    [attr.aria-busy]="loading"
+    (keydown.escape)="closeOverlay()">
+    <header class="app-header">
+      <a class="brand" routerLink="/" aria-label="Dispatch home">
+        <img src="/assets/mark.svg" alt="" width="32" height="32">
+        <strong>{{ workspace.name | uppercase }}</strong>
+      </a>
+      <nav aria-label="Primary navigation">
+        <a routerLink="/board" routerLinkActive="active">Board</a>
+        <a [routerLink]="['/reports', currentRegion.id]">Reports</a>
+        <a href="https://status.example.test" target="_blank" rel="noreferrer">Status</a>
+      </nav>
+      <button type="button" class="avatar" (click)="accountMenu.toggle($event)">
+        {{ operator.initials }}
+      </button>
+    </header>
+
+    <main id="content">
+      <section class="hero" aria-labelledby="board-title">
+        <div>
+          <p class="eyebrow">Operations · café / 東京 / é / 𝌆 / 🚀</p>
+          <h1 id="board-title">{{ greeting }}, {{ operator.displayName }}</h1>
+          <p [innerText]="summary"></p>
+        </div>
+        <time [attr.datetime]="now | date:'yyyy-MM-ddTHH:mm:ssXXX'">
+          {{ now | date:'fullDate' }}
+        </time>
+      </section>
+
+      @let visibleTrips = trips | tripFilter:filters;
+      @let selectedCount = selection.ids.length;
+
+      <form class="filters" (ngSubmit)="applyFilters()" #filterForm="ngForm">
+        <fieldset [disabled]="loading">
+          <legend>Filter departures</legend>
+          <label for="query">Search</label>
+          <input
+            #queryInput
+            id="query"
+            name="query"
+            type="search"
+            placeholder="Route, driver, or city"
+            [(ngModel)]="filters.query"
+            (input)="preview(queryInput.value)"
+            (keyup.enter)="applyFilters()"
+            autocomplete="off">
+          <label>
+            <input type="checkbox" name="delayed" [(ngModel)]="filters.delayedOnly">
+            Delayed only
+          </label>
+          <label for="region">Region</label>
+          <select id="region" name="region" [(ngModel)]="filters.regionId">
+            <option value="">Every region</option>
+            <option *ngFor="let region of regions; trackBy: trackRegion" [value]="region.id">
+              {{ region.label }}
+            </option>
+          </select>
+          <button type="submit" [disabled]="filterForm.invalid">Apply</button>
+          <button type="button" (click)="resetFilters()">Reset</button>
+        </fieldset>
+      </form>
+
+      @if (loading) {
+        <section class="notice" role="status" aria-live="polite">
+          <progress max="100" [value]="progress"></progress>
+          Loading {{ progress | number:'1.0-0' }}%
+        </section>
+      } @else if (loadError; as error) {
+        <section class="notice notice--error" role="alert">
+          <h2>Trips could not be loaded</h2>
+          <pre>{{ error.message }}</pre>
+          <button type="button" (click)="reload()">Try again</button>
+        </section>
+      } @else {
+        <section class="board" aria-label="Trip board">
+          @for (trip of visibleTrips; track trip.id; let index = $index, first = $first) {
+            <article
+              class="status-card"
+              [class.status-card--first]="first"
+              [attr.data-state]="trip.status"
+              [style.--queue-position]="index"
+              (click)="selectTrip(trip)"
+              (dblclick)="openTrip(trip.id)">
+              <header>
+                <h2>{{ trip.route.code }} — {{ trip.destination }}</h2>
+                <span class="badge" [ngClass]="statusClass(trip.status)">
+                  {{ trip.status | titlecase }}
+                </span>
+              </header>
+              <dl>
+                <div><dt>Platform</dt><dd>{{ trip.platform ?? 'TBA' }}</dd></div>
+                <div><dt>Driver</dt><dd>{{ trip.driver?.name || 'Unassigned' }}</dd></div>
+                <div><dt>Departure</dt><dd>{{ trip.departure | date:'shortTime' }}</dd></div>
+              </dl>
+              <footer>
+                <button type="button" (click)="message(trip); $event.stopPropagation()">
+                  Message crew
+                </button>
+              </footer>
+            </article>
+          } @empty {
+            <p class="empty">No trips match these filters.</p>
+          }
+        </section>
+      }
+
+      <section class="selection" [hidden]="selectedCount === 0">
+        <h2>Selected trips <small>({{ selectedCount }})</small></h2>
+        <ng-container [ngSwitch]="selection.action">
+          <p *ngSwitchCase="'notify'">A notification will be sent.</p>
+          <p *ngSwitchCase="'archive'">Completed trips will be archived.</p>
+          <p *ngSwitchDefault>Choose a bulk action.</p>
+        </ng-container>
+      </section>
+
+      @switch (connection.state) {
+        @case ('online') {
+          <output class="connection connection--ok">Live updates connected</output>
+        }
+        @case ('reconnecting') {
+          <output class="connection connection--waiting">Reconnecting…</output>
+        }
+        @default {
+          <output class="connection connection--offline">Working from cached data</output>
+        }
+      }
+
+      @defer (on viewport; prefetch on idle) {
+        <app-route-map [trips]="visibleTrips" (markerSelected)="selectTrip($event)"></app-route-map>
+      } @placeholder (minimum 500ms) {
+        <div class="map-placeholder" aria-hidden="true">Map preview</div>
+      } @loading (after 100ms; minimum 300ms) {
+        <p role="status">Preparing the route map…</p>
+      } @error {
+        <p role="alert">The route map is unavailable.</p>
+      }
+
+      <ng-template #tripRow let-trip let-position="index">
+        <tr [class.is-selected]="selection.has(trip.id)">
+          <td>{{ position + 1 }}</td>
+          <td><a [routerLink]="['/trip', trip.id]">{{ trip.route.code }}</a></td>
+          <td>{{ trip.destination }}</td>
+        </tr>
+      </ng-template>
+
+      <table>
+        <caption>Accessible compact departure list</caption>
+        <thead><tr><th scope="col">#</th><th scope="col">Route</th><th scope="col">Destination</th></tr></thead>
+        <tbody>
+          <ng-container *ngFor="let trip of visibleTrips; index as rowIndex">
+            <ng-container *ngTemplateOutlet="tripRow; context: {$implicit: trip, index: rowIndex}"></ng-container>
+          </ng-container>
+        </tbody>
+      </table>
+
+      <details (toggle)="rememberHelp($event)" open>
+        <summary>Keyboard help</summary>
+        <p>Press <kbd>/</kbd> to search and <kbd>Escape</kbd> to close dialogs.</p>
+      </details>
+    </main>
+
+    <app-toast-region aria-live="polite"></app-toast-region>
+    <footer class="app-footer">
+      <small>&copy; {{ now | date:'yyyy' }} Northwind Transit &amp; Partners</small>
+      <a href="mailto:ops@example.test">Contact operations</a>
+    </footer>
+  </app-shell>
+</body>
+</html>

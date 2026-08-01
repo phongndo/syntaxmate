@@ -1,0 +1,1602 @@
+{
+  "schemaVersion": 1,
+  "vscodeCommit": "fc3def6774c76082adf699d366f31a557ce5573f",
+  "oracle": {
+    "vscodeTextmate": "9.2.0",
+    "vscodeOniguruma": "1.7.0"
+  },
+  "sharedRootGrammars": 65,
+  "scopeEquivalent": 65,
+  "scopeDivergent": 0,
+  "styleEquivalent": 65,
+  "styleDivergent": 0,
+  "entries": [
+    {
+      "language": "vb",
+      "scopeName": "source.asp.vb.net",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 22,
+          "comparedTokens": 180,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 241,
+          "comparedTokens": 2950,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "bat",
+      "scopeName": "source.batchfile",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 25,
+          "comparedTokens": 150,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 246,
+          "comparedTokens": 1472,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "c",
+      "scopeName": "source.c",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 149,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 201,
+          "comparedTokens": 1932,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "clojure",
+      "scopeName": "source.clojure",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 29,
+          "comparedTokens": 250,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 211,
+          "comparedTokens": 1613,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "coffee",
+      "scopeName": "source.coffee",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 23,
+          "comparedTokens": 222,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 186,
+          "comparedTokens": 1412,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "cpp",
+      "scopeName": "source.cpp",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 22,
+          "comparedTokens": 149,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "libcxx_vector",
+          "lines": 40,
+          "comparedTokens": 278,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 244,
+          "comparedTokens": 2709,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "cpp-macro",
+      "scopeName": "source.cpp.embedded.macro",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 19,
+          "comparedTokens": 195,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 214,
+          "comparedTokens": 2088,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "csharp",
+      "scopeName": "source.cs",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 23,
+          "comparedTokens": 139,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 12,
+          "comparedTokens": 61,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 188,
+          "comparedTokens": 2176,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "css",
+      "scopeName": "source.css",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 23,
+          "comparedTokens": 158,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 232,
+          "comparedTokens": 2093,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "less",
+      "scopeName": "source.css.less",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 30,
+          "comparedTokens": 226,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 226,
+          "comparedTokens": 1918,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "scss",
+      "scopeName": "source.css.scss",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 31,
+          "comparedTokens": 193,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 7,
+          "comparedTokens": 35,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 221,
+          "comparedTokens": 1848,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "dart",
+      "scopeName": "source.dart",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 27,
+          "comparedTokens": 144,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 218,
+          "comparedTokens": 1560,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "diff",
+      "scopeName": "source.diff",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 20,
+          "comparedTokens": 35,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 168,
+          "comparedTokens": 288,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "docker",
+      "scopeName": "source.dockerfile",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 26,
+          "comparedTokens": 101,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 7,
+          "comparedTokens": 29,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 181,
+          "comparedTokens": 721,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "dotenv",
+      "scopeName": "source.dotenv",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 17,
+          "comparedTokens": 74,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 168,
+          "comparedTokens": 588,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "fsharp",
+      "scopeName": "source.fsharp",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 27,
+          "comparedTokens": 198,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 220,
+          "comparedTokens": 1847,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "go",
+      "scopeName": "source.go",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 24,
+          "comparedTokens": 161,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 200,
+          "comparedTokens": 1600,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "groovy",
+      "scopeName": "source.groovy",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 152,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 213,
+          "comparedTokens": 1584,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "hlsl",
+      "scopeName": "source.hlsl",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 29,
+          "comparedTokens": 121,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 248,
+          "comparedTokens": 1125,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "ignore",
+      "scopeName": "source.ignore",
+      "fixtures": [],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "ini",
+      "scopeName": "source.ini",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 24,
+          "comparedTokens": 104,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 186,
+          "comparedTokens": 808,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "java",
+      "scopeName": "source.java",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 26,
+          "comparedTokens": 153,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 10,
+          "comparedTokens": 59,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 191,
+          "comparedTokens": 1618,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "javascript",
+      "scopeName": "source.js",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 22,
+          "comparedTokens": 202,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 200,
+          "comparedTokens": 2338,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "jsx",
+      "scopeName": "source.js.jsx",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 24,
+          "comparedTokens": 260,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 5,
+          "comparedTokens": 38,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 187,
+          "comparedTokens": 2132,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "js-regexp",
+      "scopeName": "source.js.regexp",
+      "fixtures": [],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "json",
+      "scopeName": "source.json",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 25,
+          "comparedTokens": 197,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 247,
+          "comparedTokens": 1606,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "jsonc",
+      "scopeName": "source.json.comments",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 26,
+          "comparedTokens": 244,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 170,
+          "comparedTokens": 1316,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "jsonl",
+      "scopeName": "source.json.lines",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 400,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 151,
+          "comparedTokens": 7487,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "julia",
+      "scopeName": "source.julia",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 22,
+          "comparedTokens": 144,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 221,
+          "comparedTokens": 1489,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "lua",
+      "scopeName": "source.lua",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 26,
+          "comparedTokens": 128,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 6,
+          "comparedTokens": 31,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 193,
+          "comparedTokens": 1557,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "make",
+      "scopeName": "source.makefile",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 29,
+          "comparedTokens": 144,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 7,
+          "comparedTokens": 16,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 189,
+          "comparedTokens": 1001,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "objective-c",
+      "scopeName": "source.objc",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 25,
+          "comparedTokens": 290,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 221,
+          "comparedTokens": 2091,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "objective-cpp",
+      "scopeName": "source.objcpp",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 28,
+          "comparedTokens": 260,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 261,
+          "comparedTokens": 2244,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "perl",
+      "scopeName": "source.perl",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 27,
+          "comparedTokens": 158,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 233,
+          "comparedTokens": 1706,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "raku",
+      "scopeName": "source.perl.6",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 19,
+          "comparedTokens": 104,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 210,
+          "comparedTokens": 998,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "php",
+      "scopeName": "source.php",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 25,
+          "comparedTokens": 204,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 7,
+          "comparedTokens": 41,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 208,
+          "comparedTokens": 2045,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "powershell",
+      "scopeName": "source.powershell",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 30,
+          "comparedTokens": 202,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 6,
+          "comparedTokens": 33,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 211,
+          "comparedTokens": 1995,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "python",
+      "scopeName": "source.python",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 29,
+          "comparedTokens": 224,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 182,
+          "comparedTokens": 1877,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "r",
+      "scopeName": "source.r",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 248,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 225,
+          "comparedTokens": 2543,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "regexp",
+      "scopeName": "source.regexp.python",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 296,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 164,
+          "comparedTokens": 1269,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "rst",
+      "scopeName": "source.rst",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 27,
+          "comparedTokens": 75,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 243,
+          "comparedTokens": 777,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "ruby",
+      "scopeName": "source.ruby",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 31,
+          "comparedTokens": 196,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 6,
+          "comparedTokens": 25,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 203,
+          "comparedTokens": 1487,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "rust",
+      "scopeName": "source.rust",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 27,
+          "comparedTokens": 269,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 200,
+          "comparedTokens": 2183,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "shaderlab",
+      "scopeName": "source.shaderlab",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 31,
+          "comparedTokens": 186,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 191,
+          "comparedTokens": 1066,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "shellscript",
+      "scopeName": "source.shell",
+      "fixtures": [],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "sql",
+      "scopeName": "source.sql",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 26,
+          "comparedTokens": 189,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 6,
+          "comparedTokens": 16,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 210,
+          "comparedTokens": 1608,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "swift",
+      "scopeName": "source.swift",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 27,
+          "comparedTokens": 175,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "smoke",
+          "lines": 6,
+          "comparedTokens": 38,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 221,
+          "comparedTokens": 1603,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "typescript",
+      "scopeName": "source.ts",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 23,
+          "comparedTokens": 231,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 184,
+          "comparedTokens": 2150,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "tsx",
+      "scopeName": "source.tsx",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 24,
+          "comparedTokens": 204,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 184,
+          "comparedTokens": 2238,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "yaml",
+      "scopeName": "source.yaml",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 26,
+          "comparedTokens": 156,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 171,
+          "comparedTokens": 1061,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "yaml-1.2",
+      "scopeName": "source.yaml.1.2",
+      "fixtures": [],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "yaml-embedded",
+      "scopeName": "source.yaml.embedded",
+      "fixtures": [],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "bibtex",
+      "scopeName": "text.bibtex",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 25,
+          "comparedTokens": 216,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 181,
+          "comparedTokens": 1518,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "git-commit",
+      "scopeName": "text.git-commit",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 31,
+          "comparedTokens": 48,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 161,
+          "comparedTokens": 272,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "git-rebase",
+      "scopeName": "text.git-rebase",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 29,
+          "comparedTokens": 151,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 164,
+          "comparedTokens": 887,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "html",
+      "scopeName": "text.html.basic",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 23,
+          "comparedTokens": 195,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 198,
+          "comparedTokens": 2733,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "html-derivative",
+      "scopeName": "text.html.derivative",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 25,
+          "comparedTokens": 241,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 182,
+          "comparedTokens": 2150,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "handlebars",
+      "scopeName": "text.html.handlebars",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 26,
+          "comparedTokens": 215,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 196,
+          "comparedTokens": 2260,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "markdown",
+      "scopeName": "text.html.markdown",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 22,
+          "comparedTokens": 85,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 195,
+          "comparedTokens": 935,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "log",
+      "scopeName": "text.log",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 101,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 150,
+          "comparedTokens": 889,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "pug",
+      "scopeName": "text.pug",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 25,
+          "comparedTokens": 258,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 250,
+          "comparedTokens": 2105,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "tex",
+      "scopeName": "text.tex",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 29,
+          "comparedTokens": 142,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 209,
+          "comparedTokens": 1138,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "latex",
+      "scopeName": "text.tex.latex",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 24,
+          "comparedTokens": 199,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "hw2-theme",
+          "lines": 17,
+          "comparedTokens": 110,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 182,
+          "comparedTokens": 1071,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "xml",
+      "scopeName": "text.xml",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 220,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 197,
+          "comparedTokens": 1709,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    },
+    {
+      "language": "xsl",
+      "scopeName": "text.xml.xsl",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 229,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 213,
+          "comparedTokens": 1938,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
+      "scopeEquivalent": true,
+      "styleEquivalent": true
+    }
+  ]
+}

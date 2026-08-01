@@ -1,0 +1,22 @@
+:root {
+  --accent: #6c5ce7;
+  --space: 1.5rem;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: rgb(245 247 250);
+}
+
+.card[data-state="ready"] {
+  padding: var(--space);
+  border: 2px solid var(--accent);
+}
+
+.card::before { content: "Ready 🚀"; }
+.card:hover { transform: translateY(-2px); }
+
+@media (min-width: 48rem) {
+  .card { display: grid; gap: 1rem; }
+}

@@ -1,0 +1,207 @@
+static type Theme = "light" | "dark";
+static type Item = { id: number; label: string; tags?: string[] };
+static const fallbackItems: Item[] = [{ id: 0, label: "café 東京 λ" }];
+server const renderedAt: string = new Date(0).toISOString();
+client const canAnimate: boolean = typeof window !== "undefined";
+export interface Input { title?: string; theme?: Theme; items?: Item[]; }
+class FixtureState { selected = new Set<number>(); }
+
+$ const title = input.title ?? "Grammar laboratory 🚀 𝌆";
+$ const theme: Theme = input.theme ?? "light";
+$ const items: Item[] = input.items ?? fallbackItems;
+$ const state = new FixtureState();
+$ const attributes = { "data-count": items.length, role: "region" };
+
+<!DOCTYPE html>
+<?marko fixture="stress" unicode='café 東京 λ 🚀 𝌆'?>
+<!--
+  HTML-mode host content exercises a closed multiline comment.
+  Placeholders such as ${title} remain inert inside this comment.
+-->
+<main#fixture.shell class=["theme", theme] ...attributes>
+  <header class="hero" aria-labelledby="fixture-title">
+    <h1 id="fixture-title">${title}</h1>
+    <p data-rendered=renderedAt>Rendered at ${renderedAt}</p>
+    <input type="search" name="query" value=input.query placeholder="café 東京 λ"/>
+  </header>
+
+  <nav aria-label="Fixture sections">
+    <a href="#items" class:selected=input.section === "items">Items</a>
+    <a href="#details" on-click=() => console.log("details")>Details</a>
+  </nav>
+
+  <section id="items" data-empty=items.length === 0>
+    <if=items.length>
+      <ul class="items">
+        <for|item: Item, index: number| of=items>
+          <li/item.id class:odd=index % 2 === 1 data-index=index>
+            <strong>${index + 1}. ${item.label}</strong>
+            <if=item.tags?.length>
+              <small>${item.tags.join(", ")}</small>
+            </if>
+          </li>
+        </for>
+      </ul>
+    </if>
+    <else>
+      <p class="empty">No entries for ${theme} mode.</p>
+    </else>
+  </section>
+
+  <Panel<string> heading=title #body=(value: string) { return value.toUpperCase(); }>
+    <button
+      type="button"
+      key="toggle"
+      no-update-if=state.selected.size === 0
+      on-click=(event: MouseEvent) => console.log(event.type)
+      data-title:=title
+    >Toggle $!{input.emphasis}</button>
+  </Panel>
+
+  <${input.dynamicTag ?? "aside"} class="dynamic">
+    Dynamic tag content with escaped \${text} and live ${title}.
+  </>
+
+  <html-comment>
+    Embedded Marko comment body: café 東京 λ 🚀 𝌆
+    ${title} is recognized as a placeholder by the host grammar.
+  </html-comment>
+
+  <![CDATA[
+    <widget data-raw="true">CDATA café 東京 λ</widget>
+    Astral symbols stay intact: 🚀 𝌆
+  ]]>
+
+  <script type="module">
+    interface Row<T> {
+      key: number;
+      value: T;
+    }
+
+    const rows: Array<Row<string>> = items.map((item) => ({
+      key: item.id,
+      value: item.label,
+    }));
+
+    function summarize(values: readonly Row<string>[]): string {
+      return values
+        .filter(({ value }) => value.length > 0)
+        .map(({ key, value }) => `${key}:${value}`)
+        .join(" | ");
+    }
+
+    const summary = summarize(rows);
+    const unicode = { bmp: "café 東京 λ", astral: "🚀 𝌆" } as const;
+    console.log(summary, unicode);
+  </script>
+
+  <style>
+    :root {
+      --accent: #6d28d9;
+      --surface: #fafafa;
+    }
+
+    .shell {
+      color: var(--accent);
+      background: var(--surface);
+      display: grid;
+      gap: 1rem;
+    }
+
+    .hero > h1::after {
+      content: " 🚀";
+    }
+  </style>
+
+  <style.less>
+    @accent: #0f766e;
+    @space: 8px;
+
+    .items {
+      border: 1px solid @accent;
+
+      li {
+        padding: @space;
+        &:hover { color: darken(@accent, 10%); }
+      }
+    }
+  </style>
+
+  <style.scss>
+    $accent: #be123c;
+    $sizes: (small: 0.875rem, large: 1.25rem);
+
+    .dynamic {
+      border-inline-start: 3px solid $accent;
+
+      @each $name, $size in $sizes {
+        &--#{$name} { font-size: $size; }
+      }
+    }
+  </style>
+</main>
+
+style {
+  color: var(--fixture-color);
+}
+style.less {
+  @fixture-gap: 12px;
+}
+style.scss {
+  $fixture-radius: 6px;
+}
+style.ts {
+  const generatedClass: string = `fixture-${theme}`;
+}
+
+section.dashboard id="concise-root" [data-theme=theme aria-live="polite"]
+  h2.title -- Concise mode: ${title}
+  p.lead -- Unicode café 東京 λ and astral 🚀 𝌆.
+  img src=input.avatar alt="Profile portrait"
+  button.primary type="button" on-click=() => state.selected.clear() -- Reset
+  html-comment -- One-line concise comment with ${items.length} items.
+  script -- const inlineTotal: number = items.length;
+  style -- .dashboard { container-type: inline-size; }
+
+  script
+    ---
+    type Pair<T> = readonly [T, T];
+    const pair: Pair<string> = ["café", "東京"];
+    const launch = (): string => `🚀 ${pair.join(" / ")}`;
+    console.log(launch());
+    ---
+
+  style.less
+    ---
+    @ink: #172554;
+    .dashboard {
+      color: @ink;
+      .title { letter-spacing: 0.02em; }
+    }
+    ---
+
+  style.scss
+    ---
+    $ink: #4c1d95;
+    .dashboard {
+      color: $ink;
+      &.theme-dark { background: mix(black, $ink, 80%); }
+    }
+    ---
+
+  html-comment
+    ---
+    A closed concise comment block.
+    Host placeholder coverage: ${title} and $!{input.raw}.
+    ---
+
+---
+<aside class="html-island">
+  <b>HTML block inside concise mode</b>
+  <!-- closed island comment -->
+</aside>
+---
+
+footer.meta
+  small -- Finished ${items.length} records in ${theme} mode.
+static const fixtureComplete: boolean = true;

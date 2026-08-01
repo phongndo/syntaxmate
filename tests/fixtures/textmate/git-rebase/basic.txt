@@ -1,0 +1,28 @@
+# Rebase 4d3c2b1 onto 0a1b2c3 (16 commands)
+#
+# Commands use both the long form and the single-letter form.
+pick a1b2c3d bootstrap repository
+p b2c3d4e add README and contributing guide
+reword c3d4e5f document release process
+r d4e5f6a clarify café setup for Zürich
+edit e5f6a7b split parser changes
+e f6a7b8c update fixtures before review
+squash 07a8b9c fold typo fix into parser commit
+s 18b9c0d fold follow-up test cleanup
+fixup 29c0d1e correct import ordering
+f 3ad1e2f remove temporary debug output
+drop 4be2f3a discard generated benchmark data
+d 5cf3a4b remove accidental vendor update
+exec printf '%s\n' 'checking résumé 🚀'
+x test -f Cargo.toml && cargo test -q
+break
+b
+
+# Unicode commit subjects remain ordinary commit-message text.
+pick 6da4b5c localize greeting for 東京
+reword 7eb5c6d preserve emoji family 👩‍💻 in changelog
+exec name='naïve user'; printf '%s\n' "$name"
+x files=$(git diff --name-only HEAD^); test -n "$files"
+
+# Keep this order: the edit and break points are intentional.
+# End of basic interactive-rebase fixture.

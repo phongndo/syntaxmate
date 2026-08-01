@@ -1,0 +1,144 @@
+; SPIR-V assembly fixture exercising types, constants, control flow, and memory
+OpCapability Shader
+OpCapability Int64
+OpMemoryModel Logical GLSL450
+OpEntryPoint GLCompute %main "main" %global_id %buffer
+OpExecutionMode %main LocalSize 64 1 1
+OpSource GLSL 460
+OpName %main "main"
+OpName %buffer "buffer"
+OpDecorate %global_id BuiltIn GlobalInvocationId
+OpDecorate %runtime_array ArrayStride 4
+OpMemberDecorate %storage 0 Offset 0
+OpDecorate %storage Block
+OpDecorate %buffer DescriptorSet 0
+OpDecorate %buffer Binding 0
+
+%void = OpTypeVoid
+%bool = OpTypeBool
+%u32 = OpTypeInt 32 0
+%i32 = OpTypeInt 32 1
+%u64 = OpTypeInt 64 0
+%f32 = OpTypeFloat 32
+%v3u32 = OpTypeVector %u32 3
+%ptr_input_v3u32 = OpTypePointer Input %v3u32
+%runtime_array = OpTypeRuntimeArray %f32
+%storage = OpTypeStruct %runtime_array
+%ptr_storage = OpTypePointer StorageBuffer %storage
+%ptr_storage_f32 = OpTypePointer StorageBuffer %f32
+%fn_void = OpTypeFunction %void
+%fn_transform = OpTypeFunction %f32 %f32
+
+%u32_0 = OpConstant %u32 0
+%u32_1 = OpConstant %u32 1
+%u32_16 = OpConstant %u32 16
+%i32_0 = OpConstant %i32 0
+%f32_0 = OpConstant %f32 0
+%f32_1 = OpConstant %f32 1
+%f32_half = OpConstant %f32 0.5
+%global_id = OpVariable %ptr_input_v3u32 Input
+%buffer = OpVariable %ptr_storage StorageBuffer
+
+%transform_0 = OpFunction %f32 None %fn_transform
+%value_0 = OpFunctionParameter %f32
+%label_0 = OpLabel
+%scaled_0 = OpFMul %f32 %value_0 %f32_half
+%result_0 = OpFAdd %f32 %scaled_0 %f32_1
+OpReturnValue %result_0
+OpFunctionEnd
+
+%transform_1 = OpFunction %f32 None %fn_transform
+%value_1 = OpFunctionParameter %f32
+%label_1 = OpLabel
+%scaled_1 = OpFMul %f32 %value_1 %f32_half
+%result_1 = OpFAdd %f32 %scaled_1 %f32_1
+OpReturnValue %result_1
+OpFunctionEnd
+
+%transform_2 = OpFunction %f32 None %fn_transform
+%value_2 = OpFunctionParameter %f32
+%label_2 = OpLabel
+%scaled_2 = OpFMul %f32 %value_2 %f32_half
+%result_2 = OpFAdd %f32 %scaled_2 %f32_1
+OpReturnValue %result_2
+OpFunctionEnd
+
+%transform_3 = OpFunction %f32 None %fn_transform
+%value_3 = OpFunctionParameter %f32
+%label_3 = OpLabel
+%scaled_3 = OpFMul %f32 %value_3 %f32_half
+%result_3 = OpFAdd %f32 %scaled_3 %f32_1
+OpReturnValue %result_3
+OpFunctionEnd
+
+%transform_4 = OpFunction %f32 None %fn_transform
+%value_4 = OpFunctionParameter %f32
+%label_4 = OpLabel
+%scaled_4 = OpFMul %f32 %value_4 %f32_half
+%result_4 = OpFAdd %f32 %scaled_4 %f32_1
+OpReturnValue %result_4
+OpFunctionEnd
+
+%transform_5 = OpFunction %f32 None %fn_transform
+%value_5 = OpFunctionParameter %f32
+%label_5 = OpLabel
+%scaled_5 = OpFMul %f32 %value_5 %f32_half
+%result_5 = OpFAdd %f32 %scaled_5 %f32_1
+OpReturnValue %result_5
+OpFunctionEnd
+
+%transform_6 = OpFunction %f32 None %fn_transform
+%value_6 = OpFunctionParameter %f32
+%label_6 = OpLabel
+%scaled_6 = OpFMul %f32 %value_6 %f32_half
+%result_6 = OpFAdd %f32 %scaled_6 %f32_1
+OpReturnValue %result_6
+OpFunctionEnd
+
+%transform_7 = OpFunction %f32 None %fn_transform
+%value_7 = OpFunctionParameter %f32
+%label_7 = OpLabel
+%scaled_7 = OpFMul %f32 %value_7 %f32_half
+%result_7 = OpFAdd %f32 %scaled_7 %f32_1
+OpReturnValue %result_7
+OpFunctionEnd
+
+%transform_8 = OpFunction %f32 None %fn_transform
+%value_8 = OpFunctionParameter %f32
+%label_8 = OpLabel
+%scaled_8 = OpFMul %f32 %value_8 %f32_half
+%result_8 = OpFAdd %f32 %scaled_8 %f32_1
+OpReturnValue %result_8
+OpFunctionEnd
+
+%transform_9 = OpFunction %f32 None %fn_transform
+%value_9 = OpFunctionParameter %f32
+%label_9 = OpLabel
+%scaled_9 = OpFMul %f32 %value_9 %f32_half
+%result_9 = OpFAdd %f32 %scaled_9 %f32_1
+OpReturnValue %result_9
+OpFunctionEnd
+
+%main = OpFunction %void None %fn_void
+%entry = OpLabel
+%id_vec = OpLoad %v3u32 %global_id
+%index = OpCompositeExtract %u32 %id_vec 0
+%address = OpAccessChain %ptr_storage_f32 %buffer %i32_0 %index
+%old = OpLoad %f32 %address
+%new = OpFunctionCall %f32 %transform_9 %old
+%positive = OpFOrdGreaterThan %bool %new %f32_0
+OpSelectionMerge %merge None
+OpBranchConditional %positive %store %merge
+%store = OpLabel
+OpStore %address %new
+OpBranch %merge
+%merge = OpLabel
+OpReturn
+OpFunctionEnd
+
+%identity = OpFunction %f32 None %fn_transform
+%identity_value = OpFunctionParameter %f32
+%identity_label = OpLabel
+%identity_copy = OpCopyObject %f32 %identity_value
+OpReturnValue %identity_copy
+OpFunctionEnd

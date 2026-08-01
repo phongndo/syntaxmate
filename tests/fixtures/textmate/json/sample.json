@@ -1,0 +1,7 @@
+{
+  "name": "mark-golden",
+  "emoji": "λ🚀",
+  "escaped": "quote: \" slash: \\ unicode: \u03bb newline: \n",
+  "numbers": [0, -12.5e+3, true, false, null],
+  "nested": { "path": "src/lib.rs" }
+}

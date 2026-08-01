@@ -1,0 +1,20 @@
+---
+title: Launch status
+owner: field-team
+---
+
+# Café 東京 λ launch 🚀 𝌆
+
+The :badge{tone="success"}[ready] indicator belongs inside ordinary Markdown.
+
+::status-card{tone="info" compact=true}
+#header <!-- named component slot -->
+Current target: [orbital relay]{class="target"}
+
+- Telemetry is **stable**.
+- The [runbook](https://example.test/runbook) is open.
+
+:icon{name="rocket"}[Launch icon]
+::
+
+Closing prose confirms that the component and frontmatter states are balanced.

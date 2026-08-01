@@ -1,0 +1,31 @@
+name: Feature request
+description: Propose a generally useful public capability
+title: "feat: "
+labels: [enhancement, needs-triage]
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Downstream use case
+      description: Describe the application-independent problem rather than a private integration.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API or behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Compatibility boundary
+      options:
+        - label: This does not require exposing regex VMs, raw grammar IDs, caches, or serialized tokenizer state.
+          required: true

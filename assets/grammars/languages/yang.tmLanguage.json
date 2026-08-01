@@ -1,0 +1,94 @@
+{
+  "scopeName": "source.yang",
+  "uuid": "6d38bd0e-cb6f-4f02-870f-9384bad6762a",
+  "patterns": [
+    {
+      "match": "//.+",
+      "name": "comment.line.source.yang"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "name": "comment.block.source.yang"
+    },
+    {
+      "begin": "\\\"",
+      "end": "\\\"",
+      "name": "string.quoted.source.yang"
+    },
+    {
+      "begin": "\\'",
+      "end": "\\'",
+      "name": "string.quoted.source.yang"
+    },
+    {
+      "match": "((?<=[^\\w-]|^))(anyxml|argument|augment|base|belongs-to|bit|case|choice|config|contact|container|default|description|enum|error-app-tag|error-message|extension|deviation|deviate|feature|fraction-digits|grouping|identity|if-feature|import|include|input|key|leaf|leaf-list|length|list|mandatory|max-elements|min-elements|module|must|namespace|ordered-by|organization|output|path|pattern|position|prefix|presence|range|reference|refine|require-instance|revision|revision-date|status|submodule|type|typedef|unique|units|uses|value|when|yang-version|yin-element)((?=[^\\w-]|$))",
+      "captures": {
+        "2": {
+          "name": "keyword.source.yang"
+        }
+      }
+    },
+    {
+      "match": "((?<=[^\\w-]|^))(add|current|delete|deprecated|max|min|not-supported|obsolete|replace|system|unbounded|user)((?=[^\\w-]|$))",
+      "captures": {
+        "2": {
+          "name": "keyword.other.source.yang"
+        }
+      }
+    },
+    {
+      "match": "((?<=[^\\w-]|^))([A-Za-z0-9_-]+:[A-Za-z0-9_-]+)",
+      "captures": {
+        "2": {
+          "name": "entity.other.attribute-name.namespace.source.yang"
+        }
+      }
+    },
+    {
+      "match": "(\\b)(decimal64|int8|int16|int32|int64|uint8|uint16|uint32|uint64|string|boolean|enumeration|bits|binary|leafref|identityref|empty|instance-identifier)(\\b)",
+      "captures": {
+        "2": {
+          "name": "storage.type.source.yang"
+        }
+      }
+    },
+    {
+      "match": "(\\b)(true|false)(\\b)",
+      "captures": {
+        "2": {
+          "name": "constant.language.source.yang"
+        }
+      }
+    },
+    {
+      "match": "(\\b|\\.)(\\d+)(\\b|\\.)",
+      "captures": {
+        "1": {
+          "name": "constant.numeric.source.yang"
+        },
+        "2": {
+          "name": "constant.numeric.source.yang"
+        },
+        "3": {
+          "name": "constant.numeric.source.yang"
+        }
+      }
+    },
+    {
+      "match": "(\\brpc|\\bnotification)(\\s+)([\\w_\\-\\d]+)",
+      "captures": {
+        "1": {
+          "name": "keyword.source.yang"
+        },
+        "3": {
+          "name": "entity.name.function.source.yang"
+        }
+      }
+    }
+  ],
+  "name": "yang",
+  "fileTypes": [
+    "yang"
+  ]
+}

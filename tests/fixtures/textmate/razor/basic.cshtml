@@ -1,0 +1,27 @@
+@page "/catalog/{category?}"
+@model CatalogPageModel
+@using System.Globalization
+@inject IPriceFormatter Prices
+@* Basic Razor fixture: Café, 東京, and 🚀. *@
+@{
+    var heading = $"{Model.Title} — {DateTime.UtcNow:yyyy}";
+    const decimal taxRate = 0.075m;
+    var visible = Model.Items.Where(item => item.Price > 0).ToArray();
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>@heading</title>
+    <style>.price { color: #246; font-weight: 600; }</style>
+</head>
+<body data-count="@visible.Length">
+    <h1 title='Category: @Model.Category'>@heading</h1>
+    @if (visible.Length == 0) {
+        <p class="empty">No items &mdash; try again.</p>
+    } else {
+        <ul>@foreach (var item in visible) { <li class="price">@item.Name: @(Prices.Format(item.Price * (1 + taxRate)))</li> }</ul>
+    }
+    <script>const count = @visible.Length; console.log(`visible: ${count}`);</script>
+</body>
+</html>

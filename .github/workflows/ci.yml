@@ -1,0 +1,272 @@
+name: CI
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: syntaxmate-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: cargo check --lib --no-default-features --locked
+      - run: cargo check --manifest-path fuzz/Cargo.toml --locked
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+        with:
+          tool: cargo-deny
+      - name: Dependency policy
+        run: cargo deny check
+      - name: Unit and public API tests
+        run: >-
+          cargo test --all-features --locked --
+          --skip textmate_golden::manifest_golden_cases_match_or_are_allowlisted
+          --skip textmate_golden::manifest_golden_cases_have_no_budget_degradation
+      - run: cargo run --bin syntaxmate-bundle --features bundle-tools --locked -- --check
+      - run: cargo run --release --example bundle-measure --locked -- --assert-max-bundle-bytes 9000000
+
+  msrv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: "1.88"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - run: cargo check --all-targets --all-features --locked
+      - run: cargo check --lib --no-default-features --locked
+
+  feature-powerset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+        with:
+          tool: cargo-hack
+      - run: >-
+          cargo hack check --locked --lib --feature-powerset --depth 2
+          --exclude-features bundle-tools
+
+  semver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - name: Detect published baseline
+        id: baseline
+        shell: bash
+        run: |
+          status="$(curl --silent --show-error \
+            --write-out '%{http_code}' \
+            --output /tmp/syntaxmate-crate.json \
+            https://crates.io/api/v1/crates/syntaxmate)"
+          case "$status" in
+            200)
+              python3 -c 'import json; assert json.load(open("/tmp/syntaxmate-crate.json"))["crate"]["id"] == "syntaxmate"'
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "No crates.io baseline yet; skipping the bootstrap release."
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "crates.io baseline lookup failed with HTTP $status" >&2
+              exit 1
+              ;;
+          esac
+      - name: Install cargo-semver-checks
+        if: steps.baseline.outputs.exists == 'true'
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+        with:
+          tool: cargo-semver-checks
+      - name: Check public API compatibility
+        if: steps.baseline.outputs.exists == 'true'
+        run: cargo semver-checks check-release --manifest-path Cargo.toml
+
+  golden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      SYNTAXMATE_STRICT: "1"
+      SYNTAXMATE_SHARD_INDEX: ${{ matrix.shard }}
+      SYNTAXMATE_SHARD_TOTAL: "4"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - run: cargo test --all-features --locked textmate_golden::manifest_golden_cases_
+
+  generated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: tools/golden-oracle/package-lock.json
+      - run: npm ci --prefix tools/golden-oracle
+      - run: node tools/generate-textmate-cases.mjs --check
+      - run: node tools/generate-goldens.mjs --check
+      - run: node tools/generate-theme-goldens.mjs --check
+      - run: python3 tools/build-textmate-corpora.py --check
+      - run: python3 tools/generate-language-status.py --check
+      - run: python3 tools/check-language-docs.py --check
+
+  performance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - run: python3 tools/build-textmate-corpora.py --check
+      - run: cargo build --release --example profile-cold --locked
+      - run: python3 tools/check-textmate-catalog-performance.py --iterations 3
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - run: cargo package --locked
+      - name: Check packaged default API
+        run: |
+          mkdir -p target/package-consumer/src
+          cat > target/package-consumer/Cargo.toml <<'TOML'
+          [package]
+          name = "syntaxmate-package-consumer"
+          version = "0.0.0"
+          edition = "2024"
+          [dependencies]
+          syntaxmate = { path = "../package/syntaxmate-0.1.0" }
+          TOML
+          cat > target/package-consumer/src/main.rs <<'RS'
+          use syntaxmate::Highlighter;
+          fn main() -> syntaxmate::Result<()> {
+              let mut highlighter = Highlighter::bundled()?;
+              let output = highlighter.highlight("rust", "fn main() {}", "github-dark")?;
+              assert!(output.status().is_complete());
+              let html = highlighter.highlight_html("rust", "let x = \"<safe>\";", "github-dark")?;
+              assert!(html.as_str().contains("&lt;safe&gt;"));
+              Ok(())
+          }
+          RS
+          cargo run --manifest-path target/package-consumer/Cargo.toml --quiet
+      - name: Check packaged custom-assets API
+        run: |
+          mkdir -p target/package-custom-consumer/src
+          cat > target/package-custom-consumer/Cargo.toml <<'TOML'
+          [package]
+          name = "syntaxmate-package-custom-consumer"
+          version = "0.0.0"
+          edition = "2024"
+          [dependencies]
+          syntaxmate = { path = "../package/syntaxmate-0.1.0", default-features = false, features = ["html"] }
+          TOML
+          cat > target/package-custom-consumer/src/main.rs <<'RS'
+          use syntaxmate::{
+              GrammarRegistry, HtmlOptions, Theme, Tokenizer, TokenizerOptions,
+              render_html, style_document,
+          };
+          fn main() -> syntaxmate::Result<()> {
+              let mut registry = GrammarRegistry::new();
+              let root = registry.add_json(r#"{"scopeName":"source.demo","patterns":[]}"#)?;
+              let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default())?;
+              let tokens = tokenizer.tokenize("<text>");
+              assert!(tokens.status().is_complete());
+              let theme = Theme::from_json(r#"{"name":"demo","tokenColors":[]}"#)?;
+              let document = style_document(tokens, &theme);
+              let html = render_html("<text>", &document, &HtmlOptions::default())?;
+              assert!(html.as_str().contains("&lt;text&gt;"));
+              Ok(())
+          }
+          RS
+          cargo run --manifest-path target/package-custom-consumer/Cargo.toml --quiet
+
+  platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - run: cargo test --all-features --locked public_api_tests
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@6a1bd70eaac3c8bdf093356838d7ee09fda951cf # v2
+        with:
+          tool: cargo-llvm-cov
+      - name: Generate focused library coverage
+        run: >-
+          cargo llvm-cov --all-features --lib --locked --lcov
+          --output-path lcov.info --
+          --skip textmate_golden::manifest_golden_cases_match_or_are_allowlisted
+          --skip textmate_golden::manifest_golden_cases_have_no_budget_degradation
+      - name: Upload coverage
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5
+        with:
+          use_oidc: true
+          files: lcov.info
+          fail_ci_if_error: true
+
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4

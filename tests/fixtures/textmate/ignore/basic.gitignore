@@ -1,0 +1,20 @@
+# Build products
+/dist/
+/target/
+*.o
+*.so
+*.dylib
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Editor state
+.vscode/
+.idea/
+*.swp
+
+# Keep generated fixtures
+fixtures/generated/*
+!fixtures/generated/.gitkeep

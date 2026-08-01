@@ -1,0 +1,19 @@
+# Default reviewers for the repository
+* @acme/core-maintainers
+
+# Automation and repository policy
+/.github/ @acme/developer-experience
+/.github/workflows/ @acme/release-engineering @acme/security
+/CODE_OF_CONDUCT.md @acme/community
+
+  # Product source and tests
+/src/ @acme/application
+  /src/auth/ @acme/identity @acme/security
+/tests/ @acme/quality
+*.snap @acme/quality
+
+# Documentation, localization, and an astral path
+/docs/ @acme/docs
+/docs/日本語/ @acme/i18n
+/assets/🚀/ @acme/brand
+*.md docs@example.com

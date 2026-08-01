@@ -1,0 +1,211 @@
+module mark-catalog {
+  yang-version 1.1;
+  namespace "https://example.test/mark/catalog";
+  prefix mc;
+
+  import ietf-yang-types {
+    prefix yang;
+    reference "RFC 6991";
+  }
+
+  organization
+    "Mark project";
+  contact
+    "maintainers@example.test";
+  description
+    "Catalog service model used for deterministic syntax validation.";
+
+  revision 2026-07-14 {
+    description
+      "Add operational state, actions, and notifications.";
+    reference "Mark language promotion contract.";
+  }
+
+  revision 2026-07-01 {
+    description "Initial model.";
+  }
+
+  feature audit-log {
+    description "Enable audit event collection.";
+  }
+
+  identity catalog-error {
+    description "Base identity for catalog errors.";
+  }
+
+  identity duplicate-entry {
+    base catalog-error;
+    description "An entry already exists.";
+  }
+
+  typedef entry-id {
+    type uint64 {
+      range "1..max";
+    }
+    description "Stable numeric catalog identifier.";
+  }
+
+  typedef entry-state {
+    type enumeration {
+      enum pending {
+        value 0;
+        description "The entry awaits validation.";
+      }
+      enum active {
+        value 1;
+        description "The entry is available.";
+      }
+      enum archived {
+        value 2;
+        status deprecated;
+        description "The entry is retained for history.";
+      }
+    }
+  }
+
+  grouping audit-fields {
+    leaf created-at {
+      type yang:date-and-time;
+      mandatory true;
+    }
+    leaf updated-at {
+      type yang:date-and-time;
+    }
+    leaf created-by {
+      type string {
+        length "1..128";
+      }
+    }
+  }
+
+  grouping entry-fields {
+    leaf name {
+      type string {
+        length "1..80";
+        pattern "[A-Za-z][A-Za-z0-9_-]*";
+      }
+      mandatory true;
+      description "Human-readable entry name.";
+    }
+    leaf state {
+      type entry-state;
+      default active;
+    }
+    leaf-list tags {
+      type string;
+      min-elements 0;
+      max-elements 32;
+      ordered-by user;
+    }
+    uses audit-fields;
+  }
+
+  container catalog {
+    presence "Enables the catalog service.";
+    description "Configuration and state for catalog entries.";
+
+    leaf enabled {
+      type boolean;
+      default true;
+    }
+
+    leaf maximum-entries {
+      type uint32 {
+        range "1..100000";
+      }
+      default 1000;
+      units "entries";
+    }
+
+    list entry {
+      key "id";
+      unique "name";
+      min-elements 0;
+      max-elements unbounded;
+
+      leaf id {
+        type entry-id;
+      }
+
+      uses entry-fields {
+        refine "created-by" {
+          mandatory true;
+        }
+      }
+
+      choice payload {
+        mandatory true;
+        case text {
+          leaf text-value {
+            type string;
+          }
+        }
+        case binary {
+          leaf binary-value {
+            type binary;
+          }
+        }
+      }
+
+      container statistics {
+        config false;
+        leaf reads {
+          type yang:counter64;
+        }
+        leaf writes {
+          type yang:counter64;
+        }
+      }
+    }
+  }
+
+  rpc lookup-entry {
+    description "Find an entry by identifier.";
+    input {
+      leaf id {
+        type entry-id;
+        mandatory true;
+      }
+    }
+    output {
+      leaf found {
+        type boolean;
+      }
+      container result {
+        when "../found = 'true'";
+        uses entry-fields;
+      }
+    }
+  }
+
+  rpc reset-statistics {
+    input {
+      leaf id {
+        type entry-id;
+      }
+    }
+    output {
+      leaf accepted {
+        type boolean;
+      }
+    }
+  }
+
+  notification entry-state-changed {
+    if-feature audit-log;
+    leaf id {
+      type entry-id;
+    }
+    leaf previous-state {
+      type entry-state;
+    }
+    leaf current-state {
+      type entry-state;
+    }
+    leaf changed-at {
+      type yang:date-and-time;
+    }
+  }
+
+  /* End of the catalog service model. */
+}

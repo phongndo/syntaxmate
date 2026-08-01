@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<!-- Standalone Vue HTML fragment: no surrounding SFC template element. -->
+<main id="catalog" class='catalog shell' data-locale=ja aria-live="polite">
+  <header :class="{ busy: loading }">
+    <h1>{{ greeting }}, café 東京 λ 🚀 𝌆</h1>
+    <p title="Signed in as {{ user.name }}">Items &amp; alerts: &#38; &#x26;</p>
+  </header>
+  <ul v-if="items.length">
+    <li v-for="(item, index) in items" :key="item.id" data-kind=featured>
+      <button @click.stop.prevent="select(item)" :disabled="item.locked">
+        {{ index + 1 }}. {{ item.label }}
+      </button>
+      <StatusDot :tone="item.tone"></StatusDot>
+    </li>
+  </ul>
+  <EmptyState v-if='!items.length'>Nothing &lt;pending&gt;</EmptyState>
+  <UserCard :user="user">
+    <template #footer="{ updatedAt }"><small>{{ format(updatedAt) }}</small></template>
+  </UserCard>
+  <img src=/assets/rocket.png alt='Launch 🚀' loading=lazy />
+  <footer data-ready><span class="build"></span> build {{ buildId }}</footer>
+</main>

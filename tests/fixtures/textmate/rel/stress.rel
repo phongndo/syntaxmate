@@ -1,0 +1,212 @@
+/*
+ * Stress fixture for the vendored Rel TextMate grammar.
+ * It includes comments, declarations, operators, types, and Unicode 🚀.
+ */
+module stress_catalog
+  // Ordinary line comment: café, Ελληνικά, 東京.
+  // @internal
+  /* A regular block comment containing def and "quoted" text. */
+  /* @internal This declaration note is intentionally internal. */
+  doc"""
+  Documentation comments may span lines.
+  Grammar-looking text such as def hidden = true stays documentation.
+  Astral text also remains intact: 🚀
+  """
+
+  entity Customer
+  entity Order
+  bound customer_id
+  bound order_id
+  include shared_prelude
+
+  def enabled = true
+  def disabled = false
+  def state = :ready; :paused; :archived
+  def unicode_label = "café — Ελληνικά — 東京 — 🚀"
+  def escaped = "quote: \"; slash: \\; tab: \t"
+  def empty_text = ""
+
+  // Built-in type names recognized by the grammar.
+  def symbol_type = Symbol
+  def char_type = Char
+  def bool_type = Bool
+  def rational_type = Rational
+  def fixed_decimal_type = FixedDecimal
+  def float16_type = Float16
+  def float32_type = Float32
+  def float64_type = Float64
+  def int8_type = Int8
+  def int16_type = Int16
+  def int32_type = Int32
+  def int64_type = Int64
+  def int128_type = Int128
+  def uint8_type = UInt8
+  def uint16_type = UInt16
+  def uint32_type = UInt32
+  def uint64_type = UInt64
+  def uint128_type = UInt128
+  def date_type = Date
+  def datetime_type = DateTime
+  def day_type = Day
+  def week_type = Week
+  def month_type = Month
+  def year_type = Year
+  def nanosecond_type = Nanosecond
+  def microsecond_type = Microsecond
+  def millisecond_type = Millisecond
+  def second_type = Second
+  def minute_type = Minute
+  def hour_type = Hour
+  def file_position_type = FilePos
+  def hash_value_type = HashValue
+  def auto_number_type = AutoNumberValue
+
+  // Word operators and conditional control.
+  def compare_words[x, y] =
+    x eq y or x neq y or x lt y or x lt_eq y or
+    x gt y or x gt_eq y
+  def classify[x] = if x gt 10 then :large else :small
+  def logic[x, y] = x and y or not disabled
+  def consequence[x, y] = x implies y
+
+  // Symbolic arithmetic and comparison operators.
+  def arithmetic[x, y] = x + y - 2 * y / 3 % 2
+  def powers[x] = x ^ 2
+  def division[x, y] = x ÷ y
+  def equal_symbol[x, y] = x = y
+  def unequal_symbol[x, y] = x != y
+  def less_symbol[x, y] = x < y
+  def unicode_not_equal[x, y] = x ≠ y
+  def less_equal_ascii[x, y] = x <= y
+  def less_equal_unicode[x, y] = x ≤ y
+  def greater_symbol[x, y] = x > y
+  def greater_equal_ascii[x, y] = x >= y
+  def greater_equal_unicode[x, y] = x ≥ y
+  def conjunction_symbol[x, y] = x & y
+
+  // Quantifiers, membership, selection, and function syntax.
+  def has_order[id] = exists(o: order_customer(o, id))
+  def every_order[id] = forall(o: order_customer(o, id) implies valid(o))
+  def has_unicode[id] = ∃(o: order_customer(o, id))
+  def all_unicode[id] = ∀(o: order_customer(o, id) implies valid(o))
+  def members[x] = x ∈ state
+  def selected = select x from state where x neq :archived
+  def iterated = select x from state for x in Symbol
+  def increment = function(x) : x + 1
+  def returning = function(x) : return x
+
+  @inline
+  def active_customer[id] = customer(id) and enabled
+
+  @auto_number
+  entity SequenceItem
+
+  @inspect
+  def inspected = active_customer
+
+  ic no_orphans = forall(o: Order(o) implies exists(c: order_customer(o, c)))
+
+  // Pipe-like control tokens supplied by the grammar.
+  def pipe_left[x] = transform <| x
+  def pipe_plain[x] = transform | x
+  def pipe_right[x] = x |> transform
+  def pipe_both[x] = transform <|> x
+
+  module customers
+    entity Profile
+    bound profile_id
+    def names = (1, "Ada"); (2, "Grace"); (3, "東京")
+    def flags = (1, true); (2, false); (3, true)
+    def labels = (1, :alpha); (2, :beta); (3, :gamma)
+    def visible[id] = flags(id, true) and not labels(id, :hidden)
+  end
+
+  module orders
+    entity LineItem
+    bound line_id
+    def quantities = (10, 1); (11, 2); (12, 5)
+    def prices = (10, 12.50); (11, 8.25); (12, 1.00)
+    def totals[id, total] = quantities(id, q) and prices(id, p) and total = q * p
+    def expensive[id] = exists(total: totals(id, total) and total >= 20)
+  end
+
+  module dates
+    def epoch_day = Date
+    def observed_at = DateTime
+    def calendar_units = Day; Week; Month; Year
+    def clock_units = Hour; Minute; Second
+    def fine_units = Millisecond; Microsecond; Nanosecond
+    def temporal[x] = x in calendar_units or x in clock_units
+  end
+
+  module numbers
+    def signed = Int8; Int16; Int32; Int64; Int128
+    def unsigned = UInt8; UInt16; UInt32; UInt64; UInt128
+    def floating = Float16; Float32; Float64
+    def exact = Rational; FixedDecimal
+    def numeric[x] = x in signed or x in unsigned or x in floating
+    def positive[x] = numeric(x) and x gt 0
+  end
+
+  module symbols
+    def ordinary = :ordinary
+    def underscore = :_private
+    def dollar = :$cash
+    def alpha = :λ
+    def unicode = :東京
+    def statuses = :new; :running; :done
+    def terminal[x] = x eq :done or x eq :failed
+  end
+
+  module strings
+    def plain = "plain"
+    def spaces = "two words"
+    def punctuation = "comma, colon: semicolon;"
+    def escaped_quote = "She said \"Rel\"."
+    def escaped_backslash = "C:\\fixtures\\stress.rel"
+    def escaped_newline = "first\nsecond"
+    def multilingual = "naïve λ 東京 🚀"
+  end
+
+  module predicates
+    def one[x] = x eq 1
+    def two[x] = x eq 2
+    def either[x] = one(x) or two(x)
+    def neither[x] = not one(x) and not two(x)
+    def range[x] = x >= 0 and x <= 100
+    def unicode_range[x] = x ≥ 0 and x ≤ 100
+    def distinct[x, y] = x != y and x ≠ y
+  end
+
+  module queries
+    def available[id] = customer(id) and not disabled_customer(id)
+    def joined[id, name] = available(id) and customers.names(id, name)
+    def filtered[id, name] = joined(id, name) and name neq ""
+    def projected = select name from filtered where name neq "unknown"
+    def ordered = select id from available for id in Int64
+    def any_result = exists(id: available(id))
+    def all_results = forall(id: available(id) implies customer(id))
+  end
+
+  module annotations
+    @inline
+    def fast[x] = x + 1
+    @auto_number
+    entity Generated
+    @inspect
+    def debug_relation = fast
+    // @internal
+    def internal_note = "kept in source"
+  end
+
+  module closure
+    def truth = true
+    def lie = false
+    def final_symbol = :complete
+    def final_text = "Grammar closure 🚀"
+    def final_check = truth and not lie
+    def output = final_check and final_symbol and final_text
+  end
+
+  def output = customers.visible or orders.expensive or closure.output
+end

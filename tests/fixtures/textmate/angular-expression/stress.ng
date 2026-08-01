@@ -1,0 +1,201 @@
+'café in 東京 — 𝌆 aboard 🚀'
+"double-quoted résumé with a \"label\""
+'path C:\\workspace\\angular'
+"line one\nline two\tindented"
+''
+""
+
+customer.name
+customer?.profile?.displayName
+customer!.profile.avatarUrl
+this.currentAccount?.settings.locale
+orders[selectedIndex]?.lines[firstVisibleLine]
+matrix[row][column]
+theme.palette.primary
+API_ENDPOINT
+$implicit
+_privateValue
+
+true
+false
+null
+undefined
+NaN
+Infinity
+42
+0
+0xff
+0b101101
+0o755
+3.14159
+.75
+6.02e23
+1.5e-8
+
+subtotal + shipping - discount
+quantity * unitPrice / exchangeRate
+elapsed % pageSize
+balance >= 0
+temperature < warningThreshold
+start <= value && value <= end
+status === 'ready'
+result !== undefined
+legacyCode == expectedCode
+attempts != 0
+enabled && !archived
+cached || freshlyLoaded
+preferredName ?? account?.legalName ?? 'Guest'
+!form.invalid
+~permissionMask
+flags & visibleMask
+rolesMask | inheritedMask
+changedBits ^ previousBits
+page << 1
+packed >>> 8
+signed >> 2
+
+canSubmit ? 'Submit' : 'Review errors'
+isCompact ? shortTitle : fullTitle
+stock > 0 ? stock : 0
+user?.nickname ?? user?.name ?? 'anonymous'
+busy ? (queued ? 'Queued' : 'Working') : 'Idle'
+
+items | async
+items | slice:pageStart:pageEnd
+invoice.total | currency:invoice.currency:'symbol':'1.2-2'
+publishedAt | date:'longDate':timeZone:locale
+customer.name | titlecase
+results | keyvalue:sortEntries
+message | translate
+
+formatPrice(total, currencyCode)
+Math.max(minimum, requested)
+account?.refresh()
+catalog.findBySku(selectedSku)?.displayName
+formatter.format(locale, value, true)
+lookup(getRegion(account), account?.postalCode ?? '')
+run()
+identity<string>(customer.name)
+repository.load<ResultPage>(query, pageIndex)
+
+items[0]
+items[items.length - 1]
+rows?.[activeRow]
+['café', '東京', '𝌆', '🚀']
+[true, false, null, undefined]
+[0xff, 0b11, 2.5e3, Infinity, NaN]
+[customer.id, customer?.name, selected ? 'yes' : 'no']
+[]
+
+[
+  primaryAction,
+  secondaryAction,
+  disabled ? fallbackAction : defaultAction,
+]
+
+[
+  ['north', 'south'],
+  ['east', 'west'],
+  [origin?.latitude, origin?.longitude],
+]
+
+(
+  subtotal
+  + shipping
+  - (discount ?? 0)
+)
+
+(
+  isAuthenticated
+  && (hasWorkspace || canCreateWorkspace)
+  && !sessionExpired
+)
+
+calculateInvoice(
+  lineItems,
+  taxRegion,
+  applyCredits(
+    availableCredits,
+    requestedCredit ?? 0
+  )
+)
+
+chooseDestination(
+  account?.shippingAddress,
+  account?.billingAddress,
+  [defaultCity, defaultCountry]
+)
+
+`Hello, ${customer?.name ?? 'traveler'}!`
+`Order ${order.id} totals ${order.total | currency:order.currency}`
+`café • 東京 • 𝌆 • 🚀`
+`escaped backtick \` and dollar \${literal}`
+html`<strong>${title}</strong>`
+
+`Summary: ${
+  formatSummary(
+    completedCount,
+    totalCount,
+    locale
+  )
+}`
+
+`Route ${
+  [originCode, destinationCode]
+    | join:' → '
+} is ${direct ? 'direct' : 'connecting'}`
+
+(
+  `Account ${account.id}: ${account?.status ?? 'unknown'}`
+)
+
+typeof response === 'string'
+typeof selectedValue !== 'undefined'
+payload as SearchResult
+value as string
+coordinates as [number, number]
+handler as (value: string) => boolean
+record as { id: string; active: true }
+candidate as Result | null
+source as keyof Catalog
+
+counter = counter + 1
+selection = items[nextIndex]
+expanded = !expanded
+total += adjustment
+remaining -= consumed
+zoom *= scale
+ratio /= divisor
+offset %= pageSize
+mask &= allowedMask
+mask |= requiredMask
+mask ^= toggledMask
+page <<= 1
+bucket >>= 2
+counter++
+retryCount--
+
+delete cache[staleKey]
+selectedKey in labels
+model instanceof ViewModel
+void refreshToken
+await loadPreferences(account.id)
+new Date(timestamp)
+
+firstValue, secondValue, finalValue
+saveDraft(); navigateToSummary()
+let preview = formatter(value)
+if ready then primary else fallback
+entry of visibleEntries
+
+processSelection(
+  selectedItems | slice:0:maxSelection,
+  (
+    preserveOrder
+      ? sortByOriginalIndex(selectedItems)
+      : sortByLabel(selectedItems, locale)
+  ),
+  `Selected ${selectedItems.length} item${selectedItems.length === 1 ? '' : 's'}`
+)
+
+rootReady

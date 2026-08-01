@@ -1,0 +1,29 @@
+# Basic GraphQL: café, 東京, rocket 🚀, clef 𝄞
+query ViewerCard($id: ID!, $enabled: Boolean = true) {
+  viewer: user(id: $id) @include(if: $enabled) {
+    id
+    name
+    greeting(format: "Hello, café 🚀\n")
+    score(scale: 1.25e+2)
+    flags(values: [true, false, null, ACTIVE])
+    profile(input: {locale: "日本語", retries: 3}) {
+      bio
+    }
+    ...UserNames
+    ... on Admin @skip(if: false) {
+      permissions
+    }
+    ${const extraField = "astral-𝄞"; extraField}
+  }
+}
+
+fragment UserNames on User {
+  firstName
+  lastName
+}
+
+mutation Rename($id: ID!, $name: String!) {
+  renameUser(id: $id, name: $name) { id name }
+}
+
+input RenameOptions { locale: String retries: Int = 2 }

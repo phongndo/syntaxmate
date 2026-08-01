@@ -1,0 +1,20 @@
+module mark-example {
+  yang-version 1.1;
+  namespace "https://example.test/mark";
+  prefix mark;
+
+  organization "Mark project";
+  description
+    "A compact module used to validate YANG highlighting.";
+
+  revision 2026-07-14 {
+    description "Initial revision.";
+  }
+
+  container service {
+    leaf enabled {
+      type boolean;
+      default true;
+    }
+  }
+}

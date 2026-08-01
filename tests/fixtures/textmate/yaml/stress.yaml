@@ -1,0 +1,170 @@
+%YAML 1.2
+---
+# YAML stress fixture with bare keys, comments, numbers, strings, and λ🚀.
+bare_key: plain value
+number_value: 42
+float_value: -12.5e+3
+quoted_string: "café λ 🚀"
+single_quoted: 'literal # not a comment'
+nested:
+  child-key: yes
+  regex: "/api/v1/.*"
+  list:
+    - name: α
+      enabled: true
+    - name: β
+      count: 1_000
+multiline_literal: |
+  First literal line.
+  Second literal line with # not a YAML comment.
+folded_text: >
+  folded text starts here
+  and continues with emoji 🚀.
+# trailing comment for comment-scope checks
+...
+%TAG !app! tag:example.org,2026:mark/
+---
+# A deployment catalog exercises anchors, merge keys, tags, and flow styles.
+catalog: !app!catalog
+  metadata: &metadata
+    name: syntax-laboratory
+    owner: "Zoë 李"
+    created_at: 2026-07-12T14:32:05Z
+    revised_at: 2026-07-12 16:02:05.250 +02:00
+  defaults: &defaults
+    image: registry.example.org/mark/worker:2.4.1
+    replicas: 3
+    enabled: true
+    restart: null
+    command: [mark, serve, "--listen=0.0.0.0:8080"]
+    resources: &resources
+      cpu: 750m
+      memory: 1Gi
+  hardened: &hardened
+    read_only: true
+  environments:
+    development:
+      <<: *defaults
+      replicas: 1
+      endpoint: http://localhost:8080
+      features: [diagnostics, hot-reload]
+    staging:
+      <<: [*defaults, *hardened]
+      endpoint: https://staging.example.org/api
+      resources:
+        <<: *resources
+        memory: 2Gi
+    production:
+      <<: [*hardened, *defaults]
+      replicas: 12
+      endpoint: https://例え.example/🚀
+      zones:
+        - &primary-zone eu-west-1a
+        - eu-west-1b
+        - *primary-zone
+scalar_matrix:
+  nulls: [null, Null, NULL, ~]
+  booleans: [true, false, TRUE, FALSE]
+  integers:
+    decimal: 1_048_576
+    binary: 0b1010_0110
+    octal: 0o755
+    hexadecimal: 0xDEAD_BEEF
+    negative: -273
+  floats:
+    scientific: 6.022e+23
+    positive_infinity: .inf
+    negative_infinity: -.Inf
+    not_a_number: .NAN
+  duration: !duration 'PT1H30M'
+
+quoted_samples:
+  escapes: "nul=\0 bell=\a tab=\t newline=\n escape=\e slash=\/ backslash=\\"
+  unicode_escapes: "lambda=\u03BB rocket=\U0001F680 snowman=\u2603"
+  apostrophe: 'It''s YAML; # remains text.'
+  continued: "A long logical line \
+    continues after indentation."
+
+literal_strip: |-
+  SELECT id, title
+  FROM documents
+  WHERE language = '日本語';
+literal_keep: |+
+  Dear team,
+
+  Release 🚀 is ready.
+
+folded_clip: >
+  This paragraph folds across
+  adjacent source lines.
+
+  This paragraph stays separate.
+folded_strip_indent: >2-
+  Two-space indentation is explicit,
+  while this newline is folded.
+literal_indent_keep: |+2
+  leading content
+    nested-looking content stays scalar
+
+routes:
+  ? [GET, /v1/items]
+  : handler: list_items
+    cache_seconds: 30
+  ? {method: POST, path: /v1/items}
+  : handler: create_item
+    auth: required
+  ? "an explicit route key"
+  : explicit mapping keys are legal
+
+flow_examples:
+  coordinates: [{x: 0, y: 1}, {x: -2, y: 3}]
+  nested: {outer: [one, {two: [three, four]}, five], ok: true}
+  compact_pairs: [name: Ada, role: engineer]
+  aliases: [*metadata, *resources]
+...
+%YAML 1.2
+%TAG !app! tag:example.org,2026:mark/
+---
+# An event stream forms a separate document and mixes sequence item shapes.
+- id: evt-0001
+  at: 2026-07-12T14:32:05.123456Z
+  kind: build.started
+  actor: {id: 17, name: "Renée"}
+  context: &event-context
+    repository: example/mark
+    revision: 7ac91ef
+    locale: el-GR
+  payload:
+    targets: [linux-x86_64, macos-aarch64, windows-x86_64]
+    clean: true
+- id: evt-0002
+  at: 2026-07-12T14:33:44Z
+  kind: build.output
+  context: *event-context
+  payload:
+    stream: stdout
+    text: |-
+      Compiling mark-syntax v0.8.0
+      Finished release profile in 12.7s ✓
+- id: evt-0003
+  at: 2026-07-12T14:34:01Z
+  kind: review.note
+  context:
+    <<: *event-context
+    locale: ar-EG
+  payload:
+    summary: Parser coverage includes directives, aliases, and block scalar headers.
+    reviewers:
+      - {name: "Miyuki 宮崎", decision: approve}
+      - {name: "Omar عمر", decision: comment}
+    reactions: ["👍", "🎉", "🧪"]
+- id: evt-0004
+  at: 2026-07-12
+  kind: release.published
+  context: *event-context
+  payload: !app!release
+    version: 2.4.1
+    channels: [stable, "λ-preview"]
+    notes_url: https://example.org/releases/2.4.1?lang=en&view=full
+    checksum: !!str 00af91
+...

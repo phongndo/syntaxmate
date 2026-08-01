@@ -1,0 +1,27 @@
+# Small multilingual nginx configuration: café 日本語 🚀 𝌆
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+
+events {
+    worker_connections 1024;
+    multi_accept on;
+}
+
+http {
+    include mime.types;
+    default_type application/octet-stream;
+    log_format main '$remote_addr - $request "こんにちは"';
+
+    server {
+        listen 8080 default_server;
+        server_name example.test;
+
+        location / {
+            add_header X-Welcome "café 🚀";
+            content_by_lua_block {
+                ngx.say("日本語 𝌆")
+            }
+        }
+    }
+}

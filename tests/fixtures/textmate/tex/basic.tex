@@ -1,0 +1,28 @@
+% Plain TeX basics — café λ 東京 🚀 𝌆
+\catcode`\@=11
+\def\greet#1{Hello, #1!}
+\newcount\visits
+\visits=42
+\newdimen\measure
+\measure=6.5pt
+\ifnum\visits>10
+  \message{many visits}
+\else
+  \message{few visits}
+\fi
+\iffalse
+  ignored {material
+    with {nested} groups}
+  \ifodd\visits
+    ignored conditional branch
+  \fi
+\fi
+Inline math $a_1+b^2=\sqrt{9}$ and escaped \$ currency.
+$$
+  \sum_{n=1}^{3} n^2 = 14,\qquad
+  \text{café λ 東京 🚀 𝌆}
+$$
+\def\pick{\@ifnextchar[\pickopt\pickplain}
+\pick[optional] \\ % control word, brackets, newline, comment
+\csname dynamically-built\endcsname
+\catcode`\@=12

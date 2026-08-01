@@ -1,0 +1,30 @@
+/*
+ * SCSS basic fixture: café, 東京, λ, 🚀, and astral 𝌆.
+ */
+@use "sass:map";
+
+$gap: 0.5rem !default;
+$palette: (
+  "ink": #17202a,
+  "signal": #e74c3c,
+);
+
+@mixin surface($tone: "ink") {
+  color: map.get($palette, $tone);
+  border: 1px solid currentColor;
+}
+
+@function step($factor) {
+  @return $gap * $factor;
+}
+
+.card {
+  @include surface;
+  display: grid;
+  gap: step(2);
+  &__title { content: "café 東京 λ 🚀 𝌆"; }
+  &:hover { transform: translateY(-1px); }
+  @media (min-width: 40rem) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

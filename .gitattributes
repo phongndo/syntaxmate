@@ -1,0 +1,18 @@
+# Normalize repository-authored text.
+* text=auto eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.jsonl text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+
+# Keep generated and vendored data out of normal review statistics.
+/assets/grammars.bundle binary
+/assets/grammars/languages/** linguist-vendored=true
+/assets/themes/** linguist-vendored=true
+/tests/fixtures/**/*.golden.jsonl linguist-generated=true
+/docs/language-status.md linguist-generated=true
+/THIRD_PARTY_LICENSES.md linguist-generated=true

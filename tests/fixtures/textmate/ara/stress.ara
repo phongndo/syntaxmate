@@ -1,0 +1,224 @@
+namespace Observatory\Telemetry;
+
+// Unicode telemetry for Αθήνα, 東京, Nairobi, and the Europa probe 🛰️.
+/* This opening block comment checks state across lines.
+   Operators inside comments stay inert: ?? -> === 0xFF.
+   The mission motto is “ad astra” 🌌. */
+
+use Core\Collections;
+use Observatory\Contracts\Renderable;
+
+const ZERO = 0;
+const DECIMAL = 42;
+const GROUPED = 1_000_000;
+const HEX_UPPER = 0XDEAD_BEEF;
+const HEX_LOWER = 0xcafe_f00d;
+const BINARY = 0B1010_0101;
+const OCTAL = 0o755;
+const LEGACY_OCTAL = 07_55;
+const FRACTION = .625;
+const TRAILING = 12.;
+const SCIENCE = 6.022e23;
+const SIGNED_EXPONENT = 9_109.4E-31;
+
+enum SignalState {
+    case Idle;
+    case Tracking;
+    case Lost;
+}
+
+interface Identified {
+    public function identity(): string;
+}
+
+trait Timestamped {
+    protected int $epoch = 0;
+    public function touch(int $next): void {
+        $epoch = $next;
+    }
+}
+
+abstract class PacketBase implements Identified {
+    use Timestamped;
+    protected readonly string $id;
+    public function identity(): string {
+        return $id;
+    }
+}
+
+final class TelemetryPacket extends PacketBase implements Renderable {
+    private dict<string, mixed> $fields;
+    private vec<float> $samples;
+
+    public function __construct(string $id, dict<string, mixed> $fields) {
+        $this->id = $id;
+        $this->fields = $fields;
+        $this->samples = vec();
+    }
+
+    public static function fromFrame(string $frame): self {
+        return new self(id: "frame-α", fields: decode($frame));
+    }
+
+    public function render(): string {
+        $label = "Probe \"Aurora\"\n東京\t🚀";
+        $escapes = "return:\r dollar:\$ slash:\\";
+        $path = 'C:\\telemetry\\raw';
+        $quote = 'pilot\'s log';
+        return format(label: $label, escapes: $escapes, path: $path, quote: $quote);
+    }
+}
+
+type PacketMap = dict<string, TelemetryPacket>;
+type Coordinate = shape('lat' => float, 'lon' => float, ...);
+type Transformer = (fn(string, int): ?TelemetryPacket);
+type Pair = (int, string);
+type NonnullSample<T> = vec<T> where T extends nonnull;
+
+async function acquire(string $station): TelemetryPacket {
+    $raw = await Radio\Receiver\read::<string>($station);
+    return TelemetryPacket\fromFrame($raw);
+}
+
+function arithmetic(int $a, int $b): int {
+    $sum = $a + $b;
+    $difference = $a - $b;
+    $product = $a * $b;
+    $quotient = $a / $b;
+    $remainder = $a % $b;
+    $power = $a ^ $b;
+    return $sum + $difference + $product + $quotient + $remainder + $power;
+}
+
+function assignments(int $value): int {
+    $value += 2;
+    $value -= 1;
+    $value *= 3;
+    $value /= 2;
+    $value %= 7;
+    $value ^= 1;
+    $value &= 0xFF;
+    $value |= 0b10;
+    $value <<= 1;
+    $value >>= 1;
+    $value ??= 99;
+    return $value;
+}
+
+function comparisons(mixed $left, mixed $right): bool {
+    $strict = $left === $right;
+    $loose = $left == $right;
+    $different = $left !== $right;
+    $ordered = $left < $right || $left <= $right;
+    $reverse = $left > $right && $left >= $right;
+    $grouped = ($left) < ($right);
+    $indexed = [$left] < [$right];
+    $mapped = {$left} < {$right};
+    $spaceship = $left <=> $right;
+    return $strict && !$different ?: false;
+}
+
+function bitwise(int $flags): int {
+    $shifted = ($flags << 2) | ($flags >> 1);
+    $masked = $shifted & 0x0F;
+    $flipped = ~$masked;
+    return $flipped ^ 0b0011;
+}
+
+function navigation(?TelemetryPacket $packet): mixed {
+    $direct = $packet->render();
+    $safe = $packet?->identity();
+    $maybe = $packet??->render();
+    $static = TelemetryPacket::fromFrame("Δ");
+    return $safe ?? $direct ?? $static;
+}
+
+function namedArguments(): void {
+    publish(topic: "κόσμος 🌍", payload: "مرحبا", retries: 3);
+    publish(
+        topic: "deep-space 🪐",
+        payload: "नमस्ते",
+        retries: 5,
+        station🚀: "Europa",
+    );
+}
+
+function flow(vec<int> $readings): iterable {
+    for ($index = 0; $index < 3; $index += 1) {
+        if ($index === 1) continue;
+        yield $index;
+    }
+    foreach ($readings as $reading) {
+        if ($reading < 0) break;
+        yield from normalize($reading);
+    }
+    while (ready()) {
+        do {
+            $reading -= 1;
+        } while ($reading > 0);
+        break;
+    }
+}
+
+function decisions(SignalState $state): string {
+    match ($state) {
+        SignalState::Idle => "idle",
+        SignalState::Tracking => "tracking",
+        default => "lost",
+    };
+    if ($state is SignalState) return "known";
+    elseif ($state === null) return "missing";
+    else return "unknown";
+}
+
+function resilience(): void {
+    try {
+        concurrently upload("north"), upload("south");
+    } catch (NetworkError $error) {
+        retry(reason: $error->message());
+    } finally {
+        cleanup();
+    }
+}
+
+function construction(): object {
+    $copy = clone new TelemetryPacket(id: "café-λ", fields: dict());
+    $cast = $copy as Renderable;
+    $valid = $cast is nonnull;
+    return $valid ? $copy : new Fallback();
+}
+
+function closureAndSpread(vec<int> $items): vec<int> {
+    $identity = (...);
+    $all = vec(0, ...$items, 99);
+    return transform($all, $identity);
+}
+
+// Namespace separators and qualified calls exercise competing rules.
+$packet = \Observatory\Telemetry\TelemetryPacket\fromFrame("résumé 📡");
+$encoded = Observatory\Codec\encode::<dict<string, mixed>>($packet);
+$short = encode($packet);
+
+// Every supported scalar-ish type appears in one compact declaration area.
+function typeGallery(
+    void $a, true $b, false $c, null $d, never $e,
+    float $f, bool $g, int $h, string $i, dict $j,
+    vec $k, object $l, mixed $m, nonnull $n, resource $o,
+    self $p, static $q, parent $r, iterable $s,
+): void {}
+
+// Control-keyword gallery for lexical coverage.
+async function controlGallery(): void {
+    await acquire("München");
+    loop { break; }
+    exit;
+}
+
+// Modifier and declaration gallery.
+public abstract class FuturePacket {}
+private static readonly dict $cache;
+protected final function sealed(): void { return; }
+fn compact($x) => $x ?? defaultValue();
+
+// A final indented comment checks leading whitespace capture.
+    // Mission complete: שלום, мир, peace 🕊️.

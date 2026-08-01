@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ page.title ?? 'Edge fixture' }}</title>
+</head>
+<body data-locale="東京">
+  {{-- A closed Edge comment: café λ 🚀 𝌆 --}}
+  @if(user)
+    <main class="card" data-user="{{ user.id }}">
+      <h1>Hello, {{ user.name }}</h1>
+      <p>{{{ user.safeBiography }}}</p>
+      @{{ escaped.mustache }}
+      <button type="button" disabled>Launch 🚀</button>
+    </main>
+  @else
+    <p>Please sign in &amp; continue.</p>
+  @endif
+</body>
+</html>

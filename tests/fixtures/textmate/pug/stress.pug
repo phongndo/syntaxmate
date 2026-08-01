@@ -1,0 +1,249 @@
+doctype html
+//-
+  Dashboard shell for a multilingual observatory portal.
+  BMP samples include café, Ελληνικά, 東京, and λ.
+  Astral samples include 🚀, 🛰️, 🧭, and 𝌆.
+  The template exercises components, control flow, filters, and embedded assets.
+-
+  const portal = {
+    title: 'Aurora Observatory',
+    locale: 'en-GB',
+    build: 42,
+    flags: { beta: true, compact: false },
+    operator: { name: 'Zoë', callsign: 'λ-7' }
+  }
+  const navigation = [
+    { label: 'Overview', href: '/overview', icon: '⌂' },
+    { label: 'Telemetry', href: '/telemetry', icon: '↗' },
+    { label: '東京 station', href: '/stations/tokyo', icon: '🛰️' }
+  ]
+  const alerts = [
+    { level: 'info', message: 'Calibration complete' },
+    { level: 'warning', message: 'Solar wind rising' },
+    { level: 'success', message: 'Probe 🚀 linked' }
+  ]
+  const metrics = { temperature: -54.2, velocity: 7_800, visible: true }
+mixin icon(name, label)
+  svg.icon(class=`icon--${name}` role="img" aria-label=label)&attributes(attributes)
+    use(href=`/icons.svg#${name}`)
+mixin nav-item(item, active)
+  li.nav__item(class={ 'is-active': active })
+    a.nav__link(href=item.href data-route=item.href)
+      span.nav__glyph(aria-hidden="true")= item.icon
+      span.nav__label= item.label
+mixin alert-card(alert, index)
+  article.alert(id=`alert-${index}` class=['alert', `alert--${alert.level}`])
+    header.alert__header
+      +icon(alert.level, `${alert.level} alert`)(width=20 height=20)
+      strong= alert.level.toUpperCase()
+    p.alert__message #{alert.message} #[small Ticket #{index + 1}]
+    if block
+      block
+mixin metric(label, value, unit)
+  dt.metrics__label= label
+  dd.metrics__value(data-unit=unit)
+    = value
+    |  #{unit}
+extends layouts/base.pug
+include includes/telemetry-helpers.pug
+append head
+  meta(name="theme-color" content="#08111f")
+prepend scripts
+  script(src="/vendor/chart.js" defer)
+block variables
+  - const section = 'observatory'
+block content
+  #portal.dashboard.shell(
+    data-build=portal.build
+    data-locale=portal.locale
+    class={ 'is-beta': portal.flags.beta, compact: portal.flags.compact }
+  )
+    header.topbar
+      a.topbar__brand(href="/" title=portal.title)
+        +icon('aurora', 'Aurora mark')(class="brand-icon")
+        span= portal.title
+      nav#primary-navigation.topbar__navigation(aria-label="Primary")
+        ul.nav
+          each item, index in navigation
+            +nav-item(item, index === 0)
+      form.topbar__search(action="/search" method="get" role="search")
+        label.sr-only(for="site-query") Search observations
+        input#site-query.input(
+          type="search"
+          name="q"
+          placeholder="Search café, 東京, or orbit"
+          autocomplete="off"
+          required
+        )
+        button.button.button--primary(type="submit") Search
+    // This buffered comment is intentionally visible in rendered HTML.
+      The deployment inspector reads build #{portal.build} from it.
+    <!-- external monitor: portal shell -->
+    main.dashboard__main
+      section.hero(aria-labelledby="hero-title")
+        .hero__copy
+          p.eyebrow Mission control · #{section}
+          h1#hero-title #{portal.title}: live sky operations
+          p.lede.
+            Welcome, #{portal.operator.name}. Callsign #{portal.operator.callsign}
+            is connected to station #[strong 東京] and probe !{navigation[2].icon}.
+          p
+            | Escaped interpolation: #{'<safe>'}; unescaped status:
+            != '<mark>nominal</mark>'
+          .hero__actions
+            a.button.button--primary(href="/sessions/new") Start session
+            a.button.button--quiet(href="/docs"): span Read docs
+        figure.hero__orbit(data-revolutions=(portal.build * 2))
+          img(src="/images/orbit.webp" alt="Orbital path around Earth 🌍")
+          figcaption Probe #[code A-#{portal.build}] above the horizon.
+      if portal.flags.beta
+        aside.banner.banner--beta(role="status")
+          strong Beta channel
+          |  Experimental telemetry is enabled.
+      else if portal.build < 10
+        aside.banner.banner--warning Upgrade required.
+      else
+        aside.banner Stable channel.
+      unless metrics.visible
+        p.empty Metrics are hidden by policy.
+      section.panel(aria-labelledby="alert-heading")
+        header.panel__header
+          h2#alert-heading Alerts &amp; notices
+          span.counter= `${alerts.length} open`
+        .alert-grid
+          each alert, index in alerts
+            +alert-card(alert, index)(data-severity=alert.level)
+              a.alert__action(href=`/alerts/${index}`) Inspect
+          else
+            p.empty No alerts.
+      section.panel(aria-labelledby="metrics-heading")
+        h2#metrics-heading Current metrics
+        dl.metrics
+          +metric('Temperature', metrics.temperature, '°C')
+          +metric('Velocity', metrics.velocity.toLocaleString(portal.locale), 'km/h')
+          +metric('Build', portal.build, 'rev')
+        table.telemetry
+          caption Recent station samples
+          thead
+            tr
+              th(scope="col") Station
+              th(scope="col") Signal
+              th(scope="col") State
+          tbody
+            for station in navigation
+              tr(data-station=station.href)
+                th(scope="row")= station.label
+                td= Math.round(Math.random() * 100)
+                td
+                  if station.href.includes('tokyo')
+                    span.status.status--good online
+                  else
+                    span.status nominal
+      - let countdown = 2
+      while countdown > 0
+        p.countdown= `T-${countdown--}`
+      - let retries = 0
+      until retries >= 2
+        - retries += 1
+        span.retry(data-attempt=retries) Attempt #{retries}
+      case alerts[0].level
+        when 'info'
+          p.case-note: strong Informational briefing ready.
+        when ('warning')
+          p.case-note Warning review required.
+        default
+          p.case-note No categorized briefing.
+
+      section.prose
+        h2 Rich text and entities
+        | Plain pipe text can contain &copy;, &#169;, and &#x03bb;.
+        p.
+          A dot block preserves long-form copy over several indented lines.
+          Inline Pug adds #[em emphasis], #[a(href="/unicode") Unicode 🧭],
+          and nested #[strong mission #[code control]] without extra wrappers.
+        p Embedded HTML follows: <em data-source="legacy">trusted fragment</em>
+        #{'section'} Dynamic-looking text remains an interpolation example.
+
+      section(class=`theme-${portal.flags.compact ? 'compact' : 'wide'}`)&attributes({ hidden: false })
+        h2 Attribute expressions
+        button(
+          type="button"
+          disabled=!portal.flags.beta
+          data-payload={ build: portal.build, tags: ['aurora', 'λ', '🚀'] }
+          aria-describedby="attribute-help"
+        ) Toggle stream
+        #attribute-help.help Coordinates: #{[35.68, 139.76].join(', ')}
+
+      yield sharedFooter
+
+block scripts
+  script(type="application/javascript").
+    const portalData = {
+      locale: document.documentElement.lang,
+      probes: ['A-42', 'β-9', '🚀-1'],
+      active: true,
+    };
+    const labels = portalData.probes.map((probe, index) => `${index + 1}: ${probe}`);
+    document.querySelectorAll('[data-route]').forEach((link) => {
+      link.addEventListener('click', (event) => console.debug(event.currentTarget));
+    });
+    console.log(/^(?:A|β|🚀)-\d+$/u.test(portalData.probes[0]), labels);
+
+  style(type="text/css").
+    :root { --accent: #7dd3fc; --space: clamp(1rem, 2vw, 2rem); }
+    .dashboard { display: grid; gap: var(--space); color: rgb(226 232 240); }
+    .alert-grid > .alert:hover { border-color: var(--accent); }
+    @media (min-width: 60rem) { .dashboard__main { grid-template-columns: 2fr 1fr; } }
+    /* CSS Unicode: café 東京 🛰️ */
+
+  :sass
+    $accent: #7dd3fc
+    .sass-sample
+      color: $accent
+      &:hover
+        text-decoration: underline
+
+  :scss(theme="night")
+    $gap: 1rem;
+    .scss-sample {
+      display: grid;
+      gap: $gap;
+    }
+
+  :less
+    @radius: 0.5rem;
+    .less-sample {
+      border-radius: @radius;
+      color: lighten(#123456, 20%);
+    }
+
+  :stylus
+    accent = #7dd3fc
+    .stylus-sample
+      color accent
+      padding 1rem
+
+  :coffee-script
+    square = (value) -> value * value
+    message = "café 東京 🚀: #{square 6}"
+    console.log message
+
+  :uglify-js(mangle=false)
+    function announce(message) {
+      console.log("announcement:", message);
+    }
+    announce("observatory ready 🛰️");
+
+  :markdown(flavor="commonmark")
+    ## Operator notes
+    The generic filter body stays opaque but can contain **mission prose**.
+
+  //- The empty generic filter below is a deliberate grammar edge.
+  :
+
+append footer
+  footer.site-footer
+    p
+      | Built for #{portal.operator.name} · #{new Date().getFullYear()} ·
+      a(href="mailto:ops@example.test") Contact operations
+    small(data-build=portal.build) Unicode check: λ café 東京 𝌆 🚀

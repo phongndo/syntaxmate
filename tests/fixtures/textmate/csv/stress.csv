@@ -1,0 +1,151 @@
+asset_id,collection,title,creator,place,year,medium,condition,accession_note,symbol
+A001,Cartography,"Harbor chart, north quay",Elena Rossi,Genova,1842,"ink, linen",stable,"folded twice; label ""A-7""",⚓
+A002,Cartography,Mapa del Río de la Plata,Tomás Ibarra,Montevideo,1891,lithograph,fair,"foxing, lower edge",🗺️
+A003,Cartography,江戸湾海図,高橋 清,東京,1868,woodblock,fragile,"旧蔵: 海軍",🧭
+A004,Cartography,"Survey of Tāmaki Makaurau",H. Te Rangi,Auckland,1911,"paper, watercolor",good,"Māori place names retained",🌊
+A005,Cartography,Karta över Lappland,Ingrid Sjöberg,Uppsala,1775,engraving,stable,"scale 1:200,000",❄️
+A006,Cartography,طريق القوافل,ليلى منصور,دمشق,1730,"ink on paper",fair,"حواف مرممة",🐪
+A007,Cartography,"Plan de Québec, 1759",Jean B. Côté,Québec,1759,copperplate,good,"legend in French, English",⚜️
+A008,Cartography,Χάρτης του Αιγαίου,Νικόλαος Β.,Αθήνα,1827,engraving,fair,"νησιά, λιμάνια",⛵
+A009,Cartography,Карта Байкала,Ирина Волкова,Иркутск,1904,lithograph,stable,"depth soundings",🧊
+A010,Cartography,"Route 66 service map",M. Carter,Chicago,1956,offset print,good,"oil-company edition",🚗
+A011,Cartography,"星図: 南天",佐藤 愛,京都,1932,"ink, silk",excellent,"constellations include 南十字",🌌
+A012,Cartography,Carte des vents alizés,Émile Durand,Paris,1879,chromolithograph,good,"arrows in blue, red",🌬️
+A013,Cartography,Plano de Valparaíso,Inés Sepúlveda,Valparaíso,1922,blueprint,fair,"pier extension pencilled",🏗️
+A014,Cartography,𐍈 Route Fragment,Unknown,Ravenna,0500,parchment,fragmentary,"astral Gothic letter 𐍈",🏺
+A015,Cartography,Antarctic traverse grid,Amina Okafor,Cape Town,1988,mylar,excellent,"field copy, station 4",🧊
+A016,Manuscripts,"Recipe for quince, annotated",Marta Ferrer,Sevilla,1694,"iron-gall ink",fair,"margin says ""más canela""",🍐
+A017,Manuscripts,قصيدة في الربيع,يوسف الحداد,بيروت,1810,"ink, laid paper",good,"ثمانية أبيات",🌿
+A018,Manuscripts,俳句帳,松尾門人,大阪,1712,washi,fragile,"虫損あり",🌸
+A019,Manuscripts,"Letter to Ada, unfinished",C. Babbage,London,1843,ink,stable,"ends after ""engine"", no signature",⚙️
+A020,Manuscripts,Επιστολή προς την αδελφή,Ελένη Π.,Σμύρνη,1901,ink,fair,"τρεις σελίδες",✉️
+A021,Manuscripts,Notatbok fra Lofoten,Kari Nilsen,Bodø,1918,pencil,good,"weather logs",🌧️
+A022,Manuscripts,"Diário da viagem, volume II",João Pereira,Recife,1876,ink,fair,"pages 41–88",🚢
+A023,Manuscripts,מחברת לימוד,רחל כהן,ירושלים,1926,pencil,good,"עברית וערבית",📓
+A024,Manuscripts,Записки ботаника,Анна Орлова,Тбилиси,1899,ink,stable,"pressed leaf at p. 12",🍃
+A025,Manuscripts,"Cahier de chansons",Zoë Martin,Montréal,1937,"ink, crayon",good,"refrain marked ""bis""",🎵
+A026,Manuscripts,កំណត់ហេតុវត្ត,សុខា,ភ្នំពេញ,1920,palm leaf,fair,"Khmer script",🛕
+A027,Manuscripts,የጉዞ ማስታወሻ,ሚካኤል,አዲስ አበባ,1954,ink,good,"Amharic notebook",⛰️
+A028,Manuscripts,"Field notes: fungi",Dr. N. Gupta,Kolkata,1966,ballpoint,stable,"spore sketches, 23 species",🍄
+A029,Manuscripts,สมุดบันทึกตลาดน้ำ,อรุณ,กรุงเทพฯ,1971,ink,good,"Thai cursive",🛶
+A030,Manuscripts,"Draft, ""The Glass Orchard""",M. Okoye,Lagos,1982,typewritten,excellent,"author corrections in green",🌳
+A031,Photography,"Market at dawn",Lina Haddad,Alexandria,1928,"gelatin silver",good,"vendor signs in Arabic",📷
+A032,Photography,雪の日の駅,中村 葵,Sapporo,1959,"silver print",excellent,"negative N-44",🚉
+A033,Photography,"Three sisters, Sunday",Ruth Mensah,Accra,1963,"gelatin silver",good,"studio backdrop, hand tinted",👭
+A034,Photography,Praça depois da chuva,Caio Luz,Porto,1974,color slide,faded,"Kodachrome, frame 18",🌦️
+A035,Photography,Οι ψαράδες,Μαρία Ν.,Θεσσαλονίκη,1936,"albumen print",fair,"mounted, caption verso",🐟
+A036,Photography,"Jazz club, 2 a.m.",Louis Grant,New Orleans,1949,"gelatin silver",good,"performer unknown",🎷
+A037,Photography,La niña del cometa,Sofía Rojas,Bogotá,1985,color negative,excellent,"contact sheet 7, frame 3",🪁
+A038,Photography,Tramvaj číslo 9,Petr Novák,Praha,1968,"35 mm negative",stable,"taken 21 August",🚋
+A039,Photography,"Portrait of 𠮷子",山田 実,Kyoto,1990,Polaroid,good,"name contains 𠮷 U+20BB7",🙂
+A040,Photography,Desert radio mast,Salma Ben Ali,Tunis,1977,color slide,fair,"heat damage at corner",📡
+A041,Photography,"Northern lights, Tromsø",Eirik Lund,Tromsø,2001,digital print,excellent,"exposure 12 s, ISO 800",🌌
+A042,Photography,חתונה בחצר,דוד לוי,Haifa,1952,"silver print",good,"family donation",💍
+A043,Photography,"Canal workers, lock 6",A. van Dijk,Utrecht,1910,"glass negative",fragile,"emulsion lifting",🧱
+A044,Photography,Niños con máscaras,Lucía Paz,Oaxaca,1979,"gelatin silver",excellent,"Día de Muertos series",🎭
+A045,Photography,"Satellite team, launch day",Priya Raman,Bengaluru,2013,digital print,excellent,"includes 🛰️ mission patch",🛰️
+A046,Textiles,"Indigo wrapper, wave motif",Abena workshop,Kumasi,1880,"cotton, indigo",good,"selvedge intact",🧵
+A047,Textiles,帯「鶴と松」,Unknown,Kyoto,1860,"silk, gold thread",fair,"折り跡",🪡
+A048,Textiles,سجادة صلاة,فاطمة الزهراء,Fez,1912,wool,good,"red field, blue border",🕌
+A049,Textiles,"Sámi band, diamond weave",Elle Bals,Kautokeino,1947,wool,excellent,"red, yellow, green",♦️
+A050,Textiles,Manta de vicuña,Rosa Quispe,Cusco,1930,vicuña,stable,"natural dyes",🦙
+A051,Textiles,"Quilt block ""Flying Geese""",Mabel Jones,Alabama,1898,cotton,fair,"sixteen triangles",🪿
+A052,Textiles,Βελούδινο γιλέκο,Unknown,Ioannina,1855,"velvet, silver",good,"Ottoman-era embroidery",🦺
+A053,Textiles,Шарф с васильками,Ольга Миронова,Kyiv,1972,linen,excellent,"blue cross-stitch",🟦
+A054,Textiles,"Kente strip, proverb pattern",Kwame Asare,Bonwire,1965,silk,excellent,"pattern: ""wisdom knot""",🪢
+A055,Textiles,Áo dài panel,Trần Mai,Huế,1938,silk,fair,"lotus embroidery",🪷
+A056,Textiles,"Batik kain panjang",Siti Aminah,Yogyakarta,1925,cotton,good,"parang motif, soga dye",🟫
+A057,Textiles,ነጭ ሻማ,Almaz Bekele,Gondar,1980,cotton,excellent,"tibeb border",⬜
+A058,Textiles,"Wedding sash, ""María""",Carmen Ruiz,Manila,1906,silk,fair,"name embroidered twice",🎀
+A059,Textiles,ผ้าซิ่นลายขิด,คำแพง,Udon Thani,1950,cotton,good,"supplementary weft",🧶
+A060,Textiles,"Space-flight mission patch",Orbital Workshop,Houston,1998,"nylon, metallic thread",excellent,"astral emoji 🚀 in catalog note",🚀
+A061,Ceramics,"Bowl, cobalt vines",İznik workshop,İznik,1580,earthenware,repaired,"rim chips, old staples",🏺
+A062,Ceramics,茶碗 銘「朝霧」,楽家,Kyoto,1720,stoneware,excellent,"black glaze",🍵
+A063,Ceramics,جرة ماء,Unknown,Aswan,1850,terracotta,good,"soot marks",🏺
+A064,Ceramics,"Plate, lemons and leaves",Giulia Conti,Faenza,1744,maiolica,fair,"hairline crack, 7 cm",🍋
+A065,Ceramics,Кувшин с птицей,Nikolai Petrov,Gzhel,1890,porcelain,good,"underglaze blue",🐦
+A066,Ceramics,"Mate cup, silver rim",Taller López,Buenos Aires,1915,ceramic,stable,"initials ""J.R.""",🧉
+A067,Ceramics,קערת סדר,Leah Mizrahi,Jerusalem,1931,earthenware,good,"Hebrew labels",🍽️
+A068,Ceramics,"Tile: ship in storm",Delft workshop,Delft,1760,tin glaze,fair,"corner missing",⛈️
+A069,Ceramics,항아리 달무늬,박수진,Seoul,1790,porcelain,excellent,"moon jar study",🌕
+A070,Ceramics,"Vessel with jaguar handle",Unknown,Guatemala,0750,earthenware,fragmentary,"excavation unit C, locus 4",🐆
+A071,Ceramics,Assiette aux poissons,Aïcha B.,Safi,1964,earthenware,excellent,"turquoise glaze",🐠
+A072,Ceramics,"Coffee pot, geometric band",Nura Hassan,Khartoum,1987,stoneware,good,"maker's mark under base",☕
+A073,Ceramics,หม้อน้ำลายดอก,สมชาย,Chiang Mai,1942,earthenware,fair,"handle restored",🌼
+A074,Ceramics,"Porcelain insulator, type 3",Nordkraft AB,Malmö,1938,porcelain,stable,"industrial collection",⚡
+A075,Ceramics,"Test tile, glaze ""Nebula""",Aster Studio,Melbourne,2022,porcelain,excellent,"formula N-9; 🌌 speckles",🌌
+A076,Instruments,"Violin, workshop pattern",Carlo Bianchi,Cremona,1788,"maple, spruce",good,"label reads ""CB fecit""",🎻
+A077,Instruments,کمانچه,حسین رضایی,Tehran,1902,"mulberry, skin",fair,"bow absent",🎶
+A078,Instruments,尺八,田中 正,Kyoto,1871,bamboo,good,"five holes",🎵
+A079,Instruments,"Talking drum, hourglass",Adewale family,Ibadan,1958,"wood, hide",excellent,"two beaters",🥁
+A080,Instruments,Hardingfele med dragehode,Ola Vik,Bergen,1866,"wood, pearl",good,"eight strings",🎻
+A081,Instruments,"Trumpet, B-flat",Maison Lefèvre,Paris,1924,brass,fair,"dent near bell",🎺
+A082,Instruments,Μπουζούκι τρίχορδο,Nikos D.,Piraeus,1951,"wood, shell",good,"case included",🎸
+A083,Instruments,"Charango, armadillo back",Luis Mamani,La Paz,1940,"wood, shell",fragile,"export permit attached",🪕
+A084,Instruments,가야금,최은희,Busan,1976,"paulownia, silk",excellent,"twelve strings",🎼
+A085,Instruments,"Radio theremin, model T2",Nova Labs,Berlin,1932,"wood, electronics",fair,"240 V, untested",📻
+A086,Instruments,ขลุ่ยเพียงออ,วิชัย,Bangkok,1960,bamboo,good,"pitch mark in Thai",🎶
+A087,Instruments,"Mbira dzavadzimu",Tariro Moyo,Harare,1989,"wood, iron",excellent,"bottle-cap buzzers",🎵
+A088,Instruments,Concertina do marinheiro,Ana Costa,Lisboa,1910,"wood, brass",fair,"bellows patched",🪗
+A089,Instruments,"Synthesizer voice card",Keiko 𠮷田,Osaka,1984,"fiberglass, silicon",stable,"prototype ""Ω""",🎛️
+A090,Instruments,"Golden record replica",Orbital Archive,Pasadena,2017,"gold-plated copper",excellent,"diagram includes pulsar map",🛰️
+A091,Posters,"Exposition: Machines modernes",Atelier Moreau,Lyon,1925,lithograph,good,"orange, black, cream",⚙️
+A092,Posters,映画「月への旅」,小林 光,Tokyo,1958,offset print,fair,"pinholes at corners",🌙
+A093,Posters,"Festival de Jazz, sábado",R. Almeida,Rio de Janeiro,1967,screenprint,excellent,"venue changed in ink",🎷
+A094,Posters,معرض الكتاب الدولي,Samir K.,Cairo,1986,offset print,good,"Arabic, French",📚
+A095,Posters,"Vote, then dance!",M. Ndlovu,Johannesburg,1994,screenprint,good,"community hall edition",🗳️
+A096,Posters,Προστατέψτε τη θάλασσα,Eleni Art Group,Athens,1982,screenprint,excellent,"blue whale image",🐋
+A097,Posters,"Circo Estrella, 3 funciones",Taller Sol,Mexico City,1948,lithograph,fair,"tear through date",🎪
+A098,Posters,Олимпиада школьников,Studio Mir,Moscow,1979,offset print,good,"mathematics symbols",➗
+A099,Posters,"Night train to Praha",Karel Černý,Brno,1936,lithograph,stable,"Czech, German text",🚆
+A100,Posters,புத்தகத் திருவிழா,Anita Press,Chennai,2005,screenprint,excellent,"Tamil lettering",📖
+A101,Posters,"Save the wetlands, now",River Collective,New Orleans,2010,digital print,excellent,"QR code inactive",🐊
+A102,Posters,콘서트 「새벽」,민지,Seoul,1999,offset print,good,"silver ink",🎤
+A103,Posters,"Café ""Le Minuit""",Luc Bernard,Montréal,1973,screenprint,fair,"accented title, torn edge",☕
+A104,Posters,የሙዚቃ በዓል,Selam Studio,Addis Ababa,1991,offset print,good,"Amharic calendar date",🎵
+A105,Posters,"Mars mission: bring a question",Science Forum,Canberra,2031,digital print,excellent,"fictional event; astronaut 🧑‍🚀",🧑‍🚀
+A106,Natural History,"Ammonite, polished half",Unknown,Dorset,Jurassic,fossil,excellent,"spiral chambers visible",🐚
+A107,Natural History,青いモルフォ蝶,Collector S. Ito,Peru,1962,"pinned specimen",good,"wingspan 112 mm",🦋
+A108,Natural History,"Herbarium sheet, Acacia sp.",Nandi Rao,Kenya,1938,"pressed plant",fragile,"locality uncertain",🌿
+A109,Natural History,Кристалл дымчатого кварца,Field team,Altai,1975,mineral,excellent,"mass 1.8 kg",💎
+A110,Natural History,"Nautilus shell, juvenile",M. Santos,Palau,1988,shell,good,"trade documentation present",🐚
+A111,Natural History,عينة مرجان أحمر,Marine Survey,Red Sea,1971,coral,fair,"legacy collection",🪸
+A112,Natural History,"Meteorite slice, NWA 204",Atlas Expedition,Morocco,2004,"iron meteorite",stable,"etched Widmanstätten pattern",☄️
+A113,Natural History,羽毛標本「朱鷺」,Conservation Lab,Niigata,1996,feather,excellent,"non-destructive sample",🪶
+A114,Natural History,"Seed bank vial, lot 7",Arctic Flora Team,Svalbard,2016,seeds,excellent,"stored at −18 °C",🌱
+A115,Natural History,Απολίθωμα φύλλου,Geology Dept.,Lesbos,1981,fossil,good,"Miocene layer",🍂
+A116,Natural History,"Whale song spectrogram",Ocean Lab,Reykjavík,2009,thermal print,faded,"call sequence ""A, A, B""",🐋
+A117,Natural History,𓆣 Scarab casting,Field School,Luxor,2019,resin,excellent,"study copy, original returned",🪲
+A118,Natural History,"Moss packet, Bryum argenteum",L. Chen,Antarctica,2012,dried specimen,good,"GPS 77°50′S, 166°40′E",🧫
+A119,Natural History,เห็ดเรืองแสง,Forest Project,Chiang Rai,2020,"freeze-dried fungus",excellent,"bioluminescent species",🍄
+A120,Natural History,"Deep-sea image, dive 𐍈",AUV Team,Pacific Ocean,2023,digital print,excellent,"depth 6,120 m; 🐙 visible",🐙
+A121,Technology,"Telegraph key, submarine office",J. H. Grant,Halifax,1887,"brass, wood",good,"cable station no. 2",⌨️
+A122,Technology,計算尺「富士」,Fuji Works,Tokyo,1954,bamboo,excellent,"log scales A, B, C, D",📏
+A123,Technology,"Typewriter, Arabic keyboard",Remington,Beirut,1938,"steel, rubber",fair,"ribbon dry",⌨️
+A124,Technology,Комплект радиоламп,Svetlana Works,Leningrad,1961,"glass, metal",stable,"six valves, boxed",📻
+A125,Technology,"Navigation computer, Mk II",Aero Instruments,London,1942,bakelite,good,"manual dated 1943",🧮
+A126,Technology,Calculadora mecánica,Taller Ruiz,Madrid,1929,"steel, enamel",fair,"carry lever sticks",➕
+A127,Technology,"Pager, translucent green",MetroCall,Taipei,1998,"plastic, electronics",excellent,"battery removed",📟
+A128,Technology,የፀሐይ ሰዓት,Unknown,Gondar,1750,bronze,good,"portable sundial",☀️
+A129,Technology,"Punch card, payroll run",Data Bureau,Toronto,1965,paper,good,"80 columns; employee data redacted",🗂️
+A130,Technology,Компьютерная мышь «Колобок»,Tech Cooperative,Minsk,1991,"plastic, cable",fair,"ball mechanism",🖱️
+A131,Technology,"GPS receiver, expedition unit",NavStar,McMurdo,1997,"plastic, electronics",good,"cold-tested to −30 °C",🛰️
+A132,Technology,携帯電話 試作零号,Keiko 𠮷田,Yokohama,1993,"plastic, PCB",stable,"prototype, no network lock",📱
+A133,Technology,"Braille note-taker, model 4",Access Lab,Boston,2006,"plastic, electronics",excellent,"display: 40 cells",⠿
+A134,Technology,حاسوب مصغر للتعليم,Nile Systems,Khartoum,1986,"plastic, PCB",fair,"ROM label ""مدرسة""",💻
+A135,Technology,"CubeSat radio, engineering model",Aurora Space,Oslo,2024,"aluminum, PCB",excellent,"callsign FJELL-1 🚀",🛰️
+A136,Sound,"Wax cylinder, lullaby",Singer unknown,Accra,1912,wax,fragile,"incipit transcribed",🎙️
+A137,Sound,民謡「ソーラン節」,佐々木 春,Sapporo,1935,shellac,good,"78 rpm, side B blank",🎶
+A138,Sound,"Interview, dock workers",Marta Silva,Valparaíso,1970,"reel-to-reel tape",fair,"Spanish, Mapudungun phrases",🎧
+A139,Sound,حكاية البحر,عائشة نور,Alexandria,1981,cassette,good,"side A, 34 min",🌊
+A140,Sound,"Birdsong at first light",N. Okeke,Enugu,1999,DAT,excellent,"twelve identified species",🐦
+A141,Sound,Τραγούδια της ξενιτιάς,Radio Archive,Athens,1956,shellac,fair,"surface noise",🎼
+A142,Sound,"Subway ambience, Line 1",Chen Wei,Toronto,2003,MiniDisc,excellent,"announcement in three languages",🚇
+A143,Sound,Шум ледокола «Арктика»,Polar Radio,Murmansk,1978,"reel-to-reel tape",good,"engine room, deck, horn",🧊
+A144,Sound,"Piano étude, take ""final 3""",Zoë Lambert,Paris,2011,digital audio,excellent,"96 kHz, 24-bit",🎹
+A145,Sound,கோவில் மணி,Arun Kumar,Madurai,2007,digital audio,excellent,"dawn ceremony",🔔
+A146,Sound,"Forest rain, binaural",Iara Costa,Manaus,2018,digital audio,excellent,"macaw at 12:43",🌧️
+A147,Sound,ከበሮ ልምምድ,Hana Tesfaye,Addis Ababa,1994,cassette,good,"youth ensemble",🥁
+A148,Sound,"Numbers station excerpt",Receiver Club,Riga,1987,cassette,fair,"voice repeats ""7, 2, 9""",📻
+A149,Sound,宇宙電波 𝄞,Deep Array,Atacama,2025,digital data,excellent,"sonification includes astral 𝄞",📡
+A150,Sound,"Oral history: ""home, then horizon""",Mina Rahman,Sydney,2022,digital audio,excellent,"consent: public; transcript includes 🧑‍🚀",🎤

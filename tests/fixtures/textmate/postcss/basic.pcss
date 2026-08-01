@@ -1,0 +1,24 @@
+/* PostCSS basics {{fixture}} — café 🚀 𝌆 */
+$accent: #6c5ce7;
+$space: 1.5rem !default;
+:root {
+  --accent-color: $accent;
+  --label: "Ready #{$space} 🚀";
+}
+@mixin focus-ring($color) {
+  outline: 2px solid $color;
+}
+.card#hero[data-state="ready"]:hover {
+  padding: calc($space + 2px);
+  color: var(--accent-color);
+  @include focus-ring($accent);
+  &::before { content: 'café 𝌆'; }
+}
+%panel {
+  border: 1px solid #abc !important;
+}
+// SugarSS-style nesting {{valid}}
+.notice
+  color: $accent
+  &:focus
+    transform: translateY(-2px)

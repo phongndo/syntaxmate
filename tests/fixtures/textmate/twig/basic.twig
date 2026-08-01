@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="{{ locale|default('en') }}">
+<head>
+  <meta charset="utf-8">
+  <title>{{ page.title|default("Field Notes")|e }}</title>
+  <style>
+    .hero { color: {{ theme.accent|default('#315c8a') }}; }
+  </style>
+</head>
+<body id="page-{{ page.id }}" class='theme-{{ theme.name }}' data-ready="true">
+  {# A compact Twig fixture: café, 東京, and astral 🧭. #}
+  {% set links = [{'label': 'Home', 'href': '/'}, {'label': 'Archive', 'href': '/notes'}] %}
+  <header class="hero">
+    {% if user is defined and user.active == true %}
+      <h1>Hello, {{ user.profile.display_name|title }}!</h1>
+    {% else %}
+      <h1>{{ "Welcome"|upper }}</h1>
+    {% endif %}
+  </header>
+  <nav aria-label="Primary &amp; utility">
+    {% for link in links %}<a href="{{ link.href }}">{{ link.label|e }}</a>{% endfor %}
+  </nav>
+  <p>Copyright &#169; {{ "now"|date("Y") }} — explore &#x1F680; safely.</p>
+  <script>
+    const pageId = {{ page.id|json_encode }};
+    document.body.dataset.page = String(pageId);
+  </script>
+</body>
+</html>

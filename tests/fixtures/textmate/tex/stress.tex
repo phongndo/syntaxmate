@@ -1,0 +1,208 @@
+% Plain TeX stress fixture — café λ 東京 🚀 𝌆
+% Comments, control sequences, catcodes, conditionals, and persistent math states.
+\catcode`\@=11
+\catcode`\~=13
+\catcode`\!=12
+\chardef\bang=`\!
+\mathchardef\alphaSlot="710B
+\newcount\chaptercount
+\newcount\itemcount
+\newcount\scratchcount
+\newdimen\pagewidth
+\newdimen\gutter
+\newskip\bodyglue
+\newtoks\everycard
+\chaptercount=7
+\itemcount=13
+\scratchcount=-2
+\pagewidth=30pc
+\gutter=1.5em
+\bodyglue=6pt plus 2pt minus 1pt
+\everycard={\message{shipping a card}}
+\font\titlefont=cmr10 scaled 1440
+\font\mathfont=cmmi10
+\def\identity#1{#1}
+\def\pair#1#2{(#1,#2)}
+\def\swap#1#2{#2#1}
+\def\firstoftwo#1#2{#1}
+\def\secondoftwo#1#2{#2}
+\long\def\paragraphmacro#1\par{\indent#1\par}
+\outer\def\byeexample{\vfill\supereject}
+\edef\frozenname{chapter-\the\chaptercount}
+\xdef\globalname{item-\the\itemcount}
+\let\savedrelax=\relax
+\futurelet\nexttoken\savedrelax
+\def\choose{\@ifnextchar[\choosewith\choosewithout}
+\def\choosewith[#1]{\message{option=#1}}
+\def\choosewithout{\message{no option}}
+\choose[compact]
+\choose
+\csname frozen-\frozenname\endcsname
+\expandafter\def\csname dynamic-control\endcsname{dynamic}
+\begingroup
+  \advance\chaptercount by 1
+  \multiply\itemcount by 2
+  \divide\itemcount by 3
+  \global\scratchcount=99
+\endgroup
+\ifnum\chaptercount=7
+  \message{chapter count retained}
+\else
+  \errmessage{unexpected chapter count}
+\fi
+\ifodd\itemcount
+  odd item count
+\else
+  even item count
+\fi
+\ifdim\pagewidth>20pc
+  wide measure
+\else
+  narrow measure
+\fi
+\ifx\savedrelax\relax
+  equal meanings
+\fi
+\ifcat a b
+  same category
+\fi
+\ifhmode horizontal\else not horizontal\fi
+\ifmmode math\else text\fi
+\ifvmode vertical\else not vertical\fi
+\ifvoid255 empty box\else occupied box\fi
+\unless\ifnum\scratchcount<0 nonnegative\fi
+% An ignored region drives the grammar's multiline iffalse state.
+\iffalse
+  discarded words and \unknowncontrol
+  {a discarded group begins
+    {a nested discarded group
+      with café λ 東京 🚀 𝌆}
+    and the outer group ends}
+  \ifnum\itemcount>0
+    nested false-region conditional
+    \ifodd\chaptercount
+      deeper conditional text
+    \else
+      alternate deeper text
+    \fi
+  \fi
+\fi
+Visible text resumes after the false region.
+\iffalse
+  another skipped branch
+\else
+Visible else material is lexed at the root.
+\fi
+% Inline mathematics exercises constants, operators, braces, and delimiters.
+Euler wrote $e^{i\pi}+1=0$ in a compact identity.
+Fractions $\frac{a+b}{c-d}$ sit beside $x_1,x_2,\ldots,x_n$.
+Delimiters $\left(\sum_{k=0}^{m} k^2\right)$ grow with content.
+Relations $A\subseteq B$, $x\neq y$, and $u\mapsto v$ use named symbols.
+Functions $\sin^2 t+\cos^2 t=1$ and $\log_{10}100=2$ are recognized.
+Escapes \$ \% \# \& \_ \{ \} remain control symbols.
+$$
+  \sum_{n=1}^{10} n = \frac{10\cdot11}{2}
+$$
+Between displays, ordinary words and \emph{macro arguments} return to root.
+$$
+  \int_0^1 x^3\,dx = \frac14,
+  \qquad \lim_{h\to0}\frac{(x+h)^2-x^2}{h}=2x
+$$
+The next display contains text nested inside math.
+$$
+  \left\{ z\in\mathbb{C}: |z|\leq 1 \right\}
+  \quad\text{closed unit disk — café 東京}
+$$
+And a split display keeps the dollar state across several physical lines.
+$$
+  a_0 &= 1,\\
+  a_{n+1} &= 2a_n+1,\\
+  a_n &= 2^{n+1}-1.
+$$
+Single-dollar math may also span
+$
+  p(x)=x^4-2x^2+1
+$
+before text mode resumes.
+\setbox0=\hbox{A horizontal box}
+\setbox1=\vbox{\hsize=12pc A vertical box\par with two lines.}
+\setbox2=\vtop{top-aligned material}
+\wd0=8pc
+\ht0=12pt
+\dp0=3pt
+\copy0 \box1 \unhbox2
+\raise2pt\hbox{raised}
+\lower1pt\hbox{lowered}
+\kern.5em \hskip1em plus .5em \vskip6pt
+\leaders\hbox{.}\hfill
+\halign{\hfil#\hfil&\quad#\hfil\cr
+  Name&Value\cr
+  alpha&1\cr
+  beta&2\cr}
+\valign{\vfil#\vfil\cr
+  first\cr
+  second\cr}
+\def\row#1&#2\cr{\hbox to 10pc{#1\hfil#2}\par}
+\row left&right\cr
+\insert\footins{\footnotesize A plain footnote insertion.}
+\mark{chapter:\the\chaptercount}
+\topmark \firstmark \botmark
+\output={\shipout\box255\global\advance\pageno by 1}
+\headline={\hfil Plain TeX stress \folio}
+\footline={\hfil\tenrm\folio\hfil}
+\parindent=18pt
+\parskip=3pt plus 1pt
+\leftskip=0pt plus 1fil
+\rightskip=0pt plus 1fil
+\spaceskip=.4em plus .2em minus .1em
+\pretolerance=100
+\tolerance=800
+\hyphenpenalty=50
+\clubpenalty=1000
+\widowpenalty=1000
+\brokenpenalty=100
+\hyphenation{gram-mar lex-i-cal mul-ti-line}
+\patterns{a1bc de2f}
+\language=0
+\lccode`\A=`\a
+\uccode`\a=`\A
+\sfcode`\.=3000
+\delcode`\|="026A30C
+\catcode`\?=12
+\catcode`\:=12
+\message{Registers: \the\chaptercount, \the\pagewidth}
+\wlog{A diagnostic line for the transcript}
+\immediate\write16{Immediate terminal output}
+\openout1=fixture.aux
+\write1{\string\record{\frozenname}}
+\closeout1
+\openin2=optional-input.tex
+\ifeof2
+  \message{input is absent or exhausted}
+\else
+  \read2 to \inputline
+\fi
+\closein2
+\newread\datafile
+\newwrite\logfile
+\newif\ifready
+\readytrue
+\ifready
+  \message{ready flag is true}
+\else
+  \message{ready flag is false}
+\fi
+\def\loopbody{\advance\scratchcount by -1 }
+\loopbody\loopbody\loopbody
+\number\scratchcount
+\romannumeral\chaptercount
+\string\identity
+\meaning\pair
+\jobname
+\time \day \month \year
+\hrule width 10pc height .4pt depth 0pt
+\vrule width .4pt height 8pt depth 2pt
+\noindent Final paragraph with café λ 東京 🚀 𝌆 and [balanced brackets].
+\catcode`\@=12
+\catcode`\~=12
+\end

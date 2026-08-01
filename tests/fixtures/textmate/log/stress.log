@@ -1,0 +1,149 @@
+2026-07-12T06:00:00.001Z INFO boot sequence started service="atlas-api" version='3.18.0'
+2026-07-12T06:00:00.008Z DEBUG argv parsed workers=8 color=true
+2026-07-12T06:00:00.013Z TRACE config search path='/etc/atlas/config.toml'
+2026-07-12T06:00:00.021Z NOTICE environment=production region="eu-west-1"
+2026-07-12T06:00:00.034Z [information] hostname=api-07.example.net pid=4182
+2026-07-12T06:00:00.055Z [debug] allocator address=0x7f23ab10c000
+2026-07-12T06:00:00.089Z [verbose] loading trust store certificates=143
+2026-07-12T06:00:00.144Z HINT set ATLAS_LOG=debug for request bodies
+2026-07-12T06:00:00.233Z INFO migration checksum=0123456789
+2026-07-12T06:00:00.377Z INFO build commit=0123456789abcdef0123456789abcdef01234567
+2026-07-12T06:00:00.610Z INFO instance=123e4567-e89b-12d3-a456-426614174000 ready=false
+2026-07-12T06:00:00.987Z WARNING: optional file '/run/secrets/legacy_key' was not found
+2026-07-12T06:00:01.004Z INFO listening at https://api.example.com:8443/v2
+2026-07-12T06:00:01.009Z INFO metrics at http://127.0.0.1:9090/metrics
+2026-07-12T06:00:01.015Z DEBUG database host=db-primary.example.org port=5432
+2026-07-12T06:00:01.026Z TRACE dns result=2001:0db8:85a3:0000:0000:8a2e:0370:7334
+2026-07-12T06:00:01.042Z INFO network interface=eth0 mac=02:42:ac:11:00:02
+2026-07-12T06:00:01.068Z INFORMATION startup completed elapsed_ms=1067
+
+12/07/2026 06:01:14 INFO request accepted method=GET path="/v2/catalog?q=naïve"
+12/07/2026 06:01:14 debug: request headers traceparent='00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01'
+12/07/2026 06:01:14 [vrb] negotiated encoding="br"
+12/07/2026 06:01:14 [i] tenant=acme user="Zoë"
+12/07/2026 06:01:14 NOTICE rate_limit=120 remaining=119 reset=1752300134
+12/07/2026 06:01:14 INFO cache key='catalog:fr-FR:été' hit=false
+12/07/2026 06:01:14 DEBUG sql fingerprint=9a4c2d7e10
+12/07/2026 06:01:14 TRACE query="select id, title from products where active = true"
+12/07/2026 06:01:14 Info returned 24 rows in 7.4ms
+12/07/2026 06:01:14 HINT etag=7f3a91c can be reused for conditional requests
+12/07/2026 06:01:14 INFO response status=200 bytes=8192
+12/07/2026 06:01:14 TRACE request complete duration_ms=13.72
+
+06:02:03,411 [D] consumer poll topic="orders.v2" partition=3
+06:02:03,417 [I] message offset=88421 key='order-東京-1042'
+06:02:03,419 [verb] headers correlation=550e8400-e29b-41d4-a716-446655440000
+06:02:03,425 DEBUG decoding content_type="application/json; charset=utf-8"
+06:02:03,428 INFO order total=12999 currency='JPY' expedited=true
+06:02:03,433 NOTICE destination="東京都千代田区"
+06:02:03,439 TRACE inventory call grpc://inventory.example.net/Stock/Reserve
+06:02:03,451 WARN inventory response took 12ms
+06:02:03,456 [warning] sku='茶-🍵-01' remaining=2
+06:02:03,462 INFO reservation=de305d54-75b4-431b-adb2-eb6b9e546014
+06:02:03,470 DEBUG publishing topic="payments.pending"
+06:02:03,481 INFO committed offset=88421
+
+2026-07-12T06:03:29+00:00 INFO payment authorized provider=example-pay
+2026-07-12T06:03:29+00:00 [nfo] amount=12999 token="tok_live_redacted"
+2026-07-12T06:03:29+00:00 TRACE fraud endpoint=https://risk.example.com/score
+2026-07-12T06:03:29+00:00 DEBUG device=aa-bb-cc-dd-ee-01 score=17
+2026-07-12T06:03:29+00:00 WARNING card fingerprint absent; using account history
+2026-07-12T06:03:29+00:00 INFO challenge_required=false liability_shift=true
+2026-07-12T06:03:29+00:00 NOTICE receipt sent to 'renée@example.net'
+2026-07-12T06:03:29+00:00 TRACE redaction check fields=8 leaked=0
+
+4182 V pool heartbeat active=14 idle=18 waiting=0
+4182 D acquired connection id=42 age_ms=3810
+4182 I transaction began isolation='read committed'
+4182 W replica lag is 2.7s host=db-replica-2.example.org
+4182 E transaction deadline exceeded after 5000ms
+4182 D rolling back connection id=42
+4182 I connection returned healthy=false
+
+13-07-2026 00:14:51 ALERT elevated error rate window='5m' value=0.083
+13-07-2026 00:14:51 CRITICAL checkout success ratio below objective
+13-07-2026 00:14:51 EMERGENCY failover requested by '@oncall'
+13-07-2026 00:14:51 ERROR leader db-primary.example.org did not respond
+13-07-2026 00:14:51 FAILURE promotion precheck returned 3 blockers
+13-07-2026 00:14:51 FAIL replication slot 'analytics' is inactive
+13-07-2026 00:14:51 Fatal: automated failover aborted
+13-07-2026 00:14:51 FATAL operator acknowledgement required
+13-07-2026 00:14:51 Error runbook=https://runbooks.example.org/database/failover
+13-07-2026 00:14:51 EE incident=01J2C8M6S5GXN9QK4R2T7VWPAD
+
+2026-07-13T00:15:02.009Z ERROR query execution failed
+org.postgresql.util.PSQLException: canceling statement due to statement timeout
+    at org.postgresql.core.v3.QueryExecutorImpl.receiveErrorResponse(QueryExecutorImpl.java:2713)
+    at org.postgresql.core.v3.QueryExecutorImpl.processResults(QueryExecutorImpl.java:2401)
+    at org.postgresql.core.v3.QueryExecutorImpl.execute(QueryExecutorImpl.java:368)
+    at com.example.store.OrderRepository.reserve(OrderRepository.java:219)
+    at com.example.checkout.CheckoutService.submit(CheckoutService.java:88)
+Caused by: java.net.SocketTimeoutException: Read timed out
+    at java.base/sun.nio.ch.NioSocketImpl.timedRead(NioSocketImpl.java:288)
+    at java.base/java.net.Socket$SocketInputStream.read(Socket.java:966)
+    at com.example.db.TracingSocket.read(TracingSocket.java:41)
+2026-07-13T00:15:02.012Z [err] exception_id=8badf00d-1234-4abc-9def-0123456789ab
+2026-07-13T00:15:02.014Z [e] retryable=true attempt=1
+2026-07-13T00:15:02.019Z WARN retry scheduled delay_ms=250
+
+T001503Z TRACE retry timer fired
+T001503,250Z [d] opening connection host=db-primary.example.org
+T001503,278Z [bg] tcp connected local=10.2.0.17:48122
+T001503,301Z [de] tls session resumed cipher='TLS_AES_256_GCM_SHA384'
+T001503,333Z [in] authentication accepted role="checkout"
+T001503,377Z [w] server entered read-only mode
+T001503,401Z [rn] retry redirected to db-replica-1.example.org
+T001503,449Z [error] write rejected sqlstate='25006'
+T001503,451Z [eror] compatibility spelling observed from legacy worker
+T001503,453Z [ftl] retry policy exhausted
+
+2026-07-13T00:16:44.100-07:00 INFO scheduler tick jobs=6
+2026-07-13T00:16:44.102-07:00 II job='invoice-rollup' state="running"
+2026-07-13T00:16:44.108-07:00 WW queue saturation=0.84 workers=32
+2026-07-13T00:16:44.111-07:00 WARN oldest_job_age_s=93
+2026-07-13T00:16:44.117-07:00 Debug lease=abcdef0123 holder='worker-12'
+2026-07-13T00:16:44.122-07:00 trace: scanning 4096 records
+2026-07-13T00:16:44.130-07:00 information: checkpoint offset=774144
+2026-07-13T00:16:44.138-07:00 warning: job exceeded soft deadline
+2026-07-13T00:16:44.145-07:00 error: invoice service returned 503
+2026-07-13T00:16:44.152-07:00 INFO next_run='2026-07-13T00:17:00-07:00'
+
+2026-07-13 07:20 INFO asset sync source=s3://assets.example.org/releases/
+2026-07-13 07:20 DEBUG manifest hash=deadbee
+2026-07-13 07:20 DEBUG archive hash=0123456789
+2026-07-13 07:20 DEBUG signature=89abcdef0123456789abcdef0123456789abcdef
+2026-07-13 07:20 NOTICE release id=ffffffff-ffff-4fff-8fff-ffffffffffff
+2026-07-13 07:20 TRACE downloading https://cdn.example.org/releases/3.18.0/app.tar.zst
+2026-07-13 07:21 INFO downloaded bytes=104857600 checksum_ok=true
+2026-07-13 07:21 WARN mirror old-cdn.example.com returned status=301
+2026-07-13 07:21 INFO unpacked files=1842 destination='/srv/atlas/releases/3.18.0'
+2026-07-13 07:21 HINT cleanup policy keeps 5 releases
+
+14.07.2026 09:42:07 INFO localization smoke test began
+14.07.2026 09:42:07 DEBUG sample="Grüße, мир, مرحبًا, नमस्ते"
+14.07.2026 09:42:07 NOTICE emoji="🧪🚀🛰️" graphemes=3
+14.07.2026 09:42:07 INFO customer='Miyuki 山田' city="Zürich"
+14.07.2026 09:42:07 WARN normalization differs input='é' normalized='é'
+14.07.2026 09:42:07 TRACE astral codepoint U+1F680 rendered="🚀"
+14.07.2026 09:42:07 INFO right_to_left="שלום עולם"
+14.07.2026 09:42:07 INFORMATION probe complete failures=0
+
+2026-07-14T09:44:10Z INFO maintenance sweep started generation=42
+2026-07-14T09:44:10Z DEBUG heap committed=536870912 used=401882144
+2026-07-14T09:44:10Z TRACE marking roots threads=33 handles=7401
+2026-07-14T09:44:10Z NOTICE pause_ms=18.4 reclaimed_bytes=67108864
+2026-07-14T09:44:10Z WARN finalizer queue depth=27
+2026-07-14T09:44:10Z ERROR stale handle owner=worker-19 address=0xdeadbeef
+2026-07-14T09:44:10Z INFO diagnostic bundle=file://localhost/var/log/atlas/gc-42.json
+2026-07-14T09:44:10Z [v] sweep pages=2048 free_ratio=0.31
+2026-07-14T09:44:10Z INFO maintenance sweep completed
+2026-07-14T09:45:58Z INFO shutdown requested signal=15
+2026-07-14T09:45:58Z [vb] stopping HTTP accept loop
+2026-07-14T09:45:58Z [b] draining active requests count=3
+2026-07-14T09:45:59Z [bug] flushing telemetry endpoint=https://otel.example.net/v1/traces
+2026-07-14T09:45:59Z [information] exported spans=281 dropped=0
+2026-07-14T09:45:59Z [warning] one websocket still open peer=chat.example.net
+2026-07-14T09:46:00Z [fatl] forced websocket close code=1012
+2026-07-14T09:46:00Z INFO database pool closed
+2026-07-14T09:46:00Z NOTICE pid file '/run/atlas.pid' removed
+2026-07-14T09:46:00Z INFO shutdown complete exit_code=0

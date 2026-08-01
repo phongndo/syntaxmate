@@ -1,0 +1,18 @@
+<main class="host">
+  Plain HTML remains root text.
+  <h1>{{ title }}</h1>
+  <p>{{ user?.name ?? 'café' }}</p>
+  <p>{{ '東京 🚀 𝌆' }}</p>
+  <p>{{ count + 1 * 2 }}</p>
+  <p>{{ ready ? 'yes' : 'no' }}</p>
+  <p>{{ items | slice:0:3 }}</p>
+  <p>{{ format(
+    user.name,
+    locale
+  ) }}</p>
+  <p title="{{ tooltip }}">attribute host</p>
+  <!-- {{ commentValue }} is still visible at standalone root -->
+  <code>{ not an interpolation }</code>
+  {{ `hello ${name} 🚀` }}
+  <footer>{{ value as string }}</footer>
+</main>

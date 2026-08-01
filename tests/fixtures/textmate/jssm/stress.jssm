@@ -1,0 +1,189 @@
+/*
+ * Deep-space downlink controller written in FSL/JSSM.
+ * BMP text: café, λ, 東京. Astral symbols: 🛰️, 🚀, 𝄞.
+ */
+machine_name : "Asteria Deep-Space Downlink 🛰️";
+machine_version : 12.7.3;
+jssm_version : 5.9.1;
+graph_layout : dot;
+
+// Startup and self-test use ordinary legal transitions.
+PoweredOff 'power on' -> Booting;
+Booting 'firmware loaded' -> SelfTest;
+SelfTest 'memory ok' -> ClockSync;
+ClockSync 'locked' -> NetworkAcquire;
+NetworkAcquire 'carrier found' -> LinkNegotiation;
+LinkNegotiation 'session ready' -> Idle;
+
+/* Mainline scheduling favors a contact-window workflow. */
+Idle 'open window' => WindowOpening;
+WindowOpening 'ephemeris loaded' => Pointing;
+Pointing 'target locked' => CarrierLock;
+CarrierLock 'symbol sync' => Authenticating;
+Authenticating 'credentials accepted' => Ready;
+Ready 'begin downlink' => Receiving;
+Receiving 'frame complete' => Validating;
+Validating 'checksum valid' => Persisting;
+Persisting 'commit complete' => Publishing;
+Publishing 'catalog updated' => Complete;
+Complete 'next pass' => Idle;
+
+// Bidirectional legal edges permit normal operator correction.
+Idle 'maintenance' <-> Maintenance;
+Maintenance 'diagnostics' <-> Diagnostics;
+Diagnostics 'calibrate' <-> Calibration;
+Calibration 'return to service' <-> Idle;
+Pointing 'refine vector' <-> FinePointing;
+Receiving 'throttle' <-> Throttled;
+
+// Main-to-main edges mark the preferred symmetric route.
+Ready 'stream 東京' <=> Receiving;
+Validating 'inspect' <=> Review;
+Review 'approve café' <=> Persisting;
+
+// Forced transitions represent safety interrupts.
+Booting 'watchdog' ~> SafeMode;
+SelfTest 'hardware fault' ~> SafeMode;
+Pointing 'sun exclusion' ~> SafeMode;
+Receiving 'thermal limit' ~> Cooling;
+Cooling 'still hot' <~> SafeMode;
+SafeMode 'operator recovery' <~> Recovery;
+Recovery 'reinitialize' ~> Booting;
+
+/* One-way reverse arrows make the edge's authority explicit. */
+Standby <- Idle;
+ClockSync <= HoldoverClock;
+SafeMode <~ EmergencyBeacon;
+
+// Mixed edge kinds connect subsystems while preserving direction semantics.
+LegalSource 'promote main' <-=> MainTarget;
+MainSource 'demote legal' <=-> LegalTarget;
+LegalQueue 'force dispatch' <-~> ForcedWorker;
+ForcedWorker 'release legal' <~-> LegalQueue;
+MainQueue 'force dispatch' <=~> ForcedSink;
+ForcedSink 'restore main' <~=> MainQueue;
+
+// Probability annotations model noisy links and retry policy.
+CarrierLock 'strong signal' 92% => Authenticating;
+CarrierLock 'weak signal' 8% -> Repointing;
+Repointing 'vector corrected' 75% -> CarrierLock;
+Repointing 'no solution' 25% ~> SafeMode;
+Authenticating 'token fresh' 97% => Ready;
+Authenticating 'token stale' 3% -> CredentialRefresh;
+CredentialRefresh 'renewed' 80% -> Authenticating;
+CredentialRefresh 'denied' 20% ~> Quarantined;
+Receiving 'frame accepted' 99% -> Receiving;
+Receiving 'frame corrupt' 1% -> Retransmit;
+Retransmit 'retry' 64% -> Receiving;
+Retransmit 'retry exhausted' 36% ~> Degraded;
+
+/* Labels may be atoms or quoted human-facing descriptions. */
+Idle "waiting for DSN allocation" 'tick' -> Idle;
+WindowOpening "contact starts at 23:59 UTC" 'announce' -> Pointing;
+Pointing "東京 antenna α-7" 'status' -> Pointing;
+Receiving "telemetry channel λ" 'status' -> Receiving;
+Publishing "catalog café mirror" 'status' -> Publishing;
+Complete "pass complete 🚀" 'archive' -> Archived;
+
+// Embedded outcalls bind application hooks to state-machine actions.
+Idle 'audit idle' -> ${ audit("idle", 0) };
+Ready 'reserve buffers' -> ${ buffers.reserve(4096) };
+Receiving 'record frame' -> ${ telemetry.accept(frame.id) };
+Validating 'verify signature' -> ${ crypto.verify(packet) };
+Persisting 'flush journal' -> ${ journal.flush() };
+Publishing 'notify catalog' -> ${ events.emit("catalog-ready") };
+SafeMode 'raise alarm' -> ${ alarms.raise("safe-mode-🛰️") };
+
+/* Payload acquisition pipeline. */
+Ready 'request manifest' -> ManifestRequest;
+ManifestRequest 'manifest received' -> ManifestDecode;
+ManifestDecode 'schema valid' -> ManifestReady;
+ManifestDecode 'schema invalid' ~> Quarantined;
+ManifestReady 'allocate chunks' -> ChunkPlanning;
+ChunkPlanning 'plan ready' -> ChunkQueue;
+ChunkQueue 'dispatch' => ChunkReceiving;
+ChunkReceiving 'chunk complete' -> ChunkVerifying;
+ChunkVerifying 'hash valid' -> ChunkStored;
+ChunkVerifying 'hash invalid' -> ChunkRetry;
+ChunkRetry 'retry chunk' -> ChunkReceiving;
+ChunkStored 'more chunks' -> ChunkQueue;
+ChunkStored 'payload complete' => PayloadAssembly;
+PayloadAssembly 'assembled' => PayloadValidation;
+PayloadValidation 'science valid' => Persisting;
+
+// Command uplink pipeline runs alongside telemetry downlink.
+Idle 'prepare commands' -> CommandDraft;
+CommandDraft 'review requested' -> CommandReview;
+CommandReview 'changes needed' -> CommandDraft;
+CommandReview 'approved' => CommandSigned;
+CommandSigned 'queue uplink' => UplinkQueue;
+UplinkQueue 'transmitter free' => UplinkModulating;
+UplinkModulating 'symbols ready' => UplinkSending;
+UplinkSending 'ack received' => UplinkConfirmed;
+UplinkSending 'ack timeout' -> UplinkRetry;
+UplinkRetry 'retry available' -> UplinkQueue;
+UplinkRetry 'retry exhausted' ~> Degraded;
+UplinkConfirmed 'commands accepted' -> Idle;
+
+/* Fault containment and recovery paths. */
+Degraded 'isolate receiver' -> ReceiverIsolated;
+Degraded 'isolate transmitter' -> TransmitterIsolated;
+ReceiverIsolated 'restart receiver' -> ReceiverRestart;
+ReceiverRestart 'healthy' -> Idle;
+ReceiverRestart 'failed' ~> SafeMode;
+TransmitterIsolated 'restart transmitter' -> TransmitterRestart;
+TransmitterRestart 'healthy' -> Idle;
+TransmitterRestart 'failed' ~> SafeMode;
+Quarantined 'collect evidence' -> Forensics;
+Forensics 'bundle sealed' -> AwaitingOperator;
+AwaitingOperator 'discard session' -> Idle;
+AwaitingOperator 'approve recovery' -> Recovery;
+
+// Thermal management is intentionally cyclical.
+Receiving 'temperature warning' -> Cooling;
+Cooling 'fans started' -> CoolingActive;
+CoolingActive 'temperature falling' -> CoolingActive;
+CoolingActive 'temperature nominal' -> Receiving;
+CoolingActive 'sensor failed' ~> SafeMode;
+SafeMode 'passive cooling' -> ColdSoak;
+ColdSoak 'minimum duration' -> Recovery;
+
+/* Ground-station handoff across multilingual sites. */
+Receiving 'handoff Reykjavík' -> HandoffPrepare;
+HandoffPrepare 'route 東京' -> HandoffTokyo;
+HandoffPrepare 'route Canberra' -> HandoffCanberra;
+HandoffPrepare 'route Madrid' -> HandoffMadrid;
+HandoffTokyo 'carrier acquired' => Receiving;
+HandoffCanberra 'carrier acquired' => Receiving;
+HandoffMadrid 'carrier acquired' => Receiving;
+HandoffTokyo 'missed' -> HandoffFallback;
+HandoffCanberra 'missed' -> HandoffFallback;
+HandoffMadrid 'missed' -> HandoffFallback;
+HandoffFallback 'store and forward' -> StoreForward;
+StoreForward 'station available' -> Receiving;
+
+// Reporting and cleanup complete the real-world lifecycle.
+Complete 'build report' -> ReportCollecting;
+ReportCollecting 'metrics ready' -> ReportRendering;
+ReportRendering 'render text' -> ReportSigning;
+ReportRendering 'render graph' -> ReportSigning;
+ReportSigning 'signature ready' -> ReportPublishing;
+ReportPublishing 'published' -> Cleanup;
+Cleanup 'buffers released' -> CleanupJournal;
+CleanupJournal 'journal compacted' -> Archived;
+Archived 'retention elapsed' -> Purging;
+Purging 'objects removed' -> Idle;
+
+/* Atom punctuation coverage appears naturally in operational state names. */
+node_7 'probe' -> node-8;
+node-8 'increment' -> node_9;
+queue? 'answer yes' -> ready!;
+ready! 'route' -> path/to.target;
+channel#1 'copy' -> channel&2;
+slot(A) 'advance' -> slot(B);
+
+// Final loop carries Unicode in actions without sacrificing machine shape.
+Idle 'observe λ' -> LambdaSurvey;
+LambdaSurvey 'catalog 東京' -> TokyoCatalog;
+TokyoCatalog 'play tone 𝄞' -> AudioMarker;
+AudioMarker 'launch 🚀' => Ready;

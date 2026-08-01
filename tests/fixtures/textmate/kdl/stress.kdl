@@ -1,0 +1,174 @@
+// KDL stress fixture: a reviewable service catalog.
+// It deliberately covers every repository rule in the bundled grammar.
+(catalog)services version=(semver)"3.1.0" generated=#false fallback=#null {
+  metadata owner="syntax-team" active=#true archived=#false {
+    title "TextMate KDL coverage"
+    unicode café="coffee" lambda="λ" city="東京"
+    symbols rocket="🚀" tetragram="𝌆"
+    summary "café, λ, 東京, 🚀, and 𝌆 remain literal"
+  }
+
+  // Decimal integers include signs and separators.
+  decimal-zero 0
+  decimal-positive 42
+  decimal-negative -17
+  decimal-explicit-positive +23
+  decimal-grouped 1_000_000
+
+  // Every prefixed integer base is represented.
+  hexadecimal 0x0 0x2a 0xDEAD_beef
+  octal 0o0 0o52 0o755
+  binary 0b0 0b101010 0b1111_0000
+
+  // Fractional, exponent, and special floating-point forms.
+  fractions 3.14159 -0.125 +12.50
+  exponents 6.022e23 1E+9 2.5E-4
+  combined 1.25e3 -9.75E+2
+  special #nan #inf #-inf
+
+  // Language constants in argument and property positions.
+  constants #true #false #null
+  flags enabled=#true visible=#false replacement=#null
+
+  // Quoted strings and every escape recognized by the grammar.
+  quoted "plain text" empty=""
+  escaped "quote=\" slash=\\ backspace=\b formfeed=\f newline=\n"
+  controls "return=\r space=\s tab=\t lambda=\u{03bb}"
+  unicode-string "café λ 東京 🚀 𝌆"
+
+  // Hash-delimited raw strings preserve quotes and backslashes.
+  raw-basic #"a "quoted" path \\server\share"#
+  raw-hashes ##"literal # and "quotes" beside 東京"##
+  raw-unicode ###"café λ 東京 🚀 𝌆"###
+
+  // Normal multiline strings carry state across several lines.
+  multiline """
+    first line: café and λ
+    second line: 東京 and 🚀
+    third line: 𝌆 and an escaped quote \"
+  """
+
+  // Raw multiline strings use matching hashes and triple quotes.
+  raw-multiline ##"""
+    raw line with "quotes" and a \\backslash
+    raw Unicode: café λ 東京
+    raw symbols: 🚀 𝌆
+  """##
+
+  // Annotations can describe nodes, arguments, and property values.
+  (database)primary (dsn)#"postgres://db/main"# pool=(count)16 {
+    endpoint host="db.internal" port=(u16)5432
+    credentials user="mark" secret=#null
+  }
+  (cache)redis (url)"redis://cache:6379" ttl=(seconds)300
+
+  // Properties and positional arguments can be mixed.
+  server "api" "production" host="127.0.0.1" port=8080 secure=#true {
+    route "/health" method="GET" status=200
+    route "/v1/items" method="POST" status=201
+    limit requests=1_000 window=(seconds)60
+  }
+
+  // Semicolons exercise node names following an inline terminator.
+  colors red="ff0000"; green value="00ff00"; blue value="0000ff"
+  coordinates x=12.5; y value=-7.25; z value=0.0
+
+  // Line comments terminate without leaking state.
+  logging level="info" // trailing line comment
+  tracing enabled=#true // another closed line comment
+
+  /* A regular block comment occupies one line. */
+  /* A multiline block comment begins here.
+     It can contain punctuation { } = ; and quoted-looking "text".
+     The state closes before the next node. */
+  after-block "visible"
+
+  /** Documentation comment for deployment defaults. */
+  /*! Documentation can also use the emphatic opener. */
+  deployment-defaults replicas=3 strategy="rolling"
+
+  /* outer block level one
+     /** nested documentation level two
+         /* nested regular level three
+            /*! nested documentation level four */
+            level three closes here */
+         level two closes here */
+     level one closes here */
+  after-nested-comments closed=#true
+
+  // Slashdash an argument and a property within an ordinary node.
+  selection stable /- experimental channel="beta" /- retired=#true current=#true
+  numbers-kept 1 /- 999 2 3
+
+  // Slashdash a complete node without children.
+  /- deprecated-service image="old:v1" replicas=1
+  replacement-service image="new:v2" replicas=2
+
+  // Slashdash a complete node that owns a child block.
+  /- retired-cluster region="legacy" {
+    retired-worker count=4
+    retired-note "the slashdash state closes at the matching brace"
+  }
+
+  // Slashdash a child block after a node's retained arguments.
+  retained-node "configuration"
+  /- {
+    discarded-child "temporary"
+    discarded-value enabled=#false
+  }
+  retained-after-block "still tokenized"
+
+  environments {
+    environment "development" debug=#true replicas=1 {
+      variable name="RUST_LOG" value="debug"
+      variable name="REGION" value="local"
+      endpoint "http://localhost:8080"
+    }
+    environment "staging" debug=#false replicas=2 {
+      variable name="RUST_LOG" value="info"
+      variable name="REGION" value="eu-west"
+      endpoint "https://staging.example.test"
+    }
+    environment "production" debug=#false replicas=6 {
+      variable name="RUST_LOG" value="warn"
+      variable name="REGION" value="ap-northeast"
+      endpoint "https://example.test"
+    }
+  }
+
+  pipelines {
+    pipeline "build" timeout=(seconds)900 {
+      step "checkout" order=1 required=#true
+      step "compile" order=2 required=#true
+      step "unit-test" order=3 required=#true
+    }
+    pipeline "release" timeout=(seconds)1_800 {
+      step "package" order=1 required=#true
+      step "sign" order=2 required=#true
+      step "publish" order=3 required=#false
+    }
+  }
+
+  matrix {
+    target os="linux" arch="x86_64" enabled=#true
+    target os="linux" arch="aarch64" enabled=#true
+    target os="macos" arch="aarch64" enabled=#true
+    target os="windows" arch="x86_64" enabled=#false
+  }
+
+  localization {
+    locale "fr-FR" label="café" direction="ltr"
+    locale "el-GR" label="λ" direction="ltr"
+    locale "ja-JP" label="東京" direction="ltr"
+    locale "symbols" label="🚀 𝌆" direction=#null
+  }
+
+  artifacts {
+    artifact "mark-linux" size=12_345 checksum=0xCAFE_babe
+    artifact "mark-macos" size=23_456 checksum=0xFEED_face
+    artifact "mark-windows" size=34_567 checksum=0xABCD_0123
+  }
+
+  final-state strings="closed" comments="closed" children="closed"
+}
+// End of fixture: no multiline state should remain open.

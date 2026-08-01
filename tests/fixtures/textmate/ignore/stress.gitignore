@@ -1,0 +1,169 @@
+# Mark repository ignore policy
+# Build output
+/target/
+/debug/
+/release/
+/dist/
+/build/
+/out/
+.cache/
+.tmp/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+*.pdb
+*.dSYM/
+
+# Rust
+Cargo.lock
+!examples/**/Cargo.lock
+**/*.rs.bk
+
+# JavaScript and TypeScript
+node_modules/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tsbuildinfo
+.next/
+.nuxt/
+.svelte-kit/
+.astro/
+coverage/
+.nyc_output/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+# JVM and Kotlin
+*.class
+*.jar
+*.war
+*.ear
+.gradle/
+.kotlin/
+.idea_modules/
+
+# Go
+/bin/
+*.test
+*.out
+go.work.sum
+
+# Zig
+zig-cache/
+zig-out/
+.zig-cache/
+
+# Native toolchains
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+compile_commands.json
+Makefile.generated
+*.gcda
+*.gcno
+*.profraw
+*.profdata
+
+# Editors
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+.#*
+.DS_Store
+Thumbs.db
+
+# Local secrets
+.env
+.env.*
+!.env.example
+!.env.test.example
+*.pem
+*.key
+secrets/
+credentials.json
+
+# Generated documentation
+/site/
+/book/
+/docs/api/
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.typst-cache/
+
+# Test artifacts
+junit.xml
+test-results/
+playwright-report/
+playwright/.cache/
+snapshots/actual/
+fixtures/generated/
+!fixtures/generated/.gitkeep
+
+# Benchmarks and profiles
+criterion/
+bench-results/
+flamegraph.svg
+perf.data
+perf.data.old
+*.trace
+*.cpuprofile
+*.heapprofile
+
+# Containers and deployment
+.docker/
+docker-compose.override.yml
+terraform.tfstate
+terraform.tfstate.*
+.terraform/
+.terraform.lock.hcl
+.kube/cache/
+
+# Package archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# Temporary files at any depth
+**/.cache/**
+**/.tmp/**
+**/scratch/**
+**/*.generated
+
+# Keep reviewed samples and directory sentinels
+!samples/**/*.generated
+!**/.gitkeep
+!docs/examples/**

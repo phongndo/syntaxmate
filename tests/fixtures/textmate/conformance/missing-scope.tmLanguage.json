@@ -1,0 +1,15 @@
+{
+  "scopeName": "source.missing-scope-conformance",
+  "patterns": [
+    {
+      "begin": "<",
+      "end": ">",
+      "name": "meta.region.missing-scope-conformance",
+      "patterns": [
+        { "include": "source.not-present-in-bundle" }
+      ]
+    },
+    { "include": "source.not-present-in-bundle" },
+    { "match": "ok", "name": "keyword.control.missing-scope-conformance" }
+  ]
+}

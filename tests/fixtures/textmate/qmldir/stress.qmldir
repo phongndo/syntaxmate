@@ -1,0 +1,147 @@
+# Nebula component directory — Unicode: Ελληνικά, 日本語, café, 🚀
+module Nebula.Controls
+plugin nebulacontrols
+classname NebulaControlsPlugin
+typeinfo plugins.qmltypes
+depends QtQuick 2.15
+depends QtQuick.Controls 2.15
+depends QtQml 2.15
+designersupported
+
+# Public foundations
+AbstractButton 1.0 AbstractButton.qml
+AbstractButton 2.0 AbstractButtonV2.qml
+Action 1.0 Action.qml
+ActionGroup 1.0 ActionGroup.qml
+ApplicationWindow 1.0 ApplicationWindow.qml
+BusyIndicator 1.0 BusyIndicator.qml
+Button 1.0 Button.qml
+Button 1.1 Button11.qml
+Button 2.0 ButtonV2.qml
+ButtonGroup 1.0 ButtonGroup.qml
+Calendar 1.0 Calendar.qml
+CheckBox 1.0 CheckBox.qml
+CheckDelegate 1.0 CheckDelegate.qml
+ComboBox 1.0 ComboBox.qml
+Container 1.0 Container.qml
+Control 1.0 Control.qml
+DelayButton 1.0 DelayButton.qml
+Dial 1.0 Dial.qml
+Dialog 1.0 Dialog.qml
+DialogButtonBox 1.0 DialogButtonBox.qml
+Drawer 1.0 Drawer.qml
+Frame 1.0 Frame.qml
+GroupBox 1.0 GroupBox.qml
+ItemDelegate 1.0 ItemDelegate.qml
+Label 1.0 Label.qml
+Menu 1.0 Menu.qml
+MenuBar 1.0 MenuBar.qml
+MenuBarItem 1.0 MenuBarItem.qml
+MenuItem 1.0 MenuItem.qml
+MenuSeparator 1.0 MenuSeparator.qml
+Page 1.0 Page.qml
+PageIndicator 1.0 PageIndicator.qml
+Pane 1.0 Pane.qml
+Popup 1.0 Popup.qml
+ProgressBar 1.0 ProgressBar.qml
+RadioButton 1.0 RadioButton.qml
+RadioDelegate 1.0 RadioDelegate.qml
+RangeSlider 1.0 RangeSlider.qml
+RoundButton 1.0 RoundButton.qml
+ScrollBar 1.0 ScrollBar.qml
+ScrollIndicator 1.0 ScrollIndicator.qml
+ScrollView 1.0 ScrollView.qml
+Slider 1.0 Slider.qml
+SpinBox 1.0 SpinBox.qml
+SplitView 1.0 SplitView.qml
+StackView 1.0 StackView.qml
+SwipeDelegate 1.0 SwipeDelegate.qml
+SwipeView 1.0 SwipeView.qml
+Switch 1.0 Switch.qml
+SwitchDelegate 1.0 SwitchDelegate.qml
+TabBar 1.0 TabBar.qml
+TabButton 1.0 TabButton.qml
+TextArea 1.0 TextArea.qml
+TextField 1.0 TextField.qml
+ToolBar 1.0 ToolBar.qml
+ToolButton 1.0 ToolButton.qml
+ToolSeparator 1.0 ToolSeparator.qml
+ToolTip 1.0 ToolTip.qml
+Tumbler 1.0 Tumbler.qml
+
+# Singleton QML and JavaScript resources
+singleton Theme 1.0 Theme.qml
+singleton Theme 2.0 ThemeV2.qml
+singleton Metrics 1.0 Metrics.qml
+singleton Palette 1.0 Palette.qml
+singleton Icons 1.0 Icons.js
+singleton LocaleData 1.0 LocaleData.js
+singleton Motion 1.0 Motion.js
+singleton Typography 1.0 Typography.qml
+
+# Internal implementation types
+internal AccentResolver AccentResolver.qml
+internal ArrowButton ArrowButton.qml
+internal BackgroundLayer BackgroundLayer.qml
+internal ButtonPanel ButtonPanel.qml
+internal CalendarModel CalendarModel.qml
+internal CheckIndicator CheckIndicator.qml
+internal ComboPopup ComboPopup.qml
+internal DialogHandle DialogHandle.qml
+internal FocusFrame FocusFrame.qml
+internal IconLabel IconLabel.qml
+internal MenuContent MenuContent.qml
+internal PopupPositioner PopupPositioner.qml
+internal RangeHandle RangeHandle.qml
+internal ScrollHandle ScrollHandle.qml
+internal ShadowLayer ShadowLayer.qml
+internal SliderGroove SliderGroove.qml
+internal SpinEditor SpinEditor.qml
+internal SplitHandle SplitHandle.qml
+internal SwipeStrip SwipeStrip.qml
+internal TabHighlight TabHighlight.qml
+internal TextCursorHandle TextCursorHandle.qml
+internal ToolTipLabel ToolTipLabel.qml
+internal TumblerView TumblerView.qml
+
+# Additional versions exercise numeric and filename recognition
+Badge 1.0 Badge.qml
+Badge 1.5 Badge15.qml
+Badge 2.0 BadgeV2.qml
+Breadcrumb 1.0 Breadcrumb.qml
+Card 1.0 Card.qml
+Card 1.4 Card14.qml
+Chip 1.0 Chip.qml
+Chip 2.0 ChipV2.qml
+ColorDialog 1.0 ColorDialog.qml
+CommandPalette 1.0 CommandPalette.qml
+DatePicker 1.0 DatePicker.qml
+Divider 1.0 Divider.qml
+Expander 1.0 Expander.qml
+FloatingButton 1.0 FloatingButton.qml
+FormLayout 1.0 FormLayout.qml
+InfoBar 1.0 InfoBar.qml
+KeySequenceEditor 1.0 KeySequenceEditor.qml
+LinkButton 1.0 LinkButton.qml
+NavigationBar 1.0 NavigationBar.qml
+NavigationRail 1.0 NavigationRail.qml
+Notification 1.0 Notification.qml
+NumberField 1.0 NumberField.qml
+PasswordField 1.0 PasswordField.qml
+PathBreadcrumb 1.0 PathBreadcrumb.qml
+SearchField 1.0 SearchField.qml
+SegmentedButton 1.0 SegmentedButton.qml
+Skeleton 1.0 Skeleton.qml
+StatusBadge 1.0 StatusBadge.qml
+StepIndicator 1.0 StepIndicator.qml
+Tag 1.0 Tag.qml
+TimePicker 1.0 TimePicker.qml
+Toast 1.0 Toast.qml
+TreeView 1.0 TreeView.qml
+TreeView 1.2 TreeView12.qml
+TreeView 2.0 TreeViewV2.qml
+WindowTitleBar 1.0 WindowTitleBar.qml
+
+# Tooling metadata can use another recognized qmltypes filename.
+typeinfo nebula.qmltypes
+# End of representative qmldir source.

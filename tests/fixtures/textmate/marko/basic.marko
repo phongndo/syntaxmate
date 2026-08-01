@@ -1,0 +1,19 @@
+static type Greeting = { name: string; excited?: boolean };
+$ const greeting: Greeting = { name: "café 東京 λ", excited: true };
+<!DOCTYPE html>
+<!-- Basic Marko host fixture: 🚀 𝌆 -->
+<article.card data-locale="ja-JP" aria-live="polite">
+  <h1 class:excited=greeting.excited>Hello ${greeting.name}!</h1>
+  <p title="Unicode café">Rendered safely: $!{input.message}</p>
+  <script>
+    const symbols: string[] = ["λ", "東京", "🚀", "𝌆"];
+    console.log(symbols.join(" · "));
+  </script>
+  <style>
+    .card { color: rebeccapurple; }
+    .excited { font-weight: 700; }
+  </style>
+  <![CDATA[
+    literal <markup> stays text & café
+  ]]>
+</article>

@@ -1,0 +1,179 @@
+syntax = "proto2";
+
+package fixture.stress.v1;
+
+import "google/protobuf/descriptor.proto";
+import public "shared/public_types.proto";
+import weak "legacy/weak_types.proto";
+
+// A line comment contains BMP text: café, naïve, Ελληνικά, 日本語.
+/* A block comment starts with punctuation { [ ( " ' and schema words.
+   It continues across a line with astral symbols 🚀 🛰️ 𝌆 and emoji 😀.
+   Nothing inside, including message Fake {}, should become declarations. */
+
+option java_package = "dev.example.日本語";
+option java_multiple_files = true;
+option optimize_for = SPEED;
+option (fixture.file_mode) = max;
+option (fixture.audit).label = 'café 🚀 with \'quote\'';
+option (fixture.audit).ratio = 6.022e+23;
+option (fixture.audit).leading = .625;
+option (fixture.audit).hex = 0xCAFE;
+option (fixture.audit).config = {
+  enabled: true,
+  retries: 3,
+  title: "Unicode 日本語 🛰️",
+  nested: {
+    flag: false;
+    mode: STRICT
+  }
+};
+
+message ScalarMatrix {
+  reserved 40;
+  reserved 50 to 59;
+  reserved "former_name", 'legacy_alias';
+
+  required double double_value = 1 [default = 1.25];
+  optional float float_value = 2 [default = -3.5e-2];
+  optional int32 int32_value = 3 [default = -17];
+  optional int64 int64_value = 4 [default = 9000000000];
+  optional uint32 uint32_value = 5 [default = 42];
+  optional uint64 uint64_value = 6 [default = 184467];
+  optional sint32 sint32_value = 7;
+  optional sint64 sint64_value = 8;
+  optional fixed32 fixed32_value = 9 [default = 0x2A];
+  optional fixed64 fixed64_value = 10;
+  optional sfixed32 sfixed32_value = 11;
+  optional sfixed64 sfixed64_value = 12;
+  optional bool bool_value = 13 [default = true];
+  optional string string_value = 14 [default = "café 日本語 🚀 𝌆"];
+  optional bytes bytes_value = 15 [default = "A\\x42\\n"];
+
+  repeated string labels = 16;
+  .fixture.stress.v1.External absolute_type = 17;
+  fixture.stress.v1.Relative dotted_type = 18;
+  Local plain_type = 19;
+
+  map<string, int64> totals = 20;
+  map<fixed64, .fixture.stress.v1.External> lookup = 21
+      [deprecated = false, (fixture.map_hint).name = "wide"];
+
+  oneof selection {
+    option (fixture.choice) = { priority: 7 };
+    string by_name = 22 [json_name = "byName"];
+    uint64 by_id = 23;
+    // Comments are legal in the oneof include closure.
+    bytes opaque = 24;
+  }
+
+  message Local {
+    option (fixture.message_info) = {
+      owner: "syntax",
+      stable: true
+    };
+    required sfixed64 key = 1;
+    optional string note = 2 [default = 'BMP Ω; astral 😀'];
+
+    message Deeper {
+      optional bool active = 1 [default = false];
+      optional double epsilon = 2 [default = 1e-9];
+    }
+
+    enum InnerKind {
+      option allow_alias = true;
+      INNER_KIND_UNSPECIFIED = 0;
+      INNER_KIND_FIRST = 1;
+      INNER_KIND_ALIAS = 1 [deprecated = false];
+      INNER_KIND_NEGATIVE = -2;
+      INNER_KIND_HEX = 0x2A;
+      INNER_KIND_LOWER_HEX = -0x2a;
+    }
+  }
+}
+
+extend ScalarMatrix {
+  optional string extension_text = 100 [default = "extended 🚀"];
+  repeated uint32 extension_ids = 101 [packed = true];
+}
+
+enum Lifecycle {
+  reserved 7;
+  reserved 20 to 29;
+  reserved "REMOVED", 'OBSOLETE';
+  option allow_alias = true;
+
+  LIFECYCLE_UNSPECIFIED = 0;
+  LIFECYCLE_STARTING = 1;
+  LIFECYCLE_RUNNING = 2 [deprecated = false];
+  LIFECYCLE_STOPPED = 3 [(fixture.enum_value).label = "arrêté"];
+  LIFECYCLE_ALIAS = 3;
+  LIFECYCLE_NEGATIVE = -4;
+  LIFECYCLE_HEX = 0X2F;
+}
+
+message Request {
+  required string query = 1;
+  optional uint32 page_size = 2 [default = 25];
+  optional string page_token = 3;
+  repeated string locale = 4 [(fixture.normalize) = LOWER_CASE];
+}
+
+message Response {
+  repeated Result results = 1;
+  optional string next_page_token = 2;
+
+  message Result {
+    required uint64 id = 1;
+    required string title = 2;
+    optional string summary = 3 [default = "résumé 日本語 😀"];
+    optional Lifecycle lifecycle = 4 [default = LIFECYCLE_RUNNING];
+  }
+}
+
+service Catalog {
+  option deprecated = false;
+  option (fixture.service_info) = {
+    owner: "language-tools",
+    tier: TIER_A,
+    metadata: { unicode: "Ω 🚀" }
+  };
+
+  // Semicolon-ended unary RPC.
+  rpc Get (Request) returns (Response);
+
+  // Both occurrences of stream are rpcKeywords.
+  rpc Watch (stream .fixture.stress.v1.Request)
+      returns (stream .fixture.stress.v1.Response);
+
+  rpc Create (Request) returns (Response) {
+    option deprecated = true;
+    option (fixture.http) = {
+      post: "/v1/catalog/{query}",
+      body: "*"
+    };
+  }
+
+  rpc Delete (.fixture.stress.v1.Request) returns (.fixture.stress.v1.Response) {
+    // Method bodies include comments and options.
+    option (fixture.permission) = 'catalog.delete';
+  }
+}
+
+message FormattingEdges {
+  optional int32 hexadecimal_tag = 0X2A;
+  optional string escaped = 43
+      [default = "quote=\" slash=\\ tab=\t", (fixture.note) = 'single'];
+  map<string,string> compact_map=44[(fixture.map)={enabled:true,label:"tight"}];
+  oneof compact_choice {
+    int32 first=45;
+    string second = 46 [default="second"];
+  }
+
+  /* Multiple declarations on one physical line exercise begin/end restart. */
+  optional bool alpha = 47; optional bool beta = 48 [default = false];
+  enum Compact { ZERO = 0; ONE = 1; NEG = -1; }
+  message Child { required bytes data = 1; }
+}
+
+// Final BMP λ and astral 🌌 ensure UTF-16/UTF-8 offsets near the end.

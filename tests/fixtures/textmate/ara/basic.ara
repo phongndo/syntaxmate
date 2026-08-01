@@ -1,0 +1,25 @@
+namespace Aurora\Messages;
+
+// A compact greeting for 世界, café visitors, and astronaut Ada 🚀.
+readonly class Greeter extends Core\Speaker implements Contracts\Renderable {
+    private string $prefix = "Hello\n";
+    public function greet(string $name, int $visits = 0): string {
+        /* Escapes and Unicode stay meaningful: λ, 東京, 🌍. */
+        return "$prefix$name — visit \x2A \101";
+    }
+}
+
+const HEX_MASK = 0xCA_FE;
+const BITS = 0b1010_0110;
+const MODE = 0o755;
+const LEGACY = 0755;
+const RATIO = 1_024.50e-2;
+
+$guest = new Greeter(name: "Mira 🛰️", visits: 3);
+$message = Aurora\Messages\format::<string>($guest?->greet());
+$fallback = $message ?? 'مرحبًا بالعالم 🌙';
+if ($visits >= 3 && $message !== null) {
+    render(title: "Résumé ✨", body: $fallback, locale: 'العربية');
+} else {
+    return clone $guest;
+}

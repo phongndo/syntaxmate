@@ -1,0 +1,160 @@
+Make commit previews preserve Unicode metadata and patches 🚀
+
+The commit editor previously rebuilt its preview from an ASCII-only cache.
+That made contributor names such as Søren, Łucja, and 山田 render incorrectly
+after a draft was reopened. Store the original text and normalize only line
+endings so grapheme data survives a complete edit-and-preview cycle.
+
+Teach the preview to retain comments emitted by Git, while keeping those
+comments out of the final message. The parser now distinguishes the message,
+the editor metadata block, and an optional patch introduced by `git commit -v`.
+
+The attached patch includes multiple files because the behavior crosses the
+loader, renderer, tests, and user documentation. It deliberately includes a long diagnostic example that exceeds seventy-two columns so the grammar's illegal-length scope remains covered.
+
+Validation:
+- reopened a UTF-8 draft on Linux and macOS
+- checked staged, renamed, deleted, and untracked paths
+- compared the verbose patch with `git diff --cached`
+- confirmed the final newline remains present
+
+Co-authored-by: Zoë Nakamura <zoe@example.test>
+Signed-off-by: Avery Chen <avery@example.test>
+
+# Please enter the commit message for your changes. Lines starting
+# with '#' will be ignored, and an empty message aborts the commit.
+#
+# Date:      Sun Jul 12 14:32:08 2026 +0000
+#
+# On branch feature/commit-preview
+# Your branch is ahead of 'origin/feature/commit-preview' by 2 commits.
+#   (use "git push" to publish your local commits)
+#
+# Changes to be committed:
+#	modified:   src/commit/preview.rs
+#	modified:   src/commit/parser.rs
+#	new file:   tests/fixtures/unicode-message.txt
+#	deleted:    tests/fixtures/ascii-only-message.txt
+#	renamed:    docs/commit-editor.txt -> docs/commit-editor.md
+#
+# Changes not staged for commit:
+#	modified:   README.md
+#
+# Untracked files:
+#	note:       notes/manual-preview-checks.md
+diff --git a/src/commit/preview.rs b/src/commit/preview.rs
+index 9d2f151..ad72c8e 100644
+--- a/src/commit/preview.rs
++++ b/src/commit/preview.rs
+@@ -1,16 +1,28 @@
+ use std::borrow::Cow;
+ 
+-pub fn render(raw: &[u8]) -> String {
+-    String::from_utf8_lossy(raw).trim().to_owned()
++pub struct Preview<'a> {
++    pub message: Cow<'a, str>,
++    pub metadata: Vec<Cow<'a, str>>,
++    pub patch: Option<Cow<'a, str>>,
++}
++
++pub fn render(raw: &[u8]) -> Preview<'_> {
++    let source = String::from_utf8_lossy(raw);
++    let normalized = source.replace("\r\n", "\n");
++    let (message, remainder) = split_metadata(&normalized);
++    let (metadata, patch) = split_patch(remainder);
++
++    Preview {
++        message: Cow::Owned(message.trim_end().to_owned()),
++        metadata: metadata.lines().map(Cow::Borrowed).collect(),
++        patch: patch.map(|value| Cow::Owned(value.to_owned())),
++    }
+ }
+ 
+-fn sanitize(line: &str) -> Cow<'_, str> {
+-    if line.is_ascii() {
+-        Cow::Borrowed(line)
+-    } else {
+-        Cow::Owned(line.chars().filter(char::is_ascii).collect())
+-    }
++fn split_metadata(source: &str) -> (&str, &str) {
++    source
++        .find("\n#")
++        .map(|offset| source.split_at(offset + 1))
++        .unwrap_or((source, ""))
+ }
+diff --git a/src/commit/parser.rs b/src/commit/parser.rs
+index 31a87bc..54ef62a 100644
+--- a/src/commit/parser.rs
++++ b/src/commit/parser.rs
+@@ -22,12 +22,25 @@ pub fn split_patch(source: &str) -> (&str, Option<&str>) {
+-    match source.find("diff --git") {
+-        Some(offset) => (&source[..offset], Some(&source[offset..])),
+-        None => (source, None),
++    let marker = "diff --git ";
++    for (offset, line) in source.match_indices(marker) {
++        let starts_line = offset == 0 || source.as_bytes()[offset - 1] == b'\n';
++        if starts_line && line == marker {
++            return (&source[..offset], Some(&source[offset..]));
++        }
+     }
++    (source, None)
+ }
+ 
++pub fn visible_metadata(source: &str) -> impl Iterator<Item = &str> {
++    source.lines().filter(|line| {
++        line.starts_with("#\tmodified:")
++            || line.starts_with("#\tnew file:")
++            || line.starts_with("#\tdeleted:")
++            || line.starts_with("#\trenamed:")
++    })
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+diff --git a/tests/commit_preview.rs b/tests/commit_preview.rs
+index 77a90af..cf62110 100644
+--- a/tests/commit_preview.rs
++++ b/tests/commit_preview.rs
+@@ -4,9 +4,22 @@ use mark::commit::preview::render;
+ #[test]
+-fn strips_non_ascii_from_subject() {
+-    let preview = render("release cafe\n".as_bytes());
+-    assert_eq!(preview, "release cafe");
++fn preserves_unicode_subject_and_body() {
++    let draft = "Render café, 東京, and rocket 🚀\n\nBody by Zoë.\n";
++    let preview = render(draft.as_bytes());
++    assert_eq!(preview.message, "Render café, 東京, and rocket 🚀\n\nBody by Zoë.");
++    assert!(preview.patch.is_none());
++}
++
++#[test]
++fn separates_git_metadata_from_message() {
++    let draft = concat!(
++        "Keep the subject\n\n",
++        "Explain the reason.\n",
++        "# On branch main\n",
++        "#\tmodified:   src/lib.rs\n",
++    );
++    let preview = render(draft.as_bytes());
++    assert_eq!(preview.message, "Keep the subject\n\nExplain the reason.");
++    assert_eq!(preview.metadata.len(), 2);
++}
++
++#[test]
++fn keeps_verbose_patch_verbatim() {
++    assert!(render(b"Subject\n").patch.is_none());
+ }
+diff --git a/tests/fixtures/unicode-message.txt b/tests/fixtures/unicode-message.txt
+new file mode 100644
+index 0000000..b4f81a2
+--- /dev/null
++++ b/tests/fixtures/unicode-message.txt
+@@ -0,0 +1,7 @@
++Preserve contributor names and symbols 🚀
++
++The renderer keeps Ελληνικά, 日本語, café, and an astral symbol 𝌆.
++
++# On branch feature/unicode
++# Changes to be committed:
++#\tnew file:   tests/fixtures/unicode-message.txt

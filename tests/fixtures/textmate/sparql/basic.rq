@@ -1,0 +1,24 @@
+# Compact SPARQL 1.1 fixture with Turtle terms: café, 東京, 🚀, 𝌆.
+BASE <https://example.org/>
+PREFIX ex: <https://example.org/schema/>
+PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+SELECT DISTINCT ?person ?name (STRLEN(STR(?name)) AS ?length)
+WHERE {
+  VALUES (?person ?minimum) {
+    (ex:ada 10)
+    (ex:grace 20)
+  }
+  ?person a foaf:Person ;
+          foaf:name ?name ;
+          ex:score ?score ;
+          ex:greeting """Bonjour café
+東京 launches 🚀 with 𝌆
+and every multiline delimiter is closed."""@en .
+  OPTIONAL { ?person foaf:nick ?nickname . }
+  BIND(COALESCE(?nickname, ?name) AS ?label)
+  FILTER(?score >= ?minimum && LANGMATCHES(LANG(?name), "en"))
+}
+ORDER BY DESC(?length) ASC(UCASE(STR(?name)))
+LIMIT 10

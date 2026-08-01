@@ -1,0 +1,21 @@
+// A compact scene with labels, commands, values, and interpolation.
+main:
+  var $visitor "café 東京 λ"
+  set $ready true
+  talk player "Welcome, %{visitor}! 🚀 𝌆"
+  if ($ready == true)
+    think player "The launch pad is ready."
+    set $score (10 + 5)
+  else
+    talk player "We should wait."
+  choice:
+    "Launch now":
+      notify "Mission started"
+      run prepare
+    "Save first":
+      save "pre-launch"
+  return
+
+prepare:
+  wait 250
+  jump main

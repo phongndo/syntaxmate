@@ -1,0 +1,22 @@
+# A small freedesktop application launcher
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Mark Preview
+Name[ja]=Mark プレビュー 🚀
+GenericName=Syntax-aware diff viewer
+Comment=Review changes with Unicode: café, 世界, 🧪
+Icon=dev.mark.Mark
+TryExec=mark
+Exec=mark --new-window %F
+Path=/home/developer/Projects
+Terminal=false
+StartupNotify=true
+Categories=Development;Utility;
+MimeType=text/plain;text/x-rust;
+Keywords=diff;review;syntax;
+Actions=NewWindow;
+
+[Desktop Action NewWindow]
+Name=Open a New Window
+Exec=mark --new-window %U

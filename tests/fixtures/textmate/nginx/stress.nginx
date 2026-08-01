@@ -1,0 +1,218 @@
+# Production-style coverage fixture — café, 日本語, 🚀, and 𝌆 stay UTF-8.
+user nginx nginx;
+worker_processes auto;
+worker_rlimit_nofile 65535;
+error_log /var/log/nginx/error.log notice;
+pid /run/nginx.pid;
+env APP_MODE=production;
+pcre_jit on;
+init_by_lua_block {
+    local seed = 41
+    package.loaded.fixture_seed = seed + 1
+}
+events {
+    worker_connections 4096;
+    multi_accept on;
+    accept_mutex off;
+    debug_connection 127.0.0.1;
+}
+http {
+    include mime.types;
+    default_type application/octet-stream;
+    charset utf-8;
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65s;
+    keepalive_requests 1000;
+    client_max_body_size 16M;
+    client_body_timeout 15s;
+    server_tokens off;
+    variables_hash_max_size 2048;
+    types_hash_bucket_size 64;
+    log_format main '$remote_addr [$time_local] "$request" $status '
+                    '$body_bytes_sent "$http_referer" "$http_user_agent"';
+    access_log /var/log/nginx/access.log main;
+    open_log_file_cache max=1000 inactive=20s valid=1m min_uses=2;
+    gzip on;
+    gzip_comp_level 5;
+    gzip_types text/plain text/css application/json application/javascript;
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        '' close;
+    }
+    map $http_accept_language $site_language {
+        ~*^ja 日本語;
+        ~*^fr café;
+        default en;
+    }
+    types {
+        text/html html htm;
+        text/css css;
+        application/javascript js mjs;
+        application/wasm wasm;
+        image/svg+xml svg svgz;
+    }
+    upstream app_backend {
+        zone app_backend 64k;
+        least_conn;
+        server 10.0.0.11:8080 weight=3 max_fails=2 fail_timeout=10s;
+        server 10.0.0.12:8080 weight=2 max_conn=100;
+        server unix:/run/app.sock backup;
+        keepalive 32;
+        balancer_by_lua_block {
+            local balancer = require "ngx.balancer"
+            if ngx.var.arg_canary == "1" then
+                balancer.set_current_peer("10.0.0.13", 8080)
+            end
+        }
+    }
+    limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
+    limit_conn_zone $binary_remote_addr zone=perip:10m;
+    proxy_cache_path /var/cache/nginx levels=1:2 keys_zone=pages:20m inactive=30m;
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        server_name example.test www.example.test;
+        root /srv/www/example;
+        index index.html index.htm;
+        error_page 404 /errors/404.html;
+        if ($host != example.test) {
+            return 308 https://example.test$request_uri;
+        }
+        location = /healthz {
+            access_log off;
+            add_header Content-Type text/plain;
+            return 200 "ok 🚀\n";
+        }
+        location ^~ /static/ {
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+            try_files $uri =404;
+        }
+        location ~* "^/assets/(café|日本語)/.*\\.(css|js)$" {
+            gzip_static on;
+            log_not_found off;
+            try_files $uri /fallback/index.html;
+        }
+        location /api/ {
+            limit_req zone=api burst=40 nodelay;
+            limit_conn perip 20;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Request-ID ${request_id};
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection $connection_upgrade;
+            proxy_connect_timeout 3s;
+            proxy_read_timeout 30s;
+            proxy_pass http://app_backend;
+            access_by_lua_block {
+                local token = ngx.var.http_x_fixture_token
+                if token == "deny" then
+                    return ngx.exit(ngx.HTTP_FORBIDDEN)
+                end
+            }
+        }
+
+        location /private/ {
+            auth_basic "Restricted café";
+            auth_basic_user_file /etc/nginx/htpasswd;
+            limit_except GET HEAD {
+                deny all;
+            }
+            try_files $uri $uri/ =404;
+        }
+
+        location /legacy/ {
+            rewrite ^/legacy/(.*)$ /archive/$1 permanent;
+        }
+
+        location /lua-status {
+            set $fixture_label "日本語-🚀-𝌆";
+            content_by_lua_block {
+                local label = ngx.var.fixture_label
+                ngx.header.content_type = "application/json"
+                ngx.say(string.format("%q", label))
+            }
+            log_by_lua 'ngx.log(ngx.INFO, "served ", ngx.var.uri)';
+        }
+
+        location /uploads/ {
+            client_body_buffer_size 128k;
+            dav_methods PUT DELETE;
+            create_full_put_path on;
+            autoindex on;
+            autoindex_format json;
+        }
+    }
+
+    server {
+        listen 443 ssl http2;
+        server_name secure.example.test;
+        ssl_certificate /etc/nginx/tls/example.crt;
+        ssl_certificate_key /etc/nginx/tls/example.key;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_ciphers "HIGH:!aNULL:!MD5";
+        ssl_session_cache shared:TLS:10m;
+        ssl_session_timeout 10m;
+
+        ssl_certificate_by_lua_block {
+            local host = ngx.var.ssl_server_name
+            ngx.log(ngx.DEBUG, "certificate for ", host)
+        }
+
+        location /grpc.Service/ {
+            grpc_set_header X-Request-ID $request_id;
+            grpc_read_timeout 60s;
+            grpc_pass grpc://127.0.0.1:50051;
+        }
+
+        location ~ \.php$ {
+            fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param PATH_INFO $fastcgi_path_info;
+            fastcgi_pass unix:/run/php/php-fpm.sock;
+        }
+    }
+}
+
+mail {
+    auth_http 127.0.0.1:9000/auth;
+    proxy_timeout 30s;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    server {
+        listen 2525;
+        protocol smtp;
+        smtp_auth plain login;
+        smtp_capabilities "SIZE 10485760" "8BITMIME" "SMTPUTF8";
+        xclient off;
+    }
+}
+
+stream {
+    map $ssl_preread_server_name $stream_backend {
+        api.example.test api_tls;
+        default ssh_backend;
+    }
+
+    upstream api_tls {
+        server 10.0.1.10:443 weight=2 max_fails=3 fail_timeout=15s;
+        server 10.0.1.11:443 backup;
+    }
+
+    upstream ssh_backend {
+        hash $remote_addr consistent;
+        server 10.0.2.20:22;
+    }
+
+    server {
+        listen 8443 reuseport;
+        proxy_connect_timeout 5s;
+        proxy_timeout 1m;
+        proxy_pass $stream_backend;
+        ssl_preread on;
+        preread_buffer_size 16k;
+    }
+}

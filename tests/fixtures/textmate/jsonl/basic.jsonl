@@ -1,0 +1,20 @@
+{}
+[]
+{"id":1,"active":true,"deleted":false,"note":null}
+{"name":"Ada Lovelace","role":"engineer","team":"compiler"}
+{"integer":42,"negative":-17,"zero":0,"fraction":3.14159,"scientific":6.022e23,"tiny":-1.25E-7}
+{"tags":["jsonl","fixtures","syntax"],"scores":[0,1,2.5,-4e2]}
+{"user":{"id":"u-1042","profile":{"display":"Renée 東京","emoji":"🚀"}},"roles":["reader","author"]}
+{"escaped":"quote: \"; slash: \/; backslash: \\; controls: \b\f\n\r\t; omega: \u03A9"}
+{"BMP":"café Ελληνικά हिन्दी 中文","astral":"😀 𐍈 𝄞 🛰️"}
+{"line\nbreak":"escaped key","quote\"key":true,"snowman\u2603":"escaped Unicode key"}
+{"matrix":[[1,2],[3,4]],"points":[{"x":-1.5,"y":2.75},{"x":0,"y":0}]}
+{"empty":{"object":{},"array":[],"string":""},"nullable":[null,null]}
+true
+false
+null
+0
+-273.15
+"top-level string with 🌍 and \uD83D\uDE80"
+[true,false,null,{"nested":["a",{"b":2}]}]
+{"event":"deploy.finished","at":"2026-07-12T14:03:22.481Z","duration_ms":918,"ok":true}

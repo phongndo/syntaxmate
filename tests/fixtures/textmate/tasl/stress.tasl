@@ -1,0 +1,178 @@
+# TASL stress schema with closed products and coproducts.
+# Unicode source text: café 東京 λ 🚀 𝌆
+namespace ex http://example.com/tasl/stress#
+namespace schema http://schema.org/
+namespace xsd http://www.w3.org/2001/XMLSchema#
+namespace geo http://www.w3.org/2003/01/geo/wgs84_pos#
+namespace dct http://purl.org/dc/terms/
+
+type ex:LangTag xsd:language
+type ex:Token xsd:NCName
+type ex:Score xsd:decimal
+type ex:Resource <>
+type ex:MaybeText ? string
+
+type ex:LocalizedText {
+  ex:value -> string
+  ex:language -> ex:LangTag
+}
+
+type ex:Note [
+  ex:Plain <- string
+  ex:Tagged <- ex:LocalizedText
+  ex:Empty
+]
+
+type ex:MaybeDate [
+  ex:Known <- xsd:date
+  ex:Unknown
+]
+
+type ex:Coordinate {
+  geo:lat -> xsd:decimal
+  geo:long -> xsd:decimal
+}
+
+type ex:Address {
+  schema:streetAddress -> string
+  schema:addressLocality -> string
+  schema:postalCode -> string
+  ex:region -> ? string
+}
+
+type ex:ActorRef [
+  ex:Human <- * ex:Person
+  ex:Bot <- * ex:Agent
+  ex:Group <- * ex:Team
+]
+
+type ex:Payload [
+  ex:Text <- ex:LocalizedText
+  ex:Link <- <>
+  ex:Binary <- xsd:base64Binary
+]
+
+class ex:Person :: {
+  ex:id -> ex:Token
+  ex:name -> ex:LocalizedText
+  ex:preferredName -> ? ex:LocalizedText
+  ex:birthDate -> ex:MaybeDate
+  ex:home -> ex:Address
+  ex:profile -> <>
+  ex:friend -> * ex:Person
+}
+
+class ex:Agent :: {
+  ex:handle -> ex:Token
+  ex:label -> ex:LocalizedText
+  ex:service -> <>
+}
+
+class ex:Team :: {
+  ex:name -> ex:LocalizedText
+  ex:lead -> * ex:Person
+  ex:summary -> ex:Note
+}
+
+class ex:Organization :: {
+  schema:name -> string
+  ex:legalName -> ? string
+  ex:location -> ex:Coordinate
+  ex:homepage -> <>
+}
+
+class ex:Project :: {
+  ex:title -> ex:LocalizedText
+  ex:slug -> ex:Token
+  ex:owner -> * ex:Organization
+  ex:homepage -> <>
+  ex:started -> xsd:date
+}
+
+class ex:Repository :: {
+  ex:name -> ex:Token
+  ex:project -> * ex:Project
+  ex:defaultBranch -> string
+  ex:stars -> xsd:integer
+}
+
+class ex:Issue :: {
+  ex:title -> ex:LocalizedText
+  ex:body -> ex:Note
+  ex:state -> ex:Token
+  ex:openedBy -> ex:ActorRef
+  ex:repository -> * ex:Repository
+}
+
+class ex:Comment :: {
+  ex:body -> ex:Payload
+  ex:author -> ex:ActorRef
+  ex:issue -> * ex:Issue
+  ex:createdAt -> xsd:dateTime
+}
+
+class ex:Milestone :: {
+  ex:name -> ex:LocalizedText
+  ex:due -> ex:MaybeDate
+  ex:project -> * ex:Project
+}
+
+class ex:Release :: {
+  ex:version -> string
+  ex:notes -> ex:Note
+  ex:artifact -> ? <>
+  ex:repository -> * ex:Repository
+}
+
+# Nested alternatives exercise products inside a coproduct.
+type ex:ReviewState [
+  ex:Approved
+  ex:ChangesRequested <- {
+    ex:reason -> ex:Note
+    ex:blocking -> xsd:boolean
+  }
+  ex:Pending
+]
+
+type ex:Review {
+  ex:reviewer -> ex:ActorRef
+  ex:state -> ex:ReviewState
+  ex:submittedAt -> xsd:dateTime
+}
+
+type ex:BuildStatus [
+  ex:Queued
+  ex:Running <- ex:ActorRef
+  ex:Passed <- ex:Score
+  ex:Failed <- ex:Note
+]
+
+type ex:Build {
+  ex:commit -> string
+  ex:status -> ex:BuildStatus
+  ex:logs -> ? <>
+}
+
+edge ex:Membership :: ex:Person =/ ex:Note /=> ex:Team
+edge ex:Employment :: ex:Person =/ ex:MaybeDate /=> ex:Organization
+edge ex:Maintains :: ex:Team => ex:Repository
+edge ex:Owns :: ex:Organization => ex:Project
+edge ex:Tracks :: ex:Project => ex:Issue
+edge ex:Mentions :: ex:Comment =/ ex:Payload /=> ex:Issue
+edge ex:Reviews :: ex:Person =/ ex:Review /=> ex:Issue
+edge ex:Ships :: ex:Release => ex:Repository
+
+# Dense keys include punctuation and a percent escape accepted by TASL terms.
+class ex:ExternalRecord :: {
+  ex:path/a?b=c -> string
+  ex:encoded%20space -> string
+  dct:source -> <>
+}
+
+class ex:UnicodeMarker :: {
+  ex:latin -> string
+  ex:cjk -> string
+  ex:lambda -> string
+  ex:rocket -> string
+  ex:tetragram -> string
+}

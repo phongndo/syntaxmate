@@ -1,0 +1,18 @@
+// Observatory controller: café, 東京, and astral satellite 🛰️.
+machine_name : "Night Queue 🛰️";
+machine_version : 1.4.2;
+jssm_version : 5.8.0;
+graph_layout : dot;
+
+/* Legal, main, and forced paths model operator intent. */
+Offline 'boot' -> Calibrating;
+Calibrating 'ready' => Tracking;
+Tracking 'pause' <-> Paused;
+Tracking 'weather hold' ~> Safe;
+Safe 'resume' 75% => Tracking;
+Tracking 'capture 東京' -> Processing;
+Processing 'publish café' => Complete;
+Complete 'reset' -> Offline;
+
+Paused "operator review λ" 'resume' -> Tracking;
+Safe 'notify' -> ${ audit("storm-🚀") };

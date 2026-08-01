@@ -1,0 +1,225 @@
+@charset "UTF-8";
+@import (reference, less, optional) "tokens.less";
+@import (css, once) url("print.css") print and (min-resolution: 2dppx);
+@namespace svg url("http://www.w3.org/2000/svg");
+@custom-media --narrow (width < 48rem);
+
+/* A multiline comment keeps its state across
+   Greek Ελληνικά, CJK 漢字, emoji 🧪🚀, and astral 𝌆,
+   then closes normally. */
+@root-size: 16px;
+@rhythm: 1.5rem;
+@brand: #6c3cff;
+@channel: brand;
+@selected: @@channel;
+@selector-name: 宇宙-card;
+@asset-root: "/assets/雪";
+@long-label: "first line\
+second line 👩🏽‍💻 𝌆";
+@font-stack: "Noto Sans", "PingFang SC", sans-serif;
+@property: border-color;
+
+.space(@n: 1) {
+  margin: (@rhythm * @n);
+}
+
+.paint(@color; @alpha: 90%) when (iscolor(@color)) and (@alpha > 0%) {
+  color: fade(@color, @alpha);
+  border-color: shade(@color, 18%);
+}
+
+.paint(@value) when not (iscolor(@value)) {
+  color: @value;
+}
+
+.edge(@side; @width: 1px; @style: solid) {
+  border-@{side}: @width @style @selected;
+  @{property}: mix(@selected, white, 70%);
+}
+
+#theme() {
+  .button(@tone: @brand) {
+    background-color: @tone;
+    box-shadow: 0 0 0 1px fade(@tone, 25%);
+  }
+}
+
+@panel-rules: {
+  display: grid;
+  gap: @rhythm;
+};
+
+.message-base {
+  font-family: @font-stack;
+  line-height: unit(@root-size / 8px);
+}
+
+.message-success:extend(.message-base all) {
+  .paint(#168a52);
+}
+
+.@{selector-name},
+.卡片-🛰️ {
+  @panel-rules();
+  #theme.button();
+  .space(2);
+  .edge(bottom; 2px; dashed);
+  width: min(92vw, 72rem);
+  min-height: fit-content(20rem);
+  grid-template-columns: repeat(3, 1fr);
+  color: @selected;
+  background-color: light-dark(#fafafa, #15151a);
+  background-image: linear-gradient(
+    to right,
+    fade(@brand, 12%) 0%,
+    rgba(255, 255, 255, 0.8) 45%,
+    hsl(270deg 80% 55% / 30%) 100%
+  );
+  border: 1px solid color("#6c3cff");
+  border-radius: 1rem / 50%;
+  padding: clamp(1rem, calc(@rhythm + 1vw), 3rem);
+  content: %("%s — %s", @long-label, "終わり 🎉");
+  filter: blur(0) brightness(105%) drop-shadow(0 4px 8px #0004);
+  transform: perspective(60rem) translate3d(0, 1px, 0) rotateX(2deg);
+  transition: transform 180ms ease-in-out, opacity 0.2s steps(4, end);
+  animation: orbit 2s cubic-bezier(0.2, 0.8, 0.3, 1) infinite alternate;
+  unicode-range: U+0025-00FF, U+4E00-9FFF;
+  --label: "星 @selected";
+
+  &:hover,
+  &:focus-visible {
+    transform: perspective(60rem) translateY(-0.25rem) rotate(1deg);
+  }
+
+  & when (@root-size >= 16px) {
+    font-size: calc(@root-size + 0.125rem);
+  }
+
+  > header:first-child + .body:not([hidden]) {
+    border-block-end: 1px solid currentColor;
+  }
+
+  [svg|href^="#icon" i],
+  [lang|="zh"]:lang(zh-Hant) {
+    fill: currentColor;
+  }
+
+  &__badge::before {
+    content: "BMP 雪 / astral 𝌆 / emoji 🧭";
+    background: radial-gradient(circle at top left, #fff, @brand 72%);
+  }
+}
+
+.property-merge {
+  box-shadow+: inset 0 0 1px #000;
+  box-shadow+: 0 0 8px fade(@brand, 30%);
+  transform+_: translateX(1px);
+  transform+_: scale(1.02);
+}
+
+.loop(@i) when (@i > 0) {
+  .item-@{i} {
+    z-index: @i;
+  }
+  .loop(@i - 1);
+}
+.loop(3);
+
+@supports (display: grid) and (not (color: color(display-p3 1 0 0))) {
+  .feature-grid {
+    display: grid;
+    place-content: center;
+    inline-size: var(--measure, 70ch);
+  }
+}
+
+@media only screen and (min-width: 40rem) and (orientation: landscape),
+       print and (min-resolution: 300dpi) {
+  .responsive {
+    width: calc(100% - (@rhythm * 2));
+    columns: 2 18rem;
+  }
+}
+
+@media (--narrow) {
+  .responsive {
+    columns: 1;
+  }
+}
+
+@container sidebar (inline-size >= 30rem) and (orientation: landscape) {
+  .contained {
+    container-name: 内容;
+    grid-template-columns: 1fr 2fr;
+  }
+}
+
+@container style(--theme: dark) {
+  .contained {
+    color: white;
+    background: #111;
+  }
+}
+
+@font-face {
+  font-family: "Fixture Sans";
+  src: local(Fixture Sans),
+       url("@{asset-root}/fixture.woff2") format("woff2");
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+1F300-1FAFF;
+}
+
+@counter-style circled-宇宙 {
+  system: fixed;
+  symbols: "①" "②" "③" "🚀";
+  suffix: " 𝌆 ";
+}
+
+.steps(@count) when (@count > 0), (@count = default()) {
+  counter-reset: section @count;
+  content: counters(section, ".", decimal-leading-zero);
+}
+
+@keyframes orbit {
+  from {
+    opacity: 0;
+    transform: rotate(0turn) translateX(0);
+  }
+  50%, 75% {
+    opacity: percentage(0.75);
+    transform: rotate(0.5turn) translateX(1rem);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(1turn) translateX(0);
+  }
+}
+
+@page :first {
+  margin: 2cm;
+  size: A4 portrait;
+}
+
+.function-matrix {
+  @numbers: 2 4 8 16;
+  width: extract(@numbers, 3) * 1px;
+  height: sqrt(64) * 1px;
+  opacity: if((@root-size > 10px), 1, 0.5);
+  color: contrast(@brand, black, white, 43%);
+  background-image: image(url("fallback.png"), @brand);
+  clip-path: polygon(
+    evenodd,
+    0% 0%,
+    100% 0%,
+    100% 100%,
+    0% 100%
+  );
+  animation-timeline: scroll(root block);
+  animation-range: entry 10% exit 90%;
+}
+
+// A final line comment must not leak past its newline.
+.终点-🚩::after {
+  content: e("balanced EOF: \\2603 𝌆 🏁");
+  color: spin(@brand, 30);
+}

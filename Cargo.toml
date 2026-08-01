@@ -1,0 +1,92 @@
+[package]
+name = "syntaxmate"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+description = "Rust-native TextMate syntax highlighting with bundled grammars and themes"
+repository = "https://github.com/phongndo/syntaxmate"
+documentation = "https://docs.rs/syntaxmate"
+readme = "README.md"
+keywords = ["syntax-highlighting", "textmate", "grammar", "theme"]
+categories = ["parsing", "text-processing", "development-tools"]
+autobins = false
+autotests = false
+include = [
+  "src/**",
+  "assets/grammars/**",
+  "assets/grammars.bundle",
+  "assets/themes/**",
+  "examples/**",
+  "tests/*.rs",
+  "tools/build-bundle.rs",
+  "Cargo.toml",
+  "README.md",
+  "CHANGELOG.md",
+  "CONTRIBUTING.md",
+  "CODE_OF_CONDUCT.md",
+  "EXTRACTION.md",
+  "SECURITY.md",
+  "SUPPORT.md",
+  "docs/architecture.md",
+  "docs/assets.md",
+  "docs/compatibility.md",
+  "docs/language-status.md",
+  "docs/quality.md",
+  "docs/rendering.md",
+  "docs/releasing.md",
+  "LICENSE",
+  "THIRD_PARTY_LICENSES.md",
+]
+
+[features]
+default = ["bundled-grammars", "bundled-themes", "html", "ansi"]
+bundled-grammars = []
+bundled-themes = []
+html = []
+ansi = []
+diagnostics = []
+bundle-tools = ["dep:toml"]
+
+[dependencies]
+memchr = "2.7"
+miniz_oxide = "0.9.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = { version = "1.1", optional = true }
+unicode-segmentation = "1.13"
+unicode-general-category = "1.1"
+unicode-script = "0.5"
+
+[dev-dependencies]
+tempfile = "3"
+toml = "1.1"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+
+[[bin]]
+name = "syntaxmate-bundle"
+path = "tools/build-bundle.rs"
+required-features = ["bundle-tools"]
+
+[[example]]
+name = "regex-parse"
+path = "examples/regex-parse.rs"
+required-features = ["diagnostics"]
+
+[[example]]
+name = "html"
+path = "examples/html.rs"
+required-features = ["bundled-grammars", "bundled-themes", "html"]
+
+[[example]]
+name = "ansi"
+path = "examples/ansi.rs"
+required-features = ["bundled-grammars", "bundled-themes", "ansi"]

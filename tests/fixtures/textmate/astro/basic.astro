@@ -1,0 +1,27 @@
+---
+import Badge from "../../components/Badge.astro";
+
+interface Props {
+  title: string;
+  items?: string[];
+  featured?: boolean;
+}
+
+const { title, items = ["café", "日本語", "🚀 𝌆"], featured = false } = Astro.props;
+const slug = title.toLocaleLowerCase().replaceAll(" ", "-");
+---
+
+<section id={slug} class:list={["card", { featured }]} data-count={items.length}>
+  <!-- A compact component with text, entities, and expressions. -->
+  <h2>{title} &amp; friends</h2>
+  <Badge label={`Total: ${items.length}`} client:load />
+  <ul aria-label="Highlights">
+    {items.map((item, index) => <li data-index={index}>{item}</li>)}
+  </ul>
+  <slot />
+</section>
+
+<style>
+  .card { border: 1px solid currentColor; padding: 1rem; }
+  .featured h2 { color: rebeccapurple; }
+</style>

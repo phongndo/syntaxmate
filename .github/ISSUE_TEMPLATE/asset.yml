@@ -1,0 +1,38 @@
+name: Grammar, language, or theme asset issue
+description: Report catalog metadata, detection, provenance, or vendored asset problems
+title: "asset: "
+labels: [assets, needs-triage]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Asset type
+      options: [Grammar, Language metadata or path detection, Theme, License or provenance]
+    validations:
+      required: true
+  - type: input
+    id: asset
+    attributes:
+      label: Language or theme ID
+    validations:
+      required: true
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream source and revision
+      placeholder: https://github.com/owner/repo/tree/immutable-revision
+    validations:
+      required: false
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Reproduction or provenance evidence
+      description: Include a minimal path/source and expected detection or output when applicable.
+    validations:
+      required: true

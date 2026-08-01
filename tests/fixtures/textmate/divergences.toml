@@ -1,0 +1,4 @@
+# Checked-in divergences from the vscode-textmate oracle.
+#
+# Every committed fixture currently requires exact scope-stack and coarse
+# SyntaxClass parity, so there are no allowlisted divergences.

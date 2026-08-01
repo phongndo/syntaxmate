@@ -1,0 +1,145 @@
+Windows Registry Editor Version 5.00
+
+; Stress fixture exercises registry declarations, continuations, and comments.
+; Unicode values and keys include café, Ελληνικά, 東京, and 🚀.
+
+; Text and default values
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Text]
+@="default stress value"
+"Empty"=""
+"Ascii"="plain text"
+"Escapes"="C:\\Program Files\\Mark\\fixture.reg"
+"Quoted"="say \"hello\""
+"Unicode"="café — Ελληνικά — 東京 — 🚀"
+"Apostrophe"="it's still a double-quoted registry string"
+
+; DWORD values, including case-insensitive type spelling
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Numbers]
+"Zero"=dword:0
+"One"=dword:00000001
+"Answer"=dword:0000002a
+"Largest"=dword:ffffffff
+"UpperType"=DWORD:ABCDEF09
+"Short"=dword:7f
+"DeleteNumber"=-
+
+; Ordinary binary data
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Binary]
+"EmptyBinary"=hex:
+"OneByte"=hex:ff
+"FourBytes"=hex:de,ad,be,ef
+"MixedCase"=HEX:AA,bb,0C,dD
+"Sequence"=hex:00,01,02,03,04,05,06,07,08,09,0a,0b,0c,0d,0e,0f
+"DeleteBlob"=-
+
+; Backslash continuation over several physical lines
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Continued]
+"LongBinary"=hex:00,01,02,03,04,05,06,07,08,09,0a,0b,0c,0d,0e,0f,\
+  10,11,12,13,14,15,16,17,18,19,1a,1b,1c,1d,1e,1f,\
+  20,21,22,23,24,25,26,27,28,29,2a,2b,2c,2d,2e,2f,\
+  30,31,32,33,34,35,36,37,38,39,3a,3b,3c,3d,3e,3f
+"AfterContinuation"="parser state returns to a declaration"
+
+; Expandable strings are UTF-16LE hex(2)
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Expand]
+"Temp"=hex(2):25,00,54,00,45,00,4d,00,50,00,25,00,00,00
+"SystemRoot"=hex(2):25,00,53,00,79,00,73,00,74,00,65,00,6d,00,52,00,6f,00,6f,00,74,00,25,00,00,00
+"Path"=hex(2):25,00,50,00,41,00,54,00,48,00,25,00,00,00
+"EmptyExpand"=hex(2):00,00
+"UpperExpand"=HEX(2):25,00,54,00,4d,00,50,00,25,00,00,00
+
+; Multi-string data is UTF-16LE hex(7)
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\MultiString]
+"Colors"=hex(7):72,00,65,00,64,00,00,00,67,00,72,00,65,00,65,00,6e,00,00,00,62,00,6c,00,75,00,65,00,00,00,00,00
+"Cities"=hex(7):54,00,6f,00,6b,00,79,00,6f,00,00,00,4f,00,73,00,6c,00,6f,00,00,00,00,00
+"Singleton"=hex(7):6f,00,6e,00,65,00,00,00,00,00
+"EmptyMulti"=hex(7):00,00,00,00
+"UpperMulti"=HEX(7):61,00,00,00,00,00
+
+; QWORD and other typed hexadecimal values
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\TypedHex]
+"QwordZero"=hex(b):00,00,00,00,00,00,00,00
+"QwordAnswer"=hex(b):2a,00,00,00,00,00,00,00
+"QwordMax"=HEX(B):ff,ff,ff,ff,ff,ff,ff,ff
+"ResourceList"=hex(8):01,00,00,00
+"FullResource"=hex(9):02,00,00,00
+"Requirements"=hex(a):03,00,00,00
+
+; Value names may contain spaces and Unicode
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Names]
+"Value With Spaces"="spaced"
+"punctuation.!?"="punctuated name"
+"naïve café"="accented value name"
+"東京"="BMP Unicode name"
+"rocket 🚀"="astral character in a value name"
+"123"="numeric-looking name"
+
+; Empty and punctuation-heavy key components
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Names\dot.name]
+@="dot component"
+"Semi;Colon"="semicolon is data inside quotes"
+"Equals=Sign"="equals is data inside the quoted name"
+"Brackets[]"="brackets in a name"
+"Slash/Forward"="forward slash text"
+"BackslashText"="one key deeper"
+
+; Leading whitespace is accepted by the section grammar
+  [HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Indented]
+  "IndentedName"="surrounding declaration whitespace"
+  "IndentedDword" = dword:00000010
+  @ = "indented default"
+  "IndentedHex" = hex:10,20,30,40
+
+; Inline declaration comments are covered by the grammar
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Comments]
+"Text"="value before a comment" ; trailing text comment
+"Number"=dword:00000005 ; trailing number comment
+"Bytes"=hex:01,02,03 ; trailing hex comment
+"Removed"=- ; trailing deletion comment
+; A full-line comment after declarations
+
+; A realistic per-user environment key
+[HKEY_CURRENT_USER\Environment]
+"FixtureHome"="C:\\Users\\fixture"
+"FixtureTemp"=hex(2):25,00,55,00,53,00,45,00,52,00,50,00,52,00,4f,00,46,00,49,00,4c,00,45,00,25,00,5c,00,54,00,65,00,6d,00,70,00,00,00
+"Enabled"=dword:00000001
+"Tags"=hex(7):61,00,6c,00,70,00,68,00,61,00,00,00,62,00,65,00,74,00,61,00,00,00,00,00
+"Icon"="🚀"
+
+; A machine-style software key
+[HKEY_LOCAL_MACHINE\Software\MarkSyntax\Stress\Application]
+"DisplayName"="Mark Syntax Fixture"
+"DisplayVersion"="1.2.3"
+"InstallLocation"="C:\\Program Files\\Mark Syntax"
+"Flags"=dword:00000007
+"Payload"=hex:ca,fe,ba,be
+
+; Classes-root style associations
+[HKEY_CLASSES_ROOT\.markfixture]
+@="MarkSyntax.Fixture"
+"Content Type"="text/plain"
+"PerceivedType"="text"
+
+[HKEY_CLASSES_ROOT\MarkSyntax.Fixture]
+@="Mark Syntax Fixture File"
+"FriendlyTypeName"="Fixture — 東京 🚀"
+
+[HKEY_CLASSES_ROOT\MarkSyntax.Fixture\shell\open\command]
+@="\"C:\\Program Files\\Mark Syntax\\mark.exe\" \"%1\""
+"DelegateExecute"=""
+
+; Add a Unicode key and then represent key deletion syntax
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Δοκιμή\東京\🚀]
+@="Unicode key path"
+"Language"="Ελληνικά"
+"Place"="東京"
+"Astral"="🚀"
+
+[-HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Obsolete]
+[-HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Old Branch]
+
+; Final section verifies matching after deleted sections
+[HKEY_CURRENT_USER\Software\MarkSyntax\Stress\Final]
+"Complete"=dword:00000001
+"Summary"="all registry grammar branches exercised"
+; End of stress fixture 🚀

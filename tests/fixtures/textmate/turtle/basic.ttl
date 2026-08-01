@@ -1,0 +1,24 @@
+# Compact Turtle fixture: café, 東京, λ, 🚀, and astral 𝌆.
+@base <https://example.org/data/> .
+@prefix ex: <https://example.org/schema/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rule: <https://example.org/rule/> .
+
+<mission/aurora> a ex:Mission ;
+    ex:title "Aurora café 東京 λ 🚀 𝌆"@en ;
+    ex:alias 'Explorer\'s launch' ;
+    ex:count +42 ;
+    ex:ratio .75 ;
+    ex:active true ;
+    ex:launched "2026-07-12"^^xsd:date ;
+    ex:note """First closed multiline literal.
+Escapes stay inside it: newline=\n, quote=\", slash=\\, lambda=\u03BB.
+The final line contains 東京 and \U0001F680.""" .
+
+ex:crew ex:motto '''Measure twice; launch once — café.''' .
+
+ex:constraint rule:content """mission = active
+operator = present
+decision = permit""" .
+
+ex:done ex:status false .

@@ -1,0 +1,170 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: mark stress fixtures 1.0\n"
+"Report-Msgid-Bugs-To: bugs@example.invalid\n"
+"POT-Creation-Date: 2026-07-12 12:00+0000\n"
+"PO-Revision-Date: 2026-07-12 12:30+0000\n"
+"Last-Translator: Fixture Author <fixture@example.invalid>\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Generator: hand-authored fixture\n"
+
+# General translator comment before a simple entry.
+#. Extracted greeting displayed on startup.
+#: src/main.c:10 src/window.c:42
+#, fuzzy
+#| msgid "Hello, old world!"
+msgid "Hello, world!"
+msgstr "Hello, world!"
+
+#. A compact sample of BMP scripts.
+#: src/unicode.c:8
+msgctxt "unicode-bmp"
+msgid "café 東京 λ"
+msgstr "café 東京 λ"
+
+#. Astral symbols must remain valid UTF-8.
+#: src/unicode.c:14
+msgctxt "unicode-astral"
+msgid "Rocket 🚀 and tetragram 𝌆"
+msgstr "Rocket 🚀 and tetragram 𝌆"
+
+#. Both quote and backslash escapes are intentional.
+#: src/path.c:21
+msgid "Open \"C:\\Program Files\\Mark\\bin\""
+msgstr "Open \"C:\\Program Files\\Mark\\bin\""
+
+# Translator note spanning an entry with continued strings.
+#. The source is split to exercise adjacent PO strings.
+#: src/dialog.c:30
+msgctxt "dialog-title"
+msgid ""
+"A deliberately continued "
+"source string"
+msgstr ""
+"A deliberately continued "
+"translated string"
+
+#. Embedded control escapes are valid PO syntax.
+#: src/output.c:15
+msgid "First line\nSecond line\tindented"
+msgstr "First line\nSecond line\tindented"
+
+#. Singular and plural forms with a C placeholder.
+#: src/files.c:11
+#, c-format
+msgid "%d file selected"
+msgid_plural "%d files selected"
+msgstr[0] "%d file selected"
+msgstr[1] "%d files selected"
+
+# Translator: keep the named Python field unchanged.
+#. Notification count.
+#: scripts/notify.py:19
+#, python-format
+msgid "{count} notification"
+msgid_plural "{count} notifications"
+msgstr[0] "{count} notification"
+msgstr[1] "{count} notifications"
+
+#. A context disambiguates the verb from the adjective.
+#: src/menu.c:9
+msgctxt "menu-verb"
+msgid "Open"
+msgstr "Open"
+
+#. Same source text, distinct context.
+#: src/status.c:27
+msgctxt "door-state"
+msgid "Open"
+msgstr "Open"
+
+#. Context can also accompany plurals.
+#: src/cart.c:55
+#, c-format
+msgctxt "shopping-cart"
+msgid "%d item"
+msgid_plural "%d items"
+msgstr[0] "%d item"
+msgstr[1] "%d items"
+
+#. Updated toolbar label with previous metadata.
+#: src/toolbar.c:18
+#| msgctxt "toolbar-old"
+#| msgid "Save everything"
+msgctxt "toolbar"
+msgid "Save all"
+msgstr "Save all"
+
+#. Multiple references include line and column-like suffixes.
+#: ui/main.ui:120 ui/preferences.ui:44;7 lib/view.c:81
+msgid "Preferences"
+msgstr "Preferences"
+
+#. Empty translation is valid for an untranslated catalog item.
+#: src/pending.c:3
+msgid "Pending translation"
+msgstr ""
+
+# Regular translator comment without a special subtype.
+msgid "Translator-reviewed text"
+msgstr "Translator-reviewed text"
+
+#. Flag alternatives are recognized by the grammar.
+#: src/format.c:24
+#, no-c-format, qt-format
+msgid "Literal % value and %1 token"
+msgstr "Literal % value and %1 token"
+
+#. Shell formatting flag coverage.
+#: scripts/report.sh:7
+#, sh-format
+msgid "Report for $USER"
+msgstr "Report for $USER"
+
+#. Lisp formatting flag coverage.
+#: lisp/status.el:13
+#, elisp-format
+msgid "Buffer %s"
+msgstr "Buffer %s"
+
+#. Java formatting flag coverage.
+#: java/Status.java:61
+#, java-format
+msgid "Value {0}"
+msgstr "Value {0}"
+
+#. C sharp formatting flag coverage.
+#: dotnet/Status.cs:72
+#, csharp-format
+msgid "Value {0:N2}"
+msgstr "Value {0:N2}"
+
+#. PHP formatting flag coverage.
+#: web/status.php:14
+#, php-format
+msgid "User %s"
+msgstr "User %s"
+
+#. Boost formatting flag coverage.
+#: cpp/status.cc:90
+#, boost-format
+msgid "Step %1% of %2%"
+msgstr "Step %1% of %2%"
+
+#. Mixed Unicode in a plural entry.
+#: src/cargo.c:17
+#, c-format
+msgctxt "space-cargo"
+msgid "%d café crate for 東京 🚀"
+msgid_plural "%d café crates for 東京 🚀"
+msgstr[0] "%d café crate for 東京 🚀"
+msgstr[1] "%d café crates for 東京 🚀"
+
+#. A short entry after several multiline scopes.
+#: src/final.c:1
+msgid "All active states are closed"
+msgstr "All active states are closed"

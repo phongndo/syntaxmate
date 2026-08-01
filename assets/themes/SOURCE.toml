@@ -1,0 +1,380 @@
+[[source]]
+package = "github-vscode-themes"
+version = "6.3.4"
+repository = "https://github.com/primer/github-vscode-theme"
+source_commit = "67461974ae6d337a8cf352c277bf3908bf6b6317"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "github-dark"
+source_path = "dist/dark-default.json"
+sha256 = "05150fe30a4d6f6b40f4ccf9bb84c5f7f0dfe84986c3e0437e1664402996435f"
+
+[[source.theme]]
+id = "github-dark-high-contrast"
+source_path = "dist/dark-high-contrast.json"
+sha256 = "e538e324b4fb4373049beba51de4ffe3c3d1dcad2761078725c2376f623d6881"
+
+[[source.theme]]
+id = "github-light"
+source_path = "dist/light-default.json"
+sha256 = "453fd4707102f08cc12a42e41ec86f952bb5db9d3814023c61f634696f812530"
+
+[[source.theme]]
+id = "github-light-high-contrast"
+source_path = "dist/light-high-contrast.json"
+sha256 = "4964f623e9615238a7feaeaa9728dafb769e2c1506c8c0417baefb0cab020882"
+
+[[source]]
+package = "@shikijs/themes"
+version = "3.23.0"
+repository = "https://github.com/shikijs/shiki"
+source_commit = "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "catppuccin-latte"
+source_path = "dist/catppuccin-latte.mjs"
+sha256 = "b8738fedce253854cb53ebae82d8b874d99a7dbfd5be07917f6613d4caff71d9"
+
+[[source.theme]]
+id = "catppuccin-frappe"
+source_path = "dist/catppuccin-frappe.mjs"
+sha256 = "e6c762d66d2f8104e4ef69cac94d290134dec3715cf792476bfe7a3d1126fba4"
+
+[[source.theme]]
+id = "catppuccin-macchiato"
+source_path = "dist/catppuccin-macchiato.mjs"
+sha256 = "ca08dc225c75235771b2ce0fc510c7e6fa400b2f373ed02d5f2a700e969cf556"
+
+[[source.theme]]
+id = "catppuccin-mocha"
+source_path = "dist/catppuccin-mocha.mjs"
+sha256 = "aa030d67dbd4a6b66995c89ba31ef90ac3c2da23a30f712277acb50c6e94d102"
+
+[[source.theme]]
+id = "gruvbox-dark"
+source_path = "dist/gruvbox-dark-medium.mjs"
+sha256 = "8d301867af3eb863e1ae289e8657264e244ffbf2c12f4c40cd13635b102f0046"
+
+[[source.theme]]
+id = "gruvbox-light"
+source_path = "dist/gruvbox-light-medium.mjs"
+sha256 = "0fee7e7311f0c1c7b15d01cdb327b9651f7220b1702a3bdfcf9b1ead55752d5b"
+
+[[source.theme]]
+id = "tokyonight"
+source_path = "dist/tokyo-night.mjs"
+sha256 = "b77b29c07cceabd70495101d64f1acd350965be209fc13f33ec246cc5f06da01"
+
+[[source.theme]]
+id = "nord"
+source_path = "dist/nord.mjs"
+sha256 = "0ea054997b6bbe5ca17baae04576190ca34ab06e52908d8831a6cca91b49d090"
+
+[[source.theme]]
+id = "ayu-dark"
+source_path = "dist/ayu-dark.mjs"
+sha256 = "d12ec5d45edf0c6dd1b70eafffd1a1990800614dbddcb67ae9722a48bc73afd3"
+
+[[source.theme]]
+id = "ayu-light"
+source_path = "dist/ayu-light.mjs"
+sha256 = "5ccdc6750d014d51a1ea0b8eedf236d9b6d84dbc91770d653fa040098d3c2b3e"
+
+[[source.theme]]
+id = "ayu-mirage"
+source_path = "dist/ayu-mirage.mjs"
+sha256 = "bfcb47de92bb5891ec0d2a324c17a5410680dd790349c39d5b22032a992e1003"
+
+[[source.theme]]
+id = "everforest-dark"
+source_path = "dist/everforest-dark.mjs"
+sha256 = "cd9bf71333f0296d3cb6b83e25cab67356ce9631cba415762719a9232c2f5a98"
+
+[[source.theme]]
+id = "everforest-light"
+source_path = "dist/everforest-light.mjs"
+sha256 = "5a1d79eb1d563e6d560bf95fc787d1f02e02c74c88ecbc99803e0c180553f281"
+
+[[source.theme]]
+id = "kanagawa-dragon"
+source_path = "dist/kanagawa-dragon.mjs"
+sha256 = "7bc83fa0cf06eb4f3caa041ddf3f9aaf5d78b04b6732d6e365c9ebf6a2a2f54e"
+
+[[source.theme]]
+id = "kanagawa-lotus"
+source_path = "dist/kanagawa-lotus.mjs"
+sha256 = "6a43b17291201d24d944c7eee5d45a2d190f46ef440ff797dd0910c61da609f4"
+
+[[source.theme]]
+id = "kanagawa-wave"
+source_path = "dist/kanagawa-wave.mjs"
+sha256 = "b3ded90f07b5a8372aaa7ec9c0643f7ec1921ec7e44195a13b2d115a44d65dfd"
+
+[[source]]
+package = "nordic.nvim"
+version = "git"
+repository = "https://github.com/AlexvZyl/nordic.nvim"
+source_commit = "9fb62116b891184049c50ca6ffb0d3bc100a1a6e"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "nordic"
+source_path = "lua/nordic/colors/nordic.lua + lua/nordic/groups/native.lua (adapted TextMate scopes)"
+sha256 = "1f3db68f8518f247fddf61403ccb99429159bc4d7a466554761e09838aa91847"
+
+[[source]]
+package = "vscode-dark-molokai-theme"
+version = "git"
+repository = "https://github.com/nonylene/vscode-dark-molokai-theme"
+source_commit = "7a3d1da4c12d338fba19695faa8ef89c46504484"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "molokai"
+source_path = "themes/dark-molokai-color-theme.json"
+sha256 = "615eac9a3ac2875c2c277e472018ef739f7d4a3d5f9229a3a617a88b46fbc9fc"
+
+[[source]]
+package = "zenbones.nvim"
+version = "git"
+repository = "https://github.com/zenbones-theme/zenbones.nvim"
+source_commit = "8304d8df9b823ff11e103afa62f38c39f534abe6"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "zenbones-dark"
+source_path = "colors/zenbones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "3d394b8f2d8c310da7fbfa4933dde56977edbb5b640293af59fb5a5c1fcb3812"
+
+[[source.theme]]
+id = "zenbones-light"
+source_path = "colors/zenbones.vim (light palette, adapted TextMate scopes)"
+sha256 = "22a17643d6444736fad435026dbf6f6d5dbdb5e21989aaa4045c1d2d8b26feab"
+
+[[source.theme]]
+id = "duckbones"
+source_path = "colors/duckbones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "1f2757b3b9502459a495c706ef51f43751af47264e696aa1be0febad5c869d32"
+
+[[source.theme]]
+id = "forestbones-dark"
+source_path = "colors/forestbones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "6cdbd6f0ef9ea6269d9e02d26ddb5ba962b3441ea20fdca2e695f7c8955a8949"
+
+[[source.theme]]
+id = "forestbones-light"
+source_path = "colors/forestbones.vim (light palette, adapted TextMate scopes)"
+sha256 = "90819b93464c4317309cb51e0fc570f3005bbb07864a758227523e82fce79109"
+
+[[source.theme]]
+id = "kanagawabones"
+source_path = "colors/kanagawabones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "a1332e622a2663acf5769de44b1723f4e7ff464bb2d3cb4f05cb5ba833b9d6ff"
+
+[[source.theme]]
+id = "neobones-dark"
+source_path = "colors/neobones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "32a01acb18f80acf4af734c133804fd515f5a1e9ecebf3cf281a7ab1d4210ac1"
+
+[[source.theme]]
+id = "neobones-light"
+source_path = "colors/neobones.vim (light palette, adapted TextMate scopes)"
+sha256 = "5c8e7772e10378eec9761e1055266dd8aa1a68c1763834bfd61945a3ca2acd83"
+
+[[source.theme]]
+id = "nordbones"
+source_path = "colors/nordbones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "eeb43dcd08ea19b5b02d60c0c09db433b62c68ccae244e5555f4df280e931ff8"
+
+[[source.theme]]
+id = "rosebones-dark"
+source_path = "colors/rosebones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "56e28430a17a0716a4ce0401cdb95e92e7814e0a22d73f5c4fe661b558df01e7"
+
+[[source.theme]]
+id = "rosebones-light"
+source_path = "colors/rosebones.vim (light palette, adapted TextMate scopes)"
+sha256 = "47c69d787df77a322a64f9ff57407377807624ad4754343e74304d95fddba00e"
+
+[[source.theme]]
+id = "seoulbones-dark"
+source_path = "colors/seoulbones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "5e9afbb88905f20622639b6e0f109c91821e39ebb0661ab7819957b60ecd05ef"
+
+[[source.theme]]
+id = "seoulbones-light"
+source_path = "colors/seoulbones.vim (light palette, adapted TextMate scopes)"
+sha256 = "e5f9a79e2501dbab381c4924e42f0d1f79d86b0a59c6c0cf6b097e23143d8f19"
+
+[[source.theme]]
+id = "tokyobones-dark"
+source_path = "colors/tokyobones.vim (dark palette, adapted TextMate scopes)"
+sha256 = "e0d4c33630554e59d24ac3a7cc58d629d80c7969b09bed42b8b4194b3b207565"
+
+[[source.theme]]
+id = "tokyobones-light"
+source_path = "colors/tokyobones.vim (light palette, adapted TextMate scopes)"
+sha256 = "b1bb9616cbdc97084f4b6d32636d685fa3d33862ed94c0d4935530780679f03d"
+
+[[source.theme]]
+id = "vimbones"
+source_path = "colors/vimbones.vim (light palette, adapted TextMate scopes)"
+sha256 = "d41053d60a93e5dd48076bf8065458cbd02aacb7ef432c8e6ccf38df96413bde"
+
+[[source.theme]]
+id = "zenburned"
+source_path = "colors/zenburned.vim (dark palette, adapted TextMate scopes)"
+sha256 = "e6cd6755e2902c775ea7146a42811d0c6fd25acef07795f7357e6d47488f8e7b"
+
+[[source.theme]]
+id = "zenwritten-dark"
+source_path = "colors/zenwritten.vim (dark palette, adapted TextMate scopes)"
+sha256 = "b11357f2ed3c79b12301f1d1c3fa060f1485dc0ba8fd6e57d656dec1916110a6"
+
+[[source.theme]]
+id = "zenwritten-light"
+source_path = "colors/zenwritten.vim (light palette, adapted TextMate scopes)"
+sha256 = "3ed83d2a3699839eac626e8e203ada811560531640a3880200c8a8754ad781f2"
+
+[[source]]
+package = "token"
+version = "git"
+repository = "https://github.com/ThorstenRhau/token"
+source_commit = "696e001e9580a7fdfd9d034c9bcc9adda2ced0d5"
+license = "BSD-3-Clause"
+resolved = true
+
+[[source.theme]]
+id = "token-dark"
+source_path = "contrib/vscode/themes/token-dark-color-theme.json"
+sha256 = "b4a9e5b071f87a066597a846be8b9b30464f3567b95b3536df4c6e8c08c4b0ac"
+
+[[source.theme]]
+id = "token-light"
+source_path = "contrib/vscode/themes/token-light-color-theme.json"
+sha256 = "06932caf2c9d324ae75bd95f9e46ba75ce2018e1c608ac31dba188d8d653ac1c"
+
+[[source]]
+package = "gruvbox-material-vscode"
+version = "git"
+repository = "https://github.com/sainnhe/gruvbox-material-vscode"
+source_commit = "91ff2deaecd2e89ec95ab488f4aee3f614f54031"
+license = "MIT"
+resolved = true
+
+[[source.theme]]
+id = "gruvbox-material-dark"
+source_path = "themes/gruvbox-material-dark.json"
+sha256 = "f3bd16191be7bd46c98698b32412363feb0c9df701206ba46f280fb2b6809557"
+
+[[source.theme]]
+id = "gruvbox-material-light"
+source_path = "themes/gruvbox-material-light.json"
+sha256 = "359f89e4cb210003752ed04ae48ded546bd33fda9f6399a5fb8b556fefecc34f"
+
+[[source]]
+package = "mfd.nvim"
+version = "git"
+repository = "https://github.com/kungfusheep/mfd.nvim"
+source_commit = "72ae627792960a7e490cb5242a78c570d02ba775"
+license = "Apache-2.0"
+resolved = true
+
+[[source.theme]]
+id = "mfd"
+source_path = "colors/mfd.lua (adapted TextMate rules)"
+sha256 = "2381574ca4139f6f8049c001cb7bbf3c824078790c72ee0f1423fa98fe3debe4"
+
+[[source.theme]]
+id = "mfd-dark"
+source_path = "colors/mfd-dark.lua (adapted TextMate rules)"
+sha256 = "a823928cc4571e25d462dfa42efb35565a8c2c0faa4b4330270b7c2bda57b11c"
+
+[[source.theme]]
+id = "mfd-stealth"
+source_path = "colors/mfd-stealth.lua (adapted TextMate rules)"
+sha256 = "1c1749d6777ef96a37b152805bc7eabcb64443e097dfc3969386bb1a0bfa6ee1"
+
+[[source.theme]]
+id = "mfd-amber"
+source_path = "colors/mfd-amber.lua (adapted TextMate rules)"
+sha256 = "3eeaeadcbfca6475db1815b47dc714f4ce6b30f6f3b3eb8d4143ecae976823c4"
+
+[[source.theme]]
+id = "mfd-mono"
+source_path = "colors/mfd-mono.lua (adapted TextMate rules; brighter muted text)"
+sha256 = "e4ad1d4b87f4a04e0710012bb280ea94880c70dc976345d262d93dbd448c87a4"
+
+[[source.theme]]
+id = "mfd-scarlet"
+source_path = "colors/mfd-scarlet.lua (adapted TextMate rules)"
+sha256 = "7c3c0eb9696802f06c74d58872b6e3509ba58b20aad000a1a8f38bbdcadcf330"
+
+[[source.theme]]
+id = "mfd-paper"
+source_path = "colors/mfd-paper.lua (adapted TextMate rules)"
+sha256 = "a3a26cec919f4762af23dc8315d55737fa2a8c2612eac63e80d1d7124bcf9677"
+
+[[source.theme]]
+id = "mfd-hud"
+source_path = "colors/mfd-hud.lua (adapted TextMate rules)"
+sha256 = "64b516b3b0f01cd28dbee31a04f925101262dd7bae89e27e3b0e43db79574c43"
+
+[[source.theme]]
+id = "mfd-nvg"
+source_path = "colors/mfd-nvg.lua (adapted TextMate rules)"
+sha256 = "a1f2d5c27689a10dd89c2cc4623f6fb68a46cec939ad686e450cf692a315e886"
+
+[[source.theme]]
+id = "mfd-blackout"
+source_path = "colors/mfd-blackout.lua (adapted TextMate rules)"
+sha256 = "5af663a3cb4a93c3790dc6f7dce598cf968293b80a8f6c3a8ca97845116f97a4"
+
+[[source.theme]]
+id = "mfd-flir"
+source_path = "colors/mfd-flir.lua (adapted TextMate rules)"
+sha256 = "aaa08ca7ceeb08e0894f1f1d82acee34ebc6db8373b25db637a95ef6833910a0"
+
+[[source.theme]]
+id = "mfd-flir-bh"
+source_path = "colors/mfd-flir-bh.lua (adapted TextMate rules)"
+sha256 = "b7f5371033723f3792acda03c036fc76f2ada9014794031cbdb8240c756eb85e"
+
+[[source.theme]]
+id = "mfd-flir-rh"
+source_path = "colors/mfd-flir-rh.lua (adapted TextMate rules)"
+sha256 = "0cd01ae8f29420d3da91e86eddd628829e459d2eec95d930b446ff9e18d35e38"
+
+[[source.theme]]
+id = "mfd-flir-fusion"
+source_path = "colors/mfd-flir-fusion.lua (adapted TextMate rules)"
+sha256 = "8fa2f969f4bc16fc9d86d9a9cb2bffc601f543d9849281faf4530c260688d418"
+
+[[source.theme]]
+id = "mfd-gbl-light"
+source_path = "colors/mfd-gbl-light.lua (adapted TextMate rules)"
+sha256 = "981ca38eba7a106e89d1e72f53d759a787571dac7172989eec35f496ea63e128"
+
+[[source.theme]]
+id = "mfd-gbl-dark"
+source_path = "colors/mfd-gbl-dark.lua (adapted TextMate rules)"
+sha256 = "31f65b195e13be9545f8d473146a38b7161ea0493c9f1096c01939efe4c33600"
+
+[[source.theme]]
+id = "mfd-lumon"
+source_path = "colors/mfd-lumon.lua (adapted TextMate rules)"
+sha256 = "843c3c971b8e4e5de842721c9408e47ade0e22d02743ed76ea78213b49c3c920"
+
+[[source.theme]]
+id = "mfd-nerv"
+source_path = "colors/mfd-nerv.lua (adapted TextMate rules)"
+sha256 = "7d05c37ffb50b52b6ffb5021d79f81d7f7c9a733a13382141291704864610dee"
+# Regenerate package-backed themes with: node tools/vendor-textmate-themes.mjs
+# Regenerate Zenbones adaptations with: python3 tools/vendor-zenbones-themes.py

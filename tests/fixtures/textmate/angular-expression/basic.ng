@@ -1,0 +1,20 @@
+user?.profile.name ?? 'café'
+count + 1 * 2
+enabled && !archived
+status === 'ready' ? '東京' : 'waiting'
+items | slice:0:3
+format(title, locale)
+[true, false, null, undefined]
+0x2a + 0b1010 + 6.02e23
+this.value?.toString()
+`Hello ${user.name} 🚀 𝌆`
+(
+  total / (count || 1)
+)
+[
+  'alpha',
+  `β-${index}`,
+  selected ? Infinity : NaN,
+]
+value as string
+typeof result === 'string'

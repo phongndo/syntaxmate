@@ -1,0 +1,23 @@
+### Fetch a user
+# @name getUser
+@host = https://api.example.test
+@userId = 42
+GET {{host}}/v1/users/{{userId}}?expand=profile HTTP/1.1
+Accept: application/json
+X-Client-Name: mark-fixture
+?locale=fr-FR
+&emoji=🚀
+
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+X-Request-Id: req-basic-001
+
+{
+  "id": 42,
+  "name": "Zoë 東京",
+  "active": true,
+  "symbols": ["λ", "🚀"]
+}
+
+### Finished
+// A plain comment after the closed JSON body.

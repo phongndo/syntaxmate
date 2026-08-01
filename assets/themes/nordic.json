@@ -1,0 +1,202 @@
+{
+  "name": "Nordic",
+  "type": "dark",
+  "colors": {
+    "editor.background": "#242933",
+    "editor.foreground": "#BBC3D4",
+    "editorCursor.foreground": "#BBC3D4",
+    "statusBar.background": "#191D24",
+    "gitDecoration.addedResourceForeground": "#A3BE8C",
+    "gitDecoration.deletedResourceForeground": "#BF616A",
+    "gitDecoration.modifiedResourceForeground": "#81A1C1"
+  },
+  "tokenColors": [
+    {
+      "name": "Vim Comment",
+      "scope": [
+        "comment"
+      ],
+      "settings": {
+        "foreground": "#4C566A",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Vim Constant",
+      "scope": [
+        "constant",
+        "variable.other.constant"
+      ],
+      "settings": {
+        "foreground": "#BE9DB8",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim String",
+      "scope": [
+        "string"
+      ],
+      "settings": {
+        "foreground": "#A3BE8C",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Variable",
+      "scope": [
+        "variable"
+      ],
+      "settings": {
+        "foreground": "#BBC3D4",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Field",
+      "scope": [
+        "variable.other.property",
+        "support.variable.property"
+      ],
+      "settings": {
+        "foreground": "#8FBCBB",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Function",
+      "scope": [
+        "entity.name.function",
+        "support.function"
+      ],
+      "settings": {
+        "foreground": "#88C0D0",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Keyword",
+      "scope": [
+        "keyword",
+        "storage"
+      ],
+      "settings": {
+        "foreground": "#D08770",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Operator",
+      "scope": [
+        "keyword.operator"
+      ],
+      "settings": {
+        "foreground": "#BBC3D4",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Preprocessor",
+      "scope": [
+        "meta.preprocessor",
+        "keyword.control.import"
+      ],
+      "settings": {
+        "foreground": "#BF616A",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Type",
+      "scope": [
+        "entity.name.type",
+        "entity.name.class",
+        "support.type",
+        "support.class"
+      ],
+      "settings": {
+        "foreground": "#EBCB8B",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Special",
+      "scope": [
+        "constant.character.escape",
+        "support.constant"
+      ],
+      "settings": {
+        "foreground": "#81A1C1",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Delimiter",
+      "scope": [
+        "punctuation"
+      ],
+      "settings": {
+        "foreground": "#60728A",
+        "fontStyle": "italic"
+      }
+    },
+    {
+      "name": "Vim Tag",
+      "scope": [
+        "entity.name.tag"
+      ],
+      "settings": {
+        "foreground": "#81A1C1",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Vim Attribute",
+      "scope": [
+        "entity.other.attribute-name"
+      ],
+      "settings": {
+        "foreground": "#EBCB8B",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Git Added",
+      "scope": [
+        "markup.inserted"
+      ],
+      "settings": {
+        "foreground": "#A3BE8C",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Git Removed",
+      "scope": [
+        "markup.deleted"
+      ],
+      "settings": {
+        "foreground": "#BF616A",
+        "fontStyle": ""
+      }
+    },
+    {
+      "name": "Git Changed",
+      "scope": [
+        "markup.changed"
+      ],
+      "settings": {
+        "foreground": "#81A1C1",
+        "fontStyle": ""
+      }
+    }
+  ],
+  "markSource": {
+    "repository": "https://github.com/AlexvZyl/nordic.nvim",
+    "commit": "9fb62116b891184049c50ca6ffb0d3bc100a1a6e",
+    "paths": [
+      "lua/nordic/colors/nordic.lua",
+      "lua/nordic/groups/native.lua"
+    ]
+  }
+}

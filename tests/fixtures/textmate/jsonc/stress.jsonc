@@ -1,0 +1,169 @@
+/**
+ * Workspace configuration used to exercise sustained JSONC tokenization.
+ * It deliberately mixes comments with deeply nested, realistic settings.
+ */
+{
+  "$schema": "https://example.test/schemas/workspace-v2.json",
+  "workspace": {
+    "name": "Aurora Console",
+    "slug": "aurora-console",
+    "description": "Operations dashboard for Café 東京 🚀",
+    "version": "2.7.0",
+    "private": true,
+    "deprecated": false,
+    "replacement": null
+  },
+
+  // Unicode appears both literally and as a JSON escape.
+  "localization": {
+    "defaultLocale": "en-US",
+    "supported": ["en-US", "fr-FR", "ja-JP", "el-GR"],
+    "labels": {
+      "welcome": "Bienvenue à tous",
+      "status": "稼働中",
+      "greek": "κόσμος λ",
+      "emoji": "satellite 🛰️ and rocket 🚀",
+      "escapedLambda": "\u03BB"
+    }
+  },
+
+  /* Build settings are shared by local and CI invocations. */
+  "build": {
+    "outputDirectory": "dist",
+    "sourceMaps": true,
+    "minify": false,
+    "target": "es2022",
+    "numericLimits": {
+      "parallelism": 8,
+      "warningBudgetKb": 512.5,
+      "timeoutMs": 1.5e4,
+      "retryDelaySeconds": 2E+1,
+      "disabledThreshold": -1
+    },
+    "entrypoints": [
+      "src/main.ts",
+      "src/worker.ts",
+      "src/admin.ts"
+    ],
+    "define": {
+      "DEBUG": false,
+      "FEATURE_SEARCH": true,
+      "OPTIONAL_ENDPOINT": null
+    }
+  },
+
+  /** Tooling paths and command-line fragments. */
+  "tooling": {
+    "formatter": {
+      "command": "mark-fmt",
+      "arguments": ["--write", "--color=always"],
+      "lineWidth": 100
+    },
+    "linter": {
+      "command": "mark-lint",
+      "arguments": ["--deny=warnings", "src\/"],
+      "environment": {
+        "RUST_LOG": "info,mark=debug",
+        "CACHE_PATH": "C:\\cache\\aurora",
+        "BANNER": "first\nsecond\tindented"
+      }
+    }
+  },
+
+  "tasks": [
+    {
+      "id": "check",
+      "label": "Check workspace",
+      "command": "cargo check --workspace",
+      "dependsOn": [],
+      "background": false
+    },
+    {
+      "id": "test",
+      "label": "Run unit tests 🧪",
+      "command": "cargo test --all-targets",
+      "dependsOn": ["check"],
+      "background": false
+    },
+    {
+      "id": "serve",
+      "label": "Serve local dashboard",
+      "command": "npm run dev",
+      "dependsOn": ["check"],
+      "background": true
+    }
+  ],
+
+  // Environment overlays model typical deployment configuration.
+  "environments": {
+    "development": {
+      "apiBase": "http://127.0.0.1:8080/v1",
+      "logLevel": "debug",
+      "sampleRate": 1.0,
+      "features": ["search", "timeline", "dev-tools"]
+    },
+    "staging": {
+      "apiBase": "https://staging.example.test/v1",
+      "logLevel": "info",
+      "sampleRate": 0.25,
+      "features": ["search", "timeline"]
+    },
+    "production": {
+      "apiBase": "https://api.example.test/v1",
+      "logLevel": "warn",
+      "sampleRate": 5e-2,
+      "features": ["search"]
+    }
+  },
+
+  "routes": [
+    { "path": "/", "component": "Overview", "exact": true },
+    { "path": "/alerts", "component": "AlertList", "exact": true },
+    {
+      "path": "/projects/:projectId",
+      "component": "ProjectDetails",
+      "exact": false,
+      "permissions": ["projects:read", "events:read"]
+    },
+    {
+      "path": "/settings/profile",
+      "component": "ProfileSettings",
+      "exact": true,
+      "permissions": ["profile:write"]
+    }
+  ],
+
+  /* Nested arrays keep rule stacks active across many lines. */
+  "dashboards": [
+    {
+      "title": "Service health",
+      "columns": 3,
+      "widgets": [
+        { "kind": "counter", "metric": "requests.total" },
+        { "kind": "gauge", "metric": "latency.p95" },
+        { "kind": "chart", "metric": "errors.rate" }
+      ]
+    },
+    {
+      "title": "Deployments",
+      "columns": 2,
+      "widgets": [
+        { "kind": "timeline", "metric": "deploy.completed" },
+        { "kind": "table", "metric": "release.current" }
+      ]
+    }
+  ],
+
+  "observability": {
+    "tracing": {
+      "enabled": true,
+      "endpoint": "https://telemetry.example.test/v1/traces",
+      "headers": { "x-client": "aurora\"console" }
+    },
+    "metrics": {
+      "enabled": true,
+      "intervalSeconds": 30,
+      "tags": { "team": "platform", "region": "eu-west-1" }
+    }
+  }
+}

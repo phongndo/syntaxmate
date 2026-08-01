@@ -1,0 +1,247 @@
+// Tier B stress fixture: plausible, sectional KQL for hand review.
+// Unicode sentinels: café, λ, 東京, 🚀, 𝌆.
+
+// Scalar declarations and every datatype family recognized by the grammar.
+let horizon = 14d;
+let retry_delay = 250ms;
+let epoch = datetime(1970-01-01T00:00:00Z);
+let run_at = datetime(2026-07-12 09:30:15.125Z);
+let request_id = guid(01234567-89ab-cdef-0123-456789abcdef);
+let enabled = bool(true);
+let legacy_flag = boolean(false);
+let tiny = int(7);
+let total = long(42L);
+let ratio = real(.125);
+let price = decimal(19.95);
+let title = string("café dashboard");
+let pause = timespan(1.02:03:04.500);
+let clock = time(12:30:00);
+let payload = dynamic({"city":"東京","ok":true,"missing":null});
+
+// Numeric spellings: decimal, exponent, hexadecimal, and suffix variants.
+let numeric_forms = dynamic([0, 42, 0x2A, 3.14159, 6.02e23, 1.0E-3, 9UL, 5F]);
+let duration_forms = dynamic([1d, 2h, 30m, 45s, 500ms, 3microseconds, 10ticks]);
+let arithmetic = ((42 + 8) * 2 - 4) / 3 % 5;
+let bits = binary_xor(0x0F, 0xF0);
+let shifted = binary_shift_left(1, 4);
+let inverted = binary_not(0x0F);
+
+// Scalar and tabular function definitions.
+let clamp = (value:real, low:real, high:real) {
+    max_of(low, min_of(value, high))
+};
+let label_for = (name:string, score:real) {
+    strcat(trim(" ", name), " => ", tostring(round(score, 2)))
+};
+let recent = (T:(Timestamp:datetime), span:timespan) {
+    T | where Timestamp >= ago(span)
+};
+let enrich = (T:(User:string, Score:real)) {
+    T | extend Label=label_for(User, Score), Bucket=bin(Score, 10.0)
+};
+
+// All supported quote styles and closed multiline string state.
+let double_quoted = "quote: \"; slash: \\; café";
+let single_quoted = 'apostrophe: \'; slash: \\; λ';
+let verbatim_double = @"C:\telemetry\東京\events.json";
+let verbatim_single = @'literal 🚀 path';
+let hidden_double = h"secret-𝌆";
+let hidden_single = h'secret-café';
+let multiline = ```
+first line has "double" and 'single' quotes
+second line has café, λ, 東京, 🚀, and 𝌆
+third line keeps // text inside the string
+```;
+let hidden_multiline = h```
+redacted line one
+redacted line two with {placeholder}
+```;
+
+// A compact source table with typed columns and nested dynamic values.
+let Events = datatable(
+    Timestamp:datetime,
+    User:string,
+    Region:string,
+    Score:real,
+    Count:long,
+    Active:bool,
+    RequestId:guid,
+    Latency:timespan,
+    Tags:dynamic,
+    Properties:dynamic,
+    Message:string
+)
+[
+    datetime(2026-07-12T09:00:00Z), "Ada", "eu-west", 98.5, 12L, true,
+        guid(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee), 125ms,
+        dynamic(["math","café","🚀"]), dynamic({"city":"東京","level":3}), "login ok code=200",
+    datetime(2026-07-11T23:45:10Z), "Grace", "us-east", 76.25, 8L, true,
+        guid(bbbbbbbb-cccc-dddd-eeee-ffffffffffff), 1.5s,
+        dynamic(["compiler","navy"]), dynamic({"symbol":"λ","level":2}), "retry code=429",
+    datetime(2026-07-01T12:30:00Z), "Linus", "eu-west", -4.0, 0L, false,
+        guid(cccccccc-dddd-eeee-ffff-000000000000), 2h,
+        dynamic([]), dynamic({"glyph":"𝌆","level":null}), "offline code=503"
+];
+
+// Core pipeline: filters, scalar functions, projection, ordering, and aliases.
+let Normalized = Events
+| invoke recent(horizon)
+| where Active == true and isnotnull(RequestId)
+| where Score between (-10.0 .. 100.0) and Region !in ("blocked", "test")
+| extend SafeScore=clamp(Score, 0.0, 100.0)
+| extend Lower=tolower(User), Upper=toupper(Region), Length=strlen(Message)
+| extend Hash=hash_sha256(strcat(User, tostring(RequestId)))
+| extend EventDay=startofday(Timestamp), EventWeek=startofweek(Timestamp)
+| extend Age=now() - Timestamp, PreviousDay=datetime_add("day", -1, Timestamp)
+| project Timestamp, User, Region, SafeScore, Count, Latency, Tags, Properties,
+          Message, Lower, Upper, Length, Hash, EventDay, EventWeek, Age, PreviousDay
+| project-rename Score=SafeScore
+| project-reorder Timestamp, User, Score
+| serialize Row=row_number();
+
+// String and membership operators, including case-sensitive forms and regex.
+Normalized
+| where User contains "a" or User !contains_cs "ROOT"
+| where Region startswith "eu" or Region endswith_cs "east"
+| where Message has "code" and Message has_any ("login", "retry")
+| where Message has_all ("code", "=") or Message !hasprefix "debug"
+| where User in~ ("ada", "GRACE") and Region !in~ ("LOCAL")
+| where Message matches regex @'code=\d{3}'
+| extend Code=toint(extract(@'code=(\d+)', 1, Message))
+| extend Replaced=replace_regex(Message, @'\d+', "NNN")
+| extend Parts=split(Message, " "), Prefix=substring(Message, 0, 5)
+| project User, Region, Code, Replaced, Parts, Prefix
+| order by Code asc nulls first;
+
+// Date/time and numeric scalar functions.
+Normalized
+| extend Rounded=round(Score, 1), Root=sqrt(abs(Score)), Power=pow(Score, 2)
+| extend Trig=sin(radians(Score)) + cos(radians(Score))
+| extend Finite=isfinite(Score), Nan=isnan(Score), Infinite=isinf(Score)
+| extend TenMinute=bin(Timestamp, 10m), Fixed=bin_at(Timestamp, 1h, epoch)
+| extend Year=getyear(Timestamp), Month=getmonth(Timestamp), Day=dayofmonth(Timestamp)
+| extend DayName=dayofweek(Timestamp), DayNumber=dayofyear(Timestamp)
+| extend EndMonth=endofmonth(Timestamp), Local=datetime_utc_to_local(Timestamp, "Europe/Paris")
+| extend BackToUtc=datetime_local_to_utc(Local, "Europe/Paris")
+| extend Difference=datetime_diff("minute", now(), Timestamp)
+| extend Stamp=format_datetime(Timestamp, "yyyy-MM-dd HH:mm:ss")
+| extend Duration=format_timespan(Latency, "dd.hh:mm:ss.fff")
+| extend Unix=unixtime_seconds_todatetime(1720000000)
+| project Timestamp, Rounded, Root, Power, Trig, TenMinute, Fixed, Stamp, Duration, Unix;
+
+// Aggregations and grouped output.
+Normalized
+| summarize Events=count(), Total=sum(Count), Average=avg(Score),
+            Maximum=max(Score), Minimum=min(Score), DistinctUsers=dcount(User),
+            ActiveEvents=countif(Score > 0), Samples=make_list(Message, 20),
+            Regions=make_set(Region), AnyUser=take_any(User)
+        by EventDay, bin(Timestamp, 1h)
+| extend Spread=Maximum - Minimum
+| where Events > 0
+| sort by EventDay desc, Average desc
+| take 20;
+
+// Distinct, count, top, sample, and range tabular operators.
+Normalized | distinct User, Region;
+Normalized | count;
+Normalized | top 5 by Score desc;
+Normalized | top-hitters 3 of Region by Count;
+Normalized | sample 2;
+Normalized | sample-distinct 2 of User;
+Normalized | limit 10;
+range Tick from 1 to 10 step 2
+| extend Square=Tick * Tick
+| summarize Sum=sum(Square);
+
+// Joins, lookup, union, and qualified join-side names.
+let Users = datatable(User:string, Team:string, Weight:real)
+[
+    "Ada", "research", 1.25,
+    "Grace", "platform", 1.10,
+    "Linus", "kernel", 0.90
+];
+Normalized
+| join kind=leftouter hint.strategy=broadcast Users on User
+| extend Weighted=Score * Weight
+| project User, Team, Weighted, Region;
+Normalized
+| join kind=innerunique (Users) on $left.User == $right.User
+| project User, Team, Score;
+Normalized
+| lookup kind=leftouter Users on User
+| project User, Team, Score;
+union withsource=SourceName Normalized, (Events | project Timestamp, User, Region, Score, Count,
+    Latency, Tags, Properties, Message, EventDay=startofday(Timestamp))
+| summarize Rows=count() by SourceName;
+
+// Dynamic bags and arrays, expansion, application, and packing.
+Normalized
+| extend Keys=bag_keys(Properties), Packed=bag_pack("user", User, "score", Score)
+| extend Combined=bag_merge(Properties, Packed), Json=dynamic_to_json(Properties)
+| extend TagCount=array_length(Tags), First=array_index_of(Tags, "café")
+| mv-expand with_itemindex=TagIndex Tag=Tags to typeof(string)
+| extend Tag=tostring(Tag)
+| summarize Tags=make_set(Tag), Indices=make_list(TagIndex) by User;
+Normalized
+| mv-apply Tag=Tags to typeof(string) on (
+    where Tag has_any ("café", "compiler", "math")
+    | summarize MatchingTags=make_set(Tag)
+)
+| project User, MatchingTags;
+Normalized
+| evaluate bag_unpack(Properties, "prop_")
+| project-away Hash
+| project-keep Timestamp, User, Region, Score, prop_*;
+
+// Parsing families and extraction from semi-structured text.
+Normalized
+| parse Message with Action:string " code=" Status:int
+| parse-where Message with * "code=" RequiredStatus:int
+| extend KvText="mode=fast, retries=3, owner=東京"
+| parse-kv KvText as (mode:string, retries:int, owner:string) with (pair_delimiter=",", kv_delimiter="=")
+| extend Csv=parse_csv(strcat(User, ",", Region, ",", tostring(Score)))
+| extend Url=parse_url("https://example.test/path?q=café")
+| extend Command=parse_command_line("tool --flag value", "windows")
+| project Action, Status, RequiredStatus, mode, retries, owner, Csv, Url, Command;
+
+// Time series construction and series scalar functions.
+Normalized
+| make-series Total=sum(Count) default=0 on Timestamp
+    from datetime(2026-07-01) to datetime(2026-07-15) step 1d by Region
+| extend Smoothed=series_fir(Total, dynamic([0.25, 0.5, 0.25]))
+| extend Stats=series_stats_dynamic(Total)
+| extend Decomposition=series_decompose(Total)
+| project Region, Timestamp, Total, Smoothed, Stats, Decomposition;
+
+// Less common tabular operators remain small and reviewable.
+Events
+| partition hint.strategy=native by Region (
+    top 1 by Score
+)
+| project User, Region, Score;
+Events
+| fork
+    Recent=(where Timestamp > ago(2d) | project User, Timestamp),
+    High=(where Score > 80 | project User, Score);
+Events
+| facet by Region with (summarize Average=avg(Score) by Active);
+Events
+| reduce by Message with threshold=0.8
+| project representative, pattern, count;
+
+// Metadata, external references, plugins, and rendering keywords.
+cluster("telemetry.example.kusto.windows.net").database("Samples").table("Events")
+| where ingestion_time() > ago(1d)
+| getschema;
+externaldata(Code:int, Description:string)
+[@"https://example.test/status.csv"] with (format="csv", ignoreFirstRecord=true)
+| where Code >= 400;
+Normalized
+| summarize Average=avg(Score) by EventDay
+| render timechart with (title="café / 東京 🚀", ytitle='score λ 𝌆');
+
+// Deprecated spellings are intentional grammar coverage, not recommendations.
+Normalized
+| extend LegacyJson=parse_json('{"old":true}'), LegacyWeek=weekofyear(Timestamp)
+| summarize LegacyAny=any(User), LegacyList=makelist(Message)
+| consume;

@@ -1,0 +1,181 @@
+!!! 5
+%html.no-js{ lang: "en", dir: "ltr" }
+  %head
+    %meta(charset="utf-8")/
+    %meta{ name: "viewport", content: "width=device-width, initial-scale=1" }/
+    %title= page_title || "Mission control — Καλημέρα 🚀"
+    %link(rel="stylesheet" href=asset_path("application.css"))/
+    :css
+      :root {
+        --accent: rebeccapurple;
+      }
+      body { color: var(--accent); }
+      .badge::before { content: "✓"; }
+    :javascript
+      const boot = { ready: true, locale: "日本語" };
+      document.documentElement.dataset.ready = String(boot.ready);
+      console.log(`boot ${boot.locale} 🛰️`);
+  %body#dashboard.theme-dark(data-controller="shell" aria-busy=false)
+    - current_user = users.find { |candidate| candidate.active? }
+    - counts = { alerts: 3, tasks: 12, messages: 0 }
+    -# This silent block exercises nested Haml parsing.
+      %p Hidden #{current_user.name}
+      - ignored = counts[:alerts] * 2
+    / Visible HTML comment with Haml-looking content
+      %span This remains comment text.
+      = "Ruby-looking #{counts[:tasks]}"
+    /[if IE]
+    %header.site-header
+      %a.brand{ href: root_path, title: "Home & status" }
+        %span.logo(aria-hidden="true") ◈
+        %span.name Orbital Café
+      %nav#primary.navigation(role="navigation" aria-label="Primary")
+        %ul
+          - %w[Overview Missions Crew].each_with_index do |label, index|
+            %li.nav-item{ class: (index.zero? ? "is-active" : nil) }
+              %a{ href: "/#{label.downcase}", data: { index: index } }= label
+      %form.search(action="/search" method="get")
+        %label(for="query") Search
+        %input#query.field(type="search" name="q" value=params[:q])/
+        %button(type="submit" disabled=false) Go
+    %main.content
+      == <strong>Trusted #{current_user.name}</strong>
+      %h1.page-title= page_title
+      %p.subtitle
+        Welcome, #{current_user&.profile&.display_name || "traveler"}.
+      %p Unicode probes: naïve façade, Ελληνικά, 中文, and 𠮷野家 🪐.
+      %section#summary.cards{ data: { refresh_interval: 30, turbo: true } }
+        %h2 Summary
+        .card.card--alerts{ class: (counts[:alerts].positive? ? "hot" : "calm") }
+          %span.card__label Alerts
+          %strong.card__value= counts.fetch(:alerts, 0)
+        .card.card--tasks
+          %span.card__label Tasks
+          %strong.card__value= counts[:tasks]
+        #message-card.card(data-empty=counts[:messages].zero?)
+          %span.card__label Messages
+          %strong.card__value= counts[:messages]
+      %section[@mission, :details]
+        %h2= @mission.name
+        %dl.metadata
+          %dt Identifier
+          %dd= @mission.id
+          %dt State
+          %dd{ class: "state state--#{@mission.state}" }= @mission.state
+      %article{ id: dom_id(@mission),
+        class: ["mission", @mission.priority],
+        data: { owner: @mission.owner_id } }
+        %h2 Mission details
+        %p= @mission.description
+      %aside.notice(
+        role="note"
+        data-kind="maintenance"
+        aria-label="Maintenance notice")
+        Planned window at #{l(@window, format: :short)}.
+      %ul.mission-list
+        - @missions.each do |mission|
+          %li[mission]{ class: cycle("odd", "even") }
+            %a{ href: mission_path(mission) }= mission.name
+            - if mission.delayed?
+              %span.badge.badge--warning Delayed
+            - elsif mission.complete?
+              %span.badge.badge--success Complete
+            - else
+              %span.badge In flight
+        - unless @missions.any?
+          %li.empty No missions are available.
+      %table.telemetry
+        %caption Latest telemetry
+        %thead
+          %tr
+            %th(scope="col") Sensor
+            %th(scope="col") Value
+            %th(scope="col") Updated
+        %tbody
+          - telemetry.each do |name, reading|
+            %tr{ data: { sensor: name } }
+              %th(scope="row")= name
+              %td= number_with_precision(reading.value, precision: 2)
+              %td
+                %time{ datetime: reading.at.iso8601 }= time_ago_in_words(reading.at)
+      %form.settings{ action: settings_path, method: :post }
+        %input(type="hidden" name="authenticity_token" value=form_authenticity_token)/
+        %fieldset
+          %legend Preferences
+          %label(for="theme") Theme
+          %select#theme(name="theme")
+            %option(value="dark" selected=true) Dark
+            %option(value="light") Light
+          %label
+            %input(type="checkbox" name="alerts" checked=@alerts_enabled)/
+            Receive alerts
+          %textarea(name="signature" rows=3)= @signature
+        %button.button{ type: :submit, data: { disable_with: "Saving…" } } Save
+      - case @mission.state
+      - when "queued"
+        %p.status Waiting for launch.
+      - when "active"
+        %p.status Tracking orbit.
+      - else
+        %p.status State unknown.
+      = render partial: "missions/card", locals: { mission: @mission }
+      != @trusted_fragment
+      &= @escaped_fragment
+      ~ preserve(@multiline_copy)
+      == Raw interpolation for #{@mission.name} and #@instance_label.
+      %p= succeed(".") do
+        Read the
+        %a(href=docs_path) documentation
+      %br/
+      %img.hero-image{ src: image_path("earth.png"), alt: "Earth from orbit 🌍" }/
+      :ruby
+        report = telemetry.map do |name, reading|
+          [name, reading.value]
+        end
+        report.sort_by! { |(_, value)| -value }
+      :sass
+        $accent: #663399
+        .panel
+          border: 1px solid $accent
+          &:hover
+            border-color: lighten($accent, 10%)
+      :coffee
+        square = (x) -> x * x
+        console.log square(9)
+      :markdown
+        ## Flight notes
+
+        Use **care** around `#{@mission.code}` and visit [docs](/docs).
+
+        * First stage ✓
+        * Second stage 🚀
+      :plain
+        Plain filter text keeps <tags>, & entities, and #{literal_markers}.
+        It also carries BMP Привет and astral 𝌆 without interpretation.
+      %script(type="application/javascript")
+        const payload = { mission: "#{@mission.id}", safe: true };
+        window.dispatchEvent(new CustomEvent("mission:ready", { detail: payload }));
+      %style
+        .inline-panel { display: grid; gap: 1rem; }
+      - values = [
+        1,
+        2,
+        3
+      ]
+      - total = values.reduce(0) { |sum, value| sum + value }
+      %output{ for: "query", data: { total: total } }= total
+      .escaped-dot
+        . This line begins with a Haml escape marker.
+      %pre.code
+        :plain
+          %not-a-tag
+          - not_ruby = true
+  %footer.site-footer
+    %small
+      &copy; #{Time.now.year} Orbital Operations
+    %address
+      %a(href="mailto:flight@example.test") flight@example.test
+    - cache ["footer", I18n.locale] do
+      %span.build= ENV.fetch("BUILD_ID", "dev")
+    / Final comment closes before EOF.
+      Everything above is intentionally balanced.

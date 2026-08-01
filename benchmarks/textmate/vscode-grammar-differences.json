@@ -1,0 +1,660 @@
+{
+  "schemaVersion": 1,
+  "vscodeCommit": "fc3def6774c76082adf699d366f31a557ce5573f",
+  "vscodeGrammarScopes": 84,
+  "matchingRootScopes": 65,
+  "canonicalEqual": 9,
+  "canonicalDifferent": 56,
+  "entries": [
+    {
+      "language": "vb",
+      "scopeName": "source.asp.vb.net",
+      "markPath": "assets/grammars/languages/vb.tmLanguage.json",
+      "vscodePath": "extensions/vb/syntaxes/asp-vb-net.tmLanguage.json",
+      "markCanonicalSha256": "e0d943c8259b0916f87ca47f9338fa5596ddf5e7e2ce42dd1b90e76197decdce",
+      "vscodeCanonicalSha256": "1e9b2a7017b23d2ff52a04cff8097daf71969749d4157527aeae9ed87bf5d0af",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "bat",
+      "scopeName": "source.batchfile",
+      "markPath": "assets/grammars/languages/bat.tmLanguage.json",
+      "vscodePath": "extensions/bat/syntaxes/batchfile.tmLanguage.json",
+      "markCanonicalSha256": "3bff060838b9bf5f86d36af9351340b5129facc3fa857807e534b30171d60b79",
+      "vscodeCanonicalSha256": "7a1cc7c49a7fa6a1e9fa116e175e583b184cd975c6d62105a8662d49cd9c5d90",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "c",
+      "scopeName": "source.c",
+      "markPath": "assets/grammars/languages/c.tmLanguage.json",
+      "vscodePath": "extensions/cpp/syntaxes/c.tmLanguage.json",
+      "markCanonicalSha256": "92d4d83b5fa9a53320ae48a09412fe0300dc4823fc292989132c83646d4f9b2f",
+      "vscodeCanonicalSha256": "d6486043f91d8857444f3a836e7afb7b3ad431ed212133c4fe381ccfcc1ccaf5",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "clojure",
+      "scopeName": "source.clojure",
+      "markPath": "assets/grammars/languages/clojure.tmLanguage.json",
+      "vscodePath": "extensions/clojure/syntaxes/clojure.tmLanguage.json",
+      "markCanonicalSha256": "56219ce791f9e0c3892ef6c63287ee88b7dd5f131003f2cc83f0ff38213778a5",
+      "vscodeCanonicalSha256": "d248591b03ae7de221524a63ee59cc49e496128b02f34d277fa6a3dcf25230eb",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "coffee",
+      "scopeName": "source.coffee",
+      "markPath": "assets/grammars/languages/coffee.tmLanguage.json",
+      "vscodePath": "extensions/coffeescript/syntaxes/coffeescript.tmLanguage.json",
+      "markCanonicalSha256": "1410bb5ea3edf82f660b841583f6c7d5a40a83f69567488b68aa61888ac38aed",
+      "vscodeCanonicalSha256": "cd4ed2239636312ad80833dfee1ed9d84d9683784e038dc7144ceeee92ceac11",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "cpp",
+      "scopeName": "source.cpp",
+      "markPath": "assets/grammars/languages/cpp.tmLanguage.json",
+      "vscodePath": "extensions/cpp/syntaxes/cpp.tmLanguage.json",
+      "markCanonicalSha256": "f5c7ad398940e53b6ebf789a6d123197e9d48aaf46cac5533502754da6ae7298",
+      "vscodeCanonicalSha256": "247462ed033ac636040a4bfea5f1a60b480165f6f0d641f8ac890f1ff955c2bd",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "cpp-macro",
+      "scopeName": "source.cpp.embedded.macro",
+      "markPath": "assets/grammars/languages/cpp-macro.tmLanguage.json",
+      "vscodePath": "extensions/cpp/syntaxes/cpp.embedded.macro.tmLanguage.json",
+      "markCanonicalSha256": "88e7542d40c7ecd67a8adfddcf2f14138d722906b553458795a8d8b894133fac",
+      "vscodeCanonicalSha256": "36bbd6d2603339bd5d0eb5ef729e13dfe32b7f671ec1f3d94de71e4611604610",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "csharp",
+      "scopeName": "source.cs",
+      "markPath": "assets/grammars/languages/csharp.tmLanguage.json",
+      "vscodePath": "extensions/csharp/syntaxes/csharp.tmLanguage.json",
+      "markCanonicalSha256": "e4d1ebaeab8970b1b60e628e1ea9f2ffc25b188bb4195f9568810f9875537ba0",
+      "vscodeCanonicalSha256": "59f134bbbd05f8122e335a23152a46971637a2f18fd0e0ca5c1a9f59fb26b131",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "css",
+      "scopeName": "source.css",
+      "markPath": "assets/grammars/languages/css.tmLanguage.json",
+      "vscodePath": "extensions/css/syntaxes/css.tmLanguage.json",
+      "markCanonicalSha256": "8941f8087cadea88ca37ba4efe54f50077c5858e878fc1829efea4d30f2cbb48",
+      "vscodeCanonicalSha256": "f088fe7a43e79fa1336f2bb7f8e1032b462ae4b6e1a32f1311eb227a069bac58",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "less",
+      "scopeName": "source.css.less",
+      "markPath": "assets/grammars/languages/less.tmLanguage.json",
+      "vscodePath": "extensions/less/syntaxes/less.tmLanguage.json",
+      "markCanonicalSha256": "1352728043f6c8906ec76468bfc3a897f81e7f8d2829436ab4af4eed186fe4eb",
+      "vscodeCanonicalSha256": "43a0f0e66e7426140cff48f193024fbeef886768cbcff735be7bbc353d6d484e",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "scss",
+      "scopeName": "source.css.scss",
+      "markPath": "assets/grammars/languages/scss.tmLanguage.json",
+      "vscodePath": "extensions/scss/syntaxes/scss.tmLanguage.json",
+      "markCanonicalSha256": "9ef3e80d6940ba93ddf9c65c312091c731567a0c2df87dbe579a05045214cbb2",
+      "vscodeCanonicalSha256": "de15d51a66c413d530f82432d78a3a79d1bba2208e04ddcc3d81b0d20413de0d",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "dart",
+      "scopeName": "source.dart",
+      "markPath": "assets/grammars/languages/dart.tmLanguage.json",
+      "vscodePath": "extensions/dart/syntaxes/dart.tmLanguage.json",
+      "markCanonicalSha256": "f1ce4d08f5c035787ef139e63a14bdb7f05d7a996ec86138570d4f9f7bc485b5",
+      "vscodeCanonicalSha256": "f1ce4d08f5c035787ef139e63a14bdb7f05d7a996ec86138570d4f9f7bc485b5",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "diff",
+      "scopeName": "source.diff",
+      "markPath": "assets/grammars/languages/diff.tmLanguage.json",
+      "vscodePath": "extensions/diff/syntaxes/diff.tmLanguage.json",
+      "markCanonicalSha256": "256843a66b11cd0193a0cf34425474bce6f773a14e29beb6e87fba251701f8fd",
+      "vscodeCanonicalSha256": "f9c4935a6370e29e9db9382388da380ff305b3f86829db4159909d0b8c35ee35",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "docker",
+      "scopeName": "source.dockerfile",
+      "markPath": "assets/grammars/languages/docker.tmLanguage.json",
+      "vscodePath": "extensions/docker/syntaxes/docker.tmLanguage.json",
+      "markCanonicalSha256": "e66f66f31c36354abf5a58b6126ed9ed4a8c3c0f75251f5096d9a1aa96203111",
+      "vscodeCanonicalSha256": "7b05e9b7c79f19776497e4ab46c21f24f13ecdb701169620d26d7479f4bb8000",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "dotenv",
+      "scopeName": "source.dotenv",
+      "markPath": "assets/grammars/languages/dotenv.tmLanguage.json",
+      "vscodePath": "extensions/dotenv/syntaxes/dotenv.tmLanguage.json",
+      "markCanonicalSha256": "c974b3c3b610a2953cb296d3c0ecb272f4a772eadca04228ee941792f36c4ed5",
+      "vscodeCanonicalSha256": "189db357a7b496bde3295cff133ac60eb2483a314287127c473202dcdfeaa0c7",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "fsharp",
+      "scopeName": "source.fsharp",
+      "markPath": "assets/grammars/languages/fsharp.tmLanguage.json",
+      "vscodePath": "extensions/fsharp/syntaxes/fsharp.tmLanguage.json",
+      "markCanonicalSha256": "da6b6580b0583e3a5750fca44c10b641cfdef2036feb7f1a32d52d25ff014241",
+      "vscodeCanonicalSha256": "6c665dc7601ea7dcb3a7083b5e73040d1f0de4ede8806801d14ecb5298ba9340",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "go",
+      "scopeName": "source.go",
+      "markPath": "assets/grammars/languages/go.tmLanguage.json",
+      "vscodePath": "extensions/go/syntaxes/go.tmLanguage.json",
+      "markCanonicalSha256": "3dc0c29d97b57bcd714c29773fc7d4e73512cb18dd1d4e1ceb1eed87a301ab6b",
+      "vscodeCanonicalSha256": "4545e22030afcb706a587fb546c4c210fc616da73bc8067f1b320d1633b8f7ea",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "groovy",
+      "scopeName": "source.groovy",
+      "markPath": "assets/grammars/languages/groovy.tmLanguage.json",
+      "vscodePath": "extensions/groovy/syntaxes/groovy.tmLanguage.json",
+      "markCanonicalSha256": "78ae6be76d00601a6b3f91b22052b402a2fe58dc241778dcbee77837c4cf25e5",
+      "vscodeCanonicalSha256": "9ba151d86c456b79f7043196329b39797236d1108636fbcd958c6c3d75d00b04",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "hlsl",
+      "scopeName": "source.hlsl",
+      "markPath": "assets/grammars/languages/hlsl.tmLanguage.json",
+      "vscodePath": "extensions/hlsl/syntaxes/hlsl.tmLanguage.json",
+      "markCanonicalSha256": "6582a4cd8f28ef245abce0410658976a44b6fcc031551bd409f53c43db79e49c",
+      "vscodeCanonicalSha256": "8549b359b52be2c6283d78f17261f0979daf71881a4b59a87fe5282fe9ce0df5",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "ignore",
+      "scopeName": "source.ignore",
+      "markPath": "assets/grammars/languages/ignore.tmLanguage.json",
+      "vscodePath": "extensions/git-base/syntaxes/ignore.tmLanguage.json",
+      "markCanonicalSha256": "e4abfbb62912a41c2fbdbe57f01c952e387af8b5082b78bc1700d6ee46064136",
+      "vscodeCanonicalSha256": "e4abfbb62912a41c2fbdbe57f01c952e387af8b5082b78bc1700d6ee46064136",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "ini",
+      "scopeName": "source.ini",
+      "markPath": "assets/grammars/languages/ini.tmLanguage.json",
+      "vscodePath": "extensions/ini/syntaxes/ini.tmLanguage.json",
+      "markCanonicalSha256": "c7dcd071ffccc5b4582bad2d8704e7eb4ed2938588911fbfe1fe4c4d7d11d2ab",
+      "vscodeCanonicalSha256": "74af00e07e7b78e477a3d4af4272ce6128bebf69a6b295da250b2f9b331eb6bd",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "java",
+      "scopeName": "source.java",
+      "markPath": "assets/grammars/languages/java.tmLanguage.json",
+      "vscodePath": "extensions/java/syntaxes/java.tmLanguage.json",
+      "markCanonicalSha256": "e80b07bc37436b92c451766b708fc30b7fb2e631511dc0837a093b5a90798fcd",
+      "vscodeCanonicalSha256": "3b216fae9b7d3c7baf7a7a7a081df020e30c1683fe29f2305456f4f375af1bcb",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "javascript",
+      "scopeName": "source.js",
+      "markPath": "assets/grammars/languages/javascript.tmLanguage.json",
+      "vscodePath": "extensions/javascript/syntaxes/JavaScript.tmLanguage.json",
+      "markCanonicalSha256": "64e78e8674d9110aaf05f4811a5a16c5bf70799d57811108631a6f438ff4614c",
+      "vscodeCanonicalSha256": "79b2d03520e30edac3bcde4f0281510c9a014f26dcad0bdc33d410f1ba5b9bda",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "jsx",
+      "scopeName": "source.js.jsx",
+      "markPath": "assets/grammars/languages/jsx.tmLanguage.json",
+      "vscodePath": "extensions/javascript/syntaxes/JavaScriptReact.tmLanguage.json",
+      "markCanonicalSha256": "b99b366b77cc6e161e0b096b73f2257f18b86cb0bc0e6c5d635aab7a079f3117",
+      "vscodeCanonicalSha256": "9f7e7c282c5084193cf8dc04e1cae84696a4294794d0d00f7eee52fe1665a387",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "js-regexp",
+      "scopeName": "source.js.regexp",
+      "markPath": "assets/grammars/languages/js-regexp.tmLanguage.json",
+      "vscodePath": "extensions/javascript/syntaxes/Regular Expressions (JavaScript).tmLanguage",
+      "markCanonicalSha256": "a9b87020c897a0f3735fa65b6ecded1fcc24203ebc674674fcd64d8f4856b7e6",
+      "vscodeCanonicalSha256": "a9b87020c897a0f3735fa65b6ecded1fcc24203ebc674674fcd64d8f4856b7e6",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "json",
+      "scopeName": "source.json",
+      "markPath": "assets/grammars/languages/json.tmLanguage.json",
+      "vscodePath": "extensions/json/syntaxes/JSON.tmLanguage.json",
+      "markCanonicalSha256": "265030d70a20a2d86ce3110c80f2e3499b9a6f7ad1ea3daeb11f89897c7bdb06",
+      "vscodeCanonicalSha256": "ca43c67005007576f422108da26aee93788419404274485ad79d0f6d7b4b15aa",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "jsonc",
+      "scopeName": "source.json.comments",
+      "markPath": "assets/grammars/languages/jsonc.tmLanguage.json",
+      "vscodePath": "extensions/json/syntaxes/JSONC.tmLanguage.json",
+      "markCanonicalSha256": "6ad016e60fb0a05ede5c72f07263d35e4443a31a3b1b9a776ea20a4fd36667dc",
+      "vscodeCanonicalSha256": "b1f0acb084653d338a1fa4067a5cec7975e5a32d7e8b3444ed382f8c85216e36",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "jsonl",
+      "scopeName": "source.json.lines",
+      "markPath": "assets/grammars/languages/jsonl.tmLanguage.json",
+      "vscodePath": "extensions/json/syntaxes/JSONL.tmLanguage.json",
+      "markCanonicalSha256": "1ff014eaa1708875b2f05a8866c660a62253540f53b6249396b7481a6019eddd",
+      "vscodeCanonicalSha256": "a52a78c52a069aa2f496d238835e598f39fbdd1bd7252535b17c5801a9af4826",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "julia",
+      "scopeName": "source.julia",
+      "markPath": "assets/grammars/languages/julia.tmLanguage.json",
+      "vscodePath": "extensions/julia/syntaxes/julia.tmLanguage.json",
+      "markCanonicalSha256": "3f8f7c03f825f45f66ba2c1c2acf8eeef9f5edc75bb50a2a18e5a198e1751e22",
+      "vscodeCanonicalSha256": "9caa2d6705d303d95d7202a41900bb01d58a63f92b88f11824bef0ee09fbd32f",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "lua",
+      "scopeName": "source.lua",
+      "markPath": "assets/grammars/languages/lua.tmLanguage.json",
+      "vscodePath": "extensions/lua/syntaxes/lua.tmLanguage.json",
+      "markCanonicalSha256": "35f12b92153f861bb712a5d6dbeb3262fed7c9a6cf1b5ce2ba61a75c8beb6091",
+      "vscodeCanonicalSha256": "098db68fbec6f55713f3823ec7ffe0b349243e32d05a252fef66eed72f6d29db",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "make",
+      "scopeName": "source.makefile",
+      "markPath": "assets/grammars/languages/make.tmLanguage.json",
+      "vscodePath": "extensions/make/syntaxes/make.tmLanguage.json",
+      "markCanonicalSha256": "c94381316c031fe8d41c4b1b540db6cc6d5cb01c0c5814f0355553aa0e6a0b15",
+      "vscodeCanonicalSha256": "305b08f719caf7382bfb6da119b3a4ab0e1064709fcd7e7a0ce763b6bd9cbd12",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "objective-c",
+      "scopeName": "source.objc",
+      "markPath": "assets/grammars/languages/objective-c.tmLanguage.json",
+      "vscodePath": "extensions/objective-c/syntaxes/objective-c.tmLanguage.json",
+      "markCanonicalSha256": "9c10cbf7e0d3cf8ad7d672b6f4c431d2b59cd6e38320c4525b321c82b6751e2a",
+      "vscodeCanonicalSha256": "1e61911748de2dca803ca47a0f4bc8df732a162f941dd720059c558fe09b5556",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "objective-cpp",
+      "scopeName": "source.objcpp",
+      "markPath": "assets/grammars/languages/objective-cpp.tmLanguage.json",
+      "vscodePath": "extensions/objective-c/syntaxes/objective-c++.tmLanguage.json",
+      "markCanonicalSha256": "9e06b5f120328ea56505b4575758d324395bad88af2c797c36158cbdc0cbc45f",
+      "vscodeCanonicalSha256": "0e00331d8245fb08cf589002d7f4fe54dc8eb1896160104f715e81fcdf773091",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "perl",
+      "scopeName": "source.perl",
+      "markPath": "assets/grammars/languages/perl.tmLanguage.json",
+      "vscodePath": "extensions/perl/syntaxes/perl.tmLanguage.json",
+      "markCanonicalSha256": "b77a5c5bf5cbf4390f65b006094a7a61690fe34b63455ee0d6afea0a441853df",
+      "vscodeCanonicalSha256": "bedd68b9712a65a9054dc4b9afa5a30ec599e92e494e089fbd32ff199679b42a",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "raku",
+      "scopeName": "source.perl.6",
+      "markPath": "assets/grammars/languages/raku.tmLanguage.json",
+      "vscodePath": "extensions/perl/syntaxes/perl6.tmLanguage.json",
+      "markCanonicalSha256": "c599b477dab3954b569d43a101ffbb86f78a2085837391f97379bda682ad7f75",
+      "vscodeCanonicalSha256": "109dd8b6b2fe0ddc993baa55792be751a54dac56caa6bbe737ef38edfd67b131",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "php",
+      "scopeName": "source.php",
+      "markPath": "assets/grammars/languages/php.tmLanguage.json",
+      "vscodePath": "extensions/php/syntaxes/php.tmLanguage.json",
+      "markCanonicalSha256": "cb763ddb8a83293ae57dce27dfe19cbda8200307d58563b777567cbe37aa523c",
+      "vscodeCanonicalSha256": "cb763ddb8a83293ae57dce27dfe19cbda8200307d58563b777567cbe37aa523c",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "powershell",
+      "scopeName": "source.powershell",
+      "markPath": "assets/grammars/languages/powershell.tmLanguage.json",
+      "vscodePath": "extensions/powershell/syntaxes/powershell.tmLanguage.json",
+      "markCanonicalSha256": "c38f930e86f6377520a2760f14e957717e3e0aaafb44a634aacf55d708270fda",
+      "vscodeCanonicalSha256": "c355555aa1a8995b6f2eaed842c669a8f0819d0f0410ef1ecd097b7b4d74ae04",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "python",
+      "scopeName": "source.python",
+      "markPath": "assets/grammars/languages/python.tmLanguage.json",
+      "vscodePath": "extensions/python/syntaxes/MagicPython.tmLanguage.json",
+      "markCanonicalSha256": "63daccacc60546770fdae84981c77a698eeded8af40457ccc19c1e671df5a9c3",
+      "vscodeCanonicalSha256": "c6958010dc312eaf31b8d1861339e67f2e114e587747cef76596732c0c2e61c4",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "r",
+      "scopeName": "source.r",
+      "markPath": "assets/grammars/languages/r.tmLanguage.json",
+      "vscodePath": "extensions/r/syntaxes/r.tmLanguage.json",
+      "markCanonicalSha256": "5bf7d23ee52a4c52b6e51223afd84bd2a82c049d59df7a75ae580c81aed8fa3a",
+      "vscodeCanonicalSha256": "5bf7d23ee52a4c52b6e51223afd84bd2a82c049d59df7a75ae580c81aed8fa3a",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "regexp",
+      "scopeName": "source.regexp.python",
+      "markPath": "assets/grammars/languages/regexp.tmLanguage.json",
+      "vscodePath": "extensions/python/syntaxes/MagicRegExp.tmLanguage.json",
+      "markCanonicalSha256": "800d8481e3db574f7113f2a382a2b1d6f691acb1223924fcec432356c3263ceb",
+      "vscodeCanonicalSha256": "c8c85ab8e27d9d2755bf782ba24f76255bda20141ffc9b3c246e781f4ae79801",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "rst",
+      "scopeName": "source.rst",
+      "markPath": "assets/grammars/languages/rst.tmLanguage.json",
+      "vscodePath": "extensions/restructuredtext/syntaxes/rst.tmLanguage.json",
+      "markCanonicalSha256": "acf05a776e6c79063c76de11d1bb45d5989444d0af3d78bb23b4322af2e2ada2",
+      "vscodeCanonicalSha256": "62a9df3e0b910b5f616e0c6acb32f51179452d7117cb24975c69a632b0630ab1",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "ruby",
+      "scopeName": "source.ruby",
+      "markPath": "assets/grammars/languages/ruby.tmLanguage.json",
+      "vscodePath": "extensions/ruby/syntaxes/ruby.tmLanguage.json",
+      "markCanonicalSha256": "53e6a9bd5878465e2d14889abfc4b3050380d1e8b751163a78486f1729030aca",
+      "vscodeCanonicalSha256": "1269c00f4c7d0384f688f329cf35a23721311b2f7d277fa61b52e678709b6d4a",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "rust",
+      "scopeName": "source.rust",
+      "markPath": "assets/grammars/languages/rust.tmLanguage.json",
+      "vscodePath": "extensions/rust/syntaxes/rust.tmLanguage.json",
+      "markCanonicalSha256": "433ca90db0d2c72b965645c3089d23f989313c01717bfc0f7adc40cbe6d42fe5",
+      "vscodeCanonicalSha256": "2347a26f5c0d9c6b15db044a75a1ef74340a6393b499b1a1cc149e3f689e31f0",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "shaderlab",
+      "scopeName": "source.shaderlab",
+      "markPath": "assets/grammars/languages/shaderlab.tmLanguage.json",
+      "vscodePath": "extensions/shaderlab/syntaxes/shaderlab.tmLanguage.json",
+      "markCanonicalSha256": "1176a429539863ee66330631fc8605b96bc6c113ad4c0d03fabce20eb6d0e810",
+      "vscodeCanonicalSha256": "e250a2d8cea45ba459ed91646cf83c4f0500454f5726040ef355500014778625",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "shellscript",
+      "scopeName": "source.shell",
+      "markPath": "assets/grammars/languages/shellscript.tmLanguage.json",
+      "vscodePath": "extensions/shellscript/syntaxes/shell-unix-bash.tmLanguage.json",
+      "markCanonicalSha256": "29f1660a7887d01877d9004669c5a925a4f479cb47b20b418946be76406e814d",
+      "vscodeCanonicalSha256": "89c39f0df4062c2526add560c542e86c6c69d1d139da327af3469e44960914e6",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "sql",
+      "scopeName": "source.sql",
+      "markPath": "assets/grammars/languages/sql.tmLanguage.json",
+      "vscodePath": "extensions/sql/syntaxes/sql.tmLanguage.json",
+      "markCanonicalSha256": "ba2f88f9ac0291bf277230adb737baa52da4317e71099d0fa3060b539268d671",
+      "vscodeCanonicalSha256": "1e98d901d43e8884d58671438ec86ff2fda765d91581000d5a00e6b2f75f0e71",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "swift",
+      "scopeName": "source.swift",
+      "markPath": "assets/grammars/languages/swift.tmLanguage.json",
+      "vscodePath": "extensions/swift/syntaxes/swift.tmLanguage.json",
+      "markCanonicalSha256": "b7bf1e167e939539c796c7b4da5695ee16c4607320ffbd7a83ce35354c6fcc6f",
+      "vscodeCanonicalSha256": "8fad8213ed8e11dbd00f4c905bacbe4d5f59fce55a9930b465c352113c1dcd33",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "typescript",
+      "scopeName": "source.ts",
+      "markPath": "assets/grammars/languages/typescript.tmLanguage.json",
+      "vscodePath": "extensions/typescript-basics/syntaxes/TypeScript.tmLanguage.json",
+      "markCanonicalSha256": "417faf677b1254180f0c2b8427a8c387c52beedc863a3ccd2fbf428cbbed1a03",
+      "vscodeCanonicalSha256": "6cb406909aedbcff499e1acb8af05578be5e8cf8b3149aa4d1374ec89720f5b4",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "tsx",
+      "scopeName": "source.tsx",
+      "markPath": "assets/grammars/languages/tsx.tmLanguage.json",
+      "vscodePath": "extensions/typescript-basics/syntaxes/TypeScriptReact.tmLanguage.json",
+      "markCanonicalSha256": "04f53791d7dade0c6c6cb1a7461d9ececdf56569d6cd612b99ea553312cd3cff",
+      "vscodeCanonicalSha256": "04d5cb6c8ba520e32f84895f6561b49bfe92e78ae9a976c0411ed4f60e08fcbb",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "yaml",
+      "scopeName": "source.yaml",
+      "markPath": "assets/grammars/languages/yaml.tmLanguage.json",
+      "vscodePath": "extensions/yaml/syntaxes/yaml.tmLanguage.json",
+      "markCanonicalSha256": "ee975e92737ba97f2d949cbe19a15983a13e86ae85338eee1c840127ca159e7c",
+      "vscodeCanonicalSha256": "ee975e92737ba97f2d949cbe19a15983a13e86ae85338eee1c840127ca159e7c",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "yaml-1.2",
+      "scopeName": "source.yaml.1.2",
+      "markPath": "assets/grammars/languages/yaml-1.2.tmLanguage.json",
+      "vscodePath": "extensions/yaml/syntaxes/yaml-1.2.tmLanguage.json",
+      "markCanonicalSha256": "36da3f87806eae6fba7f9a01191512dd103ecd59dfe31b64583142060659955d",
+      "vscodeCanonicalSha256": "36da3f87806eae6fba7f9a01191512dd103ecd59dfe31b64583142060659955d",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "yaml-embedded",
+      "scopeName": "source.yaml.embedded",
+      "markPath": "assets/grammars/languages/yaml-embedded.tmLanguage.json",
+      "vscodePath": "extensions/yaml/syntaxes/yaml-embedded.tmLanguage.json",
+      "markCanonicalSha256": "2bb1a5162d551dbb2486c911c4c0b0dc7423c4eb093b375a478e39cd66d3523f",
+      "vscodeCanonicalSha256": "2bb1a5162d551dbb2486c911c4c0b0dc7423c4eb093b375a478e39cd66d3523f",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "bibtex",
+      "scopeName": "text.bibtex",
+      "markPath": "assets/grammars/languages/bibtex.tmLanguage.json",
+      "vscodePath": "extensions/latex/syntaxes/Bibtex.tmLanguage.json",
+      "markCanonicalSha256": "34c6d78b13fac6712f116116dfd34ca947c2cb7bd428440828ff05d29a7c4479",
+      "vscodeCanonicalSha256": "4a92f1ab0958c28c08d4607ee75a2146d35730a4c3ce24e53e74ecfc74e934d4",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "git-commit",
+      "scopeName": "text.git-commit",
+      "markPath": "assets/grammars/languages/git-commit.tmLanguage.json",
+      "vscodePath": "extensions/git-base/syntaxes/git-commit.tmLanguage.json",
+      "markCanonicalSha256": "6ae78cb726d0769d052dff7f1933d38c51cb9135813e44d7a28794bf83d7adea",
+      "vscodeCanonicalSha256": "ce2cc010b713014ee7abee4ae714aa3f225c470f2c188a4adc9c72e34acefb90",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "git-rebase",
+      "scopeName": "text.git-rebase",
+      "markPath": "assets/grammars/languages/git-rebase.tmLanguage.json",
+      "vscodePath": "extensions/git-base/syntaxes/git-rebase.tmLanguage.json",
+      "markCanonicalSha256": "d0dec2ab1c5e969b185e05f3ee6ebcb7f55ac92687535d4bfaa845b2fb8f0582",
+      "vscodeCanonicalSha256": "564436f439829a77e2ee9a58b9a8ba7d687a51e2893319c541dc14afdeb10dbc",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "html",
+      "scopeName": "text.html.basic",
+      "markPath": "assets/grammars/languages/html.tmLanguage.json",
+      "vscodePath": "extensions/html/syntaxes/html.tmLanguage.json",
+      "markCanonicalSha256": "57de192a75ee43f7fd385f99431f7169aab92e81bdf6a36dad30f54889d4e575",
+      "vscodeCanonicalSha256": "322f1136ec21710d3a205b70e0493e0d2f89f8b282a0c04dffb5769b6be42074",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "html-derivative",
+      "scopeName": "text.html.derivative",
+      "markPath": "assets/grammars/languages/html-derivative.tmLanguage.json",
+      "vscodePath": "extensions/html/syntaxes/html-derivative.tmLanguage.json",
+      "markCanonicalSha256": "2856f8ec0f0fc915367b8fcd995120af33778287b99c47ee5888b99ea45d60e9",
+      "vscodeCanonicalSha256": "7c880df04389202c65ce6108f4bb4d84aaacaa1dd38c95eb63a766030094b0a3",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "handlebars",
+      "scopeName": "text.html.handlebars",
+      "markPath": "assets/grammars/languages/handlebars.tmLanguage.json",
+      "vscodePath": "extensions/handlebars/syntaxes/Handlebars.tmLanguage.json",
+      "markCanonicalSha256": "37f526b62a665c9e6823c3b1cdfc2bfeb09dd64c88c0b52fc29b4cbaacb95664",
+      "vscodeCanonicalSha256": "37f526b62a665c9e6823c3b1cdfc2bfeb09dd64c88c0b52fc29b4cbaacb95664",
+      "canonicalEqual": true,
+      "referencePolicy": "vscode-source-identical"
+    },
+    {
+      "language": "markdown",
+      "scopeName": "text.html.markdown",
+      "markPath": "assets/grammars/languages/markdown.tmLanguage.json",
+      "vscodePath": "extensions/markdown-basics/syntaxes/markdown.tmLanguage.json",
+      "markCanonicalSha256": "0ff68b98c5c9ade48c341f19c7a48713dbf4f4185563412a076993c3cd9eaf2b",
+      "vscodeCanonicalSha256": "8516c600ca3f927f7c13c3227f8ee08d79d6d2e0216945f104e673ac2c1d8637",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "log",
+      "scopeName": "text.log",
+      "markPath": "assets/grammars/languages/log.tmLanguage.json",
+      "vscodePath": "extensions/log/syntaxes/log.tmLanguage.json",
+      "markCanonicalSha256": "bb2c7ba798400f5749b1a758d54cd899b417e17fc7f21c7d03126ab21387ad66",
+      "vscodeCanonicalSha256": "bf2a8d03e703e101e9bf7523ed5b49855553c0015aea60d781fe24c9f2a276ef",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "pug",
+      "scopeName": "text.pug",
+      "markPath": "assets/grammars/languages/pug.tmLanguage.json",
+      "vscodePath": "extensions/pug/syntaxes/pug.tmLanguage.json",
+      "markCanonicalSha256": "728206fffec4f4bfb90e2faadd05c179b9df777693eba2528306e1b348ef9da5",
+      "vscodeCanonicalSha256": "6d4c0e81df25c22c99d1be55d35011868f40e00c10d02e21b45ef08047bd00f2",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "tex",
+      "scopeName": "text.tex",
+      "markPath": "assets/grammars/languages/tex.tmLanguage.json",
+      "vscodePath": "extensions/latex/syntaxes/TeX.tmLanguage.json",
+      "markCanonicalSha256": "963c806ad077e502c0f88d8d454864764f446672564a94439d7d92d0d4910f1a",
+      "vscodeCanonicalSha256": "fdd9cc08eebacaf548dc1e88e3b14013d02de01ad00d2b2a2df3a331749c0a34",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "latex",
+      "scopeName": "text.tex.latex",
+      "markPath": "assets/grammars/languages/latex.tmLanguage.json",
+      "vscodePath": "extensions/latex/syntaxes/LaTeX.tmLanguage.json",
+      "markCanonicalSha256": "95419d1cbd434af00c6e786664739028b9dd71419bc6a97b8b6c659403093be4",
+      "vscodeCanonicalSha256": "7a65ec9e0d6ce8bff625ff321dfdfa72656a236c74471a44df6f44c246bd8c52",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "xml",
+      "scopeName": "text.xml",
+      "markPath": "assets/grammars/languages/xml.tmLanguage.json",
+      "vscodePath": "extensions/xml/syntaxes/xml.tmLanguage.json",
+      "markCanonicalSha256": "d1d88e501f584aa20b90ba5a2aee1369e11a0a19e8ddec6b883598b7c82cbc23",
+      "vscodeCanonicalSha256": "bd32874c456eb9919c54211e443e0e994667584cf9f0cc99251eab6a1f0998ea",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "xsl",
+      "scopeName": "text.xml.xsl",
+      "markPath": "assets/grammars/languages/xsl.tmLanguage.json",
+      "vscodePath": "extensions/xml/syntaxes/xsl.tmLanguage.json",
+      "markCanonicalSha256": "a7ea4a742388c7f6119e07fbc5fec123cc1e44f36dd6e4d7924d3b068dd5446c",
+      "vscodeCanonicalSha256": "b348807d53251073632c7a8d44361e6611650600773a15d3f43f8aa9f71d03cf",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    }
+  ]
+}

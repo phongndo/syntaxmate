@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+{#
+  Dashboard fixture covering long-lived states and nested Twig expressions.
+  Text deliberately includes BMP glyphs: café, Ελληνικά, 東京, and astral 🌌 🧪.
+#}
+{% macro metric_card(metric, options = {'compact': false, 'tone': 'neutral'}) %}
+  <article class="metric metric--{{ options.tone|default('neutral') }}">
+    <h3>{{ metric.label|capitalize|e }}</h3>
+    <strong>{{ metric.value|number_format(2, '.', ',') }}</strong>
+    {% if options.compact == false %}
+      <small>{{ metric.delta|default(0)|round(1, 'common') }}%</small>
+    {% endif %}
+  </article>
+{% endmacro %}
+{% import "components/forms.twig" as forms %}
+{% from 'components/badges.twig' import badge as render_badge %}
+{% set navigation = [
+  {'label': 'Overview', 'route': 'dashboard', 'roles': ['admin', 'editor']},
+  {'label': 'Reports', 'route': 'reports', 'roles': ['admin']},
+  {'label': 'Field café', 'route': 'field', 'roles': ['editor', 'author']}
+] %}
+{% set settings = {
+  'theme': {'accent': '#5b4bdb', 'dark': true},
+  'limits': {'soft': 80, 'hard': 100},
+  'features': ['charts', 'exports', 'alerts']
+} %}
+{% set fallback_name = account.name ?? 'Anonymous' %}
+{% set visible_name = fallback_name ?: 'Guest' %}
+<html lang="{{ locale|default('en-GB') }}" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name='description' content='{{ page.summary|striptags|trim|e("html_attr") }}'>
+  <link rel="canonical" href="{{ canonical_url|default('/') }}">
+  <title>{{ page.title|default('Operations') }} · {{ visible_name }}</title>
+  <!-- The style element keeps CSS state across multiple physical lines. -->
+  <style id="dashboard-theme">
+    :root {
+      --accent: {{ settings.theme.accent|default('#334155') }};
+      --panel-gap: 1.25rem;
+    }
+    body {
+      margin: 0;
+      color: #172033;
+      background: linear-gradient(135deg, #f8fafc, #eef2ff);
+      font-family: "Inter", "Noto Sans", sans-serif;
+    }
+    .dashboard__grid {
+      display: grid;
+      grid-template-columns: repeat({{ columns|default(3) }}, minmax(0, 1fr));
+      gap: var(--panel-gap);
+    }
+    @media (max-width: 48rem) {
+      .dashboard__grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body id="dashboard-{{ account.id }}"
+      class="dashboard theme-{{ settings.theme.dark ? 'dark' : 'light' }}"
+      data-account='{{ account.slug|default("unknown") }}'>
+  <!--
+    HTML comments may contain {{ diagnostics.label|default('Twig') }} and
+    remain open over lines before closing normally.
+  -->
+  <header class="masthead" role="banner">
+    <a class="brand" href="/">Atlas &amp; Co. &#169; 2026</a>
+    <p title="Unicode sample">Résumé · 中文 · 🛰️</p>
+    <nav aria-label="Primary navigation">
+      <ul>
+        {% for item in navigation if current_role in item.roles %}
+          <li class="{{ loop.first ? 'is-first' : '' }}">
+            <a href="{{ path(item.route, {'account': account.id}) }}"
+               data-index="{{ loop.index0 }}">{{ item.label|e }}</a>
+          </li>
+        {% else %}
+          <li><em>No permitted destinations</em></li>
+        {% endfor %}
+      </ul>
+    </nav>
+  </header>
+  <main id="content">
+    {% if account is defined and account.enabled == true and current_role not in ['blocked', 'guest'] %}
+      <section aria-labelledby="summary-title">
+        <h1 id="summary-title">{{ account.profile.display_name|default(visible_name)|title }}</h1>
+        {% set scores = range(1, 5) %}
+        {% set selected = cycle(['low', 'medium', 'high'], loop_index|default(0)) %}
+        <p>Window: {{ min(scores) }}–{{ max(scores) }}; mode {{ selected }}.</p>
+        <div class="dashboard__grid">
+          {% for metric in metrics|slice(0, settings.limits.soft) %}
+            {{ _self.metric_card(metric, {'compact': loop.index is even, 'tone': metric.tone}) }}
+          {% endfor %}
+        </div>
+      </section>
+    {% elseif account is defined and account.slug starts with 'trial-' %}
+      <aside>{{ include('partials/trial.twig', {'account': account}, with_context = true) }}</aside>
+    {% else %}
+      <p>{{ 'Account unavailable'|trans|upper }}</p>
+    {% endif %}
+    {% set profile_value = attribute(account, 'profile') %}
+    {% set release_class = constant('App\\Release::CHANNEL') %}
+    {% set seed = random(range(10, 99)) %}
+    {% set published = date(page.published_at|default('now')) %}
+    {% set arithmetic = ((subtotal + tax) * 2 // 3) % 7 %}
+    {% set power_ratio = (base ** 2) / divisor - offset %}
+    {% set signature = account.slug ~ ':' ~ seed %}
+    {% set permission_match = (permissions b-and required_mask) b-or optional_mask %}
+    {% set permission_delta = permissions b-xor previous_permissions %}
+    {% set announcement = "Maintenance begins at 22:00 — café teams first;
+the overnight crew follows at 23:30 🌙." %}
+    <section class="details" data-seed="{{ seed }}">
+      <h2>{{ profile_value['heading']|default('Details') }}</h2>
+      <p>{{ account["status"] }} / {{ account.preferences.locale }}</p>
+      <p>{{ account[status_key] }} · {{ announcement|trim }}</p>
+      <p>{{ account.formatLabel(release_class)|custom_emphasis('strong') }}</p>
+      <p>{{ "alpha,beta,gamma"|split(',', 2)|join(' · ') }}</p>
+      <p>{{ {'a': 1, 'b': 2}|merge({'c': 3})|json_encode }}</p>
+      <p>{{ '50% ready'|replace({'%': ' percent'})|nl2br }}</p>
+      <p>{{ page.body|default('')|striptags('em,strong')|raw }}</p>
+    </section>
+    {% filter upper|escape %}
+      <p>This captured block is filtered before display.</p>
+    {% endfilter %}
+    {% set captured_panel %}
+      <aside class="captured">
+        {{ render_badge('Queued', {'tone': 'warning'}) }}
+        {{ forms.input('email', account.email, {'required': true}) }}
+      </aside>
+    {% endset %}
+    {{ captured_panel|raw }}
+    {% for number in 1..5 %}
+      {% if number is divisible by(2) %}
+        <span data-number="{{ number }}">even</span>
+      {% elseif number is odd %}
+        <span data-number="{{ number }}">odd</span>
+      {% endif %}
+    {% endfor %}
+    {% if email matches '/^[^@]+@[^@]+$/' and filename ends with '.csv' %}
+      <p>Export address accepted.</p>
+    {% endif %}
+    {% if not export.disabled and export.count >= 1 and export.count <= export.limit or export.format != 'none' %}
+      {% do audit.record('export-ready', {'signature': signature, 'mask': permission_match}) %}
+      <p>Export queue is ready.</p>
+    {% endif %}
+    {% autoescape 'html' %}
+      <p>{{ unsafe_preview }}</p>
+    {% endautoescape %}
+    {% spaceless %}
+      <div><span>Compact</span> <span>markup</span></div>
+    {% endspaceless %}
+    {% sandbox %}
+      {% include 'partials/safe-card.twig' with {'item': featured} only %}
+    {% endsandbox %}
+    {% embed 'components/modal.twig' with {'id': 'help'} %}
+      {% block title %}Help &amp; diagnostics{% endblock %}
+      {% block body %}<p>{{ dump(account.id) }}</p>{% endblock %}
+    {% endembed %}
+    {% verbatim %}
+      <code>Client placeholder: {{ browser_will_handle_this }}</code>
+    {% endverbatim %}
+    {% raw %}
+      <template data-client="raw">{{ untouched_client_token }}</template>
+    {% endraw %}
+    <ui:card data-kind="custom"><ui:slot></ui:slot></ui:card>
+    <p>Entities: &lt;safe&gt;, &quot;quoted&quot;, &#9731;, and &#x1F9ED;.</p>
+  </main>
+  {% css %}
+  .twig-css-bundle {
+    border: 1px solid #c7d2fe;
+    background: url("/images/grid.svg") center / cover;
+  }
+  .twig-css-bundle:hover { transform: translateY(-1px); }
+  {% endcss %}
+  {% includehirescss %}
+  @supports (display: grid) {
+    .high-resolution { display: grid; gap: 0.5rem; }
+  }
+  {% endincludehirescss %}
+  {% scss %}
+  $accent: #7c3aed;
+  .report-list {
+    color: $accent;
+    &__item {
+      padding: 0.5rem;
+      &:focus { outline: 2px solid lighten($accent, 15%); }
+    }
+  }
+  {% endscss %}
+  {% js %}
+  const embeddedConfig = {
+    account: "{{ account.id|e('js') }}",
+    features: {{ settings.features|json_encode|raw }}
+  };
+  window.dispatchEvent(new CustomEvent("atlas:ready", { detail: embeddedConfig }));
+  {% endjs %}
+  <script type="module">
+    const labels = {{ chart_labels|default([])|json_encode|raw }};
+    const endpoint = "{{ path('api_metrics', {'id': account.id})|e('js') }}";
+    async function refresh() {
+      const response = await fetch(endpoint, { headers: { "X-Mode": "dashboard" } });
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+      return response.json();
+    }
+    // Twig remains available inside ordinary script elements.
+    console.info("{{ debug_message|default('ready')|e('js') }}", labels);
+    refresh().catch((error) => console.error(error));
+  </script>
+  <?php
+  $legacyAccount = isset($accountId) ? (int) $accountId : 0;
+  echo htmlspecialchars("legacy:" . $legacyAccount, ENT_QUOTES, "UTF-8");
+  ?>
+<?python
+from datetime import datetime
+stamp = datetime.utcnow().isoformat() + "Z"
+print("<!-- python bridge: {} -->".format(stamp))
+?>
+  <%# Ruby ERB bridge retained for the migration window. %>
+  <% reports = ["daily", "weekly"].map { |name| name.upcase } %>
+  <%= reports.join(", ") %>
+  <?r puts "Nitro Ruby bridge closed" ?>
+  <footer role="contentinfo">
+    <small>{{ source('partials/legal.twig', ignore_missing = true)|default('No legal copy') }}</small>
+    <time datetime="{{ 'now'|date('c') }}">{{ 'now'|date('Y-m-d H:i') }}</time>
+  </footer>
+</body>
+</html>

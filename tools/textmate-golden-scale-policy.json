@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "targetPublicLanguages": 264,
+  "targetMinimumGoldenCases": 528,
+  "measurementGateCases": 124,
+  "warmupRuns": 1,
+  "timedRuns": 5,
+  "interactiveP95Seconds": 60,
+  "shardTargetP95Seconds": 45,
+  "maximumShards": 8,
+  "shardStrategy": "sha256-language-id-modulo",
+  "referenceRunner": "local development machine (L0.6 baseline)",
+  "percentileMethod": "nearest-rank",
+  "timingCommand": "cargo test -p syntaxmate --lib textmate_golden::manifest_golden_cases_ --locked",
+  "decision": {
+    "state": "measured",
+    "manifestCases": 544,
+    "fullSuiteP95Seconds": 62.41,
+    "interactiveThresholdSeconds": 60,
+    "shardCount": 4,
+    "shardP95SecondsByIndex": {
+      "0": 17.11,
+      "1": 21.76,
+      "2": 8.57,
+      "3": 13.88
+    },
+    "measuredAt": "2026-07-14",
+    "runner": "local development machine (L0.6 baseline)",
+    "evidence": "Local full-suite and four-shard wall-clock measurement at 544 manifest cases after the Starlark/Rego/GPU/WebIDL/AssemblyScript batch (1 warmup + 5 timed runs, nearest-rank p95, 2026-07-14): full suite = 62.41 s; shard 0 = 17.11 s, shard 1 = 21.76 s, shard 2 = 8.57 s, shard 3 = 13.88 s. The full suite exceeds the 60 s trigger and every selected shard remains within the 45 s target."
+  }
+}

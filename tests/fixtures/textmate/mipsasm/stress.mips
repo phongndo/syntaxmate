@@ -1,0 +1,259 @@
+# Packet telemetry demo for MIPS32: naïve façade, 世界, and signal 🚦
+# Strings and comments deliberately include BMP and astral Unicode safely.
+.data
+.align 3
+banner: .asciiz "MIPS módulo 世界 — telemetry 🚀\n"
+escaped_text: .ascii "quote: \" slash: \\ tab:\t \
+continued: done\n"
+severity: .byte 0, 1, 2, 3
+ports: .half 53, 443, 8080
+sample_words: .word 0x10203040, 17, 29, 0xDEADBEEF
+sample_count: .word 4
+epsilon: .float 0.125
+scale: .float 3.50
+baseline: .double 42.625
+scratch: .space 96
+.extern errno 4
+.kdata
+.align 2
+saved_status: .word 0
+fault_text: .asciiz "kernel résumé ☂ — fault 🛰️\n"
+.text
+.globl main
+.globl sum_words
+.globl classify_sample
+.globl copy_unaligned
+.globl update_average
+# Program entry prints a banner, aggregates samples, and updates an average.
+main:
+  addiu $sp, $sp, -32
+  sw $ra, 28($sp)
+  sw $s0, 24($sp)
+  sw $s1, 20($sp)
+  la $a0, banner
+  li $v0, 4
+  syscall
+  la $a0, sample_words
+  lw $a1, sample_count
+  jal sum_words
+  nop
+  move $s0, $v0
+  move $a0, $v0
+  li $a1, 32
+  jal classify_sample
+  nop
+  move $s1, $v0
+  la $a0, sample_words
+  la $a1, scratch
+  li $a2, 13
+  jal copy_unaligned
+  nop
+  l.s $f12, scale
+  mtc1 $s0, $f4
+  cvt.s.w $f4, $f4
+  jal update_average
+  nop
+  move $a0, $s1
+  li $v0, 1
+  syscall
+  lw $s1, 20($sp)
+  lw $s0, 24($sp)
+  lw $ra, 28($sp)
+  addiu $sp, $sp, 32
+  li $v0, 10
+  syscall
+# Sum a word vector while exercising a conventional counted loop.
+sum_words:
+  move $v0, $zero
+  beqz $a1, sum_done
+  nop
+sum_loop:
+  lw $t0, 0($a0)
+  addu $v0, $v0, $t0
+  addiu $a0, $a0, 4
+  addiu $a1, $a1, -1
+  bnez $a1, sum_loop
+  nop
+sum_done:
+  jr $ra
+  nop
+# Return a compact set of comparison flags for a signed sample.
+classify_sample:
+  slt $t0, $a0, $zero
+  sltu $t1, $a1, $a0
+  slti $t2, $a0, 16
+  sltiu $t3, $a0, 256
+  seq $t4, $a0, $a1
+  sne $t5, $a0, $zero
+  sge $t6, $a0, $a1
+  sgtu $t7, $a0, $a1
+  sleu $t8, $a0, $a1
+  sll $t1, $t1, 1
+  sllv $t2, $t2, $t5
+  srl $t3, $t3, 1
+  srlv $t4, $t4, $t5
+  sra $t6, $t6, 1
+  srav $t7, $t7, $t5
+  or $v0, $t0, $t1
+  xor $v0, $v0, $t2
+  andi $v0, $v0, 0x00FF
+  ori $v0, $v0, 0x0100
+  xori $v0, $v0, 0x005A
+  nor $v1, $t8, $zero
+  bgez $a0, classify_nonnegative
+  negu $v0, $v0
+classify_nonnegative:
+  bgtz $a1, classify_return
+  not $v0, $v0
+classify_return:
+  jr $ra
+  nop
+# Copy an arbitrary byte count; fast paths use unaligned pseudo-loads.
+copy_unaligned:
+  blez $a2, copy_done
+  nop
+copy_words:
+  blt $a2, 4, copy_tail
+  ulw $t0, 0($a0)
+  usw $t0, 0($a1)
+  addiu $a0, $a0, 4
+  addiu $a1, $a1, 4
+  addiu $a2, $a2, -4
+  b copy_words
+  nop
+copy_tail:
+  beqz $a2, copy_done
+  nop
+  lbu $t0, 0($a0)
+  sb $t0, 0($a1)
+  addiu $a0, $a0, 1
+  addiu $a1, $a1, 1
+  addiu $a2, $a2, -1
+  bnez $a2, copy_tail
+  nop
+copy_done:
+  jr $ra
+  nop
+# Decode fields that may cross a packet alignment boundary.
+decode_header:
+  ulhu $v0, 0($a0)
+  ulh $v1, 2($a0)
+  lbu $t0, 4($a0)
+  lhu $t1, 6($a0)
+  ush $v0, 0($a1)
+  sh $v1, 2($a1)
+  swl $t0, 4($a1)
+  swr $t1, 7($a1)
+  lwl $t2, 8($a0)
+  lwr $t2, 11($a0)
+  jr $ra
+  nop
+# Mix a key using multiply/divide results and rotate pseudo-instructions.
+mix_key:
+  lui $t0, 0x9E37
+  ori $t0, $t0, 0x79B9
+  multu $a0, $t0
+  mflo $t1
+  mfhi $t2
+  mthi $t1
+  mtlo $t2
+  madd $a1, $t0
+  maddu $a2, $t0
+  msub $a3, $t0
+  divu $t1, $a1
+  mflo $t3
+  mfhi $t4
+  rol $t3, $t3, 7
+  ror $t4, $t4, 5
+  clo $t5, $t3
+  clz $t6, $t4
+  mul $t7, $t5, $t6
+  mulo $t8, $t7, $a2
+  mulou $t9, $t8, $a3
+  remu $v1, $t9, $t0
+  addu $v0, $t3, $t4
+  jr $ra
+  nop
+# Floating-point pipeline with loads, conversions, comparisons, and stores.
+update_average:
+  l.s $f0, epsilon
+  add.s $f2, $f4, $f12
+  sub.s $f6, $f2, $f0
+  mul.s $f8, $f6, $f12
+  div.s $f10, $f8, $f2
+  abs.s $f14, $f10
+  neg.s $f16, $f14
+  sqrt.s $f18, $f14
+  round.w.s $f20, $f18
+  trunc.w.s $f22, $f18
+  ceil.w.s $f24, $f18
+  floor.w.s $f26, $f18
+  c.lt.s $f0, $f18
+  bc1t average_positive
+  nop
+  mov.s $f18, $f0
+average_positive:
+  cvt.d.s $f28, $f18
+  l.d $f2, baseline
+  add.d $f4, $f28, $f2
+  sub.d $f6, $f4, $f2
+  mul.d $f8, $f6, $f2
+  div.d $f10, $f8, $f4
+  abs.d $f12, $f10
+  sqrt.d $f14, $f12
+  c.le.d $f14, $f12
+  bc1f average_unordered
+  nop
+  cvt.s.d $f0, $f14
+average_unordered:
+  s.s $f0, scratch
+  s.d $f14, scratch+8
+  mfc1 $v0, $f0
+  jr $ra
+  nop
+# An LL/SC loop performs an atomic increment at a caller-provided address.
+atomic_increment:
+atomic_retry:
+  ll $t0, 0($a0)
+  addiu $t1, $t0, 1
+  move $t2, $t1
+  sc $t2, 0($a0)
+  beqz $t2, atomic_retry
+  nop
+  move $v0, $t1
+  jr $ra
+  nop
+# Guard routine demonstrates conditional moves and architectural traps.
+checked_ratio:
+  teq $a1, $zero
+  tgeu $a0, $a2
+  tltu $a3, $a0
+  teqi $a0, 0
+  tgei $a1, 32767
+  tltiu $a2, 1
+  div $a0, $a1
+  mflo $t0
+  movn $v0, $t0, $a1
+  movz $v1, $zero, $a3
+  jr $ra
+  nop
+# Coprocessor-zero handler uses reserved registers only in kernel text.
+.ktext
+.align 2
+exception_vector:
+  mfc0 $k0, $12
+  mfc0 $k1, $13
+  sw $k0, saved_status
+  andi $k0, $k0, 0xFFFE
+  mtc0 $k0, $12
+  move $26, $k0
+  move $27, $k1
+  .set noat
+  lui $1, 0x8000
+  addu $1, $1, $26
+  .set at
+  move $2, $27
+  move $28, $gp
+  move $29, $sp
+  move $31, $ra
+  eret

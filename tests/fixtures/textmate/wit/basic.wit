@@ -1,0 +1,22 @@
+package fixtures:greeting@1.2.0;
+
+/// # Greeting API
+/// Carries café, λ, 東京, 🚀, and 𝌆 text as UTF-8.
+interface greetings {
+  type name = string;
+  record request {
+    who: name,
+    excited: bool,
+  }
+  variant reply {
+    message(string),
+    unavailable(u16),
+  }
+  flags style { polite, loud }
+  greet: func(input: request, mode: option<style>) -> result<reply, string>;
+}
+
+world greeter {
+  import greetings;
+  export run: func(names: list<string>) -> u32;
+}

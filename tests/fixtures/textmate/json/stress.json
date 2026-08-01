@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "mark-json-stress",
+  "version": "2.7.0-rc.1",
+  "description": "Grammar workbench for café, 東京, λ, and 🚀",
+  "private": true,
+  "application": {
+    "id": "syntax-preview",
+    "displayName": "Grammar Workbench",
+    "release": {
+      "channel": "canary",
+      "published": true,
+      "deprecated": false,
+      "sunset": null
+    },
+    "runtime": {
+      "command": "bin/mark --grammar json",
+      "workingDirectory": "./fixtures/textmate",
+      "environment": {
+        "MARK_LOG": "trace",
+        "CACHE/STRATEGY": "memory+disk",
+        "feature.experimental?": true
+      },
+      "limits": {
+        "workers": 8,
+        "timeoutSeconds": 12.75,
+        "memoryBytes": 1073741824
+      }
+    }
+  },
+  "servers": [
+    {
+      "name": "primary",
+      "url": "https://api.example.test/v1/parse?mode=strict&trace=1",
+      "headers": {
+        "Accept": "application/json",
+        "X-Client/Version": "2026.07"
+      },
+      "retry": {
+        "attempts": 3,
+        "backoffSeconds": [
+          0.25,
+          1,
+          4e0
+        ]
+      }
+    },
+    {
+      "name": "local fallback",
+      "url": "http://127.0.0.1:8080/health",
+      "headers": {},
+      "retry": null
+    }
+  ],
+  "buildGraph": {
+    "entrypoints": [
+      "src/main.rs",
+      "src/engine/tokenizer.rs"
+    ],
+    "tasks": [
+      {
+        "id": "compile-grammars",
+        "command": "cargo run --bin grammar-compile -- assets/grammars",
+        "dependsOn": [],
+        "inputs": [
+          "assets/grammars/languages/*.json"
+        ],
+        "outputs": [
+          "target/grammars.pack"
+        ],
+        "cache": true
+      },
+      {
+        "id": "test-parity",
+        "command": "cargo test -p syntaxmate --test textmate_golden",
+        "dependsOn": [
+          "compile-grammars"
+        ],
+        "inputs": [
+          "tests/fixtures/textmate/**/*.jsonl"
+        ],
+        "outputs": [],
+        "cache": false
+      },
+      {
+        "id": "publish-report",
+        "command": "node tools/report.mjs --format=json",
+        "dependsOn": [
+          "test-parity"
+        ],
+        "environment": {
+          "CI": "true",
+          "REPORT_LOCALE": "ja-JP"
+        },
+        "cache": false
+      }
+    ]
+  },
+  "recentRuns": [
+    {
+      "id": "run_01JZ8T3M9B",
+      "state": "passed",
+      "startedAt": "2026-07-12T09:14:33.482Z",
+      "durationMs": 1842,
+      "worker": "macos-arm64-03",
+      "summary": {
+        "files": 524,
+        "assertions": 18842,
+        "failures": 0
+      }
+    },
+    {
+      "id": "run_01JZ8T7Q2K",
+      "state": "failed",
+      "startedAt": "2026-07-12T09:19:04.007Z",
+      "durationMs": 913.5,
+      "worker": "linux-x64-11",
+      "summary": {
+        "files": 117,
+        "assertions": 4096,
+        "failures": 2
+      },
+      "diagnostics": [
+        {
+          "severity": "warning",
+          "message": "Expected value after colon",
+          "file": "fixtures/東京/config.json",
+          "range": {
+            "start": [42, 17],
+            "end": [42, 18]
+          }
+        },
+        {
+          "severity": "error",
+          "message": "Astral token 🚀 changed UTF-16 width",
+          "file": "fixtures/unicode.json",
+          "range": {
+            "start": [7, 9],
+            "end": [7, 11]
+          }
+        }
+      ]
+    }
+  ],
+  "tokenSample": {
+    "line": "{\"message\":\"hello \\uD83D\\uDE80\"}",
+    "tokens": [
+      {
+        "startIndex": 0,
+        "endIndex": 1,
+        "scopes": [
+          "source.json",
+          "punctuation.definition.dictionary.begin.json"
+        ]
+      },
+      {
+        "startIndex": 1,
+        "endIndex": 10,
+        "scopes": [
+          "source.json",
+          "string.quoted.double.json",
+          "support.type.property-name.json"
+        ]
+      }
+    ],
+    "ruleStackHash": "sha256:8d908a9cf2f8c7b1",
+    "stoppedEarly": false
+  },
+  "escapeCatalog": {
+    "quotationMark": "\"",
+    "reverseSolidus": "\\",
+    "solidus": "\/",
+    "backspace": "\b",
+    "formFeed": "\f",
+    "lineFeed": "\n",
+    "carriageReturn": "\r",
+    "horizontalTab": "\t",
+    "basicUnicode": "\u03BB",
+    "surrogatePair": "\uD83D\uDE80",
+    "literalUnicode": "Καλημέρα · 東京 · café",
+    "literalAstral": "🧪 🌌 𝄞"
+  },
+  "numericSamples": [
+    0,
+    -0,
+    17,
+    -42,
+    0.125,
+    -9876.54321,
+    6.022e23,
+    -1.602176634E-19,
+    1e+308,
+    9007199254740991,
+    18446744073709551615,
+    123456789012345678901234567890,
+    3.141592653589793238462643383279
+  ],
+  "workspace": {
+    "folders": [
+      {
+        "uri": "file:///Users/example/Grammar%20Lab",
+        "languageIds": [
+          "json",
+          "jsonc",
+          "yaml"
+        ]
+      }
+    ],
+    "editor": {
+      "tabSize": 2,
+      "insertSpaces": true,
+      "rulers": [80, 100, 120]
+    }
+  },
+  "grammarPackage": {
+    "scopeName": "source.json",
+    "fileTypes": ["json", "har", "ipynb"],
+    "patterns": [
+      {
+        "include": "#value"
+      },
+      {
+        "match": "-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?",
+        "name": "constant.numeric.json"
+      }
+    ]
+  },
+  "odd keys": {
+    "": "empty key",
+    "with spaces": "preserved",
+    "colon:key": "not a delimiter here",
+    "comma,key": "still one key",
+    "brackets[]{}": "punctuation",
+    "quote\"inside": "escaped",
+    "back\\slash": "portable"
+  },
+  "edgeValues": {
+    "truth": true,
+    "lie": false,
+    "missing": null,
+    "emptyArray": [],
+    "emptyObject": {},
+    "escaped": "quote \" slash \\ newline \n tab \t",
+    "mixed": "prefix-\u2764-❤️-\uD83E\uDDEA-suffix"
+  }
+}

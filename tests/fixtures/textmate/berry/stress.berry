@@ -1,0 +1,209 @@
+#-
+  Berry observatory stress fixture.
+  It covers comments, controls, declarations, calls, members, numerics,
+  operators, escapes, interpolation, café, Ελληνικά, 東京, 🚀, and 𝌆.
+-#
+import math as maths
+import string as text
+import json
+
+static default_limit = 0xFF
+var decimal_integer = 42
+var leading_zero = 007
+var decimal_fraction = 12.500
+var leading_fraction = .625
+var exponent_upper = 6E+4
+var exponent_lower = 9e-3
+var hex_lower = 0xdead
+var hex_upper = 0xBEEF
+var truth = true
+var lie = false
+var absent = nil
+
+# Ordinary quoted strings and every escape recognized by the grammar.
+var title = "Aurora café 東京 🚀 𝌆"
+var single = 'naïve Ελληνικά 🛰️'
+var controls = "bell\a back\b form\f line\n return\r tab\t vertical\v"
+var bytes = "hex\x41 octal\101 quote\" apostrophe\' slash\\"
+var single_bytes = 'hex\x42 octal\102 quote\" apostrophe\' slash\\'
+
+# Identifiers, one-character edge cases, calls with spacing, and members.
+var long_identifier_42 = 42
+var café_count = 3
+var x = 1
+var Z = 2
+var _ = 3
+var spaced_call = compute   (long_identifier_42)
+var member_chain = station.sensor.primary.value
+
+class Reading
+  static kind = "telemetry"
+  def init(name, value, unit)
+    self.name = name
+    self.value = value
+    self.unit = unit
+    self.valid = true
+  end
+
+  def scaled(factor)
+    if self.valid
+      return self.value * factor
+    else
+      return nil
+    end
+  end
+
+  def describe()
+    return self.name + ": " + str(self.value) + self.unit
+  end
+end
+
+class Station
+  static protocol = "Berry/1"
+  def init(identifier, location)
+    self.identifier = identifier
+    self.location = location
+    self.readings = []
+    self.enabled = true
+  end
+
+  def add(reading)
+    self.readings.push(reading)
+    return self
+  end
+
+  def disable()
+    self.enabled = false
+  end
+
+  def sample_count()
+    return size(self.readings)
+  end
+end
+
+class Radio : Station
+  def init(identifier, location, channel)
+    super(self).init(identifier, location)
+    self.channel = channel
+    self.failures = 0
+  end
+
+  def transmit(payload)
+    if !self.enabled
+      raise "radio disabled"
+    end
+    return self.protocol + " " + payload
+  end
+end
+
+def clamp(value, minimum, maximum)
+  if value < minimum
+    return minimum
+  elif value > maximum
+    return maximum
+  else
+    return value
+  end
+end
+
+def classify(reading)
+  if reading.valid && reading.value >= 90
+    return "critical"
+  elif reading.valid && reading.value >= 70
+    return "warning"
+  elif !reading.valid || reading.value < 0
+    return "invalid"
+  else
+    return "nominal"
+  end
+end
+
+def checksum(values)
+  var total = 0
+  for value : values
+    total = (total + value) % 65535
+  end
+  return total
+end
+
+def normalize(values)
+  var output = []
+  for value : values
+    if value == nil
+      continue
+    end
+    output.push(clamp(value, 0, 100))
+  end
+  return output
+end
+
+def first_alarm(readings)
+  var index = 0
+  while index < size(readings)
+    var current = readings[index]
+    if classify(current) == "critical"
+      break
+    end
+    index = index + 1
+  end
+  return index
+end
+
+def guarded_decode(payload)
+  try
+    return json.load(payload)
+  except .. as error
+    print("decode failed: " + str(error))
+    return {}
+  end
+end
+
+def poll(station, attempts)
+  var remaining = attempts
+  do
+    remaining = remaining - 1
+    if remaining <= 0
+      break
+    end
+  end
+  return station.sample_count()
+end
+
+# Dense operator coverage follows the grammar's broad single-character class.
+var arithmetic = (8 + 4) * 3 / 2 - 5 % 2
+var comparison = arithmetic >= 10 && arithmetic != 11 || arithmetic == 12
+var bits = (0xF0 & 0xCC) | (0x0F ^ 0x03)
+var shifted = (bits << 2) >> 1
+var inverted = ~shifted
+var indexed = [arithmetic, bits, shifted][1]
+var mapped = {"north": 1, "south": 2}
+mapped["zenith"] = 3
+
+var station = Radio("東京-α", "Svalbard 🛰️", 7)
+station.add(Reading("temperature", 21.75, "°C"))
+station.add(Reading("pressure", 101.3, "kPa"))
+station.add(Reading("radiation", 99, "µSv"))
+station.add(Reading("glyph-𝌆", -1, "unit"))
+
+for reading : station.readings
+  var category = classify(reading)
+  print(reading.describe() + " [" + category + "]")
+end
+
+var cleaned = normalize([10, nil, 125, -5, 88])
+var digest = checksum(cleaned)
+var alarm_index = first_alarm(station.readings)
+var decoded = guarded_decode('{"status":"ok","crew":"λ"}')
+var polls = poll(station, 3)
+
+# Function and member lookaheads around whitespace and punctuation.
+print   (station.transmit("ready 🚀"))
+maths.floor   (decimal_fraction)
+station .sample_count()
+station.identifier
+station._class
+
+# Final format matrix covers both quote styles, fields, calls, members, and {{}}.
+# Numerics exercise the grammar's intentionally missing #numbers field include.
+# It is last because the grammar's nameless begin/while wrapper persists to EOF.
+var summary = f"{station.identifier}: {station.sample_count()} / {default_limit} {{ok}}"; var report = f'{classify(station.readings[alarm_index])} café 🚀 𝌆'; var numeric_field = f"value={42} hex={0x2A} member={station.channel}"; var keyword_field = f'flags={true} none={nil} object={self}'

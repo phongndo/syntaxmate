@@ -1,0 +1,19 @@
+diff --git a/docs/greeting.txt b/docs/greeting.txt
+index 2f6c8a1..9bc17de 100644
+--- a/docs/greeting.txt
++++ b/docs/greeting.txt
+@@ -1,8 +1,9 @@
+ Welcome to the project.
+-Status: ready 🌍
++Status: launch 🚀
+ 
+-Maintainer: Zoe
++Maintainer: Zoë
+ City: 東京
+-Summary: Café notes and Δ values.
++Summary: Café notes, Δ values, and naïve examples.
+ Documentation lives in docs/.
++Release: v2 — bientôt!
+-End of file.
+\ No newline at end of file
++End of file.

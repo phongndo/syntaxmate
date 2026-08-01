@@ -1,0 +1,24 @@
+package gallery
+
+import "fmt"
+
+type Guest struct { Name string; Visits int }
+
+templ Greeting(guest Guest) {
+	<section id="welcome" class="greeting" data-visits={ fmt.Sprint(guest.Visits) }>
+		<!-- Compact templ component: café, 東京, and orbit 🚀. -->
+		<h1>{ fmt.Sprintf("Hello, %s", guest.Name) }</h1>
+		if guest.Visits > 1 {
+			<p>Welcome back &amp; enjoy the gallery.</p>
+		} else {
+			<p>Your first visit starts here.</p>
+		}
+		<style>
+			.greeting { color: rebeccapurple; padding: 1rem; }
+		</style>
+		<script>
+			const badge = document.querySelector("#welcome");
+			badge?.setAttribute("data-ready", "true");
+		</script>
+	</section>
+}

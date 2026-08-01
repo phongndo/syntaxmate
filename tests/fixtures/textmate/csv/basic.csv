@@ -1,0 +1,13 @@
+id,name,city,note,active,score,joined,tags,emoji,balance
+1,Ana Silva,São Paulo,"prefers email, not phone",true,98.5,2025-01-14,"beta,reader",📚,1200.00
+2,"O'Connor, Maeve",Dublin,"said ""ship it""",true,87,2024-11-03,maintainer,🚀,-42.75
+3,李雷,北京,普通话,false,91.25,2023-06-30,"亚洲,研究",🛰️,0
+4,Noor القاهرة,Cairo,"right-to-left: مرحبًا",true,76.0,2025-02-28,,🌍,340.10
+5,Zoë Faßbinder,München,"combining café; naïve",false,,2022-09-12,reviewer,☕,19.99
+6,"Γεώργιος, Ν.",Αθήνα,"comma, quote "" and semicolon;",true,100,2025-03-01,"alpha,Ω",🧭,888.08
+7,𐍈 Gothic,Ravenna,Astral letter U+10348,true,64,0400-01-01,archive,🏺,
+8,吉野 𠮷,京都,"supplementary ideograph 𠮷",true,82,2024-04-08,"歴史,地図",🗾,500
+9,Amélie,Dakar,,false,0,2021-12-31,,,12.50
+10,"  padded name  ",Reykjavík,  "spaces around quoted field"  ,true,73,2025-05-17,"ice,wind",❄️,70.00
+11,Renée,Montréal,"line uses CRLF in many exports",true,88.8,2020-02-29,legacy,🎼,101.01
+12,Sam,Null Island,"empty fields follow",false,,2025-07-01,,🧪,

@@ -1,0 +1,25 @@
+module fixture.basic
+
+// Compact Pkl fixture: café, λ, 中, and 🚀.
+typealias Label = String | null
+
+class Guest {
+  name: String
+  visits: Int = 0
+}
+
+local guest = new Guest {
+  name = "Zoë"
+  visits = 0x2
+}
+
+greeting = if (guest.visits > 1) "Welcome back, \(guest.name)!" else "Hello!"
+enabled = true
+missing = null
+
+message = """
+  Unicode survives: naïve λ 中 🛰️
+  Guest: \(guest.name)
+  """
+
+tags = new Listing { "basic"; "unicode"; "pkl" }

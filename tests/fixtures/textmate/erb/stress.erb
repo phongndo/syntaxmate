@@ -1,0 +1,184 @@
+<%# A deliberately dense but realistic Rails-style ERB document. %>
+<% content_for :page_title, "Project #{@project.slug} — Übersicht 🚀" %>
+<!doctype html>
+<html lang="<%= I18n.locale %>" data-theme="<%= cookies[:theme] || 'system' %>">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="<%= h @project.summary.truncate(160) %>">
+  <title><%= content_for?(:page_title) ? yield(:page_title) : "Dashboard" %></title>
+  <link rel="canonical" href="<%= project_url(@project) %>">
+  <style nonce="<%= content_security_policy_nonce %>">
+    :root {
+      --accent: <%= @project.color.presence || "#6d5dfc" %>;
+      --column-count: <%= [[@columns.size, 1].max, 6].min %>;
+    }
+    body { font-family: system-ui, sans-serif; margin: 0; }
+    .board { display: grid; grid-template-columns: repeat(var(--column-count), 1fr); }
+    .card[data-priority="high"] { border-inline-start: 0.3rem solid var(--accent); }
+    @media (prefers-reduced-motion: no-preference) {
+      .card { transition: transform 150ms ease, box-shadow 150ms ease; }
+      .card:hover { transform: translateY(-2px); }
+    }
+  </style>
+  <% if Rails.env.development? -%>
+    <meta name="debug-build" content="<%= Rails.application.config.x.build_id %>">
+  <% end -%>
+</head>
+<body class="<%= class_names('signed-in': signed_in?, compact: @compact) %>">
+  <!-- HTML comments remain host syntax; ERB below may still be embedded. -->
+  <!-- Current release: <%= h @release_name %> -->
+  <%# Unlike the HTML comment, this server-side note should disappear. %>
+  <header class="site-header">
+    <a class="brand" href="<%= root_path %>" aria-label="Home">
+      <svg viewBox="0 0 24 24" role="img" aria-hidden="true">
+        <path d="M3 12 12 3l9 9-9 9Z" fill="currentColor"></path>
+      </svg>
+      <span><%= h Rails.application.class.module_parent_name %></span>
+    </a>
+    <nav aria-label="Primary">
+      <% [{ label: "Board", path: project_path(@project) },
+          { label: "Activity", path: activity_project_path(@project) }].each do |item| %>
+        <%= link_to item[:label], item[:path], class: class_names(active: current_page?(item[:path])) %>
+      <% end %>
+    </nav>
+    <%= render "shared/account_menu", user: current_user %>
+  </header>
+  <main id="main" data-controller="board"
+        data-board-project-value="<%= @project.to_param %>"
+        data-board-refresh-value="<%= @refresh_interval.in_milliseconds %>">
+    <% flash.each do |kind, message| -%>
+      <div class="flash flash--<%= kind %>" role="status">
+        <%= h(message) %>
+      </div>
+    <% end -%>
+    <section class="hero" aria-labelledby="project-heading">
+      <div>
+        <p class="eyebrow"><%= t("projects.workspace") %></p>
+        <h1 id="project-heading"><%= h @project.name %></h1>
+        <p><%= h @project.summary %></p>
+      </div>
+      <% if policy(@project).edit? %>
+        <%= link_to "Edit", edit_project_path(@project), class: "button" %>
+      <% elsif @project.archived? %>
+        <span class="badge"><%= t("projects.archived") %></span>
+      <% else %>
+        <%= button_to "Request access", project_access_requests_path(@project), method: :post %>
+      <% end %>
+    </section>
+    <section class="metrics" aria-label="Project metrics">
+      <% @metrics.each_with_index do |(name, value), index| %>
+        <article class="metric" data-index="<%= index %>">
+          <h2><%= h name.to_s.humanize %></h2>
+          <data value="<%= value %>"><%= number_with_delimiter(value) %></data>
+        </article>
+      <% end %>
+    </section>
+    <% cache [@project, @columns, I18n.locale] do %>
+      <section class="board" aria-label="Kanban board">
+        <% @columns.each do |column| %>
+          <section class="column" id="column-<%= column.to_param %>">
+            <header>
+              <h2><%= h column.name %></h2>
+              <span aria-label="<%= pluralize(column.cards.size, 'card') %>">
+                <%= column.cards.size %>
+              </span>
+            </header>
+            <ol>
+              <% column.cards.each do |card| %>
+                <li class="card" data-priority="<%= card.priority %>"
+                    data-card-id-value="<%= card.id %>">
+                  <article>
+                    <h3>
+                      <a href="<%= project_card_path(@project, card) %>">
+                        <%= h card.title %>
+                      </a>
+                    </h3>
+                    <% if card.description? %>
+                      <div class="prose"><%= simple_format(h(card.description)) %></div>
+                    <% end %>
+                    <% if card.trusted_preview_html? -%>
+                      <div class="preview"><%== card.trusted_preview_html %></div>
+                    <% end -%>
+                    <ul class="labels" aria-label="Labels">
+                      <% card.labels.each do |label| %>
+                        <li style="--label-color: <%= label.color %>">
+                          <%= h label.name %>
+                        </li>
+                      <% end %>
+                    </ul>
+                    <footer>
+                      <time datetime="<%= card.updated_at.iso8601 %>">
+                        <%= time_ago_in_words(card.updated_at) %> ago
+                      </time>
+                      <span title="Assigned to <%= h card.assignee&.name || 'nobody' %>">
+                        <%= card.assignee&.initials || "—" %>
+                      </span>
+                    </footer>
+                  </article>
+                </li>
+              <% end %>
+              <% if column.cards.empty? %>
+                <li class="empty"><%= t("cards.none", column: column.name) %></li>
+              <% end %>
+            </ol>
+          </section>
+        <% end %>
+      </section>
+    <% end %>
+    <aside class="activity" aria-labelledby="activity-heading">
+      <h2 id="activity-heading"><%= t("activity.recent") %></h2>
+      <% grouped = @events.group_by { |event| event.created_at.to_date } %>
+      <% grouped.each do |date, events| %>
+        <h3><%= l(date, format: :long) %></h3>
+        <ul>
+          <% events.first(5).each do |event| %>
+            <li>
+              <strong><%= h event.actor.name %></strong>
+              <%= h event.description %>
+              <small><%= l event.created_at, format: :short %></small>
+            </li>
+          <% end %>
+        </ul>
+      <% end %>
+    </aside>
+    <% unless @project.read_only? %>
+      <%= form_with model: [@project, Card.new], class: "quick-add" do |form| %>
+        <%= form.label :title, "New card" %>
+        <%= form.text_field :title, required: true, placeholder: "e.g. Ship emoji support 🛰️" %>
+        <%= form.collection_select :column_id, @columns, :id, :name %>
+        <%= form.submit "Add card" %>
+      <% end %>
+    <% end %>
+  </main>
+  <template id="toast-template">
+    <div class="toast" role="status"><span data-toast-target="message"></span></div>
+  </template>
+  <script type="application/json" id="board-state">
+    <%== raw json_escape({ project: @project.id, locale: I18n.locale, emoji: "🧭" }.to_json) %>
+  </script>
+  <script nonce="<%= content_security_policy_nonce %>">
+    (() => {
+      const stateNode = document.querySelector("#board-state");
+      const state = JSON.parse(stateNode.textContent);
+      const selector = `[data-board-project-value="${CSS.escape(String(state.project))}"]`;
+      document.querySelector(selector)?.addEventListener("board:refresh", (event) => {
+        console.debug("refresh", { detail: event.detail, locale: state.locale });
+      });
+      window.boardLabel = <%= raw({ name: @project.name, symbol: "✨" }.to_json) %>;
+    })();
+  </script>
+  <% debug_note = <<~TEXT
+       Rendered for #{@project.slug} at #{Time.current.iso8601}
+       Unicode sample: café, 東京, عربى, 🐉
+     TEXT
+  %>
+  <% if local_assigns[:show_debug] %>
+    <pre class="debug"><%= h debug_note %></pre>
+  <% end %>
+  <footer>
+    <small>&copy; <%= Time.current.year %> Example &amp; Sons</small>
+    <%# Closing comment tests punctuation: %> <%= "#{@project.name}: done" %>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,24 @@
+doctype html
+- const page = { title: 'Launch café 🚀', user: { name: 'Mina' } }
+mixin badge(label, tone)
+  span.badge(class=`badge--${tone}`)&attributes(attributes)= label
+html(lang="en")
+  head
+    title= page.title
+    style.
+      .badge { color: rebeccapurple; font-weight: 600; }
+  body#app.shell(data-ready=true)
+    //- Navigation is omitted from rendered output.
+    header.hero
+      h1 Hello #{page.user.name} — 東京 🛰️
+      p Welcome to #[strong the Pug fixture] &amp; its examples.
+    if page.user
+      +badge('online', 'success')(title="Account status")
+    else
+      p.notice Guest mode
+    each item, index in ['alpha', 'βeta', 'orbit']
+      a.card(href=`/items/${index}` class={featured: index === 0})= item
+    script(type="module").
+      const greeting = `Hello, ${document.documentElement.lang} 🌍`;
+      console.log(greeting);
+    footer: small Built with Pug.

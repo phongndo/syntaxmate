@@ -1,0 +1,26 @@
+; Basic ledger — café, Ελληνικά, 日本語, 🚀, and astral 𝌆
+option "title" "Voyage 🚀 𝌆"
+include "accounts-世界.beancount"
+plugin "beancount.plugins.auto_accounts" "{\"note\": \"café\"}"
+pushtag #trip-2026
+
+2026-01-01 open Assets:Bank:Checking USD, EUR ; opened
+2026-01-02 commodity BTC
+2026-01-03 price BTC 42,500.50 USD
+2026-01-04 balance Assets:Bank:Checking +1,250.00 USD
+2026-01-05 event "location" "東京 🚀"
+2026-01-06 note Assets:Bank:Checking "Unicode 𝌆 note"
+2026-01-07 document Assets:Bank:Checking "receipt-雪.pdf"
+2026-01-08 custom "audit" TRUE -12.5 USD 2026/01/08
+
+2026-01-09 * "Café" "Launch 🚀 𝌆" #trip-2026 ^receipt_01
+  Assets:Bank:Checking  -42.50 USD {43.00 USD, 2026-01-10} @ 1.00 EUR ; paid
+  ! Expenses:Travel  42.50 USD @@ 42.50 USD
+  memo: "escaped \"quote\" and \\ path 🚀"
+  reviewed: TRUE
+  booked-on: 2026|01|09
+
+2026-01-10 pad Assets:Cash Equity:Opening-Balances
+2026-01-31 close Assets:Cash
+poptag #trip-2026
+; End of basic fixture 𝌆

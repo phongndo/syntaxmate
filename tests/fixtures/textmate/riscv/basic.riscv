@@ -1,0 +1,22 @@
+# Sum signed words; the read-only label keeps Unicode café 🚀 𝌆.
+.section .rodata
+message:
+  .asciz "café 🚀 𝌆"
+  .balign 4
+
+.text
+.globl sum_until
+.type sum_until, @function
+sum_until:
+  li t0, 0
+.Lloop:
+  beqz a1, .Ldone
+  lw t1, 0(a0)
+  add t0, t0, t1
+  addi a0, a0, 4
+  addi a1, a1, -1
+  j .Lloop
+.Ldone:
+  mv a0, t0
+  ret
+.size sum_until, .-sum_until

@@ -1,0 +1,28 @@
+# MIPS32: español, 世界, and an astral rocket 🚀
+.data
+.align 2
+message: .asciiz "Hello, mundo 🚀\n"
+values: .word 0x2A, 7, 13
+ratio: .float 3.25
+.text
+.globl main
+main:
+  la $a0, message
+  li $v0, 4
+  syscall
+  move $t0, $zero
+  li $t1, 3
+  l.s $f0, ratio
+loop:
+  addiu $t0, $t0, 1
+  add.s $f2, $f0, $f0
+  slt $t2, $t0, $t1
+  bnez $t2, loop
+  nop
+  lw $s0, values
+  sll $s1, $s0, 2
+  beq $s1, $zero, done
+  ori $s2, $s1, 0x00FF
+done:
+  li $v0, 10
+  syscall

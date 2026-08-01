@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Derivative host · 東京 🛰️</title>
+  <style>
+    orbit-card[data-state="ready"] { display: grid; color: rebeccapurple; }
+  </style>
+</head>
+<body>
+  <!-- A normal HTML host containing framework-owned custom elements. -->
+  <main id="mission" aria-label="Telemetry">
+    <h1>Signals from café 𐀀</h1>
+    <orbit-card data-state="ready" telemetry:mode='live' unknownFlag>
+      <p>Altitude &lt; 500 km; raw comparison: 3 < 5.</p>
+      <sensor-reading value=42 unit="km" /><telemetrywidget mystery=λ strange.attr='yes'></telemetrywidget>
+    </orbit-card>
+  </main>
+  <script type="module">
+    const card = document.querySelector("orbit-card");
+    card?.setAttribute("data-note", "naïve 🚀");
+  </script><status-beacon online data-code="λ"></status-beacon>
+</body>
+</html>

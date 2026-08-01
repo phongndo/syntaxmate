@@ -1,0 +1,206 @@
+package fixtures:component-lab@2.4.1;
+
+/// # Component laboratory
+/// A realistic surface-area fixture with café, Ελληνικά, 東京, 🚀, and 𝌆.
+/// - Exercises containers and declarations.
+/// 1. Keeps every multiline grammar state closed.
+use fixtures:shared/types@1.3.0 as shared;
+use wasi:clocks/monotonic-clock@0.2.0 as clock;
+
+/** Documentation block with `inline-code`, **bold**, and _emphasis_.
+ * Astral symbols 🚀 and 𝌆 remain inside a recognized comment.
+ */
+interface telemetry {
+  use shared.types.{timestamp, trace-id};
+
+  type %type = string;
+  type byte = u8;
+  type signed-byte = s8;
+  type word = u16;
+  type signed-word = s16;
+  type count = u32;
+  type delta = s32;
+  type wide-count = u64;
+  type wide-delta = s64;
+  type ratio = float32;
+  type precise-ratio = float64;
+  type rune = char;
+  type label = string;
+  type enabled = bool;
+  type tags = list<string>;
+  type maybe-label = option<label>;
+  type coordinates = tuple<float64, float64>;
+  type nested = list<option<tuple<u32, string>>>;
+  type operation-result = result<count, error-info>;
+  type inferred-error = result<_, error-info>;
+
+  /// One measured value from a named source.
+  record sample {
+    at: timestamp,
+    source: string,
+    value: float64,
+    dimensions: list<dimension>,
+  }
+
+  record dimension {
+    key: string,
+    value: string,
+  }
+
+  record error-info {
+    code: u32,
+    message: string,
+    retry-after: option<u64>,
+  }
+
+  enum severity {
+    trace,
+    debug,
+    info,
+    warning,
+    error,
+  }
+
+  flags features {
+    metrics,
+    logs,
+    traces,
+    profiles,
+  }
+
+  variant event {
+    measurement(sample),
+    message(string),
+    heartbeat(timestamp),
+    failed(error-info),
+    stopped,
+  }
+
+  resource subscription {
+    constructor(topic: string, features: features);
+    topic: func() -> string;
+    next: func(timeout-ms: option<u32>) -> result<option<event>, error-info>;
+    restore: static func(id: u64) -> result<subscription, error-info>;
+  }
+
+  publish: func(events: list<event>) -> result<u64, error-info>;
+  query: func(
+    from: timestamp,
+    to: timestamp,
+    tags: option<tags>,
+  ) -> list<sample>;
+  subscription-id: func(item: borrow<subscription>) -> u64;
+  normalize: func(value: float32, range: tuple<float32, float32>) -> float32;
+}
+
+/* Ordinary block comment.
+   /* Nested block comments are supported by the grammar. */
+   The outer comment closes here with BMP Ω and astral 🚀. */
+interface storage {
+  use telemetry.{sample, error-info};
+  /**/ // Empty and line-comment rules are both intentional: naïve 東京 🚀 𝌆.
+
+  type key = string;
+  type blob = list<u8>;
+  type lookup = result<option<blob>, error-info>;
+
+  record entry {
+    key: key,
+    body: blob,
+    checksum: tuple<u64, u64>,
+  }
+
+  variant change {
+    inserted(entry),
+    updated(entry),
+    removed(key),
+  }
+
+  resource transaction {
+    constructor(read-only: bool);
+    get: func(key: key) -> lookup;
+    put: func(value: entry) -> result<_, error-info>;
+    delete: func(key: key) -> result<bool, error-info>;
+    commit: func() -> result<u64, error-info>;
+  }
+
+  open: func(namespace: string) -> result<transaction, error-info>;
+  watch: func(prefix: option<string>) -> list<change>;
+}
+
+default interface control {
+  use telemetry.{features, severity};
+
+  enum state {
+    starting,
+    ready,
+    draining,
+    stopped,
+  }
+
+  record configuration {
+    name: string,
+    level: severity,
+    enabled-features: features,
+    labels: list<tuple<string, string>>,
+  }
+
+  resource controller {
+    constructor(config: configuration);
+    status: func() -> state;
+    reconfigure: func(config: configuration) -> result<_, string>;
+    validate: static func(config: configuration) -> result<bool, string>;
+  }
+
+  start: func(config: configuration) -> result<controller, string>;
+  shutdown: func(deadline-ms: u64) -> result<_, string>;
+}
+
+world base-runtime {
+  import clock;
+  import random: func(bytes: u32) -> list<u8>;
+  export health: func() -> bool;
+}
+
+/// > Composes the service world from the interfaces above.
+/// `with` aliases are intentionally explicit for grammar coverage.
+default world service {
+  include base-runtime with {
+    health as base-health,
+  }
+
+  use telemetry.{event, sample, error-info};
+  type batch = list<event>;
+  record limits {
+    max-events: u32,
+    max-bytes: u64,
+  }
+  flags modes { reliable, ordered, compressed }
+  variant command {
+    submit(batch),
+    inspect(tuple<u64, option<string>>),
+    stop,
+  }
+
+  import telemetry;
+  import storage;
+  import logger: interface {
+    log: func(level: u8, message: string);
+    flush: func() -> result<_, string>;
+  }
+  import authorize: func(trace: trace-id, action: string) -> result<bool, error-info>;
+
+  export control;
+  export api: interface {
+    use telemetry.{sample, event};
+    submit: func(items: list<sample>) -> result<u64, string>;
+    poll: func(cursor: option<u64>) -> tuple<list<event>, option<u64>>;
+  }
+  export run: func(args: list<string>) -> result<u32, string>;
+}
+
+world test-harness {
+  include service;
+  import fixture-data: func() -> list<u8>;
+  export execute: func(seed: u64, verbose: bool) -> result<tuple<u32, string>, string>;
+}

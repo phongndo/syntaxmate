@@ -1,0 +1,23 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath,hyperref}
+\newcommand{\vect}[1]{\mathbf{#1}}
+\begin{document}
+% Commands, Unicode text, and an astral symbol: π, café, 🚀.
+\section{A small \LaTeX{} example}\label{sec:intro}
+This is \emph{emphasized}, \textbf{bold}, and \texttt{literal}.
+See \url{https://example.test} and \cite[p.~7]{knuth:1984}.
+Inline math $e^{i\pi}+1=0$ and \(\vect{x}\cdot\vect{y}\) share a line.
+\[
+  \int_0^1 x^2\,dx = \frac{1}{3}.
+\]
+\begin{itemize}
+  \item Refer back to Section~\ref{sec:intro}.
+\end{itemize}
+\verb|raw % { text }| is not a comment.
+\begin{verbatim}
+\command{not highlighted} % still raw 🚀
+\end{verbatim}
+\begin{minted}{asy}
+draw((0,0)--(1,1)); // source.asy is intentionally unavailable
+\end{minted}
+\end{document}

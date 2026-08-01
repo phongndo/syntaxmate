@@ -1,0 +1,161 @@
+<main class="account-dashboard" aria-labelledby="dashboard-title">
+  <header class="hero">
+@let traveler = account?.profile?.displayName ?? 'Guest';
+@let city = account?.profile?.city ?? '東京';
+@let welcome = `Welcome, ${traveler} — café in ${city} 🚀 𝌆`;
+@let todayLabel = now | date:'fullDate':timeZone:locale;
+    <p class="eyebrow">Account overview</p>
+    <h1 id="dashboard-title">{{ welcome }}</h1>
+    <p>{{ todayLabel }}</p>
+  </header>
+
+  <nav aria-label="Dashboard sections">
+@let primaryLinks = navigation | slice:0:4;
+@let activePath = router?.url ?? '/overview';
+@let hasOverflow = navigation.length > primaryLinks.length;
+    <a href="/overview">Overview</a>
+    <a href="/orders">Orders</a>
+    <a href="/billing">Billing</a>
+    <span class="nav-state">{{ activePath }}</span>
+    <span class="nav-more">{{ hasOverflow ? 'More available' : 'All shown' }}</span>
+  </nav>
+
+  <section class="account-card" aria-labelledby="profile-heading">
+@let profile = account?.profile;
+@let fullName = profile?.fullName ?? traveler;
+@let initials = abbreviate(fullName, 2);
+@let contact = profile?.email || profile?.phone || 'No contact on file';
+@let locationParts = [profile?.city, profile?.region, profile?.country];
+@let location = locationParts | compact | join:', ';
+@let verified = account?.verified === true;
+    <h2 id="profile-heading">Profile</h2>
+    <div class="avatar" aria-hidden="true">{{ initials }}</div>
+    <p class="name">{{ fullName }}</p>
+    <p class="contact">{{ contact }}</p>
+    <p class="location">{{ location }}</p>
+    <p class="status">{{ verified ? 'Verified' : 'Verification needed' }}</p>
+  </section>
+
+  <section class="balance-card" aria-labelledby="balance-heading">
+@let currencyCode = account?.billing?.currency ?? 'EUR';
+@let available = balances.available ?? 0;
+@let pending = balances.pending ?? 0;
+@let reserved = balances.reserved ?? 0;
+@let totalBalance = available + pending + reserved;
+@let formattedBalance = totalBalance | currency:currencyCode:'symbol':'1.2-2';
+@let balanceTone = totalBalance < 0 ? 'danger' : (pending > 0 ? 'pending' : 'stable');
+    <h2 id="balance-heading">Balance</h2>
+    <strong class="balance">{{ formattedBalance }}</strong>
+    <p data-tone="{{ balanceTone }}">Available, pending, and reserved funds</p>
+  </section>
+
+  <section class="order-summary" aria-labelledby="orders-heading">
+@let visibleOrders = orders | slice:pageStart:pageEnd;
+@let orderCount = orders?.length ?? 0;
+@let firstOrder = visibleOrders[0];
+@let lastOrder = visibleOrders[visibleOrders.length - 1];
+@let orderRange = orderCount === 0
+  ? 'No orders'
+  : `Orders ${firstOrder?.number ?? '—'} to ${lastOrder?.number ?? '—'}`;
+@let canPageBack = pageStart > 0 && !ordersLoading;
+@let canPageForward = pageEnd < orderCount && !ordersLoading;
+    <h2 id="orders-heading">Recent orders</h2>
+    <p>{{ orderRange }}</p>
+    <button type="button" [disabled]="!canPageBack">Previous</button>
+    <button type="button" [disabled]="!canPageForward">Next</button>
+  </section>
+
+  <section class="delivery-panel" aria-labelledby="delivery-heading">
+@let preferredAddress = account?.shippingAddress ?? account?.billingAddress;
+@let destination = formatAddress(
+  preferredAddress,
+  locale,
+  [preferredAddress?.city, preferredAddress?.country]
+);
+@let coordinates = preferredAddress?.coordinates as [number, number];
+@let deliveryWindow = estimateDelivery(
+  cart.items,
+  preferredAddress?.postalCode,
+  expedited ? 'express' : 'standard'
+);
+@let deliveryMessage = `Delivery to ${destination}: ${deliveryWindow | date:'mediumDate'}`;
+    <h2 id="delivery-heading">Delivery</h2>
+    <address>{{ destination }}</address>
+    <p>{{ deliveryMessage }}</p>
+    <small>{{ coordinates }}</small>
+  </section>
+
+  <section class="cart-panel" aria-labelledby="cart-heading">
+@let itemCount = cart.items.length;
+@let subtotal = calculateSubtotal(cart.items);
+@let discount = cart.coupon?.amount ?? 0;
+@let taxable = subtotal - discount;
+@let tax = calculateTax(
+  taxable,
+  account?.taxRegion ?? 'default',
+  cart.items
+);
+@let shipping = itemCount > 0 ? quoteShipping(cart.items, preferredAddress) : 0;
+@let grandTotal = subtotal - discount + tax + shipping;
+@let grandTotalLabel = grandTotal | currency:currencyCode:'symbol':'1.2-2';
+@let checkoutLabel = itemCount === 1 ? 'Checkout one item' : `Checkout ${itemCount} items`;
+    <h2 id="cart-heading">Cart</h2>
+    <p>{{ itemCount }} items</p>
+    <p class="grand-total">{{ grandTotalLabel }}</p>
+    <button type="button">{{ checkoutLabel }}</button>
+  </section>
+
+  <section class="preferences" aria-labelledby="preferences-heading">
+@let colorScheme = preferences?.theme ?? systemTheme ?? 'light';
+@let compactMode = preferences?.density === 'compact';
+@let motionAllowed = !preferences?.reduceMotion;
+@let languageName = languageNames[locale] ?? locale;
+@let preferenceSummary = [
+  colorScheme,
+  compactMode ? 'compact' : 'comfortable',
+  motionAllowed ? 'motion' : 'reduced motion',
+  languageName,
+] | join:' · ';
+    <h2 id="preferences-heading">Preferences</h2>
+    <p>{{ preferenceSummary }}</p>
+    <p>Unicode sample: café · 東京 · 𝌆 · 🚀</p>
+  </section>
+
+  <section class="security" aria-labelledby="security-heading">
+@let lastLogin = sessions[0]?.startedAt;
+@let trustedDeviceCount = devices | trusted | count;
+@let hasRecoveryCodes = recoveryCodes?.length > 0;
+@let securityScore = scoreSecurity(
+  account?.mfaEnabled,
+  trustedDeviceCount,
+  hasRecoveryCodes,
+  lastLogin
+);
+@let securityLevel = securityScore >= 80 ? 'strong' : (securityScore >= 50 ? 'fair' : 'weak');
+    <h2 id="security-heading">Security</h2>
+    <p>Last login: {{ lastLogin | date:'medium' }}</p>
+    <p>Trusted devices: {{ trustedDeviceCount }}</p>
+    <p class="security-level">{{ securityLevel }}</p>
+  </section>
+
+  <section class="support" aria-labelledby="support-heading">
+@let openTickets = tickets | status:'open';
+@let oldestTicket = openTickets[0];
+@let supportName = assignedAgent?.name ?? 'Support team';
+@let ticketSummary = openTickets.length
+  ? `${openTickets.length} open — oldest is ${oldestTicket?.subject ?? 'untitled'}`
+  : 'No open support requests';
+@let supportAction = openTickets.length > 0 ? 'View requests' : 'Start a request';
+    <h2 id="support-heading">Support</h2>
+    <p>{{ ticketSummary }}</p>
+    <p>Your contact: {{ supportName }}</p>
+    <button type="button">{{ supportAction }}</button>
+  </section>
+
+  <footer class="dashboard-footer">
+@let buildLabel = `Web ${build.version} (${build.commit | slice:0:8})`;
+@let legalYear = now | date:'yyyy';
+@let footerLabel = formatFooter(legalYear, companyName, buildLabel);
+    <small>{{ footerLabel }}</small>
+  </footer>
+</main>

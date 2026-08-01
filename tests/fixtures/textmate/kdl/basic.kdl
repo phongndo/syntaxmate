@@ -1,0 +1,26 @@
+// Compact KDL coverage: nodes, values, properties, children, and Unicode.
+(document)package "mark" version=(semver)"2.4.0" active=#true missing=#null {
+  author "café" alias="λ" city="東京" badge="🚀 𝌆"
+  integers 42 -7 +8 1_000 0xDEAD_beef 0o755 0b1010_0110
+  floats 3.14 -0.5 6.022e23 1.25E-3 #nan #inf #-inf
+  escaped "quote: \" slash: \\ tab: \t lambda: \u{03bb}"
+  raw #"raw "quotes" and \\ stay literal"# tag=##"café # 東京"##
+  poem """
+    café λ
+    東京 🚀 𝌆
+  """
+  raw-poem #"""
+    raw "line" with café and λ
+    東京 🚀 𝌆
+  """#
+  /*! documentation for the nested comment */
+  /* outer block
+     /* nested block */
+     outer block closed */
+  // Slashdash can discard an argument or property.
+  options kept /- removed mode=modern /- legacy=#true ready=#false
+  /- obsolete reason="replaced"
+  /- old-tree {
+    hidden "closed child"
+  }
+}

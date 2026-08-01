@@ -1,0 +1,26 @@
+[package]
+name = "syntaxmate-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+syntaxmate = { path = "..", default-features = false }
+
+[[bin]]
+name = "grammar_and_source"
+path = "fuzz_targets/grammar_and_source.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "theme_json"
+path = "fuzz_targets/theme_json.rs"
+test = false
+doc = false
+bench = false

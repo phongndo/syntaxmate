@@ -1,0 +1,25 @@
+/** Compact JSONC project configuration. */
+{
+  // Literal BMP and astral Unicode remain source text.
+  "displayName": "Café λ 東京",
+  "launchMessage": "Ready 🚀 — wave 👋",
+  /* Every JSON constant is accepted. */
+  "enabled": true,
+  "archived": false,
+  "fallback": null,
+  "numbers": [0, -17, 3.1415, 6.022e23, -2.5E-8],
+  "escapes": {
+    "quote": "say \"hello\"",
+    "slash": "path\/segment",
+    "backslash": "C:\\temp\\mark",
+    "controls": "tab\tline\nreturn\rback\bform\f",
+    "unicodeEscape": "lambda=\u03BB"
+  },
+  "targets": [
+    "debug",
+    "release",
+    // Comments are values in array context for this grammar.
+    { "name": "web", "workers": 4 }
+  ],
+  "nested": { "cache": { "directory": ".cache/mark", "limits": [128, 256, 512] } }
+}

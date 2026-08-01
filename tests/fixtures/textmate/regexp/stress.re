@@ -1,0 +1,163 @@
+(?# NOTE: stress corpus for the Python-style regexp TextMate grammar)
+(?# TODO: BMP λ Ω Ж 東 京 and astral 🚀 𝌆 😀 are intentional)
+(?# HACK: every physical line is an independent regex-shaped sample)
+(?a)
+(?i)
+(?m)
+(?s)
+(?x)
+(?ai)
+(?msx)
+^alpha$
+^beta.*gamma$
+^.+$
+^.*?end$
+start.+?finish
+cat|dog|fox
+(?:red|green|blue)
+(one|two|three)
+colou?r
+ab*c
+ab*?c
+ab+c
+ab+?c
+ab??c
+https?://[^\s]+$
+^item-{2}$
+^item-{2,}$
+^item-{2,5}$
+^item-{,5}$
+a{0}b{1}c{9}
+a{1,}b{0,1}c{10,20}
+(?:ha){2,4}
+(ab|cd){3}
+[A-F0-9]{8}
+\w{1,32}
+\d{4}-\d{2}-\d{2}
+\d{1,3}(?:\.\d{1,3}){3}
+^[+-]?\d{1,6}$
+^.{0,80}$
+(?:λ|東|🚀){1,3}
+\Aabsolute
+boundary\b
+nonboundary\Bmark
+\d+\D+
+\s+\S+
+\w+\W+
+end\Z
+\A\w+(?:\s+\w+)*\Z
+\bTODO\b|\bFIXME\b
+\Bunder_score\B
+\A(?:yes|no)\Z
+\d\d\d-\D
+\s*content\S
+\w+@\w+\.\w+
+\W*(?:punctuation)\W*
+\Aλ\s+🚀\Z
+\x00\x1F\x7F
+\x41\x5A\x61\x7A
+\0\00\07
+\000\077\123\377
+\u0000\u03BB\u6771
+\U0001F600\U0001F680\U0001D306
+\u00E9cole
+caf\xE9
+\141\142\143
+\1\2\9\10\99
+(a)(b)(c)\3\2\1
+\q\y\%
+\.\*\+\?\|\^\$
+\(literal\)\[brackets\]
+\{brace\}\-dash
+path\\to\\file
+line\nfeed\ttab
+bell\aform\freturn\rvertical\v
+\N\g\k
+\U0001F680\u03BB\x41\077\q
+[abc]
+[^abc]
+[a-z]
+[A-Z0-9_]
+[-a-z]
+[a-z-]
+[]a-z]
+[^]a-z]
+[.^^$*+?|{}()]
+[\a\b\f\n\r\t\v\\]
+[\A\B\D\S\W\Z\d\s\w]
+[\0\00\000\7\77\777]
+[\x00\x7F\xFF]
+[\u03BB\u6771\U0001F680]
+[\-\]\[\^]
+[\N]
+[λΩЖ]
+[東京]
+[🚀𝌆😀]
+[^\s\r\n]
+[0-7]{1,3}
+[a-fA-F0-9]{2}
+[\w.-]+
+[]
+[^]
+[]0-9]
+[^]0-9]
+(?# NOTE: ordinary inline explanation)
+(?# TODO: tighten the identifier branch)
+(?# XXX: compatibility case)
+(?# HACK: retain legacy spelling)
+(?# FIXME: reject an empty suffix)
+(?# BUG: escaped edge needs coverage)
+(?# NOTE TODO XXX HACK FIXME BUG)
+(?# Unicode note: λ 東京 🚀 𝌆)
+(?# punctuation . ^ $ * + ? | { } [ ])
+(?# nested-looking text (?:x) remains comment text)
+(?P<name>[A-Za-z_]\w*)
+(?P<digits>\d+)
+(?P<city>東京|Zürich|Київ)
+(?P<rocket>🚀|𝌆|😀)
+(?P<lhs>\w+)=(?P<rhs>\w+)
+(?P<quote>["']).*?(?P=quote)
+(?P<word>\w+)\s+(?P=word)
+(?P<token>[A-F0-9]{4})-(?P=token)
+(?P<glyph>λ|東|🚀)(?P=glyph)
+(a)(b)(c)\1\2\3
+([A-Z]{2})(\d{4})-\2-\1
+(?P<outer>(?:ab|cd)+)-(?P=outer)
+(?=prefix)prefix
+(?!forbidden)allowed
+foo(?=bar)
+foo(?!bar)
+(?<=prefix:)value
+(?<!prefix:)value
+(?<=\bID:)\d+
+(?<!not-)safe(?!-bad)
+^(?=.*\d)(?=.*[A-Z]).+$
+^(?!.*\s)(?=.{4,16}$).+$
+(?=(?P<peek>\w+))(?P=peek)
+(?<=λ)東京(?=🚀)
+(?<!𝌆)glyph(?!😀)
+(?=(?:ab|cd){2})(?:ab|cd)+
+(?!(?:TODO|FIXME))\w+
+(a)?b(?(1)c|d)
+(?P<sign>[+-])?\d+(?(sign)\.\d+|\.0)
+(?P<open>\()?(?(open)[^)]+\)|[^()]+)
+(x)(?(1)yes|no)
+(?P<named>x)(?(named)y|z)
+(?:noncapturing)
+(capturing)
+((deeply)(nested(?:group)))
+(?:a(?:b(?:c)))
+(a|(?:b|c))(d|e)
+((?:ab)+|(?:cd)*)
+^(?:[A-Za-z_]\w*)(?:\.(?:[A-Za-z_]\w*))*$
+^(?P<scheme>https?)://(?P<host>[\w.-]+)(?P<path>/[^\s]*)?$
+^(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})$
+^(?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?$
+^(?P<key>[A-Za-z_]\w*)\s*=\s*(?P<value>.*)$
+^(?:0[xX][0-9A-Fa-f]+|0[oO][0-7]+|0[bB][01]+)$
+^(?:\+?\d{1,3}[- ]?)?(?:\(\d{3}\)|\d{3})[- ]?\d{3}[- ]?\d{4}$
+^(?P<local>[\w.+-]+)@(?P<domain>[\w.-]+\.[A-Za-z]{2,})$
+^(?:λ+|東京|🚀+|𝌆){1,4}$
+\A(?P<bmp>λΩ東京)\s+(?P<astral>🚀𝌆😀)\Z
+[]|[^]|[\N]|\q|\U0001F680
+(?# TODO: final nested coverage)(?P<x>(?:(?=a)a|(?!b)c)+)(?P=x)

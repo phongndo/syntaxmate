@@ -1,0 +1,250 @@
+package observatory
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"sort"
+	"strings"
+	"time"
+)
+
+// DashboardModel carries server-rendered telemetry into the component tree.
+type DashboardModel struct {
+	Title       string
+	Subtitle    string
+	Endpoint    *url.URL
+	GeneratedAt time.Time
+	Stations    []Station
+	Featured    bool
+	Theme       string
+}
+
+type Station struct {
+	ID       int
+	Name     string
+	Region   string
+	Status   Status
+	Readings []Reading
+	Tags     []string
+}
+
+type Reading struct {
+	Label string
+	Value float64
+	Unit  string
+}
+
+type Status string
+
+const (
+	StatusOnline  Status = "online"
+	StatusDelayed Status = "delayed"
+	StatusOffline Status = "offline"
+)
+
+func (station Station) Latest() (Reading, bool) {
+	if len(station.Readings) == 0 {
+		return Reading{}, false
+	}
+	return station.Readings[len(station.Readings)-1], true
+}
+
+func sortedStations(items []Station) []Station {
+	copyOfItems := append([]Station(nil), items...)
+	sort.Slice(copyOfItems, func(i, j int) bool {
+		return strings.ToLower(copyOfItems[i].Name) < strings.ToLower(copyOfItems[j].Name)
+	})
+	return copyOfItems
+}
+
+func statusLabel(status Status) string {
+	switch status {
+	case StatusOnline:
+		return "Receiving"
+	case StatusDelayed:
+		return "Delayed"
+	default:
+		return "Unavailable"
+	}
+}
+
+func stationPath(id int) string {
+	return fmt.Sprintf("/stations/%d", id)
+}
+
+css dashboardTheme(accent string) {
+	color: #172033;
+	background-color: #f7f9fc;
+	border-color: { accent };
+	padding: clamp(1rem, 3vw, 2.5rem);
+	font-family: system-ui, sans-serif;
+}
+
+script dashboardClient(endpoint string, retries int) {
+	const root = document.querySelector("[data-dashboard]");
+	const state = { attempts: 0, connected: false };
+
+	async function refresh(signal) {
+		while (state.attempts < retries && !signal.aborted) {
+			state.attempts += 1;
+			try {
+				const response = await fetch(endpoint, {
+					headers: { Accept: "application/json" },
+					signal,
+				});
+				if (!response.ok) throw new Error(`HTTP ${response.status}`);
+				const payload = await response.json();
+				root?.dispatchEvent(new CustomEvent("telemetry", { detail: payload }));
+				state.connected = true;
+				break;
+			} catch (error) {
+				console.warn("refresh failed", error);
+			}
+		}
+		root?.classList.toggle("connected", state.connected);
+	}
+
+	const controller = new AbortController();
+	document.addEventListener("visibilitychange", () => {
+		if (document.hidden) controller.abort();
+	});
+	refresh(controller.signal);
+}
+templ StatusPill(status Status) {
+	<span class={ "status status--" + string(status) } data-status={ string(status) }>
+		{ statusLabel(status) }
+	</span>
+}
+
+templ Metric(reading Reading) {
+	<figure class="metric" data-unit={ reading.Unit }>
+		<figcaption>{ reading.Label }</figcaption>
+		<strong>{ fmt.Sprintf("%.2f", reading.Value) }</strong>
+		<small>{ reading.Unit }</small>
+	</figure>
+}
+
+templ StationCard(station Station) {
+	<article id={ fmt.Sprintf("station-%d", station.ID) } class="station-card">
+		<header>
+			<div>
+				<p class="eyebrow">{ station.Region }</p>
+				<h2><a href={ templ.SafeURL(stationPath(station.ID)) }>{ station.Name }</a></h2>
+			</div>
+			@StatusPill(station.Status)
+		</header>
+		if reading, ok := station.Latest(); ok {
+			@Metric(reading)
+		} else {
+			<p class="empty">No readings have arrived.</p>
+		}
+		if len(station.Tags) > 0 {
+			<ul class="tags" aria-label="Station tags">
+				for index, tag := range station.Tags {
+					<li data-index={ fmt.Sprint(index) }>{ tag }</li>
+				}
+			</ul>
+		}
+	</article>
+}
+
+templ Shell(title string) {
+	<!DOCTYPE html>
+	<html lang="en-CA">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+		</head>
+		<body>
+			{! children... }
+		</body>
+	</html>
+}
+
+templ Dashboard(model DashboardModel) {
+	@Shell(model.Title) {
+		<main
+			id="telemetry-dashboard"
+			class="dashboard"
+			data-dashboard
+			data-generated={ model.GeneratedAt.Format(time.RFC3339) }
+			if model.Featured {
+				data-featured="true"
+				aria-label="Featured telemetry dashboard"
+			} else {
+				aria-label="Telemetry dashboard"
+			}
+		>
+			<!-- Unicode probes: café, naïve, Ελληνικά, 東京, and astral 🛰️ 𝌆 🚀. -->
+			<header class="hero">
+				<p class="kicker">Deep-space network &copy; 2034</p>
+				<h1>{ model.Title }</h1>
+				if model.Subtitle != "" {
+					<p>{ model.Subtitle }</p>
+				}
+				<time datetime={ model.GeneratedAt.Format(time.RFC3339) }>
+					{ model.GeneratedAt.Format("02 Jan 2006 15:04 UTC") }
+				</time>
+			</header>
+
+			switch len(model.Stations) {
+			case 0:
+				<section class="notice notice--empty">
+					<h2>No stations configured</h2>
+					<p>Add a receiver to begin collecting telemetry.</p>
+				</section>
+			case 1:
+				<section class="notice">
+					<p>One station is currently registered.</p>
+				</section>
+			default:
+				<p class="summary">{ fmt.Sprintf("%d stations", len(model.Stations)) }</p>
+			}
+
+			<section class="station-grid" aria-labelledby="stations-heading">
+				<h2 id="stations-heading">Stations &amp; latest readings</h2>
+				for _, station := range sortedStations(model.Stations) {
+					@StationCard(station)
+				}
+			</section>
+
+			<section class="legend">
+				<h2>Status legend</h2>
+				<dl>
+					<dt>Online</dt><dd>Packets received in the last minute.</dd>
+					<dt>Delayed</dt><dd>Packets are outside the expected window.</dd>
+					<dt>Offline</dt><dd>No carrier is currently detected.</dd>
+				</dl>
+			</section>
+
+			<style>
+				.dashboard { max-width: 76rem; margin: 0 auto; padding: 2rem; }
+				.hero { border-block-end: 3px solid #6b4eff; }
+				.station-grid { display: grid; gap: 1rem; }
+				.station-card { border: 1px solid #ccd3e0; border-radius: .75rem; }
+				.status--online { color: #087f5b; }
+				.status--delayed { color: #b35c00; }
+				@media (min-width: 48rem) {
+					.station-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+				}
+			</style>
+
+			<script type="module">
+				const dashboard = document.querySelector("#telemetry-dashboard");
+				dashboard?.addEventListener("telemetry", ({ detail }) => {
+					const count = detail?.stations?.length ?? 0;
+					dashboard.dataset.stationCount = String(count);
+					console.info(`Received ${count} stations 🚀`);
+				});
+			</script>
+
+			@dashboardTheme("#6b4eff")
+			if model.Endpoint != nil {
+				@dashboardClient(model.Endpoint.String(), 3)
+			}
+			{{ _ = context.Background() }}
+		</main>
+	}
+}

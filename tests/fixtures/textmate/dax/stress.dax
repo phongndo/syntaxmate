@@ -1,0 +1,208 @@
+/*
+  Stress DAX query fixture.
+  Unicode payload: café λ 東京 🚀 𝌆
+  This multiline comment is deliberately closed before declarations.
+*/
+DEFINE
+    VAR UnicodeCaption = "café λ 東京 🚀 𝌆"
+    VAR CurrentYear = YEAR ( TODAY () )
+    VAR PreviousYear = CurrentYear - 1
+    VAR MinimumAmount = 1250.50
+    VAR ScientificLimit = 6.022E+23
+    VAR EmptyValue = BLANK ()
+    MEASURE Sales[Total Sales] :=
+        SUM ( Sales[Amount] )
+    MEASURE Sales[Total Cost] :=
+        SUMX ( Sales, Sales[Quantity] * Sales[Unit Cost] )
+    MEASURE Sales[Gross Margin] :=
+        [Total Sales] - [Total Cost]
+    MEASURE Sales[Gross Margin %] :=
+        DIVIDE ( [Gross Margin], [Total Sales], 0 )
+    MEASURE Sales[Order Count] :=
+        DISTINCTCOUNT ( Sales[Order Id] )
+    MEASURE Sales[Average Order] :=
+        DIVIDE ( [Total Sales], [Order Count] )
+    MEASURE Sales[Unicode Label] :=
+        UnicodeCaption
+    MEASURE Sales[Prior Year Sales] :=
+        CALCULATE (
+            [Total Sales],
+            SAMEPERIODLASTYEAR ( 'Calendar'[Date] )
+        )
+    MEASURE Sales[Year Change] :=
+        [Total Sales] - [Prior Year Sales]
+    MEASURE Sales[Year Change %] :=
+        DIVIDE ( [Year Change], [Prior Year Sales] )
+    MEASURE Sales[Running Total] :=
+        VAR LastVisibleDate = MAX ( 'Calendar'[Date] )
+        RETURN
+            CALCULATE (
+                [Total Sales],
+                FILTER (
+                    ALL ( 'Calendar'[Date] ),
+                    'Calendar'[Date] <= LastVisibleDate
+                )
+            )
+    MEASURE Sales[Customer Rank] :=
+        RANKX (
+            ALLSELECTED ( Customer[Customer Name] ),
+            [Total Sales],
+            ,
+            DESC,
+            Dense
+        )
+    MEASURE Sales[Segment] :=
+        SWITCH (
+            TRUE (),
+            [Total Sales] >= 100000, "Platinum",
+            [Total Sales] >= 50000, "Gold",
+            [Total Sales] >= 10000, "Silver",
+            "Bronze"
+        )
+    MEASURE Sales[Selected Region] :=
+        SELECTEDVALUE ( Geography[Region], "All regions" )
+    MEASURE Sales[Display Text] :=
+        COMBINEVALUES (
+            " | ",
+            [Selected Region],
+            FORMAT ( [Total Sales], "#,##0.00" ),
+            UnicodeCaption
+        )
+
+// First query: table constructors, variables, filters, and projections.
+EVALUATE
+VAR SelectedYears =
+    {
+        PreviousYear,
+        CurrentYear,
+        CurrentYear + 1
+    }
+VAR SelectedCategories =
+    {
+        "Bikes",
+        "Accessories",
+        "Clothing"
+    }
+VAR FilteredSales =
+    FILTER (
+        Sales,
+        Sales[Calendar Year] IN SelectedYears
+            && Sales[Category] IN SelectedCategories
+            && Sales[Amount] >= MinimumAmount
+            && NOT ISBLANK ( Sales[Customer Id] )
+    )
+VAR ProjectedSales =
+    SELECTCOLUMNS (
+        FilteredSales,
+        "Order", Sales[Order Id],
+        "Customer", Sales[Customer Id],
+        "Category", Sales[Category],
+        "Net", Sales[Amount] - Sales[Discount],
+        "Caption", UnicodeCaption
+    )
+RETURN
+    TOPN (
+        25,
+        ProjectedSales,
+        [Net], DESC,
+        [Order], ASC
+    )
+ORDER BY [Net], [Order]
+
+-- Second query: grouping and subtotal modifiers.
+EVALUATE
+VAR Summary =
+    SUMMARIZECOLUMNS (
+        ROLLUPADDISSUBTOTAL (
+            'Calendar'[Calendar Year], "IsYearTotal",
+            Geography[Region], "IsRegionTotal"
+        ),
+        KEEPFILTERS ( TREATAS ( { CurrentYear }, 'Calendar'[Calendar Year] ) ),
+        "Sales", [Total Sales],
+        "Cost", [Total Cost],
+        "Margin", [Gross Margin],
+        "MarginPercent", [Gross Margin %],
+        "Orders", [Order Count]
+    )
+RETURN
+    FILTER (
+        Summary,
+        [Sales] > 0 || [IsYearTotal] = TRUE ()
+    )
+ORDER BY 'Calendar'[Calendar Year], Geography[Region]
+
+// Third query: date and time intelligence functions.
+EVALUATE
+VAR StartDate = DATE ( PreviousYear, 1, 1 )
+VAR EndDate = EOMONTH ( DATE ( CurrentYear, 12, 1 ), 0 )
+VAR Period =
+    DATESBETWEEN (
+        'Calendar'[Date],
+        StartDate,
+        EndDate
+    )
+VAR Monthly =
+    CALCULATETABLE (
+        SUMMARIZE (
+            'Calendar',
+            'Calendar'[Calendar Year],
+            'Calendar'[Month Number],
+            "Sales", [Total Sales]
+        ),
+        Period
+    )
+RETURN
+    ADDCOLUMNS (
+        Monthly,
+        "PreviousMonth", CALCULATE ( [Total Sales], PREVIOUSMONTH ( 'Calendar'[Date] ) ),
+        "NextMonth", CALCULATE ( [Total Sales], NEXTMONTH ( 'Calendar'[Date] ) ),
+        "YearToDate", TOTALYTD ( [Total Sales], 'Calendar'[Date] ),
+        "QuarterToDate", TOTALQTD ( [Total Sales], 'Calendar'[Date] ),
+        "MonthToDate", TOTALMTD ( [Total Sales], 'Calendar'[Date] )
+    )
+ORDER BY 'Calendar'[Calendar Year], 'Calendar'[Month Number]
+
+/* Relationship and set-operation coverage in another closed comment state. */
+EVALUATE
+VAR OnlineCustomers =
+    CALCULATETABLE (
+        VALUES ( Customer[Customer Id] ),
+        Sales[Channel] = "Online"
+    )
+VAR StoreCustomers =
+    CALCULATETABLE (
+        VALUES ( Customer[Customer Id] ),
+        Sales[Channel] = "Store"
+    )
+VAR BothChannels = INTERSECT ( OnlineCustomers, StoreCustomers )
+VAR EitherChannel = UNION ( OnlineCustomers, StoreCustomers )
+VAR OnlineOnly = EXCEPT ( OnlineCustomers, StoreCustomers )
+RETURN
+    ROW (
+        "Both", COUNTROWS ( BothChannels ),
+        "Either", COUNTROWS ( EitherChannel ),
+        "OnlineOnly", COUNTROWS ( OnlineOnly )
+    )
+
+// Final query keeps every string, bracket, brace, comment, and call closed.
+EVALUATE
+VAR Statistics =
+    ROW (
+        "Minimum", MIN ( Sales[Amount] ),
+        "Maximum", MAX ( Sales[Amount] ),
+        "Average", AVERAGE ( Sales[Amount] ),
+        "Median", MEDIAN ( Sales[Amount] ),
+        "Variance", VAR.P ( Sales[Amount] ),
+        "Deviation", STDEV.P ( Sales[Amount] )
+    )
+VAR TextTools =
+    ROW (
+        "Upper", UPPER ( UnicodeCaption ),
+        "Lower", LOWER ( UnicodeCaption ),
+        "Length", LEN ( UnicodeCaption ),
+        "Left", LEFT ( UnicodeCaption, 4 ),
+        "Right", RIGHT ( UnicodeCaption, 2 ),
+        "Search", SEARCH ( "東京", UnicodeCaption, 1, 0 )
+    )
+RETURN
+    CROSSJOIN ( Statistics, TextTools )

@@ -1,0 +1,18 @@
+<main>standalone host text</main>
+@if (user?.active) {
+  <h1>{{ user.name }}</h1>
+}
+@else {
+  <p>Guest café 🚀 𝌆</p>
+}
+@for (item of items; track item.id; let index = $index) {
+  <article data-city="東京">{{ index }} — {{ item.name }}</article>
+}
+@empty {
+  <p>No items</p>
+}
+@switch (status) {
+  <span>{{ status }}</span>
+}
+@case ('ready') { <strong>Ready</strong> }
+@default { <em>Waiting</em> }

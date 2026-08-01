@@ -1,0 +1,192 @@
+# Turtle grammar stress graph: café, 東京, λ, 🚀, and astral 𝌆.
+# Standard Turtle is used except for one documented triple-backtick extension.
+@base <https://example.org/data/> .
+@prefix : <https://example.org/resource/> .
+@prefix ex: <https://example.org/schema/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix schema: <https://schema.org/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix rule: <https://example.org/rule/> .
+BASE <https://example.org/data/>
+PREFIX aux: <https://example.org/auxiliary/>
+
+# Class and property declarations exercise absolute IRIs and prefixed names.
+ex:Mission a rdfs:Class ;
+    rdfs:label "Mission"@en ;
+    rdfs:label "ミッション"@ja ;
+    rdfs:comment 'A planned journey beyond Earth.'@en .
+
+ex:Vehicle a rdfs:Class ;
+    rdfs:label "Vehicle"@en .
+
+ex:destination a rdf:Property ;
+    rdfs:domain ex:Mission ;
+    rdfs:range schema:Place .
+
+ex:crewMember a rdf:Property ;
+    rdfs:domain ex:Mission ;
+    rdfs:range foaf:Person .
+
+<vocabulary/status> a rdf:Property ;
+    rdfs:label "status"@en-US .
+
+# A richly connected mission uses semicolon and comma object lists.
+:aurora a ex:Mission, schema:Event ;
+    schema:name "Aurora 🚀"@en ;
+    schema:alternateName 'Aurore café'@fr ;
+    ex:destination :tokyo, :lowEarthOrbit ;
+    ex:vehicle :odyssey ;
+    ex:crewMember :ada, :grace, :山田 ;
+    ex:active true ;
+    ex:archived false ;
+    ex:sequence 1 ;
+    ex:priority +7 ;
+    ex:temperature -17 ;
+    ex:completion .875 ;
+    ex:tolerance -.125 ;
+    ex:certainty +.99E+2 ;
+    ex:mass 6.022e23 ;
+    ex:drift -1E-9 ;
+    ex:exact 42.0 ;
+    ex:launched "2026-07-12T09:30:00Z"^^xsd:dateTime ;
+    ex:callsign "AURORA-𝌆"^^xsd:string .
+
+# IRI references include absolute, relative, mail, and URN spellings.
+:aurora rdfs:seeAlso <https://example.net/missions/aurora> ;
+    rdfs:seeAlso <archive/2026/aurora> ;
+    schema:url <https://example.org/launch?mission=aurora&lang=ja> ;
+    ex:manifest <urn:uuid:123e4567-e89b-12d3-a456-426614174000> .
+
+<mailto:control@example.org> a schema:ContactPoint ;
+    schema:name "Mission control"@en .
+
+# Empty and default namespace locals are valid prefixed names.
+ex:namespace ex:identity ex: .
+:root ex:child :aurora .
+aux:telemetry ex:source :aurora .
+
+# Blank-node property lists and labels retain complete punctuation closure.
+:odyssey a ex:Vehicle ;
+    schema:manufacturer [
+        a schema:Organization ;
+        schema:name "Orbital Works" ;
+        schema:location [
+            a schema:Place ;
+            schema:name "東京"@ja
+        ]
+    ] ;
+    ex:engine _:engine-main .
+
+_:engine-main a ex:Engine ;
+    schema:name "Lambda λ Drive" ;
+    ex:thrust "7600"^^xsd:integer ;
+    ex:reusable true .
+
+# RDF collections include resources, strings, numerics, and an empty list.
+:aurora ex:phases (
+    :planning
+    :assembly
+    :launch
+    :orbit
+) ;
+    ex:callouts ("go" 'hold' "café"@fr 3 2 1 true) ;
+    ex:emptySequence () .
+
+:planning ex:next :assembly .
+:assembly ex:next :launch .
+:launch ex:next :orbit .
+:orbit ex:next rdf:nil .
+
+# Every standard Turtle quote form appears with literal Unicode.
+:quotes ex:double "Double quoted café 東京 λ 🚀 𝌆" ;
+    ex:single 'Single quoted café 東京 λ 🚀 𝌆' ;
+    ex:tripleDouble """Triple double line one: café.
+Line two crosses 東京 with λ.
+Line three reaches 🚀 and astral 𝌆.""" ;
+    ex:tripleSingle '''Triple single line one: naïve café.
+Line two says Ελληνικά and 東京.
+Line three closes after 🚀 and 𝌆.''' .
+
+# Valid Turtle ECHAR and UCHAR spellings exercise escape recognition.
+:escapes ex:all "tab=\t backspace=\b newline=\n return=\r formfeed=\f quote=\" apostrophe=\' slash=\\" ;
+    ex:bmp "lambda=\u03BB snowman=\u2603 café" ;
+    ex:astral "rocket=\U0001F680 symbol=\U0001D306 𝌆" ;
+    ex:singleEscapes 'apostrophe=\' double=\" slash=\\ newline=\n' .
+
+# Long literals may contain ordinary quote characters without losing state.
+:manual ex:text """The operator said "go" and the crew replied 'ready'.
+A backslash is escaped as \\ and a tab marker as \t.
+No delimiter is left open at the end of this paragraph."""@en .
+
+:poem ex:text '''L'étoile guides the café crew.
+東京 answers with λ while the rocket rises.
+The astral sign 𝌆 follows 🚀 into orbit.'''@fr .
+
+# Language tags and datatype annotations cover both prefixed and IRI datatypes.
+:labels rdfs:label "Mission"@en ;
+    rdfs:label "Mission"@en-US ;
+    rdfs:label "ミッション"@ja ;
+    rdfs:label "Αποστολή"@el ;
+    ex:code "A-17"^^xsd:token ;
+    ex:checksum "deadbeef"^^<https://example.org/datatype/hex> ;
+    ex:year "2026"^^xsd:gYear ;
+    ex:duration "PT2H30M"^^xsd:duration .
+
+# Numeric objects cover integers, decimals, doubles, signs, and exponent cases.
+:measurements ex:zero 0 ;
+    ex:positive +12 ;
+    ex:negative -12 ;
+    ex:decimal 123.456 ;
+    ex:leadingDot .5 ;
+    ex:wholeDecimal 9.0 ;
+    ex:small 1.0e-12 ;
+    ex:large +9E+18 ;
+    ex:negativeDouble -2.5E3 ;
+    ex:enabled true ;
+    ex:disabled false .
+
+# Named people connect Unicode labels and nested blank nodes.
+:ada a foaf:Person ;
+    foaf:name "Ada Lovelace"@en ;
+    foaf:nick 'Enchantress of Numbers' ;
+    schema:knowsLanguage "en" ;
+    schema:address [
+        schema:addressLocality "London" ;
+        schema:postalCode "SW1A 1AA"
+    ] .
+
+:grace a foaf:Person ;
+    foaf:name "Grace Hopper"@en ;
+    foaf:nick "Amazing Grace" ;
+    schema:knowsLanguage "en-US" .
+
+:山田 a foaf:Person ;
+    foaf:name "山田 λ"@ja ;
+    foaf:nick "東京の飛行士 🚀"@ja .
+
+# The exact predicate-plus-space form enters the embedded rule constraint.
+:launchPermission a rule:Constraint ;
+    rule:content """subject = :operator
+resource = :aurora
+action = ex:launch
+condition = ex:active
+decision = permit""" ;
+    rdfs:label "Closed launch permission rule"@en .
+
+:landingPermission rule:content """subject = :operator
+resource = :odyssey
+action = ex:land
+decision = review""" .
+
+# This grammar-supported quote form is a deliberate nonstandard Turtle extension.
+:grammarExtension ex:payload ```Backtick line one uses hex=\x41 and octal=\141.
+More escape branches: low=\37 high=\47 generic=\q and trailing=\
+The extension closes here with café 東京 λ 🚀 𝌆.``` .
+
+# Final complete triples prove that parsing resumes after every multiline form.
+:aurora ex:status :ready .
+:ready rdfs:label "Ready"@en .
+<final/resource> ex:contains :aurora, :odyssey .
+# End of stress graph — all literals, blank nodes, collections, and rules closed.

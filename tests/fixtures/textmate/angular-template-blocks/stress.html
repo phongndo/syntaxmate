@@ -1,0 +1,184 @@
+<header class="site-header" data-region="東京">
+  <a href="/" aria-label="Home">🚀 Mission desk</a>
+  <p>Planning café visits, é accents, and the 𝌆 symbol.</p>
+</header>
+
+<main id="main-content">
+  <section aria-labelledby="account-heading">
+    <h1 id="account-heading">Welcome</h1>
+    @if (account(); as user) {
+      <p>Hello, <strong>{{ user.displayName }}</strong>.</p>
+      @if (user.plan === 'enterprise' && user.permissions.includes('admin')) {
+        <a href="/admin">Open administration</a>
+      } @else if (user.plan === 'pro') {
+        <span class="badge">Pro workspace</span>
+      } @else {
+        <a href="/upgrade">Compare plans</a>
+      }
+    } @else if (sessionLoading()) {
+      <p role="status" aria-live="polite">Restoring your session…</p>
+    } @else {
+      <a href="/sign-in">Sign in</a>
+    }
+  </section>
+
+  <section aria-labelledby="missions-heading">
+    <header>
+      <h2 id="missions-heading">Active missions</h2>
+      <span>{{ filteredMissions().length }} visible</span>
+    </header>
+
+    @for (
+      mission of filteredMissions();
+      track mission.id;
+      let index = $index, first = $first, last = $last, even = $even
+    ) {
+      <article
+        [class.alt]="even"
+        [attr.data-position]="index"
+        [attr.aria-labelledby]="'mission-' + mission.id"
+      >
+        <h3 [id]="'mission-' + mission.id">
+          {{ index + 1 }}. {{ mission.name }}
+        </h3>
+        @if (first) {
+          <span class="marker">Next launch</span>
+        }
+
+        <p>{{ mission.destination }} · {{ mission.launchAt | date: 'mediumDate' }}</p>
+        <ul>
+          @for (member of mission.crew; track member.id; let crewIndex = $index) {
+            <li>
+              <img [src]="member.avatar" alt="" />
+              {{ crewIndex + 1 }} — {{ member.name }}
+              @if (member.commander) {
+                <strong>commander</strong>
+              } @else {
+                <span>specialist</span>
+              }
+            </li>
+          } @empty {
+            <li>No crew assigned yet.</li>
+          }
+        </ul>
+
+        @if (last) {
+          <small>End of the active queue.</small>
+        }
+      </article>
+    } @empty {
+      <div class="empty-state" role="status">
+        <h3>No matching missions</h3>
+        <p>Clear a filter to see the full launch queue.</p>
+        <button type="button" (click)="clearFilters()">Clear filters</button>
+      </div>
+    }
+  </section>
+
+  <section aria-labelledby="telemetry-heading">
+    <h2 id="telemetry-heading">Telemetry</h2>
+    @switch (telemetryState()) {
+      @case ('connected') {
+        <output class="status connected">Receiving live data</output>
+        @if (latency() > 500) {
+          <p>High latency: {{ latency() }} ms</p>
+        }
+      }
+      @case ('reconnecting') {
+        <output class="status reconnecting">Reconnecting…</output>
+      }
+      @case ('paused') {
+        <output class="status paused">Paused by operator</output>
+        <button type="button" (click)="resume()">Resume</button>
+      }
+      @default {
+        <output class="status offline">Offline</output>
+      }
+    }
+  </section>
+
+  <section aria-labelledby="weather-heading">
+    <h2 id="weather-heading">Launch weather</h2>
+    @defer (on viewport; prefetch on idle) {
+      <app-weather-map
+        [site]="selectedSite()"
+        (forecastChange)="rememberForecast($event)"
+      />
+    } @placeholder (minimum 300ms) {
+      <figure class="map-placeholder">
+        <div aria-hidden="true"></div>
+        <figcaption>Weather map appears here.</figcaption>
+      </figure>
+    } @loading (after 100ms; minimum 500ms) {
+      <p role="status">Loading forecast for {{ selectedSite().name }}…</p>
+    } @error {
+      <p role="alert">The forecast could not be loaded.</p>
+      <button type="button" (click)="retryWeather()">Retry</button>
+    }
+  </section>
+
+  @if (showArchive()) {
+    <section aria-labelledby="archive-heading">
+      <h2 id="archive-heading">Recent archive</h2>
+      @for (year of archiveYears(); track year.value) {
+        <details [open]="year.value === currentYear">
+          <summary>{{ year.value }} ({{ year.missions.length }})</summary>
+          @for (pastMission of year.missions; track pastMission.slug) {
+            <a [href]="'/archive/' + pastMission.slug">
+              {{ pastMission.name }}
+            </a>
+          } @empty {
+            <span>No archived launches.</span>
+          }
+        </details>
+      } @empty {
+        <p>The archive index is empty.</p>
+      }
+    </section>
+  }
+
+  <section aria-labelledby="recommendation-heading">
+    <h2 id="recommendation-heading">Recommendation</h2>
+    @switch (recommendation()?.kind) {
+      @case ('article') {
+        <article>
+          <h3>{{ recommendation()?.title }}</h3>
+          <p>{{ recommendation()?.summary }}</p>
+        </article>
+      }
+      @case ('video') {
+        <video controls [poster]="recommendation()?.poster">
+          <source [src]="recommendation()?.url" type="video/mp4" />
+        </video>
+      }
+      @default {
+        @if (recommendationLoading()) {
+          <p>Choosing something useful…</p>
+        } @else {
+          <p>No recommendation today.</p>
+        }
+      }
+    }
+  </section>
+
+  <aside aria-label="Deferred activity">
+    @defer (when activityEnabled(); prefetch when signedIn()) {
+      <app-activity-feed />
+    } @placeholder {
+      <p>Activity will appear when enabled.</p>
+    } @loading {
+      <progress aria-label="Loading activity"></progress>
+    } @error {
+      <p>Activity is temporarily unavailable.</p>
+    }
+  </aside>
+</main>
+
+<footer class="site-footer">
+  <nav aria-label="Footer">
+    <a href="/about">About</a>
+    <a href="/status">System status</a>
+  </nav>
+  <small>Host HTML remains outside every balanced block.</small>
+</footer>
+<p data-root-pin="angular-template-blocks">Plain host root pin.</p>

@@ -1,0 +1,221 @@
+---
+title: AsciiDoc grammar stress
+unicode: "café λ 東京 🚀 𝌆"
+review: true
+---
+= AsciiDoc Grammar Stress: café λ 東京 🚀 𝌆
+Fixture Team <fixture@example.test>
+:revnumber: 1.0
+:revdate: 2026-07-12
+:toc: left
+:sectnums:
+:source-highlighter: highlight.js
+:project-name: Mark
+:uri-home: https://example.test/docs
+:long-value: first segment +
+  second segment with *inline emphasis* +
+  final segment
+
+// A single-line comment exercises the short form.
+////
+This multiline comment contains *markup-looking text*.
+It also contains café λ 東京 🚀 𝌆 and closes explicitly.
+////
+
+[[overview,Overview anchor]]
+== Overview
+
+This paragraph uses {project-name}, {uri-home}[the project site],
+*strong*, **unconstrained strong**, _emphasis_, __wide emphasis__,
+`monospace`, ``wide monospace``, #marked#, H~2~O, and x^2^.
+
+Typographic quotes include "`double quoted`" and '`single quoted`'.
+An entity &copy;, mailto:fixture@example.test[email], and
+xref:details.adoc#deep-link[an xref] exercise inline macros.
+See <<tables,Tables>>, footnote:[A compact note], and kbd:[Ctrl+C].
+Use menu:File[New > Document], btn:[Save], and image:rocket.png[🚀].
+Math appears as stem:[sqrt(4) = 2] and pass:[<span>raw café</span>].
+
+'''
+
+=== Lists and callouts
+
+* first bullet
+** nested bullet with `code`
+*** third-level bullet
+* second bullet
+
+. ordered item
+.. nested ordered item
+... deeper ordered item
+
+- [x] completed task
+- [ ] pending task
+
+Term one:: definition with *style*
+Term two;; alternate description marker
+
+[source,python]
+.Python callouts
+----
+def greet(name: str) -> str:
+    """Multiline embedded docstring.
+    It carries café λ 東京 🚀 𝌆.
+    """
+    return f"hello {name}"  # <1>
+----
+<1> The callout follows the embedded Python block.
+
+[[blocks]]
+== Delimited blocks
+
+NOTE: An admonition paragraph with *important syntax*.
+
+[WARNING]
+====
+An example block can contain lists and inline markup.
+
+* Keep every delimiter balanced.
+* Return to the root grammar afterward.
+====
+
+[quote, Ada Lovelace, Notes]
+____
+The engine should preserve multiline quote state.
+
+The second paragraph includes _emphasis_.
+____
+
+[sidebar]
+.Review sidebar
+****
+Sidebar content links to <<overview>> and contains `code`.
+****
+
+[literal]
+....
+literal <tags> are not source code
+spacing and café λ remain visible
+....
+
+[listing]
+----
+plain listing -- no language embedding
+line two with 🚀 and 𝌆
+----
+
+[pass]
+++++
+<div class="fixture">raw <strong>HTML</strong> 東京</div>
+++++
+
+[[tables]]
+== Tables
+
+.Primary PSV table
+[cols="1,1,2",options="header",stripes=even]
+|===
+|Kind |Token |Notes
+
+|BMP
+|café λ 東京
+|Basic Multilingual Plane examples
+
+|Astral
+|🚀 𝌆
+|Two supplementary-plane examples
+
+|Macro
+|{project-name}
+|Attribute reference in a cell
+|===
+
+== AsciiDoc source blocks
+
+[source,javascript]
+----
+/* Embedded block comment
+   remains active across lines and closes here. */
+const message = `café λ 東京 ${"🚀 𝌆"}`;
+const route = /^\/api\/[\p{Letter}-]+$/u;
+console.log(message, route.test("/api/café"));
+----
+
+[source,rust]
+----
+fn main() { println!("café λ 東京 🚀 𝌆"); }
+----
+
+[source,sql]
+----
+SELECT id, display_name FROM accounts
+WHERE display_name LIKE 'café%' ORDER BY created_at DESC;
+----
+
+[source,yaml]
+----
+service:
+  name: "東京"
+  labels: [café, λ, "🚀", "𝌆"]
+----
+
+[source,json]
+----
+{"name":"café λ 東京","symbols":["🚀","𝌆"],"active":true}
+----
+
+[source,html]
+----
+<!doctype html>
+<p lang="en" data-city="東京">café λ 🚀 𝌆</p>
+----
+
+[source,css]
+----
+:root { --label: "café λ 東京 🚀 𝌆"; }
+.fixture::before { content: var(--label); }
+----
+
+[source,shell]
+----
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' 'café λ 東京 🚀 𝌆'
+----
+
+[source,xml]
+----
+<?xml version="1.0" encoding="UTF-8"?>
+<fixture city="東京">café λ 🚀 𝌆</fixture>
+----
+
+== Markdown-style source fences
+
+```typescript
+interface Greeting {
+  text: string;
+  symbols: readonly string[];
+}
+const greeting: Greeting = {
+  text: "café λ 東京",
+  symbols: ["🚀", "𝌆"],
+};
+```
+
+```java
+final class Greeting {
+    static String text() { return "café λ 東京 🚀 𝌆"; }
+}
+```
+
+```kotlin
+data class Greeting(val text: String)
+fun main() = println(Greeting("café λ 東京 🚀 𝌆"))
+```
+
+== Macros and finish
+
+anchor:finish[]The final section includes citenp:[fixture2026] and [[[fixture2026]]].
+include::shared/fragment.adoc[leveloffset=+1]
+diagram::architecture.svg[format=svg]
+The final line is outside every comment, table, block, and source fence.

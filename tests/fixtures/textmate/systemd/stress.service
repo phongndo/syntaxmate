@@ -1,0 +1,160 @@
+# A hardened, templated telemetry gateway with deployment-tool extensions.
+# The X-* sections are ignored by systemd and consumed by the release manager.
+; This comment style remains valid for compatibility with older unit files.
+
+[Unit]
+Description="Telemetry gateway μ-probe 🚀 for instance %i"
+Documentation=https://docs.example.test/gateway man:telemetry-gateway(8)
+Requires=network-online.target
+Wants=time-sync.target telemetry-preflight.service
+After=network-online.target time-sync.target
+Conflicts=telemetry-maintenance@%i.service
+BindsTo=dev-hugepages.mount
+OnFailure=telemetry-recovery@%i.service
+PropagatesReloadTo=telemetry-sidecar@%i.service
+ReloadPropagatedFrom=telemetry-config.target
+ConditionPathExists=/etc/telemetry/%i.conf
+StartLimitIntervalSec=45s
+StartLimitBurst=7
+
+# Runtime identity and environment are intentionally instance-aware.
+[Service]
+Type=notify-reload
+NotifyAccess=main
+User=telemetry
+Group=telemetry
+DynamicUser=no
+WorkingDirectory=/var/lib/telemetry/%i
+UMask=0027
+Environment=PORT=4317 HEALTH_PORT=13133 ENABLE_TRACING=true
+Environment=INSTANCE=%i UNIT_NAME=%n LITERAL_PERCENT=%%
+Environment=STATE_ROOT=${STATE_DIRECTORY} RUNTIME_ROOT=$RUNTIME_DIRECTORY
+Environment='DISPLAY_NAME=Telemetry Gateway' "JSON_HINT={\"mode\":\"safe\"}"
+Environment="UNICODE_LABEL=μ-probe 🚀" RETRIES=3
+EnvironmentFile=-/etc/telemetry/gateway.env
+
+; Lifecycle commands use every specialized Exec directive and several prefixes.
+ExecCondition=/usr/bin/test -r /etc/telemetry/%i.conf
+ExecStartPre=-/usr/bin/install -d -o telemetry -g telemetry \
+    -m 0750 /run/telemetry/%i \
+    /var/lib/telemetry/%i
+ExecStartPre=+:/usr/bin/telemetry-check --config "/etc/telemetry/%i.conf"
+ExecStart=@-/usr/bin/telemetry-gateway gateway-main \
+    --config "/etc/telemetry/%i.conf" \
+    "--endpoint=${COLLECTOR_URL}" "--token=$ACCESS_TOKEN" \
+    "--unit=%n" "--literal=%%" "--label=μ-probe 🚀"
+ExecStartPost=!/usr/bin/telemetry-ready --instance %i
+ExecReload=:/bin/kill -HUP $MAINPID
+ExecStop=-/usr/bin/telemetryctl --unit %n drain
+ExecStopPost=+/usr/bin/rm -f /run/telemetry/%i/ready
+Restart=on-watchdog
+RestartSec=750ms
+RestartMaxDelaySec=1min30s
+TimeoutStartSec=2min15s
+TimeoutStopSec=45seconds
+TimeoutAbortSec=3s
+RuntimeMaxSec=1h30min
+RuntimeRandomizedExtraSec=250μs
+WatchdogSec=30s
+WatchdogSignal=SIGABRT
+
+# The sandbox permits only the gateway's network and file duties.
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_DAC_READ_SEARCH CAP_SETUID
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+SecureBits=keep-caps
+NoNewPrivileges=true
+PrivateTmp=yes
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictNamespaces=yes
+RestrictRealtime=true
+LockPersonality=yes
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service ~@privileged
+SystemCallErrorNumber=EPERM
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+PrivateUsers=no
+ProcSubset=pid
+ProtectProc=invisible
+
+# Resource values cover plain numbers, sizes, infinity, and compound spans.
+Nice=5
+OOMScoreAdjust=-250
+CPUWeight=200
+CPUQuota=75%
+IOWeight=500
+MemoryLow=64M
+MemoryHigh=1.5G
+MemoryMax=2G
+MemorySwapMax=0
+TasksMax=infinity
+LimitNOFILE=65536
+LimitNPROC=4096
+
+ReadWritePaths=/var/lib/telemetry/%i /run/telemetry/%i
+ReadOnlyPaths=/etc/telemetry /usr/share/telemetry
+InaccessiblePaths=-/home -/root
+BindReadOnlyPaths=/etc/ssl/certs
+TemporaryFileSystem=/tmp:ro,nodev,nosuid,size=32M
+StateDirectory=telemetry/%i
+CacheDirectory=telemetry/%i
+LogsDirectory=telemetry/%i
+RuntimeDirectory=telemetry/%i
+RuntimeDirectoryMode=0750
+StateDirectoryMode=0750
+
+StandardInput=null
+StandardOutput=append:/var/log/telemetry/%i.log
+StandardError=journal
+SyslogIdentifier=telemetry-gateway[%i]
+LogLevelMax=info
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=1000
+
+[Install]
+WantedBy=multi-user.target
+RequiredBy=telemetry.target
+Alias=telemetry-primary@%i.service
+Also=telemetry-heartbeat@%i.timer
+DefaultInstance=primary
+
+[X-Schedule]
+# The release manager emits these values into the companion timer.
+OnCalendar=quarterly
+OnCalendar=Mon..Fri *-*-* 02:15:00
+OnCalendar=*-*-01 04:00:00
+Persistent=true
+RandomizedDelaySec=10min
+AccuracySec=1μs
+Unit=%p@%i.service
+
+[X-Capability-Policy]
+AddCapability=CAP_BPF CAP_PERFMON CAP_CHECKPOINT_RESTORE
+DropCapability=CAP_SYS_ADMIN CAP_SYS_MODULE CAP_SYS_RAWIO
+PolicyVersion=3
+
+; Imported names below remain solely to diagnose deprecated configurations.
+[X-LegacyCompatibility]
+InaccessableDirectories=-/srv/legacy
+InaccessibleDirectories=-/opt/retired
+ReadOnlyDirectories=/usr /etc
+ReadWriteDirectories=/var/lib/telemetry
+Capabilities=CAP_NET_BIND_SERVICE
+StartLimitInterval=45s
+RequiresOverridable=network.target
+OnFailureIsolate=no
+
+[X-Release]
+ReleaseName="aurora μ"
+Artifact="gateway-%i-🚀.tar.zst"
+ChecksumFile=/usr/share/telemetry/checksums/%i.sha256
+FeatureFlag=on

@@ -1,0 +1,227 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Avatar from "../components/Avatar.astro";
+import Callout from "../components/Callout.astro";
+import Card from "../components/Card.astro";
+import Icon from "../components/Icon.tsx";
+import type { CollectionEntry } from "astro:content";
+
+type Theme = "dawn" | "night";
+interface Speaker {
+  name: string; role: string;
+  avatar: string; topics: string[];
+}
+interface Session {
+  id: number; title: string;
+  room: `room-${number}`;
+  start: Date; speaker: Speaker; seats?: number;
+}
+interface Props {
+  edition?: number; theme?: Theme; draft?: boolean;
+  related?: CollectionEntry<"events">[];
+}
+const { edition = 7, theme = "dawn", draft = false, related = [] } = Astro.props;
+
+const city = "Montréal";
+const tagline = "café · 日本語 · 🚀 · 𝌆";
+// Preserve the current path when a deployment does not provide Astro.site.
+const canonical = new URL(Astro.url.pathname, Astro.site ?? Astro.url);
+const accent = theme === "night" ? "#9cf" : "#7048e8";
+const formatter = new Intl.DateTimeFormat("en-CA", {
+  hour: "2-digit", minute: "2-digit", timeZone: "America/Toronto",
+});
+
+const speakers: Speaker[] = [
+  {
+    name: "Renée Nakamura", role: "Robotics lead",
+    avatar: "/people/renee.webp", topics: ["navigation", "ethics"],
+  },
+  {
+    name: "Samir Okafor", role: "Field engineer",
+    avatar: "/people/samir.webp", topics: ["telemetry", "resilience"],
+  },
+];
+
+const sessions: Session[] = speakers.map((speaker, index) => ({
+  id: index + 1,
+  title: index === 0 ? "Mapping beyond Earth" : "Signals from the ice",
+  room: `room-${index + 2}`,
+  start: new Date(`2032-06-18T${index ? "14:30" : "10:00"}:00-04:00`),
+  speaker, seats: index === 0 ? 24 : undefined,
+}));
+
+const nav = [
+  { href: "#program", label: "Program" },
+  { href: "#speakers", label: "Speakers" },
+  { href: "#visit", label: "Visit" },
+] as const;
+
+const structuredData = JSON.stringify({
+  "@context": "https://schema.org", "@type": "Event",
+  name: `Orbit North ${edition}`,
+  location: { "@type": "Place", name: city },
+});
+
+const noteHtml = "Bring a notebook; <strong>questions are welcome</strong>.";
+const registrationOpen = sessions.some(({ seats }) => (seats ?? 0) > 0);
+const bodyClass = { night: theme === "night", draft };
+---
+
+<!doctype html>
+<html lang="en-CA" data-theme={theme}>
+  <head>
+    <meta charset=utf-8 />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={`Orbit North ${edition} in ${city}`} />
+    <link rel="canonical" href={canonical} />
+    <title>{`Orbit North — edition ${edition}`}</title>
+    <script type="application/ld+json" set:html={structuredData} />
+  </head>
+  <body class:list={["event", bodyClass]}>
+    <BaseLayout title={`Orbit North ${edition}`} {theme}>
+      <Fragment slot="banner">
+        {draft && <p class="draft" role="status">Preview build</p>}
+      </Fragment>
+
+      <!-- Navigation remains useful without client-side JavaScript. -->
+      <header class="hero" data-edition={edition} aria-labelledby="page-title">
+        <nav aria-label="Event sections">
+          <a class="brand" href="/">Orbit&nbsp;North</a>
+          <ul>
+            {nav.map(({ href, label }) => (
+              <li><a href={href} data-track={`nav:${label}`}>{label}</a></li>
+            ))}
+          </ul>
+        </nav>
+        <p class="eyebrow">{city} / 18 June 2032</p>
+        <h1 id="page-title">Small teams, distant worlds <Icon name="orbit" client:idle /></h1>
+        <p class="tagline" title={tagline}>{tagline}</p>
+        {registrationOpen ? (
+          <a class="button" href="/register" data-action="register">Reserve a seat</a>
+        ) : (
+          <span class="button disabled" aria-disabled="true">Join the wait-list</span>
+        )}
+      </header>
+
+      <main>
+        <section id="program" aria-labelledby="program-heading">
+          <h2 id="program-heading">Program</h2>
+          <div class="schedule">
+            {sessions.map((session, index) => {
+              const time = formatter.format(session.start);
+              const soldOut = !session.seats;
+              return (
+                <Card
+                  class:list={["session", { soldOut }]}
+                  data-room={session.room}
+                >
+                  <p slot="meta">
+                    <time datetime={session.start.toISOString()}>{time}</time>
+                    <span aria-hidden="true"> · </span>{session.room}
+                  </p>
+                  <h3>{index + 1}. {session.title}</h3>
+                  <p>{session.speaker.name} — {session.speaker.role}</p>
+                  {session.seats != null && <small>{session.seats} seats left</small>}
+                </Card>
+              );
+            })}
+          </div>
+        </section>
+
+        <section id="speakers" class="speakers">
+          <h2>Speakers</h2>
+          {speakers.map((speaker) => (
+            <article data-topics={speaker.topics.join(",")}>
+              <Avatar
+                src={speaker.avatar}
+                alt={`Portrait of ${speaker.name}`}
+                width={96}
+                height="96"
+                {...{ loading: "lazy", decoding: "async" }}
+              />
+              <h3>{speaker.name}</h3>
+              <p>{speaker.role}</p>
+              <ul class="chips">
+                {speaker.topics.map((topic) => <li>{topic}</li>)}
+              </ul>
+            </article>
+          ))}
+        </section>
+
+        <Callout tone={registrationOpen ? "positive" : "quiet"} server:defer>
+          <span slot="title">Before you arrive</span>
+          <p set:html={noteHtml} />
+          <label>
+            Updates
+            <input type="email" name="email" placeholder="you@example.test" required />
+          </label>
+          <button type="button" data-subscribe onfocus="this.dataset.ready = 'true'">Notify me</button>
+        </Callout>
+
+        <section id="visit">
+          <h2>Visit</h2>
+          <address>12 Rue de l&apos;Orbite<br />Montréal, QC</address>
+          <details>
+            <summary>Accessibility and transit</summary>
+            <p>Step-free entry is on the east side; metro exits are clearly signed.</p>
+          </details>
+          <pre aria-label="Radio sample"><code>{`CALL ORBIT-7\nACK  2032-06-18\nSTATUS: READY 🚀`}</code></pre>
+          <div is:raw data-example="literal"><em>{not interpolated}</em> &amp; raw</div>
+        </section>
+
+        {related.length > 0 && (
+          <aside aria-labelledby="related-heading">
+            <h2 id="related-heading">From the journal</h2>
+            {related.slice(0, 3).map(({ slug, data: { title } }) => (
+              <a href={`/journal/${slug}/`}>{title}</a>
+            ))}
+          </aside>
+        )}
+      </main>
+
+      <footer>
+        <slot name="footer"><p>&copy; 2032 Orbit North</p></slot>
+      </footer>
+    </BaseLayout>
+
+    <script define:vars={{ edition, registrationOpen }}>
+      const button = document.querySelector("[data-subscribe]");
+      button?.addEventListener("click", () => {
+        const state = registrationOpen ? "open" : "wait-list";
+        console.info(`Edition ${edition}: registration is ${state}`);
+        button.textContent = "Saved ✓";
+      });
+    </script>
+
+    <script is:inline>
+      document.documentElement.classList.add("has-js");
+    </script>
+  </body>
+</html>
+
+<style define:vars={{ accent }}>
+  :global(*) { box-sizing: border-box; }
+  :global(body) { margin: 0; font-family: system-ui, sans-serif; }
+  .event { color: #1d2433; background: #fbfaf7; }
+  .event.night { color: #eef3ff; background: #111522; }
+  .hero { padding: clamp(2rem, 8vw, 7rem); border-block-end: 4px solid var(--accent); }
+  nav, nav ul { display: flex; gap: 1rem; align-items: center; }
+  nav { justify-content: space-between; }
+  nav ul, .chips { padding: 0; list-style: none; }
+  .button { display: inline-block; padding: .7rem 1rem; background: var(--accent); color: white; }
+  main { width: min(70rem, 92%); margin-inline: auto; }
+  .schedule { display: grid; gap: 1.25rem; }
+  .speakers { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); }
+  .chips { display: flex; gap: .4rem; }
+  .chips li { border: 1px solid currentColor; border-radius: 999px; padding: .2rem .6rem; }
+  @media (max-width: 40rem) {
+    nav, nav ul { align-items: flex-start; flex-direction: column; }
+    .hero { padding-inline: 1rem; }
+  }
+</style>
+<style lang="scss" is:global>
+  $focus: #ffbf47;
+  :focus-visible {
+    outline: 3px solid $focus; outline-offset: 3px;
+  }
+</style>

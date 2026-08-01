@@ -1,0 +1,226 @@
+### Shared environment and authentication
+# This file intentionally mixes requests, captured responses, and body languages.
+@scheme = https
+@host = api.example.test
+@version = v2
+@accountId = acct_東京_42
+@token = demo-token-αβ
+@uploadFile = ./fixtures/résumé-🚀.pdf
+
+# @prompt traceId Optional distributed trace identifier
+// @prompt region Deployment region, such as eu-west-1
+# @note
+// Variables above are safe fixture values, not working credentials.
+
+### Shell-driven health probe
+# @name curlHealth
+curl --silent --show-error \
+  --request GET \
+  --header 'Accept: application/json' \
+  --header "Authorization: Bearer ${DEMO_TOKEN:-fixture-token}" \
+  "https://api.example.test/health?verbose=true" | jq '{status, version}'
+### curl block closed
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+Cache-Control: no-store
+X-Trace-Id: trace-curl-0001
+
+{
+  "status": "ok",
+  "version": "2.7.0",
+  "message": "ready ✓"
+}
+
+### List projects with query continuation lines
+// @name listProjects
+GET {{scheme}}://{{host}}/{{version}}/accounts/{{accountId}}/projects HTTP/2.0
+Accept: application/json
+Accept-Language: en-GB, ja;q=0.8
+User-Agent: mark-syntax-fixture/1.0
+?page=2
+&per_page=25
+&sort=-updated_at
+&label=release🚀
+
+HTTP/2.0 206 Partial Content
+Content-Type: application/json; charset=utf-8
+Content-Range: items 26-50/87
+ETag: W-"projects-page-2"
+
+[
+  {
+    "id": "prj_1001",
+    "name": "Café observatory",
+    "tags": ["science", "München", "🔭"],
+    "archived": false
+  },
+  {
+    "id": "prj_1002",
+    "name": "東京 launchpad",
+    "tags": [],
+    "archived": null
+  }
+]
+
+### Create a project with nested JSON
+# @name createProject
+POST {{scheme}}://{{host}}/{{version}}/projects HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json
+Idempotency-Key: fixture-create-001
+X-Display-Name: naïve 🚀 client
+
+{
+  "name": "Aurora 𝄞",
+  "description": "BMP: Ελληνικά; astral: 🛰️",
+  "owner": {
+    "account": "{{accountId}}",
+    "contacts": [
+      {"type": "email", "value": "ops@example.test"},
+      {"type": "chat", "value": "#lancement"}
+    ]
+  },
+  "settings": {
+    "private": true,
+    "retentionDays": 30,
+    "threshold": 0.875,
+    "callback": "https://hooks.example.test/project?source=http-fixture"
+  }
+}
+
+HTTP/1.1 201 Created
+Location: https://api.example.test/v2/projects/prj_9000
+Content-Type: application/json
+
+{"id":"prj_9000","created":true,"label":"新規✨"}
+
+### Replace an XML document
+// @name putCatalog
+PUT {{scheme}}://{{host}}/{{version}}/catalog/items/sku-7 HTTP/1.1
+Content-Type: application/xml; charset=utf-8
+If-Match: "catalog-rev-3"
+
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog xmlns="urn:example:catalog" xml:lang="fr">
+  <!-- Embedded XML remains balanced across lines. -->
+  <item sku="sku-7" available="true">
+    <name>Café crème &amp; thé</name>
+    <warehouse code="東京">A-12</warehouse>
+    <note><![CDATA[Handle with care: <fragile> 🚚]]></note>
+  </item>
+</catalog>
+### XML body closed
+
+HTTP/1.1 204 No Content
+ETag: "catalog-rev-4"
+X-Unicode-Echo: café-東京-🚚
+
+### GraphQL query with variables and fragments
+# @name projectDashboard
+POST {{scheme}}://{{host}}/graphql HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/graphql
+X-Operation-Name: ProjectDashboard
+
+query ProjectDashboard($id: ID!, $withTasks: Boolean! = true) {
+  project(id: $id) {
+    id
+    name
+    owner { displayName locale }
+    tasks(first: 3) @include(if: $withTasks) {
+      nodes { id title status }
+      pageInfo { hasNextPage endCursor }
+    }
+    ...ProjectLabels
+  }
+}
+fragment ProjectLabels on Project {
+  labels { name color }
+}
+
+### GraphQL mutation
+// @name renameProject
+POST {{scheme}}://{{host}}/graphql
+Content-Type: application/graphql
+
+mutation RenameProject($id: ID!, $name: String!) {
+  renameProject(input: {id: $id, name: $name}) {
+    project { id name updatedAt }
+    errors { field message }
+  }
+}
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "data": {
+    "renameProject": {
+      "project": {"id": "prj_9000", "name": "北極星 🌟", "updatedAt": "2026-07-12T09:30:00Z"},
+      "errors": []
+    }
+  }
+}
+
+### Upload metadata and select a local file variable
+# @prompt uploadFile Path to a small fixture document
+PATCH {{scheme}}://{{host}}/{{version}}/projects/prj_9000/artifact HTTP/1.1
+Authorization: Bearer {{token}}
+Content-Type: application/json-patch+json
+X-Source-File: {{uploadFile}}
+
+[
+  {"op": "replace", "path": "/title", "value": "Résumé 🚀"},
+  {"op": "add", "path": "/keywords/-", "value": "解析"},
+  {"op": "test", "path": "/revision", "value": 4}
+]
+
+HTTP/1.1 422 Unprocessable Entity
+Content-Type: application/problem+json
+
+{
+  "type": "https://api.example.test/problems/revision-conflict",
+  "title": "Revision mismatch",
+  "status": 422,
+  "detail": "Expected revision 4; found 5.",
+  "instance": "/v2/projects/prj_9000/artifact"
+}
+
+### Exercise additional HTTP and WebDAV request methods
+HEAD {{scheme}}://{{host}}/{{version}}/projects/prj_9000 HTTP/1.1
+If-None-Match: "project-rev-8"
+
+OPTIONS {{scheme}}://{{host}}/{{version}}/projects HTTP/1.1
+Origin: https://console.example.test
+Access-Control-Request-Method: POST
+
+DELETE {{scheme}}://{{host}}/{{version}}/projects/prj_old?force=false HTTP/1.1
+Authorization: Bearer {{token}}
+
+PROPFIND https://dav.example.test/team/ HTTP/1.1
+Depth: 1
+Content-Type: application/xml
+
+<propfind xmlns="DAV:">
+  <prop><displayname/><getetag/><getcontentlength/></prop>
+</propfind>
+
+HTTP/1.1 207 Multi-Status
+Content-Type: application/xml
+
+<multistatus xmlns="DAV:">
+  <response>
+    <href>/team/roadmap-🗺️.md</href>
+    <propstat><status>HTTP/1.1 200 OK</status></propstat>
+  </response>
+</multistatus>
+
+### Protocol and status families
+HTTP/1.0 100 Continue
+HTTP/1.1 302 Found
+HTTP/2.0 404 Not Found
+HTTP/1.1 503 Service Unavailable
+
+// @note
+# All multiline curl, JSON, XML, and GraphQL regions are closed before EOF.

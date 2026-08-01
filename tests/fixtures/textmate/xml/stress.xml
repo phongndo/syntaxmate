@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<?xml-stylesheet
+  type="text/xsl"
+  href='catalog-detail.xsl'
+  media="screen"?>
+<?fixture generated="false" tier='A'?>
+<!DOCTYPE catalog [
+  <!-- General, numeric, external, and parameter entity declarations. -->
+  <!ENTITY company "North &amp; South Press">
+  <!ENTITY copyright "Copyright &#169; 2026">
+  <!ENTITY welcome "Bienvenue, 世界">
+  <!ENTITY orbit "&#x1F6F0;">
+  <!ENTITY nbsp "&#160;">
+  <!ENTITY cover SYSTEM "cover.svg">
+  <!ENTITY archive PUBLIC "-//Example//TEXT Archive Label//EN" "archive.txt">
+  <!ENTITY % schema-note "parameter entity replacement text">
+]>
+<!--
+  A hand-written catalog that keeps declarations, comments, attributes,
+  character references, namespaces, and multiline lexical states together.
+-->
+<catalog
+    xmlns="urn:example:catalog"
+    xmlns:dc="http://purl.org/dc/elements/1.1/"
+    xmlns:xlink="http://www.w3.org/1999/xlink"
+    xmlns:cfg="urn:example:configuration"
+    xml:lang="en-GB"
+    version='2026.07'
+    owner="&company;">
+  <metadata>
+    <dc:title>International Markup Catalog</dc:title>
+    <dc:creator>&company;</dc:creator>
+    <dc:rights>&copyright;</dc:rights>
+    <dc:description>
+      &welcome; — examples span café, Ελληνικά, 日本語, and 🛰️.
+    </dc:description>
+    <revision major="2" minor='7' patch="0"/>
+    <build channel="stable"></build>
+    <?audit
+      actor="fixture-author"
+      result='accepted'
+      timestamp="2026-07-12T10:30:00Z"?>
+  </metadata>
+
+  <configuration cfg:mode="strict" cfg:cache='enabled'>
+    <cfg:option name="preserve-space" value="true"/>
+    <cfg:option name='entity-policy' value="declared-only" />
+    <cfg:paths>
+      <cfg:path platform="unix">/var/lib/mark/catalog.xml</cfg:path>
+      <cfg:path platform='windows'>C:\fixtures\catalog.xml</cfg:path>
+    </cfg:paths>
+    <cfg:empty></cfg:empty>
+  </configuration>
+
+  <!-- Attribute values deliberately mix quote styles and entity forms. -->
+  <section id="featured" rank='1' label="Books &amp; Essays">
+    <book
+        xml:id="book.alpha"
+        status='available'
+        edition="third"
+        xlink:type="simple"
+        xlink:href='https://example.test/books/alpha?view=full&amp;lang=en'>
+      <dc:title>The &quot;Practical&quot; XML Handbook</dc:title>
+      <authors>
+        <author id="a1" role='primary'>
+          <name family="Ng" given='Mei'>Mei Ng</name>
+          <contact preferred="email">
+            <email>mei.ng@example.test</email>
+          </contact>
+        </author>
+        <author id='a2' role="reviewer">
+          <name family='García' given="Álvaro">Álvaro García</name>
+          <contact preferred='none'/>
+        </author>
+      </authors>
+      <identifiers>
+        <isbn scheme="ISBN-13">978-1-4028-9462-6</isbn>
+        <urn>urn:isbn:9781402894626</urn>
+      </identifiers>
+      <published date="2024-02-29" timezone='UTC'/>
+      <price currency="GBP" tax-included='true'>24.50</price>
+      <stock warehouse="north">&#49;&#50;</stock>
+      <keywords>
+        <keyword>XML</keyword>
+        <keyword>namespaces</keyword>
+        <keyword>entities&nbsp;and references</keyword>
+      </keywords>
+      <abstract>
+        Text may use &lt;escaped-markup&gt;, &apos;apostrophes&apos;,
+        &quot;quotes&quot;, and a hexadecimal lambda: &#x03BB;.
+      </abstract>
+    </book>
+
+    <book xml:id="book.beta" status="preorder" edition='first'>
+      <dc:title>Unicode from A to 🌌</dc:title>
+      <authors>
+        <author id="a3" role="primary">
+          <name family="山田" given="花子">山田 花子</name>
+        </author>
+      </authors>
+      <scripts count="6">
+        <sample code="Latn">naïve façade</sample>
+        <sample code="Grek">Καλημέρα κόσμε</sample>
+        <sample code="Cyrl">Привет, мир</sample>
+        <sample code="Arab" direction="rtl">مرحبا بالعالم</sample>
+        <sample code="Hani">漢字と仮名</sample>
+        <sample code="Zsye">🚀 🧪 🌍</sample>
+      </scripts>
+      <availability>
+        <region code="EU" enabled="true"/>
+        <region code="APAC" enabled='true'/>
+        <region code="AQ" enabled="false"></region>
+      </availability>
+    </book>
+  </section>
+
+  <section id='articles' rank="2" label='Research &amp; Notes'>
+    <!-- The comment spans lines without using the forbidden double-hyphen. -->
+    <article xml:id="article.entities" type='reference'>
+      <dc:title>Entity Reference Matrix</dc:title>
+      <matrix>
+        <entry kind="named">&company;</entry>
+        <entry kind='decimal'>&#955;</entry>
+        <entry kind="hexadecimal">&#x1F680;</entry>
+        <entry kind='predefined'>&lt;&amp;&gt;</entry>
+      </matrix>
+      <notes xml:space="preserve">
+        First line keeps indentation.
+          Second line is intentionally deeper.
+        Third line contains a non-breaking space:&nbsp;here.
+      </notes>
+    </article>
+
+    <article xml:id='article.cdata' type="example">
+      <dc:title>CDATA and Template Samples</dc:title>
+      <source format="xml"><![CDATA[
+<message priority="high">
+  Literal markup is not parsed here: <b>bold</b> & untouched.
+  A JSP-style Java sample can be represented safely as <% int n = 2; %>.
+  A directive-shaped sample is <%@ page language="java" %>.
+  The CDATA terminator must be escaped in prose as ]]&gt;.
+</message>
+      ]]></source>
+      <explanation>
+        The surrounding source element resumes normal XML tokenization.
+      </explanation>
+    </article>
+
+    <article xml:id="article.multiline" type="state-test">
+      <dc:title>Multiline Attribute State</dc:title>
+      <example
+          first="a double-quoted value
+that continues on another line"
+          second='a single-quoted value
+that also continues'
+          third="entity inside: &orbit;">
+        Attribute whitespace is normalized by an XML processor.
+      </example>
+    </article>
+  </section>
+
+  <media>
+    <image
+        id="cover-main"
+        xlink:href="images/cover-main.svg"
+        width='640'
+        height="480"
+        alt='A satellite 🛰 orbiting Earth'/>
+    <image id='thumbnail' xlink:href="images/thumb.png" width="160" height='120'/>
+    <audio id="pronunciation" xlink:href='audio/title.ogg'></audio>
+  </media>
+
+  <appendices>
+    <appendix code="A" title='Empty element forms'>
+      <compact/>
+      <spaced />
+      <paired></paired>
+      <ns:placeholder xmlns:ns="urn:example:temporary" ns:value='ok'/>
+    </appendix>
+    <appendix code='B' title="Processing instructions">
+      <?render mode='preview' theme="night"?>
+      <result state="pending"/>
+    </appendix>
+    <appendix code="C" title="Mixed content">
+      Before <emphasis level='strong'>important</emphasis> after,
+      with &quot;quoted&quot; words and Unicode Ω plus 🧭.
+    </appendix>
+  </appendices>
+
+  <!-- A final balanced branch checks ordinary start and end tags. -->
+  <footer>
+    <generated-by name="mark-syntax" version="0.1.0"/>
+    <legal>&copyright; — all examples are fictional.</legal>
+    <checksum algorithm='sha256'>0123456789abcdef</checksum>
+  </footer>
+</catalog>

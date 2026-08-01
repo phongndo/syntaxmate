@@ -1,0 +1,20 @@
+2026-07-12T08:14:03.271Z INFO gateway started on "https://api.example.com/v1"
+2026-07-12 08:14:03 DEBUG request_id=550e8400-e29b-41d4-a716-446655440000 retries=0
+12/07/2026 08:14 WARNING: cache node cache-01.example.net is 91% full
+08:14:04.003 ERROR checkout failed for order 'café-🚀-42'
+java.net.SocketTimeoutException: read timed out
+    at com.example.checkout.Client.send(Client.java:184)
+    at com.example.checkout.Worker.run(Worker.java:57)
+[trace] span=7f3a91c parent=9a4c2d7e10 payload=null
+[debug] feature_new_router=true address=0x7ffeefbff5c0
+[information] user="李雷" locale='zh-CN'
+[warn] disk=aa:bb:cc:dd:ee:ff free=2048
+[fatal] correlation=123e4567-e89b-12d3-a456-426614174000
+1234 V verbose worker heartbeat
+1234 D scheduler queue depth 17
+1234 I background sync complete
+1234 W retry budget nearly exhausted
+1234 E upload to s3://archive.example.org/logs/ failed
+NOTICE release=4f3c2a1 commit=0123456789abcdef0123456789abcdef01234567
+T081406,25+02:00 HINT see http://status.example.com/incidents/42
+2026-07-12T08:14:07Z TRACE unicode probe: Ελληνικά العربية 🛰️

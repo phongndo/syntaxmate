@@ -1,0 +1,21 @@
+Bundled theme attributions
+
+Mark embeds TextMate/VS Code theme data from the projects below. The pinned
+source revisions and per-theme file hashes are recorded in assets/themes/SOURCE.toml
+in Mark's source tree:
+
+  https://github.com/phongndo/mark/tree/main/assets/themes
+
+- GitHub VS Code themes: https://github.com/primer/github-vscode-theme
+- Shiki themes: https://github.com/shikijs/shiki
+- Nordic: https://github.com/AlexvZyl/nordic.nvim
+- Dark Molokai: https://github.com/nonylene/vscode-dark-molokai-theme
+- Zenbones: https://github.com/zenbones-theme/zenbones.nvim
+- Token: https://github.com/ThorstenRhau/token
+- Gruvbox Material: https://github.com/sainnhe/gruvbox-material-vscode
+- MFD: https://github.com/kungfusheep/mfd.nvim
+
+The Nordic, Zenbones, and MFD files are modified adaptations that map upstream
+Neovim/Vim highlight groups and palettes to TextMate scopes and VS Code
+workbench color keys for use by Mark. Mark's adaptation is Copyright (c) 2026
+Mark contributors.
