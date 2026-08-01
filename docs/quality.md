@@ -38,7 +38,9 @@ stress-corpus counts.
 Machine-sensitive throughput uses stable generated corpora and exact input
 hashes. Deterministic engine counters remain the preferred merge signal for
 micro-optimizations; reference-machine measurements guard whole-catalog
-throughput, bundle size, and theme cache behavior.
+throughput, bundle size, and theme cache behavior. The validation policy keeps
+the reference-machine floor separate from conservative per-language and
+aggregate floors calibrated for variable GitHub-hosted runners.
 
 ## Release evidence
 

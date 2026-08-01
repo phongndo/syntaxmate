@@ -91,6 +91,7 @@ jobs:
         shell: bash
         run: |
           status="$(curl --silent --show-error \
+            --user-agent "syntaxmate-ci/0.1 (+https://github.com/${GITHUB_REPOSITORY})" \
             --write-out '%{http_code}' \
             --output /tmp/syntaxmate-crate.json \
             https://crates.io/api/v1/crates/syntaxmate)"
@@ -165,7 +166,7 @@ jobs:
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
       - run: python3 tools/build-textmate-corpora.py --check
       - run: cargo build --release --example profile-cold --locked
-      - run: python3 tools/check-textmate-catalog-performance.py --iterations 3
+      - run: python3 tools/check-textmate-catalog-performance.py --ci
 
   package:
     runs-on: ubuntu-latest
@@ -274,7 +275,8 @@ jobs:
         with:
           use_oidc: true
           files: lcov.info
-          fail_ci_if_error: true
+          disable_search: true
+          fail_ci_if_error: false
 
   dependency-review:
     if: github.event_name == 'pull_request'

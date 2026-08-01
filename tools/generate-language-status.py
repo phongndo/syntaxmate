@@ -314,6 +314,18 @@ def render(root=ROOT):
     performance_floor = finite_number(
         policy["minimumStressMbPerSecond"], "minimumStressMbPerSecond"
     )
+    ci_performance = policy["ciPerformance"]
+    ci_iterations = ci_performance["iterations"]
+    if isinstance(ci_iterations, bool) or not isinstance(ci_iterations, int) or ci_iterations < 1:
+        raise ValueError("ciPerformance.iterations must be a positive integer")
+    ci_language_floor = finite_number(
+        ci_performance["minimumLanguageMbPerSecond"],
+        "ciPerformance.minimumLanguageMbPerSecond",
+    )
+    ci_aggregate_floor = finite_number(
+        ci_performance["minimumAggregateMbPerSecond"],
+        "ciPerformance.minimumAggregateMbPerSecond",
+    )
     strict_contract_date = policy["strictContractIntroduced"]
     final_promotion_batch_date = policy["finalPromotionBatchDate"]
     promotions = promotion_dates(root, public)
@@ -403,10 +415,11 @@ def render(root=ROOT):
             "",
             f"The oracle manifest currently covers **{oracle_covered}** public IDs. "
             f"`catalog-repeated` contains the **{len(stress_languages)}** IDs with stress "
-            f"fixtures. Every sweep member is gated at **≥ {performance_floor:g} MB/s** "
-            f"by a three-iteration CI and reference-machine run of "
-            f"`check-textmate-catalog-performance.py`. "
-            f"The persisted sweep measures **{aggregate_rate:.2f} MB/s aggregate**. "
+            f"fixtures. Every persisted reference sweep member is gated at "
+            f"**≥ {performance_floor:g} MB/s**. Shared-runner CI uses {ci_iterations} "
+            f"iterations with floors of **≥ {ci_language_floor:g} MB/s per language** "
+            f"and **≥ {ci_aggregate_floor:g} MB/s aggregate**. The persisted sweep "
+            f"measures **{aggregate_rate:.2f} MB/s aggregate**. "
             f"All {len(promotions)} promotion dates are the actual final-batch date, "
             f"{final_promotion_batch_date}; they are explicitly recorded per language in "
             f"`{PROMOTIONS}`, not inferred during generation. The strict contract was "

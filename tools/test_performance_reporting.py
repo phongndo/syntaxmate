@@ -104,6 +104,30 @@ class CatalogPerformanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "must be a number"):
                 PERFORMANCE.load_policy_floor(path)
 
+    def test_ci_policy_has_independent_shared_runner_floors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "policy.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "ciPerformance": {
+                            "iterations": 3,
+                            "minimumLanguageMbPerSecond": 1.0,
+                            "minimumAggregateMbPerSecond": 6.0,
+                        }
+                    }
+                )
+            )
+            self.assertEqual(PERFORMANCE.load_ci_policy(path), (3, 1.0, 6.0))
+
+            path.write_text(
+                '{"ciPerformance":{"iterations":0,'
+                '"minimumLanguageMbPerSecond":1,'
+                '"minimumAggregateMbPerSecond":6}}\n'
+            )
+            with self.assertRaisesRegex(ValueError, "must be a positive integer"):
+                PERFORMANCE.load_ci_policy(path)
+
     def test_aggregate_is_total_bytes_over_inferred_total_time(self):
         results = [
             {"bytes": 1_000_000, "mbPerSecond": 2.0},
