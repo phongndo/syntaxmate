@@ -8,7 +8,7 @@ For this ledger, *validated* means `cases.toml` contains both `basic` and `stres
 
 The independent `benchmarks/textmate/validation-policy.json` hard-locks expected public, validated, oracle, and stress-corpus counts at 264 each. Generation fails before writing this ledger if any count falls below that completed state.
 
-The oracle manifest currently covers **264** public IDs. `catalog-repeated` contains the **264** IDs with stress fixtures. Every sweep member is gated at **≥ 2 MB/s** by a three-iteration CI and reference-machine run of `check-textmate-catalog-performance.py`. The persisted sweep measures **15.76 MB/s aggregate**. All 264 promotion dates are the actual final-batch date, 2026-07-14; they are explicitly recorded per language in `benchmarks/textmate/language-promotions.json`, not inferred during generation. The strict contract was introduced on 2026-07-12.
+The oracle manifest currently covers **264** public IDs. `catalog-repeated` contains the **264** IDs with stress fixtures. Every sweep member is gated at **≥ 2 MB/s** by a ten-iteration CI run of `check-textmate-catalog-performance.py`; the persisted reference-machine sweep uses three iterations. The persisted sweep measures **15.76 MB/s aggregate**. All 264 promotion dates are the actual final-batch date, 2026-07-14; they are explicitly recorded per language in `benchmarks/textmate/language-promotions.json`, not inferred during generation. The strict contract was introduced on 2026-07-12.
 
 Regenerate with `python3 tools/generate-language-status.py`; verify with `python3 tools/generate-language-status.py --check`. Performance numbers only change when `python3 tools/check-textmate-catalog-performance.py --iterations 3 --write-report` is explicitly run.
 

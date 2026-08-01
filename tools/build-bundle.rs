@@ -764,7 +764,8 @@ fn hash_inputs(path: &Path) -> u64 {
     collect_files(path, &mut inputs);
     let mut bytes = Vec::new();
     for file in inputs {
-        bytes.extend_from_slice(file.to_string_lossy().as_bytes());
+        let relative = file.strip_prefix(path).unwrap_or(file.as_path());
+        bytes.extend_from_slice(normalize_path(relative).as_bytes());
         if let Ok(contents) = fs::read(&file) {
             bytes.extend_from_slice(&contents);
         }
