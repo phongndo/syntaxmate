@@ -5,7 +5,7 @@ use std::{
     collections::HashSet,
     hash::{BuildHasherDefault, Hash, Hasher},
     ops::{Deref, Range},
-    sync::{Arc, OnceLock, Weak},
+    sync::{Arc, Mutex, OnceLock, Weak},
     time::Instant,
 };
 
@@ -816,13 +816,17 @@ impl<'a> Iterator for FrameStackIter<'a> {
 #[cfg(test)]
 impl ExactSizeIterator for FrameStackIter<'_> {}
 
+type RepositoryBindings = BTreeMap<String, String>;
+type RuleRepositoryContexts = FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>;
+
 #[derive(Debug, Clone, Default)]
 pub struct GrammarSet {
     // Arc-shared so cloning a set (one clone per tokenizer instance) shares
-    // the immutable compiled grammars instead of deep-copying them, and so
-    // flattened rule contexts can be cached by grammar identity.
-    grammars: Vec<Arc<CompiledGrammar>>,
-    scope_to_id: HashMap<String, GrammarId>,
+    // immutable compiled grammars and live root-specific repository walks.
+    // Weak values let those walks be reclaimed with their tokenizers.
+    grammars: Arc<Vec<Arc<CompiledGrammar>>>,
+    scope_to_id: Arc<HashMap<String, GrammarId>>,
+    rule_repository_context_cache: Arc<Mutex<FastMap<GrammarId, Weak<RuleRepositoryContexts>>>>,
 }
 
 impl GrammarSet {
@@ -832,12 +836,16 @@ impl GrammarSet {
 
     pub fn add(&mut self, grammar: CompiledGrammar) -> GrammarId {
         let id = grammar.id;
-        self.scope_to_id.insert(grammar.scope_name.clone(), id);
+        Arc::make_mut(&mut self.scope_to_id).insert(grammar.scope_name.clone(), id);
+        // A mutated set must not share root compilations produced from an
+        // older grammar graph. Existing clones retain their valid cache.
+        self.rule_repository_context_cache = Arc::new(Mutex::new(hashing::fast_map()));
         let index = id.0 as usize;
-        if index == self.grammars.len() {
-            self.grammars.push(Arc::new(grammar));
-        } else if index < self.grammars.len() {
-            self.grammars[index] = Arc::new(grammar);
+        let grammars = Arc::make_mut(&mut self.grammars);
+        if index == grammars.len() {
+            grammars.push(Arc::new(grammar));
+        } else if index < grammars.len() {
+            grammars[index] = Arc::new(grammar);
         } else {
             panic!("grammar ids must be dense and insertion ordered");
         }
@@ -864,11 +872,41 @@ impl GrammarSet {
     }
 
     pub fn grammars(&self) -> &[Arc<CompiledGrammar>] {
-        &self.grammars
+        self.grammars.as_slice()
+    }
+
+    fn rule_repository_contexts(
+        &self,
+        root: GrammarId,
+        injections: &[CompiledInjectionSelector],
+    ) -> Arc<RuleRepositoryContexts> {
+        if let Some(contexts) = self
+            .rule_repository_context_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&root)
+            .and_then(Weak::upgrade)
+        {
+            return contexts;
+        }
+
+        // Do the recursive work outside the lock. Concurrent first users may
+        // compute the same immutable value, but only one is shared.
+        let compiled = Arc::new(compile_rule_repository_contexts(self, root, injections));
+        let mut cache = self
+            .rule_repository_context_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(contexts) = cache.get(&root).and_then(Weak::upgrade) {
+            return contexts;
+        }
+        cache.retain(|_, contexts| contexts.strong_count() != 0);
+        cache.insert(root, Arc::downgrade(&compiled));
+        compiled
     }
 
     pub fn validate_include_graph(&self) -> Result<(), GrammarValidationError> {
-        for grammar in &self.grammars {
+        for grammar in self.grammars.iter() {
             grammar.validate_local_refs()?;
             self.validate_refs_for_grammar(grammar, &grammar.top_level, "patterns")?;
             for (name, rule_ref) in &grammar.repository {
@@ -1035,7 +1073,7 @@ pub struct TextMateTokenizer {
     injection_outcome_cache: FastMap<ScopeStackId, (InjectionOutcomeId, Arc<InjectionOutcome>)>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
     include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
-    rule_repository_contexts: Arc<HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>>,
+    rule_repository_contexts: Arc<RuleRepositoryContexts>,
     /// Owns exact frame identities and stack edges for this tokenizer.
     frame_stack_interner: FrameStackInternTable,
     /// Repeat pushes of a known (parent stack, frame) transition skip interner lookup.
@@ -1070,11 +1108,8 @@ impl TextMateTokenizer {
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
         let injection_selectors = Arc::new(compile_injection_selectors(&grammars, root));
-        let rule_repository_contexts = Arc::new(compile_rule_repository_contexts(
-            &grammars,
-            root,
-            &injection_selectors,
-        ));
+        let rule_repository_contexts =
+            grammars.rule_repository_contexts(root, &injection_selectors);
         Self {
             grammars,
             root,
@@ -1527,11 +1562,9 @@ impl TextMateTokenizer {
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
         let injection_selectors = Arc::new(compile_injection_selectors(&self.grammars, root));
-        let rule_repository_contexts = Arc::new(compile_rule_repository_contexts(
-            &self.grammars,
-            root,
-            &injection_selectors,
-        ));
+        let rule_repository_contexts = self
+            .grammars
+            .rule_repository_contexts(root, &injection_selectors);
         self.injection_selectors = injection_selectors;
         self.include_availability_cache.borrow_mut().clear();
         self.rule_repository_contexts = rule_repository_contexts;
@@ -4332,7 +4365,10 @@ struct CandidateSearchResult {
     fallback_steps: u64,
 }
 
-type RepositoryBindings = BTreeMap<String, String>;
+fn empty_repository_context() -> &'static Arc<RepositoryBindings> {
+    static EMPTY: OnceLock<Arc<RepositoryBindings>> = OnceLock::new();
+    EMPTY.get_or_init(|| Arc::new(RepositoryBindings::new()))
+}
 
 fn resolve_repository_in_context<'a>(
     grammar: &'a CompiledGrammar,
@@ -4383,7 +4419,7 @@ fn compile_rule_repository_contexts(
     grammars: &GrammarSet,
     root: GrammarId,
     injections: &[CompiledInjectionSelector],
-) -> HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>> {
+) -> RuleRepositoryContexts {
     // Keep the recursive walk's grammar identity and three independent cycle/
     // memo tables explicit; bundling them would obscure which state is shared
     // across recursive edges.
@@ -4394,9 +4430,9 @@ fn compile_rule_repository_contexts(
         base_grammar_id: GrammarId,
         captures: &CaptureSpec,
         context: &Arc<RepositoryBindings>,
-        compiled: &mut HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
-        compiled_top_levels: &mut HashSet<GrammarId>,
-        visiting_repositories: &mut HashSet<(GrammarId, String, RepositoryBindings)>,
+        compiled: &mut FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
+        compiled_top_levels: &mut hashing::FastSet<GrammarId>,
+        visiting_repositories: &mut HashSet<(GrammarId, String, usize)>,
     ) {
         for entry in captures.entries.values() {
             visit_refs(
@@ -4417,9 +4453,9 @@ fn compile_rule_repository_contexts(
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         context: &Arc<RepositoryBindings>,
-        compiled: &mut HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
-        compiled_top_levels: &mut HashSet<GrammarId>,
-        visiting_repositories: &mut HashSet<(GrammarId, String, RepositoryBindings)>,
+        compiled: &mut FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
+        compiled_top_levels: &mut hashing::FastSet<GrammarId>,
+        visiting_repositories: &mut HashSet<(GrammarId, String, usize)>,
     ) {
         if !compiled_top_levels.insert(grammar_id) {
             return;
@@ -4445,14 +4481,14 @@ fn compile_rule_repository_contexts(
         base_grammar_id: GrammarId,
         refs: &[RuleRef],
         context: &Arc<RepositoryBindings>,
-        compiled: &mut HashMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
-        compiled_top_levels: &mut HashSet<GrammarId>,
-        visiting_repositories: &mut HashSet<(GrammarId, String, RepositoryBindings)>,
+        compiled: &mut FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
+        compiled_top_levels: &mut hashing::FastSet<GrammarId>,
+        visiting_repositories: &mut HashSet<(GrammarId, String, usize)>,
     ) {
         let Some(grammar) = grammars.grammar(grammar_id) else {
             return;
         };
-        let empty_context = Arc::new(RepositoryBindings::new());
+        let empty_context = empty_repository_context();
         for rule_ref in refs {
             match rule_ref {
                 RuleRef::Rule(rule_id) => {
@@ -4577,7 +4613,10 @@ fn compile_rule_repository_contexts(
                 }
                 RuleRef::Repository(name) => {
                     let bound_name = context.get(name).cloned().unwrap_or_else(|| name.clone());
-                    let repository_key = (grammar_id, bound_name, context.as_ref().clone());
+                    // Repository-only recursion preserves this immutable Arc.
+                    // Its pointer is therefore a complete path identity and
+                    // avoids cloning and hashing every binding at each edge.
+                    let repository_key = (grammar_id, bound_name, Arc::as_ptr(context) as usize);
                     if !visiting_repositories.insert(repository_key.clone()) {
                         continue;
                     }
@@ -4609,7 +4648,7 @@ fn compile_rule_repository_contexts(
                         grammars,
                         base_grammar_id,
                         base_grammar_id,
-                        &empty_context,
+                        empty_context,
                         compiled,
                         compiled_top_levels,
                         visiting_repositories,
@@ -4632,7 +4671,7 @@ fn compile_rule_repository_contexts(
                                 external_id,
                                 base_grammar_id,
                                 std::slice::from_ref(target),
-                                &empty_context,
+                                empty_context,
                                 compiled,
                                 compiled_top_levels,
                                 visiting_repositories,
@@ -4643,7 +4682,7 @@ fn compile_rule_repository_contexts(
                             grammars,
                             external_id,
                             base_grammar_id,
-                            &empty_context,
+                            empty_context,
                             compiled,
                             compiled_top_levels,
                             visiting_repositories,
@@ -4654,15 +4693,15 @@ fn compile_rule_repository_contexts(
         }
     }
 
-    let mut compiled = HashMap::new();
-    let mut compiled_top_levels = HashSet::new();
+    let mut compiled = hashing::fast_map();
+    let mut compiled_top_levels = hashing::fast_set();
     let mut visiting_repositories = HashSet::new();
-    let empty_context = Arc::new(RepositoryBindings::new());
+    let empty_context = empty_repository_context();
     visit_top_level(
         grammars,
         root,
         root,
-        &empty_context,
+        empty_context,
         &mut compiled,
         &mut compiled_top_levels,
         &mut visiting_repositories,
@@ -4676,7 +4715,7 @@ fn compile_rule_repository_contexts(
             injection.grammar_id,
             root,
             &injection.patterns,
-            &empty_context,
+            empty_context,
             &mut compiled,
             &mut compiled_top_levels,
             &mut visiting_repositories,
@@ -6025,6 +6064,38 @@ mod tests {
             "{second_line:#?}"
         );
         assert!(!line_has_scope(&second_line, "plain.second-host"));
+    }
+
+    #[test]
+    fn grammar_set_clones_share_repository_contexts_until_mutated() {
+        let mut set = GrammarSet::new();
+        let root = set
+            .load_and_add(
+                r##"{
+                    "scopeName": "source.context-cache",
+                    "patterns": [{"include":"#entry"}],
+                    "repository": {
+                        "entry": {"match":"x", "name":"keyword.context-cache"}
+                    }
+                }"##,
+            )
+            .unwrap();
+        let selectors = compile_injection_selectors(&set, root);
+        let first = set.rule_repository_contexts(root, &selectors);
+        let cloned = set.clone();
+        let second = cloned.rule_repository_contexts(root, &selectors);
+        assert!(Arc::ptr_eq(&first, &second));
+
+        let cached = Arc::downgrade(&first);
+        set.load_and_add(r#"{"scopeName":"source.later","patterns":[]}"#)
+            .unwrap();
+        let selectors = compile_injection_selectors(&set, root);
+        let after_mutation = set.rule_repository_contexts(root, &selectors);
+        assert!(!Arc::ptr_eq(&first, &after_mutation));
+
+        drop(first);
+        drop(second);
+        assert!(cached.upgrade().is_none());
     }
 
     #[test]

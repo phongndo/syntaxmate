@@ -121,7 +121,13 @@ pub struct CapturedText<'a> {
 
 impl CompiledGrammar {
     pub fn rule(&self, id: RuleId) -> Option<&Rule> {
-        self.rules.iter().find(|rule| rule.id == id)
+        // Grammar compilation stores rules densely in id order, making this
+        // hot lookup O(1). Keep the linear fallback for callers that construct
+        // `CompiledGrammar` values directly in a different order.
+        self.rules
+            .get(id.0 as usize)
+            .filter(|rule| rule.id == id)
+            .or_else(|| self.rules.iter().find(|rule| rule.id == id))
     }
 
     pub fn pattern(&self, id: PatternId) -> Option<&str> {
@@ -567,6 +573,11 @@ pub fn load_dev_grammar_from_path(
         }
     }
 
+    // Rules are assigned dense ids before their children are compiled, but
+    // recursive compilation finishes children first. Restore id order once so
+    // every tokenizer-side rule lookup can index the vector directly.
+    compiler.rules.sort_unstable_by_key(|rule| rule.id);
+
     Ok(CompiledGrammar {
         id,
         scope_name: raw.scope_name.clone(),
@@ -995,6 +1006,13 @@ mod tests {
             }"##,
         )
         .unwrap();
+        assert!(
+            grammar
+                .rules
+                .iter()
+                .enumerate()
+                .all(|(index, rule)| rule.id.0 as usize == index)
+        );
         assert!(matches!(
             &grammar.rule(RuleId(0)).unwrap().body,
             RuleBody::BeginWhile { while_captures, patterns, .. }
