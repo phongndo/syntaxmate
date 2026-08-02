@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "@shikijs/langs": "3.23.0",
-    "@shikijs/themes": "3.23.0",
     "github-vscode-themes": "6.3.4",
     "vscode-oniguruma": "1.7.0",
     "vscode-textmate": "9.2.0"

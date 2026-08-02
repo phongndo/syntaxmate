@@ -16,69 +16,10 @@ use crate::{HighlightScopeTable, ScopeStackRef, ThemeRule};
 #[cfg(feature = "bundled-themes")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinTextMateTheme {
-    CatppuccinLatte,
-    CatppuccinFrappe,
-    CatppuccinMacchiato,
-    CatppuccinMocha,
-    GruvboxDark,
-    GruvboxLight,
-    GithubDark,
-    GithubDarkHighContrast,
-    GithubLight,
-    GithubLightHighContrast,
-    Tokyonight,
-    Nordic,
-    Nord,
-    AyuDark,
-    AyuLight,
-    AyuMirage,
-    Molokai,
-    ZenbonesDark,
-    ZenbonesLight,
-    Duckbones,
-    ForestbonesDark,
-    ForestbonesLight,
-    Kanagawabones,
-    NeobonesDark,
-    NeobonesLight,
-    Nordbones,
-    RosebonesDark,
-    RosebonesLight,
-    SeoulbonesDark,
-    SeoulbonesLight,
-    TokyobonesDark,
-    TokyobonesLight,
-    Vimbones,
-    Zenburned,
-    ZenwrittenDark,
-    ZenwrittenLight,
-    KanagawaWave,
-    KanagawaDragon,
-    KanagawaLotus,
-    EverforestDark,
-    EverforestLight,
-    TokenDark,
-    TokenLight,
-    GruvboxMaterialDark,
-    GruvboxMaterialLight,
-    Mfd,
-    MfdDark,
-    MfdStealth,
-    MfdAmber,
-    MfdMono,
-    MfdScarlet,
-    MfdPaper,
-    MfdHud,
-    MfdNvg,
-    MfdBlackout,
-    MfdFlir,
-    MfdFlirBh,
-    MfdFlirRh,
-    MfdFlirFusion,
-    MfdGblLight,
-    MfdGblDark,
-    MfdLumon,
-    MfdNerv,
+    Dark,
+    DarkHighContrast,
+    Light,
+    LightHighContrast,
 }
 
 #[cfg(feature = "bundled-themes")]
@@ -88,90 +29,14 @@ impl BuiltinTextMateTheme {
             .iter()
             .copied()
             .find(|theme| theme.name() == name)
-            .or(match name {
-                "tokyo-night" => Some(Self::Tokyonight),
-                "ayu" => Some(Self::AyuDark),
-                "monokai" => Some(Self::Molokai),
-                "zenbones" => Some(Self::ZenbonesDark),
-                "forestbones" => Some(Self::ForestbonesDark),
-                "neobones" => Some(Self::NeobonesDark),
-                "rosebones" => Some(Self::RosebonesDark),
-                "seoulbones" => Some(Self::SeoulbonesDark),
-                "tokyobones" => Some(Self::TokyobonesDark),
-                "zenwritten" => Some(Self::ZenwrittenDark),
-                "kanagawa" => Some(Self::KanagawaWave),
-                "everforest" => Some(Self::EverforestDark),
-                "token" => Some(Self::TokenDark),
-                "gruvbox-material" => Some(Self::GruvboxMaterialDark),
-                _ => None,
-            })
     }
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::CatppuccinLatte => "catppuccin-latte",
-            Self::CatppuccinFrappe => "catppuccin-frappe",
-            Self::CatppuccinMacchiato => "catppuccin-macchiato",
-            Self::CatppuccinMocha => "catppuccin-mocha",
-            Self::GruvboxDark => "gruvbox-dark",
-            Self::GruvboxLight => "gruvbox-light",
-            Self::GithubDark => "github-dark",
-            Self::GithubDarkHighContrast => "github-dark-high-contrast",
-            Self::GithubLight => "github-light",
-            Self::GithubLightHighContrast => "github-light-high-contrast",
-            Self::Tokyonight => "tokyonight",
-            Self::Nordic => "nordic",
-            Self::Nord => "nord",
-            Self::AyuDark => "ayu-dark",
-            Self::AyuLight => "ayu-light",
-            Self::AyuMirage => "ayu-mirage",
-            Self::Molokai => "molokai",
-            Self::ZenbonesDark => "zenbones-dark",
-            Self::ZenbonesLight => "zenbones-light",
-            Self::Duckbones => "duckbones",
-            Self::ForestbonesDark => "forestbones-dark",
-            Self::ForestbonesLight => "forestbones-light",
-            Self::Kanagawabones => "kanagawabones",
-            Self::NeobonesDark => "neobones-dark",
-            Self::NeobonesLight => "neobones-light",
-            Self::Nordbones => "nordbones",
-            Self::RosebonesDark => "rosebones-dark",
-            Self::RosebonesLight => "rosebones-light",
-            Self::SeoulbonesDark => "seoulbones-dark",
-            Self::SeoulbonesLight => "seoulbones-light",
-            Self::TokyobonesDark => "tokyobones-dark",
-            Self::TokyobonesLight => "tokyobones-light",
-            Self::Vimbones => "vimbones",
-            Self::Zenburned => "zenburned",
-            Self::ZenwrittenDark => "zenwritten-dark",
-            Self::ZenwrittenLight => "zenwritten-light",
-            Self::KanagawaWave => "kanagawa-wave",
-            Self::KanagawaDragon => "kanagawa-dragon",
-            Self::KanagawaLotus => "kanagawa-lotus",
-            Self::EverforestDark => "everforest-dark",
-            Self::EverforestLight => "everforest-light",
-            Self::TokenDark => "token-dark",
-            Self::TokenLight => "token-light",
-            Self::GruvboxMaterialDark => "gruvbox-material-dark",
-            Self::GruvboxMaterialLight => "gruvbox-material-light",
-            Self::Mfd => "mfd",
-            Self::MfdDark => "mfd-dark",
-            Self::MfdStealth => "mfd-stealth",
-            Self::MfdAmber => "mfd-amber",
-            Self::MfdMono => "mfd-mono",
-            Self::MfdScarlet => "mfd-scarlet",
-            Self::MfdPaper => "mfd-paper",
-            Self::MfdHud => "mfd-hud",
-            Self::MfdNvg => "mfd-nvg",
-            Self::MfdBlackout => "mfd-blackout",
-            Self::MfdFlir => "mfd-flir",
-            Self::MfdFlirBh => "mfd-flir-bh",
-            Self::MfdFlirRh => "mfd-flir-rh",
-            Self::MfdFlirFusion => "mfd-flir-fusion",
-            Self::MfdGblLight => "mfd-gbl-light",
-            Self::MfdGblDark => "mfd-gbl-dark",
-            Self::MfdLumon => "mfd-lumon",
-            Self::MfdNerv => "mfd-nerv",
+            Self::Dark => "github-dark",
+            Self::DarkHighContrast => "github-dark-high-contrast",
+            Self::Light => "github-light",
+            Self::LightHighContrast => "github-light-high-contrast",
         }
     }
 
@@ -181,69 +46,10 @@ impl BuiltinTextMateTheme {
 
     pub const fn all() -> &'static [Self] {
         &[
-            Self::CatppuccinLatte,
-            Self::CatppuccinFrappe,
-            Self::CatppuccinMacchiato,
-            Self::CatppuccinMocha,
-            Self::GruvboxDark,
-            Self::GruvboxLight,
-            Self::GithubDark,
-            Self::GithubDarkHighContrast,
-            Self::GithubLight,
-            Self::GithubLightHighContrast,
-            Self::Tokyonight,
-            Self::Nordic,
-            Self::Nord,
-            Self::AyuDark,
-            Self::AyuLight,
-            Self::AyuMirage,
-            Self::Molokai,
-            Self::ZenbonesDark,
-            Self::ZenbonesLight,
-            Self::Duckbones,
-            Self::ForestbonesDark,
-            Self::ForestbonesLight,
-            Self::Kanagawabones,
-            Self::NeobonesDark,
-            Self::NeobonesLight,
-            Self::Nordbones,
-            Self::RosebonesDark,
-            Self::RosebonesLight,
-            Self::SeoulbonesDark,
-            Self::SeoulbonesLight,
-            Self::TokyobonesDark,
-            Self::TokyobonesLight,
-            Self::Vimbones,
-            Self::Zenburned,
-            Self::ZenwrittenDark,
-            Self::ZenwrittenLight,
-            Self::KanagawaWave,
-            Self::KanagawaDragon,
-            Self::KanagawaLotus,
-            Self::EverforestDark,
-            Self::EverforestLight,
-            Self::TokenDark,
-            Self::TokenLight,
-            Self::GruvboxMaterialDark,
-            Self::GruvboxMaterialLight,
-            Self::Mfd,
-            Self::MfdDark,
-            Self::MfdStealth,
-            Self::MfdAmber,
-            Self::MfdMono,
-            Self::MfdScarlet,
-            Self::MfdPaper,
-            Self::MfdHud,
-            Self::MfdNvg,
-            Self::MfdBlackout,
-            Self::MfdFlir,
-            Self::MfdFlirBh,
-            Self::MfdFlirRh,
-            Self::MfdFlirFusion,
-            Self::MfdGblLight,
-            Self::MfdGblDark,
-            Self::MfdLumon,
-            Self::MfdNerv,
+            Self::Dark,
+            Self::DarkHighContrast,
+            Self::Light,
+            Self::LightHighContrast,
         ]
     }
 }
@@ -960,18 +766,6 @@ macro_rules! vendored_theme {
 }
 
 #[cfg(feature = "bundled-themes")]
-vendored_theme!(catppuccin_latte, "catppuccin-latte.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(catppuccin_frappe, "catppuccin-frappe.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(catppuccin_macchiato, "catppuccin-macchiato.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(catppuccin_mocha, "catppuccin-mocha.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(gruvbox_dark, "gruvbox-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(gruvbox_light, "gruvbox-light.json");
-#[cfg(feature = "bundled-themes")]
 vendored_theme!(github_dark, "github-dark.json");
 #[cfg(feature = "bundled-themes")]
 vendored_theme!(github_dark_high_contrast, "github-dark-high-contrast.json");
@@ -982,179 +776,14 @@ vendored_theme!(
     github_light_high_contrast,
     "github-light-high-contrast.json"
 );
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(tokyonight, "tokyonight.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(nordic, "nordic.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(nord, "nord.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(ayu_dark, "ayu-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(ayu_light, "ayu-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(ayu_mirage, "ayu-mirage.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(molokai, "molokai.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(zenbones_dark, "zenbones-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(zenbones_light, "zenbones-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(duckbones, "duckbones.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(forestbones_dark, "forestbones-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(forestbones_light, "forestbones-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(kanagawabones, "kanagawabones.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(neobones_dark, "neobones-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(neobones_light, "neobones-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(nordbones, "nordbones.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(rosebones_dark, "rosebones-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(rosebones_light, "rosebones-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(seoulbones_dark, "seoulbones-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(seoulbones_light, "seoulbones-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(tokyobones_dark, "tokyobones-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(tokyobones_light, "tokyobones-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(vimbones, "vimbones.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(zenburned, "zenburned.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(zenwritten_dark, "zenwritten-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(zenwritten_light, "zenwritten-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(kanagawa_wave, "kanagawa-wave.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(kanagawa_dragon, "kanagawa-dragon.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(kanagawa_lotus, "kanagawa-lotus.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(everforest_dark, "everforest-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(everforest_light, "everforest-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(token_dark, "token-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(token_light, "token-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(gruvbox_material_dark, "gruvbox-material-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(gruvbox_material_light, "gruvbox-material-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd, "mfd.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_dark, "mfd-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_stealth, "mfd-stealth.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_amber, "mfd-amber.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_mono, "mfd-mono.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_scarlet, "mfd-scarlet.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_paper, "mfd-paper.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_hud, "mfd-hud.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_nvg, "mfd-nvg.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_blackout, "mfd-blackout.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_flir, "mfd-flir.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_flir_bh, "mfd-flir-bh.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_flir_rh, "mfd-flir-rh.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_flir_fusion, "mfd-flir-fusion.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_gbl_light, "mfd-gbl-light.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_gbl_dark, "mfd-gbl-dark.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_lumon, "mfd-lumon.json");
-#[cfg(feature = "bundled-themes")]
-vendored_theme!(mfd_nerv, "mfd-nerv.json");
 
 #[cfg(feature = "bundled-themes")]
 fn builtin_theme(theme: BuiltinTextMateTheme) -> &'static TextMateTheme {
     match theme {
-        BuiltinTextMateTheme::CatppuccinLatte => catppuccin_latte(),
-        BuiltinTextMateTheme::CatppuccinFrappe => catppuccin_frappe(),
-        BuiltinTextMateTheme::CatppuccinMacchiato => catppuccin_macchiato(),
-        BuiltinTextMateTheme::CatppuccinMocha => catppuccin_mocha(),
-        BuiltinTextMateTheme::GruvboxDark => gruvbox_dark(),
-        BuiltinTextMateTheme::GruvboxLight => gruvbox_light(),
-        BuiltinTextMateTheme::GithubDark => github_dark(),
-        BuiltinTextMateTheme::GithubDarkHighContrast => github_dark_high_contrast(),
-        BuiltinTextMateTheme::GithubLight => github_light(),
-        BuiltinTextMateTheme::GithubLightHighContrast => github_light_high_contrast(),
-        BuiltinTextMateTheme::Tokyonight => tokyonight(),
-        BuiltinTextMateTheme::Nordic => nordic(),
-        BuiltinTextMateTheme::Nord => nord(),
-        BuiltinTextMateTheme::AyuDark => ayu_dark(),
-        BuiltinTextMateTheme::AyuLight => ayu_light(),
-        BuiltinTextMateTheme::AyuMirage => ayu_mirage(),
-        BuiltinTextMateTheme::Molokai => molokai(),
-        BuiltinTextMateTheme::ZenbonesDark => zenbones_dark(),
-        BuiltinTextMateTheme::ZenbonesLight => zenbones_light(),
-        BuiltinTextMateTheme::Duckbones => duckbones(),
-        BuiltinTextMateTheme::ForestbonesDark => forestbones_dark(),
-        BuiltinTextMateTheme::ForestbonesLight => forestbones_light(),
-        BuiltinTextMateTheme::Kanagawabones => kanagawabones(),
-        BuiltinTextMateTheme::NeobonesDark => neobones_dark(),
-        BuiltinTextMateTheme::NeobonesLight => neobones_light(),
-        BuiltinTextMateTheme::Nordbones => nordbones(),
-        BuiltinTextMateTheme::RosebonesDark => rosebones_dark(),
-        BuiltinTextMateTheme::RosebonesLight => rosebones_light(),
-        BuiltinTextMateTheme::SeoulbonesDark => seoulbones_dark(),
-        BuiltinTextMateTheme::SeoulbonesLight => seoulbones_light(),
-        BuiltinTextMateTheme::TokyobonesDark => tokyobones_dark(),
-        BuiltinTextMateTheme::TokyobonesLight => tokyobones_light(),
-        BuiltinTextMateTheme::Vimbones => vimbones(),
-        BuiltinTextMateTheme::Zenburned => zenburned(),
-        BuiltinTextMateTheme::ZenwrittenDark => zenwritten_dark(),
-        BuiltinTextMateTheme::ZenwrittenLight => zenwritten_light(),
-        BuiltinTextMateTheme::KanagawaWave => kanagawa_wave(),
-        BuiltinTextMateTheme::KanagawaDragon => kanagawa_dragon(),
-        BuiltinTextMateTheme::KanagawaLotus => kanagawa_lotus(),
-        BuiltinTextMateTheme::EverforestDark => everforest_dark(),
-        BuiltinTextMateTheme::EverforestLight => everforest_light(),
-        BuiltinTextMateTheme::TokenDark => token_dark(),
-        BuiltinTextMateTheme::TokenLight => token_light(),
-        BuiltinTextMateTheme::GruvboxMaterialDark => gruvbox_material_dark(),
-        BuiltinTextMateTheme::GruvboxMaterialLight => gruvbox_material_light(),
-        BuiltinTextMateTheme::Mfd => mfd(),
-        BuiltinTextMateTheme::MfdDark => mfd_dark(),
-        BuiltinTextMateTheme::MfdStealth => mfd_stealth(),
-        BuiltinTextMateTheme::MfdAmber => mfd_amber(),
-        BuiltinTextMateTheme::MfdMono => mfd_mono(),
-        BuiltinTextMateTheme::MfdScarlet => mfd_scarlet(),
-        BuiltinTextMateTheme::MfdPaper => mfd_paper(),
-        BuiltinTextMateTheme::MfdHud => mfd_hud(),
-        BuiltinTextMateTheme::MfdNvg => mfd_nvg(),
-        BuiltinTextMateTheme::MfdBlackout => mfd_blackout(),
-        BuiltinTextMateTheme::MfdFlir => mfd_flir(),
-        BuiltinTextMateTheme::MfdFlirBh => mfd_flir_bh(),
-        BuiltinTextMateTheme::MfdFlirRh => mfd_flir_rh(),
-        BuiltinTextMateTheme::MfdFlirFusion => mfd_flir_fusion(),
-        BuiltinTextMateTheme::MfdGblLight => mfd_gbl_light(),
-        BuiltinTextMateTheme::MfdGblDark => mfd_gbl_dark(),
-        BuiltinTextMateTheme::MfdLumon => mfd_lumon(),
-        BuiltinTextMateTheme::MfdNerv => mfd_nerv(),
+        BuiltinTextMateTheme::Dark => github_dark(),
+        BuiltinTextMateTheme::DarkHighContrast => github_dark_high_contrast(),
+        BuiltinTextMateTheme::Light => github_light(),
+        BuiltinTextMateTheme::LightHighContrast => github_light_high_contrast(),
     }
 }
 
@@ -1225,42 +854,6 @@ mod tests {
                 blue: 0x30,
             })
         );
-    }
-
-    #[test]
-    fn ayu_raw_markup_backgrounds_remain_low_contrast() {
-        for (theme, expected) in [
-            (
-                BuiltinTextMateTheme::AyuDark,
-                RgbColor {
-                    red: 0x13,
-                    green: 0x17,
-                    blue: 0x1f,
-                },
-            ),
-            (
-                BuiltinTextMateTheme::AyuLight,
-                RgbColor {
-                    red: 0xf9,
-                    green: 0xf9,
-                    blue: 0xf9,
-                },
-            ),
-            (
-                BuiltinTextMateTheme::AyuMirage,
-                RgbColor {
-                    red: 0x27,
-                    green: 0x2c,
-                    blue: 0x39,
-                },
-            ),
-        ] {
-            let (table, stack) = HighlightScopeTable::from_scope_names(&["markup.raw"]);
-            assert_eq!(
-                theme.get().resolve(&table, stack).background,
-                Some(expected)
-            );
-        }
     }
 
     #[test]
@@ -1397,106 +990,6 @@ mod tests {
                 }
             }
         });
-    }
-
-    #[test]
-    fn adapted_themes_match_their_pinned_upstream_highlights() {
-        let resolve = |theme: BuiltinTextMateTheme, scope: &str| {
-            let (table, stack) = HighlightScopeTable::from_scope_names(&[scope]);
-            theme.get().resolve(&table, stack)
-        };
-
-        assert_eq!(
-            resolve(BuiltinTextMateTheme::Nordic, "keyword.control").foreground,
-            Some(RgbColor {
-                red: 0xd0,
-                green: 0x87,
-                blue: 0x70,
-            })
-        );
-        assert_eq!(
-            resolve(BuiltinTextMateTheme::Nordic, "constant.numeric").foreground,
-            Some(RgbColor {
-                red: 0xbe,
-                green: 0x9d,
-                blue: 0xb8,
-            })
-        );
-        let mfd_keyword = resolve(BuiltinTextMateTheme::MfdStealth, "keyword.control");
-        assert_eq!(
-            mfd_keyword.foreground,
-            Some(RgbColor {
-                red: 0x9a,
-                green: 0xbb,
-                blue: 0x9a,
-            })
-        );
-        assert!(mfd_keyword.modifiers.contains(SyntaxModifiers::BOLD));
-    }
-
-    #[test]
-    fn zenbones_matches_the_pinned_upstream_vim_highlights() {
-        let theme = BuiltinTextMateTheme::ZenbonesDark.get();
-        let resolve = |scope: &str| {
-            let (table, stack) = HighlightScopeTable::from_scope_names(&[scope]);
-            theme.resolve(&table, stack)
-        };
-
-        assert_eq!(
-            resolve("comment.line").foreground,
-            Some(RgbColor {
-                red: 0x6e,
-                green: 0x67,
-                blue: 0x63,
-            })
-        );
-        assert!(
-            resolve("comment.line")
-                .modifiers
-                .contains(SyntaxModifiers::ITALIC)
-        );
-        assert_eq!(
-            resolve("string.quoted").foreground,
-            Some(RgbColor {
-                red: 0x86,
-                green: 0x8c,
-                blue: 0x91,
-            })
-        );
-        assert!(
-            resolve("string.quoted")
-                .modifiers
-                .contains(SyntaxModifiers::ITALIC)
-        );
-        assert_eq!(
-            resolve("keyword.control").foreground,
-            Some(RgbColor {
-                red: 0xb4,
-                green: 0xbd,
-                blue: 0xc3,
-            })
-        );
-        assert!(
-            resolve("keyword.control")
-                .modifiers
-                .contains(SyntaxModifiers::BOLD)
-        );
-        assert_eq!(
-            resolve("entity.name.type").foreground,
-            Some(RgbColor {
-                red: 0xa1,
-                green: 0x93,
-                blue: 0x8c,
-            })
-        );
-        assert_eq!(
-            resolve("punctuation.definition").foreground,
-            Some(RgbColor {
-                red: 0x86,
-                green: 0x7a,
-                blue: 0x74,
-            })
-        );
     }
 
     #[test]

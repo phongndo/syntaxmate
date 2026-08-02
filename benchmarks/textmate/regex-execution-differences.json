@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "oracle": "vscode-textmate@9.2.0 + vscode-oniguruma@1.7.0",
+  "sampleSize": 512,
+  "differences": {
+    "003541f3437fcf89d8019ead27a93527f8570bfee1b76ec983af18f4a88e3d15": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "25cc782374ea192729f48ac7d07b66af40f6e3c3f472ac1ae2a92a6a0e8f2e99",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "02d744cd79177d13bf449c1c081d287551b9b8813248d2e6f2d2f129e5246877": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "49c0687a8a93306023ca0b66206fd368b2f829418bfd11ffd2ee82f35f75d503",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "0493ea0f1ae12f7262659cc3fa130052240069b59445f7e8d1f53e43558a86b7": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "f5b10edaaf8bd020076c5de296153599be32545afae563af6817c7fb0fd171d0",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "050684f22ed03e23cae07dee95221737cba8434aafba7275623b01931a6dd7db": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "7d17bbd58ee9c01d9bf451001ef888e103ee9c9e755080120251fcd60208d887",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "066f96476f2c7b7383cc3b02d0a3861d183d15ee12785050754623219dd3faff": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "6aeddb453f22218e5ac94f22b68052be74300584077422dd36cba2fb9256d070",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "089dce72f5ae1d370b83346fab72325913a8efc8e3d80172b3943c0ccc0094ac": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "555f6092e1eda637af6fdaeaeadb6cbfe50c0887633cfe74853a5a2fb244c511",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "08d02742214d81da88882e0baee3a39fdf393d875f644b27d56f8cce2bbdf886": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "6b9a208ec76896bfa0c68aaf63a4bd73a9c6c0a889241a869ee7e43908424659",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "0a50b30dd883e55c26c46d56fe52a883b99582c1af10552aca175530e557c2b5": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "d2df140884d911c5074c79f108cc578ecfe0f16debe3ba026a2514b16842f5fb",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "0e75577666af05bff475b13a5ac2db93e1d9c695d15af97005cc37758d3b5b6b": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "e9a1c7fb7c4c32da1a7d88a5760688e3b65d55e32035c2c9b59bcc01e56fdbbe",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "0eaf81f1ddb463c81b06665e6821f31b6ff8faffdbbcb5d1eaccec4884c169d5": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "141d1465c90857286d434b6ce929443771d4922cd510c62aa75dfe6140975617",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "0fbd20b6f01c4ebf646cb6ae32992e93fe3b641ad7756fcfb74b83ef7f866db9": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "5ff078e674ebdf4e543bdbdb5753fdd3d8a6cb2e392af58bfacbb0583e1e74b9",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
+    "10f1edfaa59d6ecee2d2d840abc51da6e023c9c4396c6fc429c021b45cf98e02": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "158de3c25114ac4682858c7f730e58fa3349c22897afa7d2efbc1d7cbe48f07b",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    }
+  }
+}

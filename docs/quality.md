@@ -11,8 +11,10 @@ checks.
 - MSRV and current-stable builds;
 - default, no-default, all-features, and feature-powerset checks;
 - public API semver checks against the latest crates.io release after bootstrap;
-- unit, public API, incremental, checkpoint, renderer, and doctests;
+- unit, public API, incremental-state replay, checkpoint, renderer, and doctests;
 - strict sharded oracle parity for every public language;
+- actual scanner-execution replay against `vscode-oniguruma`;
+- grammar-regex construct coverage and deterministic differential mutation;
 - deterministic grammar bundle and generated documentation;
 - Linux, macOS, and Windows public API tests;
 - dependency advisory/license/source policy;
@@ -26,8 +28,25 @@ longer fuzz campaigns and static security analysis.
 
 The pinned JavaScript oracle is development-only. Checked-in goldens preserve
 its exact ordered scope stacks after UTF-16-to-UTF-8 offset conversion. An empty
-divergence allowlist and stale-exception detection prevent silent normalization
-of known mismatches.
+final-output divergence allowlist and stale-exception detection prevent silent
+normalization of known mismatches.
+
+Final tokens can conceal lower-level matcher differences. Inspired by
+[Shiki's record-and-replay comparison](https://github.com/shikijs/shiki/blob/main/packages/engine-javascript/test/compare.test.ts)
+of its JavaScript and Oniguruma engines,
+`regex-execution-parity.mjs` records real scanner calls made while highlighting
+complex C++, Markdown, TypeScript, and YAML fixtures and replays a deterministic
+sample through Syntaxmate. Exact winners, ranges, and captures are required.
+The narrowly documented dormant-capture differences live in
+`benchmarks/textmate/regex-execution-differences.json`; new differences and
+stale exceptions both fail CI, following the known-failure baseline discipline
+used by [Syntect's dual regex-backend syntax tests](https://github.com/trishume/syntect/blob/master/.github/workflows/CI.yml).
+
+The focused regex proving corpus must represent every advanced construct and
+variant inventoried from bundled grammars. Deterministic mutations add hostile
+Unicode and surrounding text. Every committed oracle fixture is also replayed
+twice from identical incremental state, ensuring cache history cannot change
+output or continuation state.
 
 Theme goldens validate scope matching, colors, alpha compositing, and font
 modifiers. Generated catalog documentation locks public, validated, oracle, and

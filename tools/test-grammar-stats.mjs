@@ -48,7 +48,7 @@ test('case metadata mismatches are conformance gaps', () => {
 })
 
 test('--fail-on-gaps exits 1 for case metadata mismatches alone', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mark-grammar-stats-'))
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'syntaxmate-grammar-stats-'))
   try {
     const grammars = path.join(root, 'grammars')
     const cases = path.join(root, 'cases.mjs')

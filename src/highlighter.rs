@@ -185,15 +185,23 @@ impl Highlighter {
         self.highlight(&language, source, theme)
     }
 
-    /// Starts an incremental session for one bundled language and theme.
+    /// Starts an incremental session with a bundled theme.
     #[cfg(all(feature = "bundled-grammars", feature = "bundled-themes"))]
     pub fn session(&self, language: &str, theme: &str) -> Result<HighlightSession> {
+        let theme = Theme::bundled(theme)?;
+        self.session_with_theme(language, &theme)
+    }
+
+    /// Starts an incremental session with a caller-supplied theme.
+    ///
+    /// This remains available when `bundled-themes` is disabled.
+    pub fn session_with_theme(&self, language: &str, theme: &Theme) -> Result<HighlightSession> {
         let tokenizer = Tokenizer::for_bundled_language(language, self.options)?;
         let state = tokenizer.initial_state();
         Ok(HighlightSession {
             tokenizer,
             state,
-            theme: Theme::bundled(theme)?,
+            theme: theme.clone(),
         })
     }
 }

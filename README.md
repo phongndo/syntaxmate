@@ -8,8 +8,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A Rust-native TextMate syntax highlighter with the batteries included: 264
-validated languages, curated themes, exact scope stacks, incremental state,
-path detection, safe HTML/ANSI output, and no native Oniguruma dependency.
+validated languages, four accessible GitHub themes, exact scope stacks,
+incremental state, path detection, safe HTML/ANSI output, and no native
+Oniguruma dependency.
 
 ```toml
 [dependencies]
@@ -91,7 +92,7 @@ require a strict, closed include graph.
 | Feature | Default | Purpose |
 | --- | :---: | --- |
 | `bundled-grammars` | yes | Validated grammar catalog and path metadata |
-| `bundled-themes` | yes | Curated TextMate color themes |
+| `bundled-themes` | yes | GitHub dark/light themes, including high-contrast variants |
 | `html` | yes | Escaped, dependency-free HTML renderer |
 | `ansi` | yes | 24-bit ANSI renderer with terminal-injection protection |
 | `diagnostics` | no | Counters and regex conformance diagnostics |
@@ -112,6 +113,7 @@ check `HighlightStatus`; safe fallback output is marked `Degraded` when a
 limit is exhausted. The release library performs no filesystem, network, or
 environment-variable access.
 
+- [Public API design](docs/api-design.md)
 - [Architecture](docs/architecture.md)
 - [Asset provenance and updates](docs/assets.md)
 - [TextMate compatibility](docs/compatibility.md)

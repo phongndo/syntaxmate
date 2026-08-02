@@ -1,14 +1,16 @@
 # Asset provenance and updates
 
 Bundled grammars and themes are source code from independent upstream projects.
-Every asset must remain reproducible, reviewable, and legally attributable.
+Every asset must remain reproducible, reviewable, and legally attributable. The
+default theme catalog is intentionally limited to GitHub dark/light themes and
+their high-contrast variants; applications can load any compatible custom
+TextMate theme at runtime.
 
 ## Source of truth
 
 - `assets/grammars/SOURCE.toml` records grammar source pins and transformations.
 - `assets/grammars/licenses.json` records per-asset SPDX and source metadata.
-- `assets/themes/SOURCE.toml` records theme sources, revisions, adaptations, and
-  checksums.
+- `assets/themes/SOURCE.toml` records the theme source revision and checksums.
 - `THIRD_PARTY_LICENSES.md` is the human-readable release notice.
 - `assets/grammars.bundle` is the committed deterministic runtime artifact.
 

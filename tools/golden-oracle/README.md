@@ -1,11 +1,9 @@
 # Golden oracle dependencies
 
-Development-only package used by `../golden-dump.mjs`, `../generate-goldens.mjs`,
-`../regex-conformance.mjs`, `../vendor-shiki-grammars.mjs`, and
-`../vendor-textmate-themes.mjs`, and `../vscode-grammar-behavior-audit.mjs`.
-Versions are
-pinned exactly (no ranges) so oracle output and vendored grammar imports stay
-reproducible.
+Development-only package used by the golden generators, regex conformance and
+execution-replay tools, theme parity checks, and grammar/theme vendor scripts in
+`tools/`. Versions are pinned exactly (no ranges) so oracle output and vendored
+asset imports stay reproducible.
 
 These dependencies are **not** used by release builds and are intentionally kept
 out of the Rust workspace. Install only when regenerating goldens, running regex
@@ -52,9 +50,22 @@ node tools/regex-conformance.mjs
 # optional: --out target/regex-conformance-phase2.json
 ```
 
-This compares a small set of patterns against `vscode-oniguruma` by driving the
-`syntaxmate` `regex-parse` example. It requires a working `cargo` toolchain and
-is also dev-only.
+This compares a focused set of patterns against `vscode-oniguruma` by driving
+the `syntaxmate` `regex-parse` example. Deterministic mutation expands that
+proving set while retaining a reproducible seed:
+
+```sh
+node tools/fuzz-regex-conformance.mjs --seed 1 --cases 256
+```
+
+Replay a deterministic sample of scanner calls observed during real TextMate
+tokenization:
+
+```sh
+node tools/regex-execution-parity.mjs --max-executions 512
+```
+
+All three commands require a working `cargo` toolchain and are development-only.
 
 ## Shiki grammar vendor check
 
@@ -71,10 +82,9 @@ This verifies `assets/grammars/languages/`, `coverage.toml`,
 | Package | Version | Role |
 | --- | --- | --- |
 | `@shikijs/langs` | `3.23.0` | Pinned source for vendored TextMate grammars |
-| `@shikijs/themes` | `3.23.0` | Pinned source for named community themes |
 | `github-vscode-themes` | `6.3.4` | Pinned source for GitHub themes |
 | `vscode-textmate` | `9.2.0` | TextMate line tokenizer reference |
 | `vscode-oniguruma` | `1.7.0` | Oniguruma WASM used by the reference |
 
-Bump both together, reinstall with the lockfile, then regenerate goldens and
-review the diff.
+Bump source or oracle pins deliberately, reinstall with the lockfile, then
+regenerate the affected assets and goldens and review the diff.

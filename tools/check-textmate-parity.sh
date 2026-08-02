@@ -5,7 +5,6 @@ cd "$(dirname "$0")/.."
 
 python3 tools/check-textmate-theme-assets.py
 python3 tools/check-grammar-provenance.py
-python3 tools/check-theme-performance.py
 node tools/vendor-textmate-themes.mjs --check
 node tools/vendor-shiki-grammars.mjs --check
 node tools/generate-theme-goldens.mjs --check

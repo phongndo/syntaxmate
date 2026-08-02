@@ -185,7 +185,7 @@ def count_snippet(path, counts):
             f"**{counts.supported_only} more are supported** by real bundled grammars and "
             "the catalog-wide smoke/budget gate. See "
             "[`language-status.md`](language-status.md) for the generated per-language "
-            "ledger, or run `mark syntax available --installed` for the runtime catalog."
+            "ledger, or inspect `Catalog::bundled().languages()` at runtime."
         )
     elif path == FIXTURE_README:
         validated = ", ".join(f"`{language}`" for language in counts.validated_ids) or "none"

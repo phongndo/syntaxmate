@@ -31,6 +31,27 @@ node tools/textmate-bench.mjs \
 
 Use `--mode same-driver --iterations 3` for repeated passes after one setup.
 
+## Reproducible engine comparison
+
+Compare Syntaxmate and the pinned VS Code implementation on identical grammar
+assets and source fixtures, excluding each driver's setup phase:
+
+```sh
+npm ci --prefix tools/golden-oracle
+RUSTUP_TOOLCHAIN=1.88.0 python3 tools/compare-textmate-performance.py \
+  --iterations 5 \
+  --out target/textmate-performance/comparison.json
+```
+
+The committed reference result is `engine-comparison.json`; use a `target/`
+path for ad-hoc runs and replace the reference only after reviewing the complete
+environment and per-language output. The report records raw elapsed time,
+processed bytes, token counts, and the runtime environment. Token counts may
+differ and are never treated as a speed score. Syntect uses Sublime syntax
+definitions rather than the same TextMate JSON assets, so it is intentionally
+excluded from this like-for-like report; any separate Syntect measurement must
+be labeled as a different-grammar comparison.
+
 ## Quality oracle
 
 ```sh

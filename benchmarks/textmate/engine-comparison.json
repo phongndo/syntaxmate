@@ -1,0 +1,222 @@
+{
+  "aggregate": {
+    "syntaxmate": {
+      "bytes": 327280,
+      "elapsedNanoseconds": 67481750,
+      "engine": "syntaxmate",
+      "megabytesPerSecond": 4.85
+    },
+    "vscodeTextmate": {
+      "bytes": 327280,
+      "elapsedNanoseconds": 1256818000,
+      "engine": "vscode-textmate",
+      "megabytesPerSecond": 0.26
+    }
+  },
+  "contract": "identical TextMate grammar assets and source fixtures; setup excluded",
+  "environment": {
+    "node": "v24.18.0",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.14.6",
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)"
+  },
+  "iterations": 5,
+  "mode": "same-driver",
+  "oracle": {
+    "vscodeOniguruma": "1.7.0",
+    "vscodeTextmate": "9.2.0"
+  },
+  "results": [
+    {
+      "fixture": "tests/fixtures/textmate/bash/stress.sh",
+      "language": "bash",
+      "scope": "source.shell",
+      "sourceBytes": 5871,
+      "syntaxmate": {
+        "bytes": 29355,
+        "elapsedNanoseconds": 4606542,
+        "megabytesPerSecond": 6.372,
+        "tokens": 8345
+      },
+      "vscodeTextmate": {
+        "bytes": 29355,
+        "elapsedNanoseconds": 47820000,
+        "megabytesPerSecond": 0.614,
+        "stoppedEarly": false,
+        "tokens": 9200
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/cpp/stress.cpp",
+      "language": "cpp",
+      "scope": "source.cpp",
+      "sourceBytes": 11814,
+      "syntaxmate": {
+        "bytes": 59070,
+        "elapsedNanoseconds": 19768958,
+        "megabytesPerSecond": 2.988,
+        "tokens": 13485
+      },
+      "vscodeTextmate": {
+        "bytes": 59070,
+        "elapsedNanoseconds": 306030000,
+        "megabytesPerSecond": 0.193,
+        "stoppedEarly": false,
+        "tokens": 13545
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/html/stress.html",
+      "language": "html",
+      "scope": "text.html.basic",
+      "sourceBytes": 9431,
+      "syntaxmate": {
+        "bytes": 47155,
+        "elapsedNanoseconds": 13646750,
+        "megabytesPerSecond": 3.455,
+        "tokens": 13630
+      },
+      "vscodeTextmate": {
+        "bytes": 47155,
+        "elapsedNanoseconds": 335709000,
+        "megabytesPerSecond": 0.14,
+        "stoppedEarly": false,
+        "tokens": 13665
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/java/stress.java",
+      "language": "java",
+      "scope": "source.java",
+      "sourceBytes": 5927,
+      "syntaxmate": {
+        "bytes": 29635,
+        "elapsedNanoseconds": 2761084,
+        "megabytesPerSecond": 10.733,
+        "tokens": 7935
+      },
+      "vscodeTextmate": {
+        "bytes": 29635,
+        "elapsedNanoseconds": 54048000,
+        "megabytesPerSecond": 0.548,
+        "stoppedEarly": false,
+        "tokens": 8090
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/json/stress.json",
+      "language": "json",
+      "scope": "source.json",
+      "sourceBytes": 5694,
+      "syntaxmate": {
+        "bytes": 28470,
+        "elapsedNanoseconds": 760167,
+        "megabytesPerSecond": 37.452,
+        "tokens": 8015
+      },
+      "vscodeTextmate": {
+        "bytes": 28470,
+        "elapsedNanoseconds": 14373000,
+        "megabytesPerSecond": 1.981,
+        "stoppedEarly": false,
+        "tokens": 8030
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/markdown/stress.md",
+      "language": "markdown",
+      "scope": "text.html.markdown",
+      "sourceBytes": 5088,
+      "syntaxmate": {
+        "bytes": 25440,
+        "elapsedNanoseconds": 10965791,
+        "megabytesPerSecond": 2.32,
+        "tokens": 4155
+      },
+      "vscodeTextmate": {
+        "bytes": 25440,
+        "elapsedNanoseconds": 169609000,
+        "megabytesPerSecond": 0.15,
+        "stoppedEarly": false,
+        "tokens": 4675
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/python/stress.py",
+      "language": "python",
+      "scope": "source.python",
+      "sourceBytes": 5389,
+      "syntaxmate": {
+        "bytes": 26945,
+        "elapsedNanoseconds": 2872583,
+        "megabytesPerSecond": 9.38,
+        "tokens": 8400
+      },
+      "vscodeTextmate": {
+        "bytes": 26945,
+        "elapsedNanoseconds": 55352000,
+        "megabytesPerSecond": 0.487,
+        "stoppedEarly": false,
+        "tokens": 9385
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/rust/stress.rs",
+      "language": "rust",
+      "scope": "source.rust",
+      "sourceBytes": 5951,
+      "syntaxmate": {
+        "bytes": 29755,
+        "elapsedNanoseconds": 1343750,
+        "megabytesPerSecond": 22.143,
+        "tokens": 10625
+      },
+      "vscodeTextmate": {
+        "bytes": 29755,
+        "elapsedNanoseconds": 44970000,
+        "megabytesPerSecond": 0.662,
+        "stoppedEarly": false,
+        "tokens": 10915
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/typescript/stress.ts",
+      "language": "typescript",
+      "scope": "source.ts",
+      "sourceBytes": 5903,
+      "syntaxmate": {
+        "bytes": 29515,
+        "elapsedNanoseconds": 8206375,
+        "megabytesPerSecond": 3.597,
+        "tokens": 10460
+      },
+      "vscodeTextmate": {
+        "bytes": 29515,
+        "elapsedNanoseconds": 183933000,
+        "megabytesPerSecond": 0.16,
+        "stoppedEarly": false,
+        "tokens": 10750
+      }
+    },
+    {
+      "fixture": "tests/fixtures/textmate/yaml/stress.yaml",
+      "language": "yaml",
+      "scope": "source.yaml",
+      "sourceBytes": 4388,
+      "syntaxmate": {
+        "bytes": 21940,
+        "elapsedNanoseconds": 2549750,
+        "megabytesPerSecond": 8.605,
+        "tokens": 5265
+      },
+      "vscodeTextmate": {
+        "bytes": 21940,
+        "elapsedNanoseconds": 44974000,
+        "megabytesPerSecond": 0.488,
+        "stoppedEarly": false,
+        "tokens": 5305
+      }
+    }
+  ],
+  "schemaVersion": 1
+}
