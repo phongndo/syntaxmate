@@ -68,6 +68,7 @@ export async function generateTextMateGolden(options) {
     embedded = [],
     themePath,
     timeLimit = 0,
+    onigObserver,
   } = options
   if ((!grammarPath && !assetsDir) || !scopeName || !sourcePath) {
     throw new Error('grammarPath or assetsDir, scopeName, and sourcePath are required')
@@ -114,7 +115,24 @@ export async function generateTextMateGolden(options) {
   const registry = new vsctm.Registry({
     ...(rawTheme ? { theme: rawTheme } : {}),
     onigLib: Promise.resolve({
-      createOnigScanner(patterns) { return new onig.OnigScanner(patterns) },
+      createOnigScanner(patterns) {
+        const scanner = new onig.OnigScanner(patterns)
+        if (!onigObserver) return scanner
+        return {
+          findNextMatchSync(string, startPosition, findOptions) {
+            const result = scanner.findNextMatchSync(string, startPosition, findOptions)
+            onigObserver({
+              patterns,
+              line: typeof string === 'string' ? string : string.content,
+              startPosition,
+              findOptions,
+              result,
+            })
+            return result
+          },
+          dispose() { scanner.dispose?.() },
+        }
+      },
       createOnigString(source) { return new onig.OnigString(source) },
     }),
     loadGrammar: async scope => grammars.get(scope) ?? null,

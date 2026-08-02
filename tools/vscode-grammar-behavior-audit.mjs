@@ -24,11 +24,11 @@ const exported = spawnSync('python3', [path.join(root, 'tools/export-vscode-gram
 })
 if (exported.status !== 0) throw new Error(exported.stderr)
 const vscodeSpecs = new Map(Object.entries(JSON.parse(exported.stdout)))
-const markSpecs = new Map()
+const syntaxmateSpecs = new Map()
 for (const name of await fs.readdir(path.join(root, 'assets/grammars/languages'))) {
   if (!name.endsWith('.tmLanguage.json')) continue
   const grammar = JSON.parse(await fs.readFile(path.join(root, 'assets/grammars/languages', name), 'utf8'))
-  markSpecs.set(grammar.scopeName, { path: `assets/grammars/languages/${name}`, grammar })
+  syntaxmateSpecs.set(grammar.scopeName, { path: `assets/grammars/languages/${name}`, grammar })
 }
 
 const sourceAudit = JSON.parse(await fs.readFile(path.join(root, 'benchmarks/textmate/vscode-grammar-differences.json'), 'utf8'))
@@ -60,7 +60,7 @@ const rawTheme = {
     ...theme.tokenColors,
   ],
 }
-const markRegistry = new vsctm.Registry({ theme: rawTheme, onigLib, loadGrammar: async scope => markSpecs.get(scope)?.grammar ?? null })
+const syntaxmateRegistry = new vsctm.Registry({ theme: rawTheme, onigLib, loadGrammar: async scope => syntaxmateSpecs.get(scope)?.grammar ?? null })
 const vscodeRegistry = new vsctm.Registry({ theme: rawTheme, onigLib, loadGrammar: async scope => vscodeSpecs.get(scope)?.grammar ?? null })
 
 const entries = []
@@ -86,15 +86,15 @@ for (const language of languages) {
     styleEquivalent: true,
   }
   try {
-    const markGrammar = await markRegistry.loadGrammar(language.scopeName)
+    const syntaxmateGrammar = await syntaxmateRegistry.loadGrammar(language.scopeName)
     const vscodeGrammar = await vscodeRegistry.loadGrammar(language.scopeName)
-    if (!markGrammar || !vscodeGrammar) throw new Error('root grammar failed to load')
+    if (!syntaxmateGrammar || !vscodeGrammar) throw new Error('root grammar failed to load')
     for (const fixture of fixtures) {
       const source = await fs.readFile(fixture.source, 'utf8')
       const compared = compareTokenization(
-        markGrammar,
+        syntaxmateGrammar,
         vscodeGrammar,
-        markRegistry.getColorMap(),
+        syntaxmateRegistry.getColorMap(),
         vscodeRegistry.getColorMap(),
         source,
       )
@@ -112,7 +112,7 @@ for (const language of languages) {
 }
 
 const report = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   vscodeCommit: expectedRevision,
   oracle: { vscodeTextmate: '9.2.0', vscodeOniguruma: '1.7.0' },
   sharedRootGrammars: entries.length,
@@ -135,8 +135,8 @@ if (report.scopeDivergent || report.styleDivergent) {
 }
 console.log(`ok: scopes ${report.scopeEquivalent}/${entries.length}, styles ${report.styleEquivalent}/${entries.length}`)
 
-function compareTokenization(markGrammar, vscodeGrammar, markColors, vscodeColors, source) {
-  let markState = vsctm.INITIAL
+function compareTokenization(syntaxmateGrammar, vscodeGrammar, syntaxmateColors, vscodeColors, source) {
+  let syntaxmateState = vsctm.INITIAL
   let vscodeState = vsctm.INITIAL
   let scopeMismatchLines = 0
   let styleMismatchLines = 0
@@ -144,20 +144,20 @@ function compareTokenization(markGrammar, vscodeGrammar, markColors, vscodeColor
   let firstMismatch = null
   const lines = source.split('\n')
   for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-    const mark = markGrammar.tokenizeLine(lines[lineNumber], markState, 0)
+    const syntaxmate = syntaxmateGrammar.tokenizeLine(lines[lineNumber], syntaxmateState, 0)
     const vscode = vscodeGrammar.tokenizeLine(lines[lineNumber], vscodeState, 0)
-    const markStyled = markGrammar.tokenizeLine2(lines[lineNumber], markState, 0)
+    const syntaxmateStyled = syntaxmateGrammar.tokenizeLine2(lines[lineNumber], syntaxmateState, 0)
     const vscodeStyled = vscodeGrammar.tokenizeLine2(lines[lineNumber], vscodeState, 0)
-    markState = mark.ruleStack
+    syntaxmateState = syntaxmate.ruleStack
     vscodeState = vscode.ruleStack
-    const left = mark.tokens.map(token => [token.startIndex, token.endIndex, token.scopes])
+    const left = syntaxmate.tokens.map(token => [token.startIndex, token.endIndex, token.scopes])
     const right = vscode.tokens.map(token => [token.startIndex, token.endIndex, token.scopes])
     comparedTokens += Math.max(left.length, right.length)
     if (JSON.stringify(left) !== JSON.stringify(right)) {
       scopeMismatchLines++
-      firstMismatch ??= { lineNumber, line: lines[lineNumber], mark: left, vscode: right }
+      firstMismatch ??= { lineNumber, line: lines[lineNumber], syntaxmate: left, vscode: right }
     }
-    const leftStyles = styleRuns(markStyled.tokens, markColors, lines[lineNumber].length)
+    const leftStyles = styleRuns(syntaxmateStyled.tokens, syntaxmateColors, lines[lineNumber].length)
     const rightStyles = styleRuns(vscodeStyled.tokens, vscodeColors, lines[lineNumber].length)
     if (JSON.stringify(leftStyles) !== JSON.stringify(rightStyles)) styleMismatchLines++
   }

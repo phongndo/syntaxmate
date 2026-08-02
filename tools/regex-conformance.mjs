@@ -147,7 +147,8 @@ export const cases = conformanceCases
 
 export async function runConformance(options = {}) {
   const selectedNames = new Set(options.caseNames ?? [])
-  const selectedCases = conformanceCases.filter(testCase => selectedNames.size === 0 || selectedNames.has(testCase.name))
+  const candidateCases = options.cases ?? conformanceCases
+  const selectedCases = candidateCases.filter(testCase => selectedNames.size === 0 || selectedNames.has(testCase.name))
   if (selectedNames.size) {
     const found = new Set(selectedCases.map(testCase => testCase.name))
     const unknown = [...selectedNames].filter(name => !found.has(name))
@@ -155,7 +156,7 @@ export async function runConformance(options = {}) {
   }
 
   const onig = await loadOniguruma()
-  const markExecutable = options.markExecutable ?? buildMarkExecutable()
+  const syntaxmateExecutable = options.syntaxmateExecutable ?? buildSyntaxmateExecutable()
   const records = []
   for (const testCase of selectedCases) {
     const scanner = new onig.OnigScanner([testCase.pattern])
@@ -167,16 +168,24 @@ export async function runConformance(options = {}) {
       onigError = error.message
       onigMatch = null
     }
-    const mark = runMark(testCase, markExecutable)
+    const syntaxmate = runSyntaxmate(testCase, syntaxmateExecutable)
     const documentedDegradation = testCase.expectedDegradation === 'unsupported-no-match'
-    const expectedResult = documentedDegradation
-      ? onigMatch != null && mark.match == null
-      : testCase.expectMiss
-        ? onigMatch == null && mark.match == null
-        : onigMatch != null && mark.match != null
-    const pass = !onigError && !mark.error && expectedResult &&
-      (documentedDegradation || capturesEqual(mark, onigMatch, testCase.line))
-    records.push({ ...testCase, onig: simplifyOnig(onigMatch, testCase.line), ...(onigError ? { onigError } : {}), mark, pass })
+    const expectedResult = testCase.parityOnly
+      ? capturesEqual(syntaxmate, onigMatch, testCase.line)
+      : documentedDegradation
+        ? onigMatch != null && syntaxmate.match == null
+        : testCase.expectMiss
+          ? onigMatch == null && syntaxmate.match == null
+          : onigMatch != null && syntaxmate.match != null
+    const pass = !onigError && !syntaxmate.error && expectedResult &&
+      (documentedDegradation || capturesEqual(syntaxmate, onigMatch, testCase.line))
+    records.push({
+      ...testCase,
+      onig: simplifyOnig(onigMatch, testCase.line),
+      ...(onigError ? { onigError } : {}),
+      syntaxmate,
+      pass,
+    })
   }
   return {
     version: 2,
@@ -213,7 +222,7 @@ async function loadOniguruma() {
   return onig
 }
 
-function buildMarkExecutable() {
+function buildSyntaxmateExecutable() {
   const result = spawnSync(
     'cargo',
     ['build', '-q', '-p', 'syntaxmate', '--example', 'regex-parse', '--features', 'diagnostics', '--message-format=json'],
@@ -233,7 +242,7 @@ function buildMarkExecutable() {
   throw new Error('cargo did not report the regex-parse executable')
 }
 
-function runMark(testCase, executable) {
+function runSyntaxmate(testCase, executable) {
   const args = ['--match', '--engine', testCase.engine]
   if (testCase.from != null) args.push('--from', String(testCase.from))
   if (testCase.allowA) args.push('--allow-a')
@@ -259,10 +268,10 @@ function simplifyOnig(match, line) {
   return { index: match.index, captures: match.captureIndices.map(span => normalizeOnigSpan(span, line)) }
 }
 
-function spansEqual(mark, onig, line) {
+function spansEqual(syntaxmate, onig, line) {
   onig = normalizeOnigSpan(onig, line)
-  if (!mark || !onig) return mark == null && onig == null
-  return mark.start === onig.start && mark.end === onig.end
+  if (!syntaxmate || !onig) return syntaxmate == null && onig == null
+  return syntaxmate.start === onig.start && syntaxmate.end === onig.end
 }
 
 function normalizeOnigSpan(span, line) {
@@ -275,12 +284,13 @@ function normalizeOnigSpan(span, line) {
   }
 }
 
-function capturesEqual(mark, onigMatch, line) {
-  if (!onigMatch) return mark.match == null
+function capturesEqual(syntaxmate, onigMatch, line) {
+  if (!onigMatch) return syntaxmate.match == null
   const oracle = onigMatch.captureIndices ?? []
-  if (!spansEqual(mark.match, oracle[0], line)) return false
-  if (mark.captures.length !== oracle.length) return false
-  return oracle.every((capture, index) => spansEqual(mark.captures[index], capture, line))
+  if (!spansEqual(syntaxmate.match, oracle[0], line)) return false
+  if (syntaxmate.captures.length !== oracle.length) return false
+  return oracle.every((capture, index) =>
+    spansEqual(syntaxmate.captures[index], capture, line))
 }
 
 function parseArgs(argv) {

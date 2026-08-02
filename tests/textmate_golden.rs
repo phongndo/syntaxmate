@@ -351,6 +351,31 @@ fn divergence_allowlist_is_empty() {
 }
 
 #[test]
+fn manifest_golden_cases_replay_incremental_state_deterministically() {
+    for case in load_manifest_for_current_shard() {
+        let records = load_golden_records(&case);
+        let mut tokenizer = tokenizer_for_case(&case);
+        let mut state = TokenizerState::default();
+        for (line_index, record) in records.iter().enumerate() {
+            let parse_line = format!("{}\n", record.line);
+            let first =
+                tokenizer.tokenize_line_scopes_at_line(&parse_line, state.clone(), line_index);
+            let replay =
+                tokenizer.tokenize_line_scopes_at_line(&parse_line, state.clone(), line_index);
+            assert_eq!(
+                first,
+                replay,
+                "{} {} line {} changed when replayed from identical state",
+                case.language,
+                case.fixture,
+                line_index + 1,
+            );
+            state = first.state.clone();
+        }
+    }
+}
+
+#[test]
 fn manifest_golden_cases_have_no_budget_degradation() {
     for case in load_manifest_for_current_shard() {
         let mut tokenizer = tokenizer_for_case(&case);
@@ -925,7 +950,7 @@ fn compare_exact_scopes(
     let mut state = TokenizerState::default();
     for (index, record) in records.iter().enumerate() {
         validate_record(case, record, index, failures);
-        if mark_allowed(divergences, case, index + 1, ComparisonMode::Exact) {
+        if is_allowlisted(divergences, case, index + 1, ComparisonMode::Exact) {
             continue;
         }
         // vscode-textmate tokenizes each logical line with a synthetic `\n`;
@@ -970,7 +995,7 @@ fn compare_coarse_highlights(
         .iter()
         .enumerate()
         .filter_map(|(index, _)| {
-            mark_allowed(divergences, case, index + 1, ComparisonMode::Coarse).then_some(index)
+            is_allowlisted(divergences, case, index + 1, ComparisonMode::Coarse).then_some(index)
         })
         .collect::<HashSet<_>>();
     if allowed_lines.len() == records.len() {
@@ -1347,7 +1372,7 @@ fn validate_divergences(divergences: &[RuntimeDivergence]) {
     }
 }
 
-fn mark_allowed(
+fn is_allowlisted(
     divergences: &mut [RuntimeDivergence],
     case: &CaseSpec,
     line: usize,

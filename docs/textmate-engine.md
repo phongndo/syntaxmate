@@ -1,19 +1,12 @@
 # In-house TextMate engine
 
-Status document for the native TextMate syntax engine in this crate.
-This is the migration from the removed syntect/two-face hybrid to a single
-in-house engine with vendored TextMate grammars.
-
-Production highlighting is switched to the bundled native backend. The engine,
-grammar bundle path, oracle harness, and full public catalog are in-tree. The
-checked-in fixture corpus passes exact scope-stack and coarse class parity
+Status document for Syntaxmate's native TextMate engine. The engine, grammar
+bundle, oracle harness, and full public catalog are maintained in this
+repository. The checked-in fixture corpus passes exact scope-stack parity
 without divergence allowlists.
 
-The accepted plan to move this implementation into the independent,
-batteries-included `syntaxmate` crate is documented in
-[`extraction-plan.md`](extraction-plan.md). This document
-continues to describe the current in-tree implementation until that migration
-is complete.
+The historical extraction boundary and completed ownership transfer are
+recorded in [`extraction-plan.md`](extraction-plan.md).
 
 ## Goals
 
@@ -31,16 +24,18 @@ is complete.
 src/
   engine/
     grammar.rs      # rule model (match / begin-end / begin-while, includes, injections)
-    regex/          # hybrid matcher: DFA path + budgeted backtracking fallback
-    tokenizer.rs    # line-oriented TextMate stack machine
-    state.rs        # interned parser state / checkpoints
-    scopes.rs       # scope interning + scope → SyntaxClass
+    regex/          # ordered scanner + budgeted backtracking fallback
+    tokenizer.rs    # line-oriented TextMate stack machine and owned caches
+    state.rs        # interned parser state
+    checkpoint.rs   # viewport replay checkpoints
     line.rs         # line splitting / UTF-8 boundary helpers
   grammars/
-    registry.rs     # curated dev/test asset table (raw JSON via include_str!)
-    bundle.rs       # MRKB embedded bundle reader
-    catalog.rs      # aliases / extensions / basenames for the bundle
-  highlight.rs, language.rs, storage.rs, types.rs  # public config / API surface
+    bundle.rs       # deterministic embedded grammar bundle
+    registry.rs     # bundled catalog loading and dependency closure
+  tokenizer.rs      # custom registry, exact scopes, state, and viewport API
+  highlighter.rs    # bundled and custom-theme highlighting API
+  catalog.rs        # aliases, extensions, basenames, licenses, and themes
+  theme/            # TextMate selector and style resolution
 
 assets/grammars/           # committed TextMate JSON (full public catalog + private deps)
   SOURCE.toml                 # pin: @shikijs/langs@3.23.0
@@ -77,12 +72,16 @@ first-class concern, not a rare escape hatch.
 
 ### Public API shape
 
-External `syntaxmate` types stay shape-compatible with the previous highlighter
-so TUI queue/LRU layers do not need a redesign:
+Syntaxmate exposes engine-independent, exact-scope types rather than product or
+renderer-specific classes:
 
-- `SyntaxClass`, `SyntaxSegment`, `HighlightedLine`, `HighlightedText`
-- language detection / config management (`language.rs`, `storage.rs`)
-- `SyntaxHighlighter` must remain `Send` (worker-thread highlighting)
+- `Catalog`, `GrammarRegistry`, `Tokenizer`, and `TokenizerState`;
+- `TokenizedDocument`, `TokenizedLine`, `TokenSpan`, and scope-table references;
+- `CheckpointTable` for bounded viewport replay;
+- `Highlighter`, `HighlightSession`, and caller-supplied `Theme` values;
+- optional escaped HTML and terminal-safe ANSI rendering.
+
+Regex/compiler internals and cache identities remain private.
 
 ## Public language catalog
 
@@ -265,9 +264,12 @@ item (see limitations).
 
 **Current state.** Native regular and fallback matchers, ordered pattern-set
 selection, anchor context, prefilters, and budget kills are implemented. The
-conformance script covers a proving set; broader Oniguruma parity remains open.
+conformance script covers every inventoried bundled-grammar construct and
+variant. Deterministic mutation and sampled replay of real
+`vscode-oniguruma` scanner executions extend that proving set; the full
+Oniguruma surface remains larger than the committed corpus.
 
-### Phase 3 — tokenizer and scope classification
+### Phase 3 — tokenizer and exact scope transport
 
 **Goal.** Line tokenization that can pass golden fixtures.
 
@@ -276,8 +278,8 @@ conformance script covers a proving set; broader Oniguruma parity remains open.
 - Stack machine with first-match-wins, while-continuation, captures, zero-width
   guards.
 - Cross-grammar includes and injection candidate flattening.
-- Scope → `SyntaxClass` classification and `HighlightedText` conversion.
-- Exact + coarse golden harness (`textmate_golden.rs`).
+- Exact scope-stack interning and public token/document conversion.
+- Exact golden and incremental-state replay harness (`textmate_golden.rs`).
 
 **Current state.** Tokenizer + harness land; all basic, stress, and smoke cases
 are exact gates. `divergences.toml` contains no exceptions.
@@ -312,8 +314,8 @@ budgets, feature-gated counters, and lazy per-language tokenizer instances are
 implemented behind Syntaxmate's public highlighter and tokenizer APIs.
 
 Current throughput measurements and policies are recorded under
-[`benchmarks/textmate/`](../benchmarks/textmate/). Theme-engine measurements live
-in [`textmate-theme-performance.md`](textmate-theme-performance.md).
+[`benchmarks/textmate/`](../benchmarks/textmate/). The like-for-like engine
+comparison uses identical grammar and source assets and excludes setup time.
 
 **Retained optimizations** (each validated with alternating-order,
 separate-process A/B runs, paired medians, and byte-exact scope streams):
@@ -499,8 +501,10 @@ changing tokenizer behavior.
 3. **Hot fallback path.** Lookaround-heavy rules (especially TS/C++/Ruby) still
    rely on the budgeted backtracker; translator widening may be required if
    fallback dominates hot matches.
-4. **Performance target remains open.** The measured 2.1x scanner improvement
-   is substantial, but cold full-file throughput is still well below 12 MB/s.
+4. **Performance evidence remains workload-specific.** Shared-runner and
+   reference-machine policies are separate, and comparisons with
+   `vscode-textmate` use identical assets. Results are not generalized to
+   engines that consume different grammar formats.
 5. **Catalog breadth.** The product catalog now follows the full pinned Shiki
    import plus MLIR. Full Shiki parity still relies on smoke/stress fixtures and
    the budget guard; adversarial coverage remains incremental.
@@ -521,4 +525,4 @@ changing tokenizer behavior.
 - Oracle: `tools/golden-dump.mjs`, `tools/generate-goldens.mjs`, `tools/golden-oracle/`
 - Assets: `assets/grammars/`
 - Engine: `src/engine/`
-- Performance evidence: `benchmarks/textmate/`, `docs/textmate-theme-performance.md`
+- Performance evidence: `benchmarks/textmate/`

@@ -80,7 +80,7 @@ if (selectedCases.length === 0) {
   process.exit(1)
 }
 
-const tempRoot = args.check ? await fs.mkdtemp(path.join(os.tmpdir(), 'mark-goldens-')) : null
+const tempRoot = args.check ? await fs.mkdtemp(path.join(os.tmpdir(), 'syntaxmate-goldens-')) : null
 let failures = 0
 
 try {

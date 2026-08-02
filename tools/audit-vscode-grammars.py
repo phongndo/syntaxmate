@@ -45,32 +45,32 @@ for path in sorted((checkout / "extensions").rglob("*")):
     if grammar is not None:
         vscode.setdefault(grammar["scopeName"], (path, grammar))
 
-mark: dict[str, tuple[Path, dict]] = {}
+syntaxmate: dict[str, tuple[Path, dict]] = {}
 for path in sorted((ROOT / "assets/grammars/languages").glob("*.tmLanguage.json")):
     grammar = load_grammar(path)
     if grammar is not None:
-        mark[grammar["scopeName"]] = (path, grammar)
+        syntaxmate[grammar["scopeName"]] = (path, grammar)
 
 entries = []
-for scope in sorted(set(mark) & set(vscode)):
-    mark_path, mark_grammar = mark[scope]
+for scope in sorted(set(syntaxmate) & set(vscode)):
+    syntaxmate_path, syntaxmate_grammar = syntaxmate[scope]
     vscode_path, vscode_grammar = vscode[scope]
-    mark_bytes = canonical(mark_grammar)
+    syntaxmate_bytes = canonical(syntaxmate_grammar)
     vscode_bytes = canonical(vscode_grammar)
-    equal = mark_bytes == vscode_bytes
+    equal = syntaxmate_bytes == vscode_bytes
     entries.append({
-        "language": mark_path.name.removesuffix(".tmLanguage.json"),
+        "language": syntaxmate_path.name.removesuffix(".tmLanguage.json"),
         "scopeName": scope,
-        "markPath": str(mark_path.relative_to(ROOT)),
+        "syntaxmatePath": str(syntaxmate_path.relative_to(ROOT)),
         "vscodePath": str(vscode_path.relative_to(checkout)),
-        "markCanonicalSha256": hashlib.sha256(mark_bytes).hexdigest(),
+        "syntaxmateCanonicalSha256": hashlib.sha256(syntaxmate_bytes).hexdigest(),
         "vscodeCanonicalSha256": hashlib.sha256(vscode_bytes).hexdigest(),
         "canonicalEqual": equal,
         "referencePolicy": "vscode-source-identical" if equal else "source-differs-behavior-audit-required",
     })
 
 report = {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "vscodeCommit": COMMIT,
     "vscodeGrammarScopes": len(vscode),
     "matchingRootScopes": len(entries),

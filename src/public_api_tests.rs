@@ -17,6 +17,15 @@ fn batteries_included_api_detects_tokenizes_and_styles() {
     let catalog = Catalog::bundled();
     assert_eq!(catalog.detect_path("src/main.rs").as_deref(), Some("rust"));
     assert!(catalog.languages().len() >= 264);
+    assert_eq!(
+        catalog.themes(),
+        vec![
+            "github-dark",
+            "github-dark-high-contrast",
+            "github-light",
+            "github-light-high-contrast",
+        ]
+    );
 
     let mut highlighter = Highlighter::bundled().unwrap();
     let document = highlighter
@@ -104,6 +113,32 @@ fn incremental_output_matches_complete_document_scopes() {
             .collect::<Vec<_>>();
         assert_eq!(incremental_scopes, complete_scopes);
     }
+}
+
+#[test]
+fn incremental_session_accepts_a_custom_theme() {
+    let theme = Theme::from_json(
+        r##"{
+            "name": "Custom",
+            "tokenColors": [{
+                "scope": "keyword",
+                "settings": {"foreground": "#112233"}
+            }]
+        }"##,
+    )
+    .unwrap();
+    let highlighter = Highlighter::bundled().unwrap();
+    let mut session = highlighter.session_with_theme("rust", &theme).unwrap();
+    let line = session.highlight_line("fn main() {}").unwrap();
+    assert_eq!(line.status(), HighlightStatus::Complete);
+    assert!(line.spans().iter().any(|span| {
+        span.style().foreground
+            == Some(crate::RgbColor {
+                red: 0x11,
+                green: 0x22,
+                blue: 0x33,
+            })
+    }));
 }
 
 #[test]

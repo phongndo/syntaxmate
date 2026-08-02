@@ -41,7 +41,7 @@ for (let depth = 1; depth <= maxDepth; depth++) {
     name: Array.from({ length: depth }, (_, index) => `$${index + 1}`).join(' '),
   })
 }
-const grammarSource = { scopeName: 'mark.theme.oracle', patterns }
+const grammarSource = { scopeName: 'syntaxmate.theme.oracle', patterns }
 const require = createRequire(import.meta.url)
 const resolvePaths = [path.join(root, 'tools/golden-oracle')]
 const resolvePackage = name => require.resolve(name, { paths: resolvePaths })

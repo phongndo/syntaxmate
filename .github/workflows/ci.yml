@@ -45,6 +45,7 @@ jobs:
           cargo test --all-features --locked --
           --skip textmate_golden::manifest_golden_cases_match_or_are_allowlisted
           --skip textmate_golden::manifest_golden_cases_have_no_budget_degradation
+          --skip textmate_golden::manifest_golden_cases_replay_incremental_state_deterministically
       - run: cargo run --bin syntaxmate-bundle --features bundle-tools --locked -- --check
       - run: cargo run --release --example bundle-measure --locked -- --assert-max-bundle-bytes 9000000
 
@@ -76,6 +77,10 @@ jobs:
       - run: >-
           cargo hack check --locked --lib --feature-powerset --depth 2
           --exclude-features bundle-tools
+      - name: Custom themes without bundled themes
+        run: >-
+          cargo test --locked --no-default-features --features bundled-grammars
+          --test custom_theme_session
 
   semver:
     runs-on: ubuntu-latest
@@ -147,10 +152,29 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: tools/golden-oracle/package-lock.json
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
       - run: npm ci --prefix tools/golden-oracle
+      - run: node tools/regex-conformance.mjs --out target/regex-conformance.json
+      - run: >-
+          node tools/regex-execution-parity.mjs
+          --max-executions 512 --out target/regex-execution-parity.json
+      - run: >-
+          node tools/grammar-stats.mjs assets/grammars/languages
+          --conformance-diff --fail-on-gaps --compact
+          > target/grammar-regex-coverage.json
+      - run: >-
+          node tools/fuzz-regex-conformance.mjs
+          --seed 1 --cases 256 --out target/regex-differential-fuzz.json
       - run: node tools/generate-textmate-cases.mjs --check
       - run: node tools/generate-goldens.mjs --check
       - run: node tools/generate-theme-goldens.mjs --check
+      - run: node tools/theme-selector-conformance.mjs
+      - run: node tools/theme-catalog-parity.mjs --check
+      - run: python3 tools/check-textmate-theme-assets.py
+      - run: node tools/vendor-textmate-themes.mjs --check
       - run: python3 tools/build-textmate-corpora.py --check
       - run: python3 tools/generate-language-status.py --check
       - run: python3 tools/check-language-docs.py --check
@@ -270,6 +294,7 @@ jobs:
           --output-path lcov.info --
           --skip textmate_golden::manifest_golden_cases_match_or_are_allowlisted
           --skip textmate_golden::manifest_golden_cases_have_no_budget_degradation
+          --skip textmate_golden::manifest_golden_cases_replay_incremental_state_deterministically
       - name: Upload coverage
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:

@@ -14,7 +14,7 @@ const outputs = [
   ['tests/fixtures/textmate/latex/hw2-theme.golden.jsonl', null],
   ['tests/fixtures/textmate/latex/hw2-theme.theme.golden.jsonl', 'assets/themes/github-dark-high-contrast.json'],
 ]
-const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'mark-theme-golden-'))
+const temporary = await fs.mkdtemp(path.join(os.tmpdir(), 'syntaxmate-theme-golden-'))
 try {
   for (const [output, theme] of outputs) {
     const generated = path.join(temporary, path.basename(output))

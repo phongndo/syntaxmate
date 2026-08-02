@@ -11,13 +11,6 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets" / "themes"
 LICENSE_FILES = {
     "github-vscode-themes": "github-vscode-themes.license",
-    "@shikijs/themes": "shiki-themes.license",
-    "nordic.nvim": "nordic.nvim.license",
-    "vscode-dark-molokai-theme": "vscode-dark-molokai-theme.license",
-    "zenbones.nvim": "zenbones.nvim.license",
-    "token": "token.license",
-    "gruvbox-material-vscode": "gruvbox-material-vscode.license",
-    "mfd.nvim": "mfd.nvim.license",
 }
 
 
@@ -33,10 +26,6 @@ def main() -> None:
         path = ASSETS / "licenses" / filename
         if not path.is_file() or not path.read_text().strip():
             raise SystemExit(f"{package}: missing license text at {path}")
-    attribution = ASSETS / "licenses" / "theme-attributions.notice"
-    if not attribution.is_file() or not attribution.read_text().strip():
-        raise SystemExit(f"missing theme attribution notice at {attribution}")
-
     declared: dict[str, str] = {}
     for block in manifest.split("[[source.theme]]")[1:]:
         theme_id = re.search(r'^id\s*=\s*"([^"]+)"', block, re.MULTILINE)

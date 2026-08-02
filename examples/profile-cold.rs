@@ -58,6 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .transpose()?
         .unwrap_or(1);
     let scope = scope.ok_or("--scope is required")?;
+    if !matches!(mode.as_str(), "process-cold" | "same-driver") {
+        return Err(format!("unsupported mode {mode:?}").into());
+    }
     let source = fs::read_to_string(fixture)?;
 
     // Catalog performance uses source assets so grammar discovery and file IO
@@ -77,20 +80,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         None
     };
 
-    let started = Instant::now();
-    let mut token_count = 0usize;
-    for _ in 0..iterations {
-        let mut tokenizer = if let Some((registry, root)) = &custom {
-            Tokenizer::new(registry, *root, TokenizerOptions::default())?
+    let create_tokenizer = || -> Result<Tokenizer, syntaxmate::Error> {
+        if let Some((registry, root)) = &custom {
+            Tokenizer::new(registry, *root, TokenizerOptions::default())
         } else {
             Tokenizer::for_bundled_language(
                 bundled_language
                     .as_deref()
                     .expect("bundled language selected"),
                 TokenizerOptions::default(),
-            )?
+            )
+        }
+    };
+    let mut same_driver = if mode == "same-driver" {
+        Some(create_tokenizer()?)
+    } else {
+        None
+    };
+
+    let started = Instant::now();
+    let mut token_count = 0usize;
+    for _ in 0..iterations {
+        let document = if let Some(tokenizer) = same_driver.as_mut() {
+            tokenizer.tokenize(&source)
+        } else {
+            create_tokenizer()?.tokenize(&source)
         };
-        let document = tokenizer.tokenize(&source);
         token_count += document
             .lines()
             .iter()

@@ -36,8 +36,8 @@ for (const file of themeFiles) {
   console.log(`${themeName}: ${stacks.length} selector cases match vscode-textmate`)
 }
 
-const randomized = randomizedConformance(0x4d41524b, 512, 4000)
-const randomThemePath = path.join(os.tmpdir(), `mark-random-theme-${process.pid}.json`)
+const randomized = randomizedConformance(0x53594e54, 512, 4000)
+const randomThemePath = path.join(os.tmpdir(), `syntaxmate-random-theme-${process.pid}.json`)
 await fs.writeFile(randomThemePath, JSON.stringify(randomized.theme))
 try {
   await checkTheme('seeded-random', randomized.theme, randomized.stacks, randomThemePath)
@@ -50,7 +50,7 @@ console.log(`ok: ${checked} resolved style cases across ${themeFiles.length} the
 
 async function checkTheme(themeName, theme, stacks, rustThemeName) {
   const grammarSource = {
-    scopeName: `source.mark-theme-oracle.${themeName}`,
+    scopeName: `source.syntaxmate-theme-oracle.${themeName}`,
     patterns: stacks.map((scopes, index) => ({
       match: `^T${String(index).padStart(5, '0')}$`,
       name: scopes.join(' '),
@@ -128,7 +128,7 @@ function randomizedConformance(seed, ruleCount, stackCount) {
     tokenColors.push({ scope: random() < 0.2 ? [selector, scope()] : selector, settings })
   }
   const theme = {
-    name: 'Mark seeded random conformance',
+    name: 'Syntaxmate seeded random conformance',
     colors: { 'editor.foreground': '#eeeeee', 'editor.background': '#101010' },
     tokenColors,
   }
@@ -147,7 +147,7 @@ function randomizedConformance(seed, ruleCount, stackCount) {
 function conformanceStacks(theme) {
   const unique = new Map()
   const add = scopes => unique.set(JSON.stringify(scopes), scopes)
-  add(['meta.unmatched.mark-oracle'])
+  add(['meta.unmatched.syntaxmate-oracle'])
   for (const rule of theme.tokenColors ?? []) {
     let selectors = typeof rule.scope === 'string'
       ? rule.scope.replace(/^,+|,+$/g, '').split(',')
@@ -158,8 +158,8 @@ function conformanceStacks(theme) {
       const target = parts.at(-1)
       const parents = parts.slice(0, -1).filter(part => part !== '>')
       add([...parents, target])
-      add([...parents, `${target}.mark-oracle-child`])
-      if (parents.length) add([parents[0], 'meta.intermediate.mark-oracle', ...parents.slice(1), target])
+      add([...parents, `${target}.syntaxmate-oracle-child`])
+      if (parents.length) add([parents[0], 'meta.intermediate.syntaxmate-oracle', ...parents.slice(1), target])
       add([`not-${target}`])
     }
   }

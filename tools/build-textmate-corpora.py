@@ -118,9 +118,9 @@ def build_core() -> dict:
         generated_aggregate.update(relative.encode())
         generated_aggregate.update(b"\0")
         generated_aggregate.update(data)
-        # The checked-in Make smoke fixture uses a .mk basename that Mark does
-        # not detect. Keep generating it for coverage, but preserve the
-        # historical detected-language acceptance corpus.
+        # The checked-in Make smoke fixture uses a .mk basename that the
+        # bundled catalog does not detect. Keep generating it for coverage, but
+        # preserve the historical detected-language acceptance corpus.
         detected = language != "make"
         if detected:
             aggregate.update(relative.encode())

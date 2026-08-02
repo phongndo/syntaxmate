@@ -6,7 +6,7 @@ import path from 'node:path'
 
 import { generateManifest, runGenerator } from './generate-textmate-cases.mjs'
 
-const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mark-textmate-cases-'))
+const root = await fs.mkdtemp(path.join(os.tmpdir(), 'syntaxmate-textmate-cases-'))
 try {
   const fixtures = path.join(root, 'fixtures')
   const grammars = path.join(root, 'grammars')

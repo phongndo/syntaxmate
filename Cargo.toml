@@ -28,6 +28,7 @@ include = [
   "EXTRACTION.md",
   "SECURITY.md",
   "SUPPORT.md",
+  "docs/api-design.md",
   "docs/architecture.md",
   "docs/assets.md",
   "docs/compatibility.md",
@@ -66,6 +67,11 @@ toml = "1.1"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[[test]]
+name = "custom_theme_session"
+path = "tests/custom_theme_session.rs"
+required-features = ["bundled-grammars"]
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
@@ -80,6 +86,16 @@ required-features = ["bundle-tools"]
 name = "regex-parse"
 path = "examples/regex-parse.rs"
 required-features = ["diagnostics"]
+
+[[example]]
+name = "regex-replay"
+path = "examples/regex-replay.rs"
+required-features = ["diagnostics"]
+
+[[example]]
+name = "theme-resolve"
+path = "examples/theme-resolve.rs"
+required-features = ["bundled-themes"]
 
 [[example]]
 name = "html"
