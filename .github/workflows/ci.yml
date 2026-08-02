@@ -121,7 +121,7 @@ jobs:
           tool: cargo-semver-checks
       - name: Check public API compatibility
         if: steps.baseline.outputs.exists == 'true'
-        run: cargo semver-checks check-release --manifest-path Cargo.toml
+        run: cargo +stable semver-checks check-release --manifest-path Cargo.toml
 
   golden:
     runs-on: ubuntu-latest
