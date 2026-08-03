@@ -3,7 +3,6 @@
 [![Crates.io](https://img.shields.io/crates/v/syntaxmate.svg)](https://crates.io/crates/syntaxmate)
 [![Documentation](https://docs.rs/syntaxmate/badge.svg)](https://docs.rs/syntaxmate)
 [![CI](https://github.com/phongndo/syntaxmate/actions/workflows/ci.yml/badge.svg)](https://github.com/phongndo/syntaxmate/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/phongndo/syntaxmate/graph/badge.svg)](https://codecov.io/gh/phongndo/syntaxmate)
 [![MSRV 1.88](https://img.shields.io/badge/MSRV-1.88-blue.svg)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 

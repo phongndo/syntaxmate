@@ -4,6 +4,7 @@ pub mod cache;
 pub mod checkpoint;
 pub mod counters;
 pub mod grammar;
+pub(crate) mod grammar_ir;
 pub(crate) mod hashing;
 pub mod line;
 pub mod regex;
@@ -45,13 +46,11 @@ pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::Gra
     Ok((grammars, root))
 }
 
-/// Decode, parse, and compile exactly the external-include closure of one root.
+/// Decode exactly the compiled external-include closure of one root.
 ///
 /// `CompiledGrammar` retains the complete include graph, so dependency
-/// discovery can walk it directly. The previous path first parsed every JSON
-/// blob into `serde_json::Value` for discovery and then parsed the same bytes
-/// again for compilation. Embedded-heavy grammars paid that duplicate work on
-/// their first visible highlight.
+/// discovery can walk it directly without parsing bundled JSON or compiling
+/// grammar rules at runtime.
 fn compiled_grammar_closure(
     bundle: &grammars::bundle::Bundle,
     root_scope: &str,
@@ -77,28 +76,14 @@ fn compiled_grammar_closure(
         }
         if compiled[index].is_none() {
             let blob = &bundle.grammar_blobs[index];
-            let bytes = blob.decoded_bytes().map_err(|error| {
-                Error::Grammar(format!(
-                    "failed to decode bundled TextMate grammar `{}`: {error:?}",
-                    blob.language
-                ))
-            })?;
-            let source = std::str::from_utf8(&bytes).map_err(|_| {
-                Error::Grammar(format!(
-                    "bundled TextMate grammar `{}` is not UTF-8",
-                    blob.language
-                ))
-            })?;
-            compiled[index] = Some(
-                grammar::load_dev_grammar_from_str(state::GrammarId(0), source).map_err(
-                    |error| {
-                        Error::Grammar(format!(
-                            "failed to load bundled TextMate grammar `{}`: {error}",
-                            blob.language
-                        ))
-                    },
-                )?,
-            );
+            compiled[index] = Some(blob.compiled_grammar(state::GrammarId(0)).map_err(
+                |error| {
+                    Error::Grammar(format!(
+                        "failed to decode bundled TextMate grammar `{}`: {error:?}",
+                        blob.language
+                    ))
+                },
+            )?);
         }
         let grammar = compiled[index]
             .as_ref()

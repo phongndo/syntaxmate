@@ -10,6 +10,8 @@
   repository walks, and copy-on-write grammar registry clones.
 - Reduce cold and incremental allocation pressure by directly decoding grammar
   unions, sharing interned scopes and capture specs, and compacting regex tries.
+- Store deterministic versioned compiled-grammar IR in the bundled asset,
+  removing runtime JSON parsing and rule compilation for bundled languages.
 
 ## 0.1.0 - 2026-08-01
 

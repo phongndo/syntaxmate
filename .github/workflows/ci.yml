@@ -277,7 +277,6 @@ jobs:
     timeout-minutes: 25
     permissions:
       contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
@@ -296,13 +295,6 @@ jobs:
           --skip textmate_golden::manifest_golden_cases_match_or_are_allowlisted
           --skip textmate_golden::manifest_golden_cases_have_no_budget_degradation
           --skip textmate_golden::manifest_golden_cases_replay_incremental_state_deterministically
-      - name: Upload coverage
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        with:
-          use_oidc: true
-          files: lcov.info
-          disable_search: true
-          fail_ci_if_error: false
 
   dependency-review:
     if: github.event_name == 'pull_request'

@@ -6,11 +6,21 @@ use std::{
 
 #[path = "../src/grammars/catalog.rs"]
 mod catalog;
+#[allow(dead_code)]
+#[path = "../src/engine/grammar.rs"]
+mod grammar;
+#[allow(dead_code)]
+#[path = "../src/engine/grammar_ir.rs"]
+mod grammar_ir;
+#[allow(dead_code)]
+#[path = "../src/engine/state.rs"]
+mod state;
 
 const MAGIC: &[u8; 4] = b"MRKB";
-const FORMAT_VERSION: u16 = 1;
+const FORMAT_VERSION: u16 = 2;
 const CODEC_NONE: u32 = 0;
 const CODEC_DEFLATE_ZLIB: u32 = 1;
+const GRAMMAR_BLOB_COMPILED_IR: u32 = 1;
 const SECTION_STRINGS: u32 = 3;
 const SECTION_SCOPES: u32 = 4;
 const SECTION_LANGUAGES: u32 = 5;
@@ -28,6 +38,7 @@ struct GrammarAsset {
     first_line_pattern: Option<String>,
     bytes: Vec<u8>,
     scopes: Vec<String>,
+    pattern_count: u32,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -131,6 +142,13 @@ fn run() -> Result<(), String> {
     hash_bytes.extend_from_slice(
         &fs::read(manifest_dir.join("src/grammars/catalog.rs")).unwrap_or_default(),
     );
+    for path in [
+        "src/engine/grammar.rs",
+        "src/engine/grammar_ir.rs",
+        "src/engine/state.rs",
+    ] {
+        hash_bytes.extend_from_slice(&fs::read(manifest_dir.join(path)).unwrap_or_default());
+    }
     let input_hash = fnv1a64(&hash_bytes);
     let bytes = build_bundle(&assets, input_hash)?;
     let version = read_bundle_hash(&bytes).unwrap_or(0);
@@ -310,13 +328,10 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
                 language: grammar.language.clone(),
                 scope_name: grammar.scope_name.clone(),
                 codec,
-                flags: 0,
+                flags: GRAMMAR_BLOB_COMPILED_IR,
                 raw_len: grammar.bytes.len() as u32,
                 bytes,
-                pattern_count: count_key(&grammar.bytes, b"\"match\"")
-                    + count_key(&grammar.bytes, b"\"begin\"")
-                    + count_key(&grammar.bytes, b"\"end\"")
-                    + count_key(&grammar.bytes, b"\"while\""),
+                pattern_count: grammar.pattern_count,
                 dfa_count: 0,
                 fallback_count: 0,
             }
@@ -391,21 +406,27 @@ fn collect_grammars(assets: &Path) -> Result<Vec<GrammarAsset>, String> {
             continue;
         }
         let source_bytes = fs::read(&path).map_err(|e| e.to_string())?;
+        let source =
+            std::str::from_utf8(&source_bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         let json = serde_json::from_slice::<serde_json::Value>(&source_bytes)
             .map_err(|e| format!("{}: {e}", path.display()))?;
-        // The runtime parses individual blobs lazily. Store canonical compact
-        // JSON so whitespace in vendored, reviewable sources does not inflate
-        // every Syntaxmate consumer.
-        let bytes = serde_json::to_vec(&json).map_err(|e| e.to_string())?;
-        let scope_name = json
-            .get("scopeName")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| format!("{}: missing scopeName", path.display()))?
-            .to_owned();
-        let first_line_pattern = json
-            .get("firstLineMatch")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned);
+        let compiled =
+            grammar::load_dev_grammar_from_path(state::GrammarId(0), Some(path.as_path()), source)
+                .map_err(|error| error.to_string())?;
+        let bytes = grammar_ir::encode_compiled_grammar(&compiled)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let decoded =
+            grammar_ir::decode_compiled_grammar(state::GrammarId(0), &bytes).map_err(|error| {
+                format!("{}: generated IR failed to decode: {error}", path.display())
+            })?;
+        if decoded != compiled {
+            return Err(format!(
+                "{}: generated IR does not round-trip the compiled grammar",
+                path.display()
+            ));
+        }
+        let scope_name = compiled.scope_name.clone();
+        let first_line_pattern = compiled.metadata.first_line_match.clone();
         let language = path
             .file_name()
             .and_then(|name| name.to_str())
@@ -421,6 +442,8 @@ fn collect_grammars(assets: &Path) -> Result<Vec<GrammarAsset>, String> {
             first_line_pattern,
             bytes,
             scopes: scopes.into_iter().collect(),
+            pattern_count: u32::try_from(compiled.patterns.len())
+                .map_err(|_| format!("{}: too many patterns", path.display()))?,
         });
     }
     Ok(grammars)
@@ -787,13 +810,6 @@ fn collect_files(path: &Path, out: &mut Vec<PathBuf>) {
 
 fn read_bundle_hash(bytes: &[u8]) -> Option<u64> {
     Some(u64::from_le_bytes(bytes.get(16..24)?.try_into().ok()?))
-}
-
-fn count_key(bytes: &[u8], key: &[u8]) -> u32 {
-    bytes
-        .windows(key.len())
-        .filter(|window| *window == key)
-        .count() as u32
 }
 
 fn normalize_path(path: &Path) -> String {

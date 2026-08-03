@@ -204,7 +204,7 @@ allowlisted or silently stale fixture output.
 
 | Layer | Allowed | Forbidden in release |
 | --- | --- | --- |
-| Product binary (`syntaxmate` / CLI) | Pure Rust; vendored grammar JSON; build-time `bundle.bin` | Node, npm, network at build/runtime for highlighting |
+| Product binary (`syntaxmate` / CLI) | Pure Rust; versioned compiled `grammars.bundle`; caller-supplied custom JSON | Node, npm, network at build/runtime for highlighting |
 | Dev oracle (`tools/golden-oracle`) | Pinned `vscode-textmate@9.2.0`, `vscode-oniguruma@1.7.0` | Version ranges (`^`/`~`); resolving packages from unrelated trees |
 | Tests | Checked-in `.golden.jsonl`, optional Node for regen | Requiring Node in default `cargo test` |
 
@@ -295,9 +295,10 @@ are exact gates. `divergences.toml` contains no exceptions.
 - License table and bundle version stamp.
 - No network/Node in release builds.
 
-**Current state.** Bundle format and compile path are in production. The runtime
-decodes only the selected grammar and its embedding dependencies; compact JSON
-is stored once in the bundle rather than duplicated through the dev asset table.
+**Current state.** `MRKB` version 2 stores individually compressed, versioned
+compiled-grammar IR. The runtime decodes only the selected grammar and its
+embedding dependencies without parsing bundled JSON or compiling rules. The dev
+loader remains the custom caller-supplied JSON path.
 
 ### Phase 5 — performance layer
 

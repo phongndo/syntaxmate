@@ -1,20 +1,20 @@
 //! Deterministic `MRKB` bundle reader/writer.
 //!
 //! The production highlighter resolves every grammar through this bundle. It
-//! is a byte-level container with eager metadata and lazy per-grammar blob
-//! access, produced by the `grammar-compile` build step.
+//! is a byte-level container with eager metadata and lazy per-grammar compiled
+//! IR access, produced by the `syntaxmate-bundle` tool.
 
 use std::{collections::BTreeMap, path::Path};
 
 use crate::engine::{
-    grammar::{CompiledGrammar, load_dev_grammar_from_str},
-    state::GrammarId,
+    grammar::CompiledGrammar, grammar_ir::decode_compiled_grammar, state::GrammarId,
 };
 
 pub const MAGIC: &[u8; 4] = b"MRKB";
-pub const FORMAT_VERSION: u16 = 1;
+pub const FORMAT_VERSION: u16 = 2;
 pub const CODEC_NONE: u32 = 0;
 pub const CODEC_DEFLATE_ZLIB: u32 = 1;
+pub const GRAMMAR_BLOB_COMPILED_IR: u32 = 1;
 pub const SECTION_STRINGS: u32 = 3;
 pub const SECTION_SCOPES: u32 = 4;
 pub const SECTION_LANGUAGES: u32 = 5;
@@ -100,10 +100,11 @@ pub enum BundleError {
     BadGrammarBlobId(u32),
     BadLicenseId(u32),
     BadCodec(u32),
+    BadGrammarFlags { language: String, flags: u32 },
     Inflate { language: String },
     Truncated(&'static str),
     TrailingBytes(&'static str),
-    GrammarParse { language: String, message: String },
+    GrammarIr { language: String, message: String },
 }
 
 #[derive(Debug, Clone)]
@@ -139,15 +140,8 @@ impl BundleGrammarRegistry {
                 .bundle
                 .grammar_blob_for_language(&canonical)
                 .ok_or(BundleError::BadGrammarBlobId(u32::MAX))?;
-            let bytes = blob.decoded_bytes()?;
-            let source = std::str::from_utf8(&bytes).map_err(|_| BundleError::BadUtf8)?;
             let id = GrammarId(self.cache.len() as u16);
-            let grammar = load_dev_grammar_from_str(id, source).map_err(|error| {
-                BundleError::GrammarParse {
-                    language: canonical.clone(),
-                    message: error.to_string(),
-                }
-            })?;
+            let grammar = blob.compiled_grammar(id)?;
             self.cache.insert(canonical.clone(), grammar);
         }
         Ok(self
@@ -169,6 +163,20 @@ impl BundleGrammarRegistry {
 }
 
 impl GrammarBlob {
+    pub fn compiled_grammar(&self, id: GrammarId) -> Result<CompiledGrammar, BundleError> {
+        if self.flags != GRAMMAR_BLOB_COMPILED_IR {
+            return Err(BundleError::BadGrammarFlags {
+                language: self.language.clone(),
+                flags: self.flags,
+            });
+        }
+        let bytes = self.decoded_bytes()?;
+        decode_compiled_grammar(id, &bytes).map_err(|error| BundleError::GrammarIr {
+            language: self.language.clone(),
+            message: error.to_string(),
+        })
+    }
+
     pub fn decoded_bytes(&self) -> Result<Vec<u8>, BundleError> {
         match self.codec {
             CODEC_NONE => Ok(self.bytes.clone()),
@@ -841,8 +849,18 @@ impl<'a> Cursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{grammar::load_dev_grammar_from_str, grammar_ir::encode_compiled_grammar};
+
+    fn grammar_ir(scope_name: &str, pattern: &str) -> Vec<u8> {
+        let source = format!(
+            r#"{{"scopeName":"{scope_name}","patterns":[{{"match":"{pattern}","name":"constant.language.fixture"}}]}}"#
+        );
+        let grammar = load_dev_grammar_from_str(GrammarId(0), &source).unwrap();
+        encode_compiled_grammar(&grammar).unwrap()
+    }
 
     fn sample_bundle() -> Bundle {
+        let grammar_bytes = grammar_ir("source.rust", "true");
         Bundle {
             source_hash: 7,
             bundle_hash: 0,
@@ -862,9 +880,9 @@ mod tests {
                 language: "rust".to_owned(),
                 scope_name: "source.rust".to_owned(),
                 codec: CODEC_NONE,
-                flags: 0,
-                raw_len: 2,
-                bytes: b"{}".to_vec(),
+                flags: GRAMMAR_BLOB_COMPILED_IR,
+                raw_len: grammar_bytes.len() as u32,
+                bytes: grammar_bytes,
                 pattern_count: 0,
                 dfa_count: 0,
                 fallback_count: 0,
@@ -906,18 +924,42 @@ mod tests {
     }
 
     #[test]
+    fn rejects_stale_bundle_version() {
+        let mut bytes = sample_bundle().to_bytes();
+        bytes[4..6].copy_from_slice(&(FORMAT_VERSION - 1).to_le_bytes());
+        assert_eq!(
+            Bundle::parse(&bytes),
+            Err(BundleError::UnsupportedVersion(FORMAT_VERSION - 1))
+        );
+    }
+
+    #[test]
     fn registry_decodes_grammar_blob_lazily() {
         let mut bundle = sample_bundle();
         bundle.languages[0].canonical = "fixture".to_owned();
         bundle.languages[0].aliases = vec!["fx".to_owned()];
         bundle.grammar_blobs[0].language = "fixture".to_owned();
-        bundle.grammar_blobs[0].bytes = br#"{"scopeName":"source.fixture","patterns":[{"match":"true","name":"constant.language.fixture"}]}"#.to_vec();
+        bundle.grammar_blobs[0].scope_name = "source.fixture".to_owned();
+        bundle.grammar_blobs[0].bytes = grammar_ir("source.fixture", "true");
         bundle.grammar_blobs[0].raw_len = bundle.grammar_blobs[0].bytes.len() as u32;
         let parsed = Bundle::parse(&bundle.to_bytes()).unwrap();
         let mut registry = BundleGrammarRegistry::new(parsed);
         let grammar = registry.grammar("fx").unwrap();
         assert_eq!(grammar.scope_name, "source.fixture");
         assert_eq!(grammar.patterns, vec!["true".to_owned()]);
+    }
+
+    #[test]
+    fn registry_rejects_truncated_compiled_grammar_ir() {
+        let mut bundle = sample_bundle();
+        bundle.grammar_blobs[0].bytes.pop();
+        bundle.grammar_blobs[0].raw_len = bundle.grammar_blobs[0].bytes.len() as u32;
+        let parsed = Bundle::parse(&bundle.to_bytes()).unwrap();
+        let mut registry = BundleGrammarRegistry::new(parsed);
+        assert!(matches!(
+            registry.grammar("rust"),
+            Err(BundleError::GrammarIr { .. })
+        ));
     }
 
     #[test]

@@ -33,6 +33,7 @@ include = [
   "docs/assets.md",
   "docs/compatibility.md",
   "docs/language-status.md",
+  "docs/performance-roadmap.md",
   "docs/quality.md",
   "docs/rendering.md",
   "docs/releasing.md",
