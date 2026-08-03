@@ -17,6 +17,29 @@ TextMate theme at runtime.
 Release builds consume committed files only. They never download assets or run
 Node.
 
+## Grammar bundle format and compatibility
+
+`assets/grammars.bundle` is an `MRKB` little-endian sectioned container. Format
+version 2 contains sorted string/scope metadata, public language records,
+individually compressed grammar blobs, and license records. Grammar blobs with
+flag `1` contain `CGIR` version 1: a deterministic compiled-grammar encoding
+with an insertion-ordered grammar string table, lexical supplemental strings,
+unsigned varints, tagged rule bodies/references, and checked IDs. Deflate remains
+per grammar so the runtime can decode only a selected external-include closure.
+
+The bundle builder parses and compiles vendored JSON, writes `CGIR`, and includes
+the compiler/codec sources in the generated source hash. The runtime rejects
+unknown `MRKB` or `CGIR` versions and malformed/truncated records rather than
+attempting a best-effort interpretation. Custom caller-supplied grammars still
+use the JSON grammar compiler; only committed bundled grammars use binary IR.
+
+Regenerate and verify the artifact with:
+
+```sh
+cargo run --locked --bin syntaxmate-bundle --features bundle-tools --
+cargo run --locked --bin syntaxmate-bundle --features bundle-tools -- --check
+```
+
 ## Updating a grammar or theme
 
 1. Pin an immutable upstream revision and verify its license.

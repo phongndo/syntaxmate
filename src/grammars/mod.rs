@@ -197,7 +197,6 @@ impl BundleSummary {
 mod tests {
     use super::*;
     use crate::engine::{
-        grammar::load_dev_grammar_from_str,
         state::GrammarId,
         tokenizer::{GrammarSet, TextMateTokenizer},
     };
@@ -822,10 +821,9 @@ mod tests {
         let bundle = embedded_bundle();
         let mut grammars = GrammarSet::new();
         for (index, blob) in bundle.grammar_blobs.iter().enumerate() {
-            let bytes = blob.decoded_bytes().unwrap();
-            let source = std::str::from_utf8(&bytes).unwrap();
-            let grammar = load_dev_grammar_from_str(GrammarId(index as u16), source)
-                .unwrap_or_else(|error| panic!("{} failed to parse: {error}", blob.language));
+            let grammar = blob
+                .compiled_grammar(GrammarId(index as u16))
+                .unwrap_or_else(|error| panic!("{} failed to decode: {error:?}", blob.language));
             grammars.add(grammar);
         }
 

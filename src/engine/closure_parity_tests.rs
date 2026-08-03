@@ -1,4 +1,8 @@
-use std::collections::{BTreeSet, HashMap};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 
 use serde_json::Value;
 
@@ -7,6 +11,7 @@ use super::{compiled_grammar_closure, grammars};
 #[test]
 fn compiled_dependency_walk_matches_representative_json_contracts() {
     let bundle = grammars::embedded_bundle();
+    let sources = reference_grammars();
     // Embedded-heavy roots exercise broad external closures; Wikitext also
     // guards the local-repository boundary that must not expand into every
     // fenced language in the catalog.
@@ -21,16 +26,43 @@ fn compiled_dependency_walk_matches_representative_json_contracts() {
             .into_iter()
             .map(|grammar| grammar.scope_name)
             .collect::<Vec<_>>();
-        let expected = reference_closure(bundle, &language.scope_name);
+        let expected = reference_closure(bundle, &language.scope_name, &sources);
         assert_eq!(actual, expected, "{}", language.canonical);
     }
 }
 
-fn reference_closure(bundle: &grammars::bundle::Bundle, root_scope: &str) -> Vec<String> {
+fn reference_grammars() -> BTreeMap<String, Value> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/grammars/languages");
+    let mut entries = fs::read_dir(directory)
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    entries.sort_by_key(|entry| entry.file_name());
+    let mut sources = BTreeMap::new();
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("json") {
+            continue;
+        }
+        let grammar = serde_json::from_slice::<Value>(&fs::read(path).unwrap()).unwrap();
+        let scope = grammar
+            .get("scopeName")
+            .and_then(Value::as_str)
+            .expect("bundled source grammar has scopeName")
+            .to_owned();
+        sources.insert(scope, grammar);
+    }
+    sources
+}
+
+fn reference_closure(
+    bundle: &grammars::bundle::Bundle,
+    root_scope: &str,
+    sources: &BTreeMap<String, Value>,
+) -> Vec<String> {
     let mut pending = vec![(root_scope.to_owned(), None::<String>)];
     let mut selected = BTreeSet::new();
     let mut inspected = BTreeSet::new();
-    let mut decoded = HashMap::new();
     while let Some((scope, repository)) = pending.pop() {
         let Some((index, blob)) = bundle
             .grammar_blobs
@@ -44,9 +76,9 @@ fn reference_closure(bundle: &grammars::bundle::Bundle, root_scope: &str) -> Vec
         if !inspected.insert((index, repository.clone())) {
             continue;
         }
-        let json = decoded.entry(index).or_insert_with(|| {
-            serde_json::from_slice::<Value>(&blob.decoded_bytes().unwrap()).unwrap()
-        });
+        let json = sources
+            .get(&scope)
+            .unwrap_or_else(|| panic!("missing source grammar for {scope}"));
         collect_external_scopes(
             json,
             &blob.scope_name,

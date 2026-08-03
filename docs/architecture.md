@@ -8,8 +8,9 @@ optimizations can evolve without forcing downstream migrations.
 
 1. **Catalog and assets** — a deterministic compressed grammar bundle, embedded
    themes, aliases, path metadata, and third-party provenance.
-2. **Grammar compiler** — parses JSON TextMate rules, validates IDs and include
-   graphs, and compiles immutable grammar structures.
+2. **Grammar compiler and IR** — compiles vendored JSON into deterministic,
+   versioned immutable grammar records at asset-generation time; the same JSON
+   compiler remains available for caller-supplied custom grammars.
 3. **Regex engine** — routes regular patterns through scanners/automata and
    advanced Oniguruma constructs through a budgeted native backtracker.
 4. **Tokenizer** — applies TextMate grammar ordering, captures, injections,
@@ -46,6 +47,8 @@ internal syntax classes are not public API.
 ## Runtime access
 
 The release library performs no filesystem, network, process-environment, or
-Node access. Custom assets are supplied as strings by the caller; bundled assets
-are compiled into the crate. Development tooling owns vendoring, checksums,
-oracle generation, and corpus production.
+Node access. Custom assets are supplied as strings by the caller. Bundled assets
+are compiled into the crate and their selected compiled-grammar closure is
+decoded lazily without runtime JSON parsing or rule compilation. Development
+tooling owns vendoring, grammar compilation, checksums, oracle generation, and
+corpus production.

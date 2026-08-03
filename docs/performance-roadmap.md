@@ -27,18 +27,25 @@ under `benchmarks/textmate/`.
 
 ### 1. Compiled grammar IR in the bundle
 
-- [ ] Store a versioned deterministic binary representation of
+- [x] Store a versioned deterministic binary representation of
       `CompiledGrammar` in each grammar blob.
-- [ ] Decode the IR directly for bundled grammars while retaining JSON
+- [x] Decode the IR directly for bundled grammars while retaining JSON
       compilation for custom grammars.
-- [ ] Reject stale bundle versions and malformed/truncated IR.
-- [ ] Regenerate `assets/grammars.bundle` and document its format/version.
-- [ ] Measure bundle size, cold construction, first tokenization, and allocation
+- [x] Reject stale bundle versions and malformed/truncated IR.
+- [x] Regenerate `assets/grammars.bundle` and document its format/version.
+- [x] Measure bundle size, cold construction, first tokenization, and allocation
       changes on embedded-heavy and core grammars.
 
-Expected result: remove bundled runtime JSON deserialization and grammar-rule
-compilation, reducing cold latency and allocation pressure most strongly for
-Markdown and other embedded grammars.
+Result: seven alternating release samples reduced median process-cold time by
+1.63x for Markdown, 1.12x for C++, and 1.08x for Rust and HTML. Construction
+allocation calls fell by 38.6%, 30.3%, 1.6%, and 11.4%, respectively; cumulative
+construction bytes fell by 63.6%, 51.1%, 0.6%, and 29.4%. First/warm,
+incremental, and highlighting allocation counts remained identical. Benchmark
+token counts and the complete golden scope streams were unchanged. The compact
+raw grammar payload shrank 38.5%, while independently compressed blobs increased
+the complete committed bundle from 2,048,812 to 2,274,428 bytes (+11.0%) and
+changed retained construction bytes by -4.0% to +6.2% depending on closure size.
+The raw report is `target/profile-item1-comparison.json`.
 
 ### 2. Explicit prepared-language API
 
