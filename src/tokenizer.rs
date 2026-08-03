@@ -108,6 +108,7 @@ pub struct GrammarId {
 pub struct Tokenizer {
     id: u64,
     inner: TextMateTokenizer,
+    parse_line_buffer: String,
 }
 
 impl Tokenizer {
@@ -126,6 +127,7 @@ impl Tokenizer {
         Ok(Self {
             id: NEXT_TOKENIZER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             inner,
+            parse_line_buffer: String::new(),
         })
     }
 
@@ -140,6 +142,7 @@ impl Tokenizer {
         Ok(Self {
             id: NEXT_TOKENIZER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             inner,
+            parse_line_buffer: String::new(),
         })
     }
 
@@ -164,23 +167,34 @@ impl Tokenizer {
             return Err(Error::InvalidLine);
         }
 
-        let parse_text = format!("{line}\n");
-        let tokenized = self
+        let tokenized = if self
             .inner
-            .tokenize_line_scopes(&parse_text, state.inner.clone());
+            .max_line_bytes()
+            .is_some_and(|max_line_bytes| line.len() >= max_line_bytes)
+        {
+            // The parser adds one synthetic newline, so a line at the byte
+            // limit is already too large. Skip it without filling the buffer.
+            self.inner
+                .tokenize_line_shared_scopes_skipped(line, state.inner.clone())
+        } else {
+            self.parse_line_buffer.clear();
+            self.parse_line_buffer.push_str(line);
+            self.parse_line_buffer.push('\n');
+            self.inner
+                .tokenize_line_shared_scopes(&self.parse_line_buffer, state.inner.clone())
+        };
         state.inner = tokenized.state;
         let tokens = tokenized
             .tokens
-            .iter()
+            .into_iter()
             .filter_map(|token| {
                 let start = token.range.start.min(line.len());
                 let end = token.range.end.min(line.len());
-                (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then(
-                    || ScopedToken {
+                (start < end && line.is_char_boundary(start) && line.is_char_boundary(end))
+                    .then_some(ScopedToken {
                         range: start..end,
-                        scopes: token.scopes.clone(),
-                    },
-                )
+                        scopes: token.scopes,
+                    })
             })
             .collect();
         let status = if self.inner.take_degraded() {
@@ -315,7 +329,7 @@ impl HighlightStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedToken {
     range: Range<usize>,
-    scopes: Vec<String>,
+    scopes: Arc<[Arc<str>]>,
 }
 
 impl ScopedToken {
@@ -324,7 +338,12 @@ impl ScopedToken {
     }
 
     pub fn scopes(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.scopes.iter().map(String::as_str)
+        self.scopes.iter().map(AsRef::as_ref)
+    }
+
+    #[cfg(feature = "bundled-grammars")]
+    pub(crate) fn into_parts(self) -> (Range<usize>, Arc<[Arc<str>]>) {
+        (self.range, self.scopes)
     }
 }
 
@@ -341,6 +360,11 @@ impl TokenizedLine {
 
     pub fn status(&self) -> HighlightStatus {
         self.status
+    }
+
+    #[cfg(feature = "bundled-grammars")]
+    pub(crate) fn into_parts(self) -> (Vec<ScopedToken>, HighlightStatus) {
+        (self.tokens, self.status)
     }
 }
 
@@ -394,5 +418,34 @@ impl TokenizedDocument {
 
     pub fn status(&self) -> HighlightStatus {
         self.status
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejected_incremental_lines_do_not_grow_parse_buffer() {
+        let mut registry = GrammarRegistry::new();
+        let root = registry
+            .add_json(r#"{"scopeName":"source.test","patterns":[]}"#)
+            .unwrap();
+        let options = TokenizerOptions {
+            max_line_bytes: 8,
+            ..TokenizerOptions::default()
+        };
+        let mut tokenizer = Tokenizer::new(&registry, root, options).unwrap();
+        let mut state = tokenizer.initial_state();
+        let initial_capacity = tokenizer.parse_line_buffer.capacity();
+
+        for line in ["x".repeat(options.max_line_bytes), "x".repeat(64 * 1024)] {
+            let tokenized = tokenizer.tokenize_line(&line, &mut state).unwrap();
+
+            assert_eq!(tokenized.status(), HighlightStatus::Degraded);
+            assert!(state.is_initial());
+            assert_eq!(tokenizer.parse_line_buffer.capacity(), initial_capacity);
+            assert_eq!(tokenized.tokens()[0].range(), 0..line.len());
+        }
     }
 }

@@ -75,6 +75,12 @@ pub struct ScopedToken {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SharedScopedToken {
+    pub(crate) range: Range<usize>,
+    pub(crate) scopes: Arc<[Arc<str>]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CompactScopedToken {
     pub(crate) range: Range<usize>,
     pub(crate) stack: ScopeStackId,
@@ -161,6 +167,12 @@ pub struct TokenizedLine {
     pub state: TokenizerState,
     pub entry_state_id: StateId,
     pub exit_state_id: StateId,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SharedTokenizedLine {
+    pub(crate) tokens: Vec<SharedScopedToken>,
+    pub(crate) state: TokenizerState,
 }
 
 #[derive(Debug, Clone)]
@@ -1305,11 +1317,56 @@ impl TextMateTokenizer {
         self.resolve_compact_line(compact)
     }
 
+    pub(crate) fn tokenize_line_shared_scopes(
+        &mut self,
+        parse_text: &str,
+        state: TokenizerState,
+    ) -> SharedTokenizedLine {
+        let compact = self.tokenize_line_compact_at_line(parse_text, state, 0);
+        self.resolve_shared_compact_line(compact)
+    }
+
+    pub(crate) fn tokenize_line_shared_scopes_skipped(
+        &mut self,
+        parse_text: &str,
+        state: TokenizerState,
+    ) -> SharedTokenizedLine {
+        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, 0, true);
+        self.resolve_shared_compact_line(compact)
+    }
+
+    fn resolve_shared_compact_line(
+        &mut self,
+        compact: CompactTokenizedLine,
+    ) -> SharedTokenizedLine {
+        let mut tokens = Vec::with_capacity(compact.tokens.len());
+        for token in compact.tokens.iter() {
+            tokens.push(SharedScopedToken {
+                range: token.range.clone(),
+                scopes: self.resolve_scope_stack_cached(token.stack),
+            });
+        }
+        SharedTokenizedLine {
+            tokens,
+            state: compact.state,
+        }
+    }
+
     fn tokenize_line_compact_at_line(
+        &mut self,
+        parse_text: &str,
+        state: TokenizerState,
+        line_index: usize,
+    ) -> CompactTokenizedLine {
+        self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, false)
+    }
+
+    fn tokenize_line_compact_at_line_inner(
         &mut self,
         parse_text: &str,
         mut state: TokenizerState,
         line_index: usize,
+        force_degraded: bool,
     ) -> CompactTokenizedLine {
         let is_first_line = line_index == 0;
         self.record_line_tokenized();
@@ -1319,7 +1376,7 @@ impl TextMateTokenizer {
         self.regex_scratch.begin_line(parse_text);
         let parse_fingerprint = LineTextFingerprint::from_text(parse_text);
         let entry_state_id = self.intern_state(&state);
-        if self.fallback_call_budget_remaining == Some(0) {
+        if force_degraded || self.fallback_call_budget_remaining == Some(0) {
             self.record_line_skipped();
             self.record_degraded_line();
             let stack = self.current_scope_stack_id(&state, true, None);
@@ -2139,10 +2196,10 @@ impl TextMateTokenizer {
                                             begin_captures,
                                             repository_context,
                                         ),
-                                        end_captures: Arc::new(contextualize_capture_spec(
+                                        end_captures: contextualize_capture_spec(
                                             end_captures,
                                             repository_context,
-                                        )),
+                                        ),
                                         name: scope_name(grammar, *name).map(Arc::from),
                                         content_name: scope_name(grammar, *content_name)
                                             .map(Arc::from),
@@ -2191,10 +2248,10 @@ impl TextMateTokenizer {
                                             begin_captures,
                                             repository_context,
                                         ),
-                                        while_captures: Arc::new(contextualize_capture_spec(
+                                        while_captures: contextualize_capture_spec(
                                             while_captures,
                                             repository_context,
-                                        )),
+                                        ),
                                         name: scope_name(grammar, *name).map(Arc::from),
                                         content_name: scope_name(grammar, *content_name)
                                             .map(Arc::from),
@@ -4170,13 +4227,13 @@ enum CandidateKind {
         grammar_id: GrammarId,
         name: Option<String>,
         name_template: Option<ScopeTemplateId>,
-        captures: CaptureSpec,
+        captures: Arc<CaptureSpec>,
     },
     BeginEnd {
         grammar_id: GrammarId,
         rule_id: RuleId,
         end: PatternId,
-        begin_captures: CaptureSpec,
+        begin_captures: Arc<CaptureSpec>,
         end_captures: Arc<CaptureSpec>,
         name: Option<Arc<str>>,
         content_name: Option<Arc<str>>,
@@ -4190,7 +4247,7 @@ enum CandidateKind {
         grammar_id: GrammarId,
         rule_id: RuleId,
         while_pattern: PatternId,
-        begin_captures: CaptureSpec,
+        begin_captures: Arc<CaptureSpec>,
         while_captures: Arc<CaptureSpec>,
         name: Option<Arc<str>>,
         content_name: Option<Arc<str>>,
@@ -4395,17 +4452,17 @@ fn contextualize_refs(refs: &[RuleRef], context: Option<&RepositoryBindings>) ->
 }
 
 fn contextualize_capture_spec(
-    captures: &CaptureSpec,
+    captures: &Arc<CaptureSpec>,
     context: Option<&RepositoryBindings>,
-) -> CaptureSpec {
-    let Some(context) = context else {
-        return captures.clone();
+) -> Arc<CaptureSpec> {
+    let Some(context) = context.filter(|context| !context.is_empty()) else {
+        return Arc::clone(captures);
     };
-    let mut captures = captures.clone();
-    for entry in captures.entries.values_mut() {
+    let mut contextualized = captures.as_ref().clone();
+    for entry in contextualized.entries.values_mut() {
         entry.patterns = contextualize_refs(&entry.patterns, Some(context));
     }
-    captures
+    Arc::new(contextualized)
 }
 
 /// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
@@ -6576,7 +6633,7 @@ mod tests {
                 grammar_id: GrammarId(0),
                 name: Some(name.to_owned()),
                 name_template: None,
-                captures: CaptureSpec::default(),
+                captures: Arc::new(CaptureSpec::default()),
             },
         };
 

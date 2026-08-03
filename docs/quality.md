@@ -62,6 +62,16 @@ throughput, bundle size, and theme cache behavior. The validation policy keeps
 the reference-machine floor separate from conservative per-language and
 aggregate floors calibrated for variable GitHub-hosted runners.
 
+Use the allocation profiler to compare construction, first/warm whole-document
+runs, incremental tokenization, and incremental highlighting on one corpus:
+
+```sh
+cargo run --release --example profile-alloc -- rust path/to/source.rs
+```
+
+It reports allocation/reallocation calls, cumulative allocated bytes, retained
+bytes at the phase boundary, elapsed time, and allocations per KiB.
+
 ## Release evidence
 
 A release tag is required to match `Cargo.toml` and a non-Unreleased changelog

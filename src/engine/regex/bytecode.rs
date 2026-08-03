@@ -51,6 +51,10 @@ struct ClassId(u32);
 #[derive(Debug, Clone, Copy)]
 struct LiteralTrieId(u32);
 
+// Keep speculative trie allocation proportional for small inventories while
+// bounding over-reservation when many branches share the same prefixes.
+const LITERAL_TRIE_NODE_RESERVE_LIMIT: usize = 4 * 1024;
+
 /// Ordered trie for an alternation whose branches are all exact literals.
 ///
 /// A normal bytecode alternation tests every branch prefix independently.
@@ -64,15 +68,48 @@ struct LiteralTrie {
     unicode_nodes: Vec<UnicodeLiteralTrieNode>,
 }
 
+#[derive(Debug, Clone)]
+enum LiteralTrieEdges<T> {
+    Empty,
+    One((T, u32)),
+    Many(Vec<(T, u32)>),
+}
+
+impl<T> Default for LiteralTrieEdges<T> {
+    fn default() -> Self {
+        Self::Empty
+    }
+}
+
+impl<T: Copy> LiteralTrieEdges<T> {
+    fn iter(&self) -> std::slice::Iter<'_, (T, u32)> {
+        match self {
+            Self::Empty => [].iter(),
+            Self::One(edge) => std::slice::from_ref(edge).iter(),
+            Self::Many(edges) => edges.iter(),
+        }
+    }
+
+    fn push(&mut self, edge: (T, u32)) {
+        match self {
+            Self::Empty => *self = Self::One(edge),
+            Self::One(first) => *self = Self::Many(vec![*first, edge]),
+            Self::Many(edges) => edges.push(edge),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct LiteralTrieNode {
-    edges: Vec<(u8, u32)>,
+    // Most trie nodes have one child. Keeping that edge inline avoids one heap
+    // allocation per byte while preserving a Vec only for actual branches.
+    edges: LiteralTrieEdges<u8>,
     terminal_order: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
 struct UnicodeLiteralTrieNode {
-    edges: Vec<(char, u32)>,
+    edges: LiteralTrieEdges<char>,
     terminal_order: Option<u32>,
 }
 
@@ -1779,12 +1816,30 @@ impl Compiler {
 
 impl LiteralTrie {
     fn new(literals: &[String], flags: RegexFlags) -> Result<Self, CompileError> {
+        let unicode = flags.case_insensitive && literals.iter().any(|literal| !literal.is_ascii());
+        let node_capacity = literals
+            .iter()
+            .fold(1usize, |nodes, literal| {
+                nodes.saturating_add(if unicode {
+                    literal.chars().count()
+                } else {
+                    literal.len()
+                })
+            })
+            .min(LITERAL_TRIE_NODE_RESERVE_LIMIT);
         let mut trie = Self {
-            nodes: vec![LiteralTrieNode::default()],
-            unicode_nodes: Vec::new(),
+            nodes: if unicode {
+                Vec::new()
+            } else {
+                Vec::with_capacity(node_capacity)
+            },
+            unicode_nodes: if unicode {
+                Vec::with_capacity(node_capacity)
+            } else {
+                Vec::new()
+            },
         };
-        if flags.case_insensitive && literals.iter().any(|literal| !literal.is_ascii()) {
-            trie.nodes.clear();
+        if unicode {
             trie.unicode_nodes.push(UnicodeLiteralTrieNode::default());
             for (order, literal) in literals.iter().enumerate() {
                 let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
@@ -1812,6 +1867,7 @@ impl LiteralTrie {
             }
             return Ok(trie);
         }
+        trie.nodes.push(LiteralTrieNode::default());
         for (order, literal) in literals.iter().enumerate() {
             let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
             let mut node = 0usize;
@@ -2155,6 +2211,15 @@ mod tests {
                 "capture mismatch for {pattern:?} on {line:?}"
             );
         }
+    }
+
+    #[test]
+    fn literal_trie_bounds_reservation_for_duplicate_branches() {
+        let literals = vec!["a".to_owned(); LITERAL_TRIE_NODE_RESERVE_LIMIT * 2];
+        let trie = LiteralTrie::new(&literals, RegexFlags::default()).unwrap();
+
+        assert_eq!(trie.nodes.len(), 2);
+        assert_eq!(trie.nodes.capacity(), LITERAL_TRIE_NODE_RESERVE_LIMIT);
     }
 
     #[test]

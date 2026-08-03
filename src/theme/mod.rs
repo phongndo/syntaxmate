@@ -3,6 +3,8 @@
 //! This is deliberately independent of the tokenizer: a theme can be changed
 //! while reusing the immutable scope table in [`crate::HighlightedLine`].
 
+#[cfg(any(feature = "bundled-grammars", test))]
+use std::sync::Arc;
 use std::{cmp::Ordering, collections::HashMap};
 
 #[cfg(feature = "bundled-themes")]
@@ -114,6 +116,14 @@ pub struct ThemeMatch<'a> {
     pub style: ResolvedSyntaxStyle,
 }
 
+struct ScopeResolution<'a> {
+    representative: Option<&'a CompiledThemeRule>,
+    foreground_matched: bool,
+    background_matched: bool,
+    modifiers_matched: bool,
+    style: ResolvedSyntaxStyle,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeSelectorScore {
     pub target_depth: usize,
@@ -142,6 +152,39 @@ struct CompiledThemeRule {
     background: Option<RgbColor>,
     modifiers: Option<SyntaxModifiers>,
     source_order: usize,
+}
+
+trait ThemeScopeStack {
+    fn len(&self) -> usize;
+    fn scope_name(&self, index: usize) -> Option<&str>;
+}
+
+struct TableScopeStack<'a> {
+    table: &'a HighlightScopeTable,
+    atoms: &'a [crate::ScopeAtomId],
+}
+
+impl ThemeScopeStack for TableScopeStack<'_> {
+    fn len(&self) -> usize {
+        self.atoms.len()
+    }
+
+    fn scope_name(&self, index: usize) -> Option<&str> {
+        self.atoms
+            .get(index)
+            .and_then(|atom| self.table.atom(*atom))
+    }
+}
+
+#[cfg(any(feature = "bundled-grammars", test))]
+impl ThemeScopeStack for [Arc<str>] {
+    fn len(&self) -> usize {
+        <[Arc<str>]>::len(self)
+    }
+
+    fn scope_name(&self, index: usize) -> Option<&str> {
+        self.get(index).map(AsRef::as_ref)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -359,6 +402,11 @@ impl TextMateTheme {
         self.resolve_style(table, stack).style
     }
 
+    #[cfg(any(feature = "bundled-grammars", test))]
+    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> ResolvedSyntaxStyle {
+        self.resolve_scope_stack(scopes).style
+    }
+
     /// Resolves and caches all style and property-match data needed by a
     /// renderer. Diagnostic selector metadata remains available separately
     /// through [`Self::resolve_with_match`].
@@ -371,7 +419,11 @@ impl TextMateTheme {
         if let Some(style) = cached {
             return unpack_style(style);
         }
-        let matched = self.resolve_with_match(table, stack);
+        let scopes = TableScopeStack {
+            table,
+            atoms: table.stack(stack).unwrap_or_default(),
+        };
+        let matched = self.resolve_scope_stack(&scopes);
         let resolved = ResolvedThemeStyle {
             foreground_matched: matched.foreground_matched,
             background_matched: matched.background_matched,
@@ -387,17 +439,28 @@ impl TextMateTheme {
         table: &HighlightScopeTable,
         stack: ScopeStackRef,
     ) -> ThemeMatch<'a> {
-        let Some(atoms) = table.stack(stack) else {
-            return ThemeMatch {
-                selector: None,
-                score: None,
-                source_order: None,
-                foreground_matched: false,
-                background_matched: false,
-                modifiers_matched: false,
-                style: self.default_style,
-            };
+        let scopes = TableScopeStack {
+            table,
+            atoms: table.stack(stack).unwrap_or_default(),
         };
+        let resolved = self.resolve_scope_stack(&scopes);
+        ThemeMatch {
+            selector: resolved
+                .representative
+                .map(|rule| rule.selector_text.as_str()),
+            score: resolved.representative.map(selector_score),
+            source_order: resolved.representative.map(|rule| rule.source_order),
+            foreground_matched: resolved.foreground_matched,
+            background_matched: resolved.background_matched,
+            modifiers_matched: resolved.modifiers_matched,
+            style: resolved.style,
+        }
+    }
+
+    fn resolve_scope_stack<'a, S>(&'a self, scopes: &S) -> ScopeResolution<'a>
+    where
+        S: ThemeScopeStack + ?Sized,
+    {
         // vscode-textmate applies theme attributes every time a scope is
         // pushed, merging only properties set by the new scope into the
         // attributes inherited from its parent. Resolving only the innermost
@@ -408,9 +471,8 @@ impl TextMateTheme {
         let mut foreground_matched = false;
         let mut background_matched = false;
         let mut modifiers_matched = false;
-        for depth in 1..=atoms.len() {
-            let active_stack = &atoms[..depth];
-            let Some(scope) = table.atom(active_stack[depth - 1]) else {
+        for depth in 1..=scopes.len() {
+            let Some(scope) = scopes.scope_name(depth - 1) else {
                 continue;
             };
             let head = scope.split('.').next().unwrap_or(scope);
@@ -420,7 +482,7 @@ impl TextMateTheme {
             let mut level_representative: Option<&CompiledThemeRule> = None;
             for rule_index in self.candidates_by_head.get(head).into_iter().flatten() {
                 let rule = &self.rules[*rule_index];
-                if !rule.matches(table, active_stack) {
+                if !rule.matches(scopes, depth) {
                     continue;
                 }
                 if level_representative
@@ -448,10 +510,8 @@ impl TextMateTheme {
                 representative = level_representative;
             }
         }
-        ThemeMatch {
-            selector: representative.map(|rule| rule.selector_text.as_str()),
-            score: representative.map(selector_score),
-            source_order: representative.map(|rule| rule.source_order),
+        ScopeResolution {
+            representative,
             foreground_matched,
             background_matched,
             modifiers_matched,
@@ -552,17 +612,20 @@ fn unpack_style(packed: u64) -> ResolvedThemeStyle {
 }
 
 impl CompiledThemeRule {
-    fn matches(&self, table: &HighlightScopeTable, stack: &[crate::ScopeAtomId]) -> bool {
-        let Some((inner, ancestors)) = stack.split_last() else {
-            return false;
-        };
-        let Some(inner) = table.atom(*inner) else {
+    fn matches<S>(&self, stack: &S, depth: usize) -> bool
+    where
+        S: ThemeScopeStack + ?Sized,
+    {
+        let Some(inner) = depth
+            .checked_sub(1)
+            .and_then(|index| stack.scope_name(index))
+        else {
             return false;
         };
         if !scope_matches(inner, &self.target) {
             return false;
         }
-        let mut ancestor_index = ancestors.len();
+        let mut ancestor_index = depth - 1;
         let mut parent_index = 0;
         while parent_index < self.parents.len() {
             let mut direct = false;
@@ -578,8 +641,8 @@ impl CompiledThemeRule {
             let mut found = false;
             while ancestor_index > 0 {
                 ancestor_index -= 1;
-                if table
-                    .atom(ancestors[ancestor_index])
+                if stack
+                    .scope_name(ancestor_index)
                     .is_some_and(|scope| scope_matches(scope, pattern))
                 {
                     found = true;
@@ -1023,6 +1086,30 @@ mod tests {
                 blue: 0x92,
             })
         );
+    }
+
+    #[test]
+    fn shared_scope_name_resolution_matches_table_resolution() {
+        let theme = github_dark_high_contrast();
+        for scopes in [
+            &[
+                "text.tex.latex",
+                "support.function.be.latex",
+                "punctuation.definition.function.latex",
+            ][..],
+            &["source.test", "string.quoted", "variable.custom"][..],
+            &["text.html.markdown", "markup.bold.markdown"][..],
+        ] {
+            let (table, stack) = HighlightScopeTable::from_scope_names(scopes);
+            let shared = scopes
+                .iter()
+                .map(|scope| Arc::<str>::from(*scope))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                theme.resolve_shared_scope_names(&shared),
+                theme.resolve(&table, stack)
+            );
+        }
     }
 
     #[test]

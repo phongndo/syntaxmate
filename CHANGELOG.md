@@ -8,6 +8,8 @@
   all 31 core regression assets.
 - Speed up tokenizer construction with dense O(1) rule lookup, shared immutable
   repository walks, and copy-on-write grammar registry clones.
+- Reduce cold and incremental allocation pressure by directly decoding grammar
+  unions, sharing interned scopes and capture specs, and compacting regex tries.
 
 ## 0.1.0 - 2026-08-01
 
