@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, fmt, ops::Range, path::Path};
+use std::{
+    collections::BTreeMap,
+    fmt,
+    ops::Range,
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 use serde::Deserialize;
 
@@ -19,14 +25,14 @@ pub struct CaptureEntry {
 pub enum RuleBody {
     Match {
         pattern: PatternId,
-        captures: CaptureSpec,
+        captures: Arc<CaptureSpec>,
         name: Option<ScopeId>,
     },
     BeginEnd {
         begin: PatternId,
         end: PatternId,
-        begin_captures: CaptureSpec,
-        end_captures: CaptureSpec,
+        begin_captures: Arc<CaptureSpec>,
+        end_captures: Arc<CaptureSpec>,
         name: Option<ScopeId>,
         content_name: Option<ScopeId>,
         apply_end_pattern_last: bool,
@@ -35,8 +41,8 @@ pub enum RuleBody {
     BeginWhile {
         begin: PatternId,
         while_pattern: PatternId,
-        begin_captures: CaptureSpec,
-        while_captures: CaptureSpec,
+        begin_captures: Arc<CaptureSpec>,
+        while_captures: Arc<CaptureSpec>,
         name: Option<ScopeId>,
         content_name: Option<ScopeId>,
         patterns: Vec<RuleRef>,
@@ -104,13 +110,13 @@ pub struct CompiledGrammar {
     pub id: GrammarId,
     pub scope_name: String,
     pub metadata: GrammarMetadata,
-    pub string_names: Vec<String>,
+    pub string_names: Vec<Arc<str>>,
     pub patterns: Vec<String>,
     pub rules: Vec<Rule>,
     pub repository: BTreeMap<String, RuleRef>,
     pub top_level: Vec<RuleRef>,
     pub injections: Vec<Injection>,
-    pub scope_names: Vec<String>,
+    pub scope_names: Vec<Arc<str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,7 +127,13 @@ pub struct CapturedText<'a> {
 
 impl CompiledGrammar {
     pub fn rule(&self, id: RuleId) -> Option<&Rule> {
-        self.rules.iter().find(|rule| rule.id == id)
+        // Grammar compilation stores rules densely in id order, making this
+        // hot lookup O(1). Keep the linear fallback for callers that construct
+        // `CompiledGrammar` values directly in a different order.
+        self.rules
+            .get(id.0 as usize)
+            .filter(|rule| rule.id == id)
+            .or_else(|| self.rules.iter().find(|rule| rule.id == id))
     }
 
     pub fn pattern(&self, id: PatternId) -> Option<&str> {
@@ -129,11 +141,11 @@ impl CompiledGrammar {
     }
 
     pub fn scope(&self, id: ScopeId) -> Option<&str> {
-        self.scope_names.get(id.0 as usize).map(String::as_str)
+        self.scope_names.get(id.0 as usize).map(AsRef::as_ref)
     }
 
     pub fn string(&self, id: StringId) -> Option<&str> {
-        self.string_names.get(id.0 as usize).map(String::as_str)
+        self.string_names.get(id.0 as usize).map(AsRef::as_ref)
     }
 
     pub fn validate_local_refs(&self) -> Result<(), GrammarValidationError> {
@@ -401,11 +413,48 @@ struct RawGrammar {
     injections: BTreeMap<String, RawPattern>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 enum RawRepositoryEntry {
     Pattern(Box<RawPattern>),
     Patterns(Vec<RawPattern>),
+}
+
+impl<'de> Deserialize<'de> for RawRepositoryEntry {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct RepositoryEntryVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for RepositoryEntryVisitor {
+            type Value = RawRepositoryEntry;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a TextMate rule object or rule array")
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                RawPattern::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(|pattern| RawRepositoryEntry::Pattern(Box::new(pattern)))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut patterns = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(pattern) = seq.next_element()? {
+                    patterns.push(pattern);
+                }
+                Ok(RawRepositoryEntry::Patterns(patterns))
+            }
+        }
+
+        deserializer.deserialize_any(RepositoryEntryVisitor)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -425,19 +474,36 @@ struct RawPattern {
     #[serde(default)]
     repository: BTreeMap<String, RawRepositoryEntry>,
     #[serde(default, deserialize_with = "deserialize_captures")]
-    captures: BTreeMap<String, RawCapture>,
+    captures: RawCaptures,
     #[serde(default, deserialize_with = "deserialize_captures")]
-    begin_captures: BTreeMap<String, RawCapture>,
+    begin_captures: RawCaptures,
     #[serde(default, deserialize_with = "deserialize_captures")]
-    end_captures: BTreeMap<String, RawCapture>,
+    end_captures: RawCaptures,
     #[serde(default, deserialize_with = "deserialize_captures")]
-    while_captures: BTreeMap<String, RawCapture>,
+    while_captures: RawCaptures,
     #[serde(default, deserialize_with = "deserialize_boolish")]
     apply_end_pattern_last: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Default)]
+enum RawCaptures {
+    #[default]
+    Empty,
+    Map(BTreeMap<String, RawCapture>),
+    Indexed(BTreeMap<u32, RawCapture>),
+}
+
+impl RawCaptures {
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Empty => true,
+            Self::Map(captures) => captures.is_empty(),
+            Self::Indexed(captures) => captures.is_empty(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 enum RawCapture {
     #[default]
     Empty,
@@ -445,9 +511,76 @@ enum RawCapture {
     Seq(Vec<RawCapture>),
     Full {
         name: Option<String>,
-        #[serde(default)]
         patterns: Vec<RawPattern>,
     },
+}
+
+impl<'de> Deserialize<'de> for RawCapture {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct CaptureVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for CaptureVisitor {
+            type Value = RawCapture;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a TextMate capture object, string, array, or null")
+            }
+
+            fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                Ok(RawCapture::Empty)
+            }
+
+            fn visit_none<E>(self) -> Result<Self::Value, E> {
+                Ok(RawCapture::Empty)
+            }
+
+            fn visit_str<E>(self, name: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(RawCapture::Name(name.to_owned()))
+            }
+
+            fn visit_string<E>(self, name: String) -> Result<Self::Value, E> {
+                Ok(RawCapture::Name(name))
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let mut captures = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(capture) = seq.next_element()? {
+                    captures.push(capture);
+                }
+                Ok(RawCapture::Seq(captures))
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                #[derive(Deserialize)]
+                struct FullCapture {
+                    name: Option<String>,
+                    #[serde(default)]
+                    patterns: Vec<RawPattern>,
+                }
+
+                FullCapture::deserialize(serde::de::value::MapAccessDeserializer::new(map)).map(
+                    |capture| RawCapture::Full {
+                        name: capture.name,
+                        patterns: capture.patterns,
+                    },
+                )
+            }
+        }
+
+        deserializer.deserialize_any(CaptureVisitor)
+    }
 }
 
 impl RawCapture {
@@ -469,26 +602,55 @@ impl RawCapture {
     }
 }
 
-fn deserialize_captures<'de, D>(deserializer: D) -> Result<BTreeMap<String, RawCapture>, D::Error>
+fn deserialize_captures<'de, D>(deserializer: D) -> Result<RawCaptures, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum CaptureMap {
-        Map(BTreeMap<String, RawCapture>),
-        Seq(Vec<RawCapture>),
+    struct CapturesVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for CapturesVisitor {
+        type Value = RawCaptures;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("a capture-index map, capture array, or null")
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E> {
+            Ok(RawCaptures::Empty)
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E> {
+            Ok(RawCaptures::Empty)
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::MapAccess<'de>,
+        {
+            let mut captures = BTreeMap::new();
+            while let Some(group) = map.next_key::<String>()? {
+                captures.insert(group, map.next_value()?);
+            }
+            Ok(RawCaptures::Map(captures))
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut captures = BTreeMap::new();
+            let mut index = 0u32;
+            while let Some(capture) = seq.next_element()? {
+                captures.insert(index, capture);
+                index = index
+                    .checked_add(1)
+                    .ok_or_else(|| serde::de::Error::custom("capture index exceeds u32"))?;
+            }
+            Ok(RawCaptures::Indexed(captures))
+        }
     }
 
-    Ok(match Option::<CaptureMap>::deserialize(deserializer)? {
-        Some(CaptureMap::Map(map)) => map,
-        Some(CaptureMap::Seq(seq)) => seq
-            .into_iter()
-            .enumerate()
-            .map(|(index, capture)| (index.to_string(), capture))
-            .collect(),
-        None => BTreeMap::new(),
-    })
+    deserializer.deserialize_any(CapturesVisitor)
 }
 
 fn deserialize_boolish<'de, D>(deserializer: D) -> Result<bool, D::Error>
@@ -512,11 +674,11 @@ where
 #[derive(Debug, Default)]
 struct DevCompiler {
     next_rule: u32,
-    strings: BTreeMap<String, StringId>,
-    string_names: Vec<String>,
+    strings: BTreeMap<Arc<str>, StringId>,
+    string_names: Vec<Arc<str>>,
     patterns: Vec<String>,
-    scopes: BTreeMap<String, ScopeId>,
-    scope_names: Vec<String>,
+    scopes: BTreeMap<Arc<str>, ScopeId>,
+    scope_names: Vec<Arc<str>>,
     rules: Vec<Rule>,
     repository: BTreeMap<String, RuleRef>,
     local_repository_scopes: Vec<BTreeMap<String, String>>,
@@ -567,6 +729,11 @@ pub fn load_dev_grammar_from_path(
         }
     }
 
+    // Rules are assigned dense ids before their children are compiled, but
+    // recursive compilation finishes children first. Restore id order once so
+    // every tokenizer-side rule lookup can index the vector directly.
+    compiler.rules.sort_unstable_by_key(|rule| rule.id);
+
     Ok(CompiledGrammar {
         id,
         scope_name: raw.scope_name.clone(),
@@ -606,10 +773,14 @@ impl DevCompiler {
     }
 
     fn compile_patterns(&mut self, patterns: Vec<RawPattern>) -> Vec<RuleRef> {
-        patterns
-            .into_iter()
-            .map(|pattern| self.compile_rule(pattern))
-            .collect()
+        // Do not use map().collect() here. Vec's in-place collection can reuse
+        // the much larger RawPattern buffer for compact RuleRefs, retaining
+        // megabytes of deserialization capacity in embedded-heavy grammars.
+        let mut compiled = Vec::with_capacity(patterns.len());
+        for pattern in patterns {
+            compiled.push(self.compile_rule(pattern));
+        }
+        compiled
     }
 
     fn compile_include_only(&mut self, patterns: Vec<RawPattern>) -> RuleRef {
@@ -781,38 +952,59 @@ impl DevCompiler {
         }
     }
 
-    fn pattern_id(&mut self, pattern: String) -> PatternId {
+    fn pattern_id(&mut self, mut pattern: String) -> PatternId {
         self.string_id(&pattern);
+        // Direct serde_json string decoding grows escaped regexes geometrically.
+        // Grammar patterns live for the tokenizer's lifetime, so release that
+        // transient spare capacity before retaining them.
+        pattern.shrink_to_fit();
         let id = PatternId(self.patterns.len() as u32);
         self.patterns.push(pattern);
         id
     }
 
-    fn capture_spec(&mut self, captures: BTreeMap<String, RawCapture>) -> CaptureSpec {
-        let entries = captures
-            .into_iter()
-            .filter_map(|(group, capture)| {
-                let group = group.parse::<u32>().ok()?;
-                Some((
-                    group,
-                    CaptureEntry {
-                        name: capture.name().map(|scope| self.scope_id(scope)),
-                        patterns: self.compile_patterns(capture.patterns()),
-                    },
-                ))
-            })
-            .collect();
-        CaptureSpec { entries }
+    fn capture_spec(&mut self, captures: RawCaptures) -> Arc<CaptureSpec> {
+        let mut entries = BTreeMap::new();
+        match captures {
+            RawCaptures::Empty => {}
+            RawCaptures::Map(captures) => {
+                for (group, capture) in captures {
+                    let Ok(group) = group.parse::<u32>() else {
+                        continue;
+                    };
+                    entries.insert(group, self.capture_entry(capture));
+                }
+            }
+            RawCaptures::Indexed(captures) => {
+                for (group, capture) in captures {
+                    entries.insert(group, self.capture_entry(capture));
+                }
+            }
+        }
+        if entries.is_empty() {
+            static EMPTY: OnceLock<Arc<CaptureSpec>> = OnceLock::new();
+            Arc::clone(EMPTY.get_or_init(|| Arc::new(CaptureSpec::default())))
+        } else {
+            Arc::new(CaptureSpec { entries })
+        }
+    }
+
+    fn capture_entry(&mut self, capture: RawCapture) -> CaptureEntry {
+        CaptureEntry {
+            name: capture.name().map(|scope| self.scope_id(scope)),
+            patterns: self.compile_patterns(capture.patterns()),
+        }
     }
 
     fn scope_id(&mut self, scope: &str) -> ScopeId {
-        self.string_id(scope);
+        let string_id = self.string_id(scope);
         if let Some(id) = self.scopes.get(scope) {
             return *id;
         }
         let id = ScopeId(self.scopes.len() as u32);
-        self.scopes.insert(scope.to_owned(), id);
-        self.scope_names.push(scope.to_owned());
+        let name = Arc::clone(&self.string_names[string_id.0 as usize]);
+        self.scopes.insert(Arc::clone(&name), id);
+        self.scope_names.push(name);
         id
     }
 
@@ -821,8 +1013,9 @@ impl DevCompiler {
             return *id;
         }
         let id = StringId(self.strings.len() as u32);
-        self.strings.insert(value.to_owned(), id);
-        self.string_names.push(value.to_owned());
+        let value: Arc<str> = Arc::from(value);
+        self.strings.insert(Arc::clone(&value), id);
+        self.string_names.push(value);
         id
     }
 }
@@ -933,6 +1126,47 @@ mod tests {
     }
 
     #[test]
+    fn dev_loader_resolves_numeric_capture_aliases_in_lexical_key_order() {
+        for contents in [
+            r##"{
+                "scopeName": "source.fixture",
+                "patterns": [{
+                    "match": "(x)",
+                    "captures": {
+                        "1": {"name": "capture.canonical.fixture"},
+                        "01": {"name": "capture.alias.fixture"}
+                    }
+                }]
+            }"##,
+            r##"{
+                "scopeName": "source.fixture",
+                "patterns": [{
+                    "match": "(x)",
+                    "captures": {
+                        "01": {"name": "capture.alias.fixture"},
+                        "1": {"name": "capture.canonical.fixture"}
+                    }
+                }]
+            }"##,
+        ] {
+            let grammar = load_dev_grammar_from_str(GrammarId(0), contents).unwrap();
+            let RuleRef::Rule(rule_id) = grammar.top_level.first().unwrap() else {
+                panic!("match rule");
+            };
+            let RuleBody::Match { captures, .. } = &grammar.rule(*rule_id).unwrap().body else {
+                panic!("match body");
+            };
+            let name = captures
+                .entries
+                .get(&1)
+                .and_then(|capture| capture.name)
+                .and_then(|scope| grammar.scope(scope));
+
+            assert_eq!(name, Some("capture.canonical.fixture"));
+        }
+    }
+
+    #[test]
     fn dev_loader_preserves_metadata_and_string_table() {
         let grammar = load_dev_grammar_from_str(
             GrammarId(0),
@@ -961,7 +1195,7 @@ mod tests {
             grammar
                 .string_names
                 .iter()
-                .any(|value| value == "keyword.fixture")
+                .any(|value| value.as_ref() == "keyword.fixture")
         );
     }
 
@@ -995,6 +1229,13 @@ mod tests {
             }"##,
         )
         .unwrap();
+        assert!(
+            grammar
+                .rules
+                .iter()
+                .enumerate()
+                .all(|(index, rule)| rule.id.0 as usize == index)
+        );
         assert!(matches!(
             &grammar.rule(RuleId(0)).unwrap().body,
             RuleBody::BeginWhile { while_captures, patterns, .. }
@@ -1114,7 +1355,7 @@ mod tests {
             grammar
                 .string_names
                 .iter()
-                .any(|value| value == "L:text.html - comment")
+                .any(|value| value.as_ref() == "L:text.html - comment")
         );
     }
 

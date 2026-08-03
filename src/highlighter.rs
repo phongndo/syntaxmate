@@ -74,6 +74,11 @@ impl Theme {
         let (table, stack) = HighlightScopeTable::from_scope_names(scopes);
         self.inner.get().resolve(&table, stack)
     }
+
+    #[cfg(feature = "bundled-grammars")]
+    fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> ResolvedSyntaxStyle {
+        self.inner.get().resolve_shared_scope_names(scopes)
+    }
 }
 
 /// Batteries-included TextMate highlighter with the bundled language catalog.
@@ -241,16 +246,14 @@ pub struct HighlightSession {
 impl HighlightSession {
     pub fn highlight_line(&mut self, line: &str) -> Result<IncrementalHighlightedLine> {
         let tokenized = self.tokenizer.tokenize_line(line, &mut self.state)?;
-        let status = tokenized.status();
-        let spans = tokenized
-            .tokens()
-            .iter()
+        let (tokens, status) = tokenized.into_parts();
+        let spans = tokens
+            .into_iter()
             .map(|token| {
-                let scopes = token.scopes().map(str::to_owned).collect::<Vec<_>>();
-                let names = scopes.iter().map(String::as_str).collect::<Vec<_>>();
+                let (range, scopes) = token.into_parts();
                 IncrementalHighlightedSpan {
-                    range: token.range(),
-                    style: self.theme.resolve_scope_names(&names),
+                    range,
+                    style: self.theme.resolve_shared_scope_names(&scopes),
                     scopes,
                 }
             })
@@ -319,7 +322,7 @@ impl HighlightedDocument {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncrementalHighlightedSpan {
     range: Range<usize>,
-    scopes: Vec<String>,
+    scopes: Arc<[Arc<str>]>,
     style: ResolvedSyntaxStyle,
 }
 
@@ -329,7 +332,7 @@ impl IncrementalHighlightedSpan {
     }
 
     pub fn scopes(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.scopes.iter().map(String::as_str)
+        self.scopes.iter().map(AsRef::as_ref)
     }
 
     pub fn style(&self) -> ResolvedSyntaxStyle {

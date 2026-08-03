@@ -83,6 +83,11 @@ path = "tools/build-bundle.rs"
 required-features = ["bundle-tools"]
 
 [[example]]
+name = "profile-alloc"
+path = "examples/profile-alloc.rs"
+required-features = ["bundled-grammars", "bundled-themes"]
+
+[[example]]
 name = "regex-parse"
 path = "examples/regex-parse.rs"
 required-features = ["diagnostics"]

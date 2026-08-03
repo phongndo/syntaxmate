@@ -336,9 +336,11 @@ Later baseline additions include the word-context start-class gate
 skip-prefix gate for separator-prefixed rules, cached per-line block-comment
 checks, and atom-derived ASCII class bitmaps in the bytecode compiler. In
 Syntaxmate these proven optimizations are deterministic engine behavior rather
-than environment switches. Compiled-pattern, frame, and rule-context caches
-are tokenizer-owned; only immutable bundled assets are initialized globally.
-`profile-cold --mode process-cold` constructs a fresh tokenizer per iteration.
+than environment switches. Compiled-pattern, frame, candidate, and dynamic-rule
+caches are tokenizer-owned. Immutable repository-binding walks are shared by
+clones of a grammar registry, while only immutable bundled assets are
+initialized globally. `profile-cold --mode process-cold` constructs a fresh
+tokenizer per iteration.
 
 **Reverted experiments — do not retry as-is** (measured deltas in the git
 history of this file):

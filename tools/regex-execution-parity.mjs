@@ -5,7 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 import { spawnSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { generateTextMateGolden } from './textmate-oracle.mjs'
 
@@ -14,8 +14,35 @@ const assetsDir = path.join(root, 'assets/grammars/languages')
 const differencesPath = path.join(root, 'benchmarks/textmate/regex-execution-differences.json')
 const oraclePackagePath = path.join(root, 'tools/golden-oracle/package.json')
 const provingCases = [
+  ['bash', 'source.shell', 'tests/fixtures/textmate/bash/stress.sh'],
+  ['c', 'source.c', 'tests/fixtures/textmate/c/stress.c'],
   ['cpp', 'source.cpp', 'tests/fixtures/textmate/cpp/stress.cpp'],
+  ['cpp-macro', 'source.cpp.embedded.macro', 'tests/fixtures/textmate/cpp-macro/stress.cpp'],
+  ['csharp', 'source.cs', 'tests/fixtures/textmate/csharp/stress.cs'],
+  ['css', 'source.css', 'tests/fixtures/textmate/css/stress.css'],
+  ['docker', 'source.dockerfile', 'tests/fixtures/textmate/docker/stress.Dockerfile'],
+  ['go', 'source.go', 'tests/fixtures/textmate/go/stress.go'],
+  ['html', 'text.html.basic', 'tests/fixtures/textmate/html/stress.html'],
+  ['java', 'source.java', 'tests/fixtures/textmate/java/stress.java'],
+  ['javascript', 'source.js', 'tests/fixtures/textmate/javascript/stress.js'],
+  ['json', 'source.json', 'tests/fixtures/textmate/json/stress.json'],
+  ['jsx', 'source.js.jsx', 'tests/fixtures/textmate/jsx/stress.jsx'],
+  ['kotlin', 'source.kotlin', 'tests/fixtures/textmate/kotlin/stress.kt'],
+  ['lua', 'source.lua', 'tests/fixtures/textmate/lua/stress.lua'],
+  ['make', 'source.makefile', 'tests/fixtures/textmate/make/stress.mk'],
   ['markdown', 'text.html.markdown', 'tests/fixtures/textmate/markdown/stress.md'],
+  ['nix', 'source.nix', 'tests/fixtures/textmate/nix/stress.nix'],
+  ['php', 'source.php', 'tests/fixtures/textmate/php/stress.php'],
+  ['powershell', 'source.powershell', 'tests/fixtures/textmate/powershell/stress.ps1'],
+  ['python', 'source.python', 'tests/fixtures/textmate/python/stress.py'],
+  ['ruby', 'source.ruby', 'tests/fixtures/textmate/ruby/stress.rb'],
+  ['rust', 'source.rust', 'tests/fixtures/textmate/rust/stress.rs'],
+  ['scss', 'source.css.scss', 'tests/fixtures/textmate/scss/stress.scss'],
+  ['sql', 'source.sql', 'tests/fixtures/textmate/sql/stress.sql'],
+  ['swift', 'source.swift', 'tests/fixtures/textmate/swift/stress.swift'],
+  ['terraform', 'source.hcl.terraform', 'tests/fixtures/textmate/terraform/stress.tf'],
+  ['toml', 'source.toml', 'tests/fixtures/textmate/toml/stress.toml'],
+  ['tsx', 'source.tsx', 'tests/fixtures/textmate/tsx/stress.tsx'],
   ['typescript', 'source.ts', 'tests/fixtures/textmate/typescript/stress.ts'],
   ['yaml', 'source.yaml', 'tests/fixtures/textmate/yaml/stress.yaml'],
 ]
@@ -51,9 +78,10 @@ Options:
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.help) return usage()
-  const unique = new Map()
+  const executionBuckets = []
   let observed = 0
   for (const [language, scopeName, fixture] of provingCases) {
+    const unique = new Map()
     await generateTextMateGolden({
       assetsDir,
       language,
@@ -68,11 +96,19 @@ async function main() {
         unique.set(hash, { hash, language, fixture, ...record })
       },
     })
+    executionBuckets.push({ language, records: [...unique.values()] })
   }
 
-  const records = [...unique.values()]
-    .sort((left, right) => left.hash.localeCompare(right.hash))
-    .slice(0, args.maxExecutions)
+  const records = selectBalancedExecutionSample(executionBuckets, args.maxExecutions)
+  const globalUniqueExecutions = new Set(
+    executionBuckets.flatMap(bucket => bucket.records.map(record => record.hash)),
+  ).size
+  const sampledByLanguage = Object.fromEntries(
+    provingCases.map(([language]) => [
+      language,
+      records.filter(record => record.language === language).length,
+    ]),
+  )
   const executable = buildReplayExecutable()
   const replay = spawnSync(executable, [], {
     cwd: root,
@@ -133,8 +169,9 @@ async function main() {
     oracle,
     provingCases: provingCases.map(([language, scope, fixture]) => ({ language, scope, fixture })),
     observedExecutions: observed,
-    uniqueExecutions: unique.size,
+    uniqueExecutions: globalUniqueExecutions,
     sampledExecutions: records.length,
+    sampledByLanguage,
     exactMatches: records.length - observedDifferences.length,
     allowedDifferences: observedDifferences.length - failures.length,
     failed: failures.length + staleDifferences.length,
@@ -147,13 +184,42 @@ async function main() {
   console.log(JSON.stringify({
     out: args.out,
     observed,
-    unique: unique.size,
+    unique: globalUniqueExecutions,
     sampled: records.length,
     exact: report.exactMatches,
     allowedDifferences: report.allowedDifferences,
     failed: report.failed,
   }))
   if (report.failed) process.exitCode = 1
+}
+
+export function selectBalancedExecutionSample(buckets, limit) {
+  const ordered = buckets.map(bucket => ({
+    language: bucket.language,
+    records: [...bucket.records].sort((left, right) => left.hash.localeCompare(right.hash)),
+    offset: 0,
+  }))
+  const selected = []
+  const selectedHashes = new Set()
+  let progressed = true
+  while (selected.length < limit && progressed) {
+    progressed = false
+    for (const bucket of ordered) {
+      while (
+        bucket.offset < bucket.records.length &&
+        selectedHashes.has(bucket.records[bucket.offset].hash)
+      ) {
+        bucket.offset += 1
+      }
+      if (bucket.offset >= bucket.records.length) continue
+      const record = bucket.records[bucket.offset++]
+      selected.push(record)
+      selectedHashes.add(record.hash)
+      progressed = true
+      if (selected.length === limit) break
+    }
+  }
+  return selected
 }
 
 function differenceFingerprint(expected, actual) {
@@ -233,7 +299,9 @@ function buildReplayExecutable() {
   throw new Error('cargo did not report the regex-replay executable')
 }
 
-main().catch(error => {
-  console.error(`regex-execution-parity: ${error.stack ?? error.message}`)
-  process.exitCode = 1
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error(`regex-execution-parity: ${error.stack ?? error.message}`)
+    process.exitCode = 1
+  })
+}

@@ -3,64 +3,54 @@
   "oracle": "vscode-textmate@9.2.0 + vscode-oniguruma@1.7.0",
   "sampleSize": 512,
   "differences": {
+    "001fbe5c7f675cc214e0ce92dab4cd8e8ec962e608fd28eddfc46fbc6ff8e93a": {
+      "kind": "dormant-capture-end-sentinel",
+      "fingerprint": "490fea69603de306e8107ae24175e1794072b09ba1af5b546654874e9d23804d",
+      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
+    },
     "003541f3437fcf89d8019ead27a93527f8570bfee1b76ec983af18f4a88e3d15": {
       "kind": "dormant-capture-end-sentinel",
       "fingerprint": "25cc782374ea192729f48ac7d07b66af40f6e3c3f472ac1ae2a92a6a0e8f2e99",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "02d744cd79177d13bf449c1c081d287551b9b8813248d2e6f2d2f129e5246877": {
+    "0050f2477c00033442554789503c02947c32fe41718a08f283981ef11e1b9ef6": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "49c0687a8a93306023ca0b66206fd368b2f829418bfd11ffd2ee82f35f75d503",
+      "fingerprint": "74e52d3fdf8a2ebb92a32672f2e822a5f34c2e12a69ce3d4fe4acb9eae34ab88",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "0493ea0f1ae12f7262659cc3fa130052240069b59445f7e8d1f53e43558a86b7": {
+    "009a3c4e2b64d0a27c0c1f5159c6a08285577764ea44495c436e33ca0ef700d9": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "f5b10edaaf8bd020076c5de296153599be32545afae563af6817c7fb0fd171d0",
+      "fingerprint": "ea609b3de0b4d2a7566c8e21b226c1c82b78e996ecb26e00685ff853cdefe938",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "050684f22ed03e23cae07dee95221737cba8434aafba7275623b01931a6dd7db": {
+    "00b17aeabdf41b9efd3c2f070dca1cbcbdbe96d9a63e2c58216e9afd4fdc8f0c": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "7d17bbd58ee9c01d9bf451001ef888e103ee9c9e755080120251fcd60208d887",
+      "fingerprint": "344194857c7f2ca01f598809bdba9446fd50dc596b4e9317c8c019d5bfae0a3b",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "066f96476f2c7b7383cc3b02d0a3861d183d15ee12785050754623219dd3faff": {
+    "00bcfa2c7142fa297063cc0ea885d8c41b86ca63714623f599322daab0e307e6": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "6aeddb453f22218e5ac94f22b68052be74300584077422dd36cba2fb9256d070",
+      "fingerprint": "46a76a7191d5fd6b25efdafab950796619bfb4a9c6bb46b11a61a599e43e80dd",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "089dce72f5ae1d370b83346fab72325913a8efc8e3d80172b3943c0ccc0094ac": {
+    "00bf50d710ab3ef4203811abbbc3063e5ad499f537cce54c0a396c95cc59cdc2": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "555f6092e1eda637af6fdaeaeadb6cbfe50c0887633cfe74853a5a2fb244c511",
+      "fingerprint": "ce99a1a3d65c57e389a05e6abe080a43117affe4e49139cdbb3c9fe1076cab29",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "08d02742214d81da88882e0baee3a39fdf393d875f644b27d56f8cce2bbdf886": {
+    "00f8e472e205b13cddf75e9d3b7a2cc5e46751ebf03234281d7819422885a0bb": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "6b9a208ec76896bfa0c68aaf63a4bd73a9c6c0a889241a869ee7e43908424659",
+      "fingerprint": "606dadc1238d4074b7af93f35f6606db23fedfc56152df56c96a53d6fc2892a9",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "0a50b30dd883e55c26c46d56fe52a883b99582c1af10552aca175530e557c2b5": {
+    "013f3926fc067a2d4118728a824e242fe96143a451c593119cc347bc8ff8f5a0": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "d2df140884d911c5074c79f108cc578ecfe0f16debe3ba026a2514b16842f5fb",
+      "fingerprint": "941427067d9a72ef1a30b4385ece19a25da1a6567d1d01cc255148c025da4aa5",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
-    "0e75577666af05bff475b13a5ac2db93e1d9c695d15af97005cc37758d3b5b6b": {
+    "02e1c1569fca4657957f4b067325bd34f0b9c45238b132f4c1c05e41439fd489": {
       "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "e9a1c7fb7c4c32da1a7d88a5760688e3b65d55e32035c2c9b59bcc01e56fdbbe",
-      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
-    },
-    "0eaf81f1ddb463c81b06665e6821f31b6ff8faffdbbcb5d1eaccec4884c169d5": {
-      "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "141d1465c90857286d434b6ce929443771d4922cd510c62aa75dfe6140975617",
-      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
-    },
-    "0fbd20b6f01c4ebf646cb6ae32992e93fe3b641ad7756fcfb74b83ef7f866db9": {
-      "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "5ff078e674ebdf4e543bdbdb5753fdd3d8a6cb2e392af58bfacbb0583e1e74b9",
-      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
-    },
-    "10f1edfaa59d6ecee2d2d840abc51da6e023c9c4396c6fc429c021b45cf98e02": {
-      "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "158de3c25114ac4682858c7f730e58fa3349c22897afa7d2efbc1d7cbe48f07b",
+      "fingerprint": "7bc2051a30d24d7ffe69b6a6dabcac0eb1f61728986ba40a4a0a374cb96b1758",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     }
   }

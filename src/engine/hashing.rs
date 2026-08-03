@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
 /// Multiply-mix hasher for the engine's hot lookup tables. The keys are
@@ -48,7 +48,12 @@ impl Hasher for FastHasher {
 }
 
 pub(crate) type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
+pub(crate) type FastSet<T> = HashSet<T, BuildHasherDefault<FastHasher>>;
 
 pub(crate) fn fast_map<K, V>() -> FastMap<K, V> {
     HashMap::with_hasher(BuildHasherDefault::default())
+}
+
+pub(crate) fn fast_set<T>() -> FastSet<T> {
+    HashSet::with_hasher(BuildHasherDefault::default())
 }

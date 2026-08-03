@@ -357,6 +357,17 @@ pub(crate) fn uniform_effective_flags(ast: &Ast) -> Option<RegexFlags> {
     visit(ast, RegexFlags::default()).ok().flatten()
 }
 
+fn is_quantifier_start(ch: char) -> bool {
+    matches!(ch, '*' | '+' | '?' | '{')
+}
+
+fn is_regex_syntax(ch: char) -> bool {
+    matches!(
+        ch,
+        '(' | '[' | '.' | '^' | '$' | '\\' | ')' | '|' | '*' | '+' | '?' | '{'
+    )
+}
+
 struct Parser<'a> {
     source: &'a str,
     chars: Vec<char>,
@@ -562,7 +573,23 @@ impl<'a> Parser<'a> {
                 ));
                 Ast::Unsupported("unmatched ')'".to_owned())
             }
-            ch => Ast::Literal(ch.to_string()),
+            ch => {
+                let mut literal = String::new();
+                literal.push(ch);
+                while let Some(next) = self.peek() {
+                    if is_regex_syntax(next)
+                        || (self.flags.ignore_whitespace && (next.is_whitespace() || next == '#'))
+                        || self
+                            .chars
+                            .get(self.pos + 1)
+                            .is_some_and(|following| is_quantifier_start(*following))
+                    {
+                        break;
+                    }
+                    literal.push(self.bump().expect("peeked literal character"));
+                }
+                Ast::Literal(literal)
+            }
         }
     }
 

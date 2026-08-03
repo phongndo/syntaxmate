@@ -109,8 +109,17 @@ impl SpecialFallbackMatcher {
         match self {
             Self::NixFunctionLookahead => nix_function_lookahead_match(line, start)
                 .map(|capture| zero_width_special_match(start, capture_count, Some(capture))),
-            Self::NixExpressionEndLookahead => nix_expression_end_lookahead_match(line, start)
-                .map(|capture| zero_width_special_match(start, capture_count, capture)),
+            Self::NixExpressionEndLookahead => {
+                nix_expression_end_lookahead_match(line, start).map(|(outer, inner)| {
+                    let mut matched = zero_width_special_match(start, capture_count, Some(outer));
+                    if let Some(inner) = inner
+                        && let Some(slot) = matched.captures.get_mut(2)
+                    {
+                        *slot = Some(inner);
+                    }
+                    matched
+                })
+            }
         }
     }
 }
@@ -205,14 +214,17 @@ fn nix_function_attrset_comma_or_question_match(line: &str, start: usize) -> Opt
         .and_then(|byte| matches!(byte, b',' | b'?').then_some(start..pos + 1))
 }
 
-fn nix_expression_end_lookahead_match(line: &str, start: usize) -> Option<Option<Range<usize>>> {
+fn nix_expression_end_lookahead_match(
+    line: &str,
+    start: usize,
+) -> Option<(Range<usize>, Option<Range<usize>>)> {
     let bytes = line.as_bytes();
     if bytes
         .get(start)
         .copied()
         .is_some_and(|byte| matches!(byte, b']' | b')' | b',' | b';' | b'}'))
     {
-        return Some(None);
+        return Some((start..start + 1, None));
     }
     for word in ["else", "then"] {
         let end = start + word.len();
@@ -220,7 +232,7 @@ fn nix_expression_end_lookahead_match(line: &str, start: usize) -> Option<Option
             && is_word_boundary(line, start)
             && is_word_boundary(line, end)
         {
-            return Some(Some(start..end));
+            return Some((start..end, Some(start..end)));
         }
     }
     None
@@ -3216,10 +3228,10 @@ mod tests {
     fn nix_expression_end_lookahead_specialization_matches_capture_shape() {
         let matcher = FallbackMatcher::new(r#"(?=([]),;}]|\b(else|then)\b))"#);
         let result = matcher.find(", next", 0, ctx()).unwrap();
-        assert_eq!(result.captures, vec![Some(0..0), None, None]);
+        assert_eq!(result.captures, vec![Some(0..0), Some(0..1), None]);
 
         let result = matcher.find("then value", 0, ctx()).unwrap();
-        assert_eq!(result.captures, vec![Some(0..0), Some(0..4), None]);
+        assert_eq!(result.captures, vec![Some(0..0), Some(0..4), Some(0..4)]);
     }
 
     #[test]

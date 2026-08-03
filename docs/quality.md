@@ -35,8 +35,9 @@ Final tokens can conceal lower-level matcher differences. Inspired by
 [Shiki's record-and-replay comparison](https://github.com/shikijs/shiki/blob/main/packages/engine-javascript/test/compare.test.ts)
 of its JavaScript and Oniguruma engines,
 `regex-execution-parity.mjs` records real scanner calls made while highlighting
-complex C++, Markdown, TypeScript, and YAML fixtures and replays a deterministic
-sample through Syntaxmate. Exact winners, ranges, and captures are required.
+the stress fixtures for all 31 core regression assets and replays a balanced,
+deterministic sample through Syntaxmate. Every core language contributes to the
+sample. Exact winners, ranges, and captures are required.
 The narrowly documented dormant-capture differences live in
 `benchmarks/textmate/regex-execution-differences.json`; new differences and
 stale exceptions both fail CI, following the known-failure baseline discipline
@@ -60,6 +61,16 @@ micro-optimizations; reference-machine measurements guard whole-catalog
 throughput, bundle size, and theme cache behavior. The validation policy keeps
 the reference-machine floor separate from conservative per-language and
 aggregate floors calibrated for variable GitHub-hosted runners.
+
+Use the allocation profiler to compare construction, first/warm whole-document
+runs, incremental tokenization, and incremental highlighting on one corpus:
+
+```sh
+cargo run --release --example profile-alloc -- rust path/to/source.rs
+```
+
+It reports allocation/reallocation calls, cumulative allocated bytes, retained
+bytes at the phase boundary, elapsed time, and allocations per KiB.
 
 ## Release evidence
 

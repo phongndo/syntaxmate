@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Fix participating capture ranges in the optimized Nix expression-end
+  lookahead so they match `vscode-oniguruma`.
+- Expand scanner-execution parity from four fixtures to a balanced sample over
+  all 31 core regression assets.
+- Speed up tokenizer construction with dense O(1) rule lookup, shared immutable
+  repository walks, and copy-on-write grammar registry clones.
+- Reduce cold and incremental allocation pressure by directly decoding grammar
+  unions, sharing interned scopes and capture specs, and compacting regex tries.
+
 ## 0.1.0 - 2026-08-01
 
 - Extract the Rust-native TextMate grammar, tokenizer, regex, catalog, and theme
