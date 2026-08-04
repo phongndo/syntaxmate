@@ -63,14 +63,23 @@ the reference-machine floor separate from conservative per-language and
 aggregate floors calibrated for variable GitHub-hosted runners.
 
 Use the allocation profiler to compare construction, first/warm whole-document
-runs, incremental tokenization, and incremental highlighting on one corpus:
+runs, incremental tokenization/highlighting, and prepared-language creation and
+reuse on one corpus:
 
 ```sh
 cargo run --release --example profile-alloc -- rust path/to/source.rs
 ```
 
 It reports allocation/reallocation calls, cumulative allocated bytes, retained
-bytes at the phase boundary, elapsed time, and allocations per KiB.
+bytes at the phase boundary, elapsed time, and allocations per KiB. For
+alternating, separate-process comparisons of multiple independent tokenizers,
+use `profile-prepared` in `direct`, `prepared-total`, and `prepared-reuse` modes.
+Its JSON also reports prepared count and charged-byte capacities/populations:
+
+```sh
+cargo run --release --example profile-prepared -- \
+  prepared-reuse markdown tests/fixtures/textmate/markdown/stress.md 4
+```
 
 ## Release evidence
 

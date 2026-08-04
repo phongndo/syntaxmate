@@ -1,15 +1,50 @@
 use crate::{
-    Catalog, Error, GrammarRegistry, HighlightStatus, Highlighter, HtmlOptions, Theme, Tokenizer,
-    TokenizerOptions, render_html, style_document,
+    Catalog, Error, GrammarRegistry, HighlightStatus, Highlighter, HtmlOptions, PreparedLanguage,
+    Theme, Tokenizer, TokenizerOptions, render_html, style_document,
 };
 
 #[test]
 fn public_runtime_types_are_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Highlighter>();
+    assert_send::<PreparedLanguage>();
     assert_send::<Tokenizer>();
     assert_send::<crate::TokenizerState>();
     assert_send::<Theme>();
+}
+
+#[test]
+fn prepared_language_is_an_explicit_shared_immutable_boundary() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<PreparedLanguage>();
+
+    let prepared = PreparedLanguage::for_bundled_language("rust").unwrap();
+    let initial = prepared.stats();
+    assert!(initial.grammar_count() >= 1);
+    assert!(initial.compiled_pattern_count() <= initial.static_pattern_capacity());
+    assert!(initial.static_pattern_retained_bytes() <= initial.static_pattern_byte_capacity());
+    assert!(initial.static_candidate_count() <= initial.static_candidate_capacity());
+    assert!(initial.static_candidate_retained_bytes() <= initial.static_candidate_byte_capacity());
+
+    let mut first = prepared.tokenizer(TokenizerOptions::default());
+    let mut second = Tokenizer::from_prepared(&prepared, TokenizerOptions::default());
+    assert_eq!(
+        first.tokenize("fn first() {}"),
+        second.tokenize("fn first() {}")
+    );
+}
+
+#[test]
+fn every_bundled_language_fits_the_preparation_bounds() {
+    for language in Catalog::bundled().languages() {
+        let prepared = PreparedLanguage::for_bundled_language(&language)
+            .unwrap_or_else(|error| panic!("failed to prepare {language}: {error}"));
+        let stats = prepared.stats();
+        assert!(stats.compiled_pattern_count() <= stats.static_pattern_capacity());
+        assert!(stats.static_pattern_retained_bytes() <= stats.static_pattern_byte_capacity());
+        assert!(stats.static_candidate_count() <= stats.static_candidate_capacity());
+        assert!(stats.static_candidate_retained_bytes() <= stats.static_candidate_byte_capacity());
+    }
 }
 
 #[test]

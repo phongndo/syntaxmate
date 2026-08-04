@@ -86,6 +86,33 @@ any externally included grammars you want resolved. Missing optional includes
 are ignored like `vscode-textmate`; call `GrammarRegistry::validate` when you
 require a strict, closed include graph.
 
+## Reusing language preparation
+
+Servers and editors that need independent tokenizers for the same language can
+retain immutable grammar and regex work explicitly:
+
+```rust
+use syntaxmate::{PreparedLanguage, TokenizerOptions};
+
+let prepared = PreparedLanguage::for_bundled_language("rust")?;
+let mut first = prepared.tokenizer(TokenizerOptions::default());
+let mut second = prepared.tokenizer(TokenizerOptions::default());
+assert_eq!(first.tokenize("let x = 1;"), second.tokenize("let x = 1;"));
+# Ok::<(), syntaxmate::Error>(())
+```
+
+Each tokenizer has independent continuation state and bounded mutable caches.
+The caller-owned preparation retains the grammar closure plus static compiled
+patterns and candidate descriptors reached by derived tokenizers.
+`PreparedLanguage::stats` reports slot/count populations and conservative byte
+charges. Prepared regexes have a 64 MiB charged ceiling; candidate descriptors,
+scanners, and canonical injection outcomes have a combined 12 MiB ceiling and
+at most 1,024 descriptors. Custom registries use `PreparedLanguage::new`.
+Prefer direct `Tokenizer` construction for one-off work so this preparation is
+reclaimed with the tokenizer. Pathological custom grammar graphs that exceed
+the preparation-walk bounds return `Error::Grammar` and remain usable through
+the direct tokenizer API.
+
 ## Feature flags
 
 | Feature | Default | Purpose |

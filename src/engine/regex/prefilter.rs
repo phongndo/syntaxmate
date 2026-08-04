@@ -412,15 +412,21 @@ fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
 /// Scan-local memo of required-literal occurrences, keyed by compiled-pattern
 /// slot. Anchored pattern-set attempts ask the same rejection question at
 /// monotonically increasing positions; remembering the next occurrence turns
-/// the per-position tail search into an O(1) check. Rejection-only: a stale or
-/// missing entry falls back to a fresh search, so false negatives are
-/// impossible by construction.
+/// the per-position tail search into an O(1) check. Process-global matcher IDs
+/// above the dense prefix are folded into a bounded direct-mapped overflow
+/// table and retained in each entry, so collisions become safe cache misses
+/// instead of growing tokenizer memory. Rejection-only: a stale or missing
+/// entry falls back to a fresh search, so false negatives are impossible by
+/// construction.
+const MAX_PREFILTER_CURSOR_SLOTS: usize = 1024;
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PrefilterCursors {
     line_ptr: usize,
     line_len: usize,
     generation: u64,
     slots: Vec<CursorSlot>,
+    overflow_slots: Vec<OverflowCursorSlot>,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -428,6 +434,12 @@ struct CursorSlot {
     generation: u64,
     searched_from: usize,
     next_occurrence: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct OverflowCursorSlot {
+    matcher_slot: u32,
+    cursor: CursorSlot,
 }
 
 impl PrefilterCursors {
@@ -463,38 +475,75 @@ impl PrefilterCursors {
         if slot == u32::MAX {
             return prefilter.next_occurrence(line, start);
         }
-        let slot = slot as usize;
         let (line_ptr, line_len) = (line.as_ptr() as usize, line.len());
         if self.line_ptr != line_ptr || self.line_len != line_len {
             self.line_ptr = line_ptr;
             self.line_len = line_len;
             self.generation = self.generation.wrapping_add(1);
         }
-        if slot >= self.slots.len() {
-            self.slots.resize(slot + 1, CursorSlot::default());
-        }
         // Generation zero marks never-written slots; never treat it as bound.
         if self.generation == 0 {
             self.generation = 1;
         }
         let generation = self.generation;
-        let entry = &mut self.slots[slot];
-        let stale = entry.generation != generation || entry.searched_from > start;
-        if !stale {
-            match entry.next_occurrence {
-                None => return None,
-                Some(occurrence) if occurrence >= start => return Some(occurrence),
-                Some(_) => {}
+        if (slot as usize) < MAX_PREFILTER_CURSOR_SLOTS {
+            let slot = slot as usize;
+            if slot >= self.slots.len() {
+                self.slots.resize(slot + 1, CursorSlot::default());
             }
+            return cached_next_occurrence(
+                &mut self.slots[slot],
+                true,
+                generation,
+                prefilter,
+                line,
+                start,
+            );
         }
-        let next = prefilter.next_occurrence(line, start);
-        *entry = CursorSlot {
+
+        let overflow_index = slot as usize % MAX_PREFILTER_CURSOR_SLOTS;
+        if overflow_index >= self.overflow_slots.len() {
+            self.overflow_slots
+                .resize(overflow_index + 1, OverflowCursorSlot::default());
+        }
+        let entry = &mut self.overflow_slots[overflow_index];
+        let same_matcher = entry.matcher_slot == slot;
+        entry.matcher_slot = slot;
+        cached_next_occurrence(
+            &mut entry.cursor,
+            same_matcher,
             generation,
-            searched_from: start,
-            next_occurrence: next,
-        };
-        next
+            prefilter,
+            line,
+            start,
+        )
     }
+}
+
+#[inline]
+fn cached_next_occurrence(
+    entry: &mut CursorSlot,
+    same_matcher: bool,
+    generation: u64,
+    prefilter: &Prefilter,
+    line: &str,
+    start: usize,
+) -> Option<usize> {
+    let stale = !same_matcher || entry.generation != generation || entry.searched_from > start;
+    if !stale {
+        match entry.next_occurrence {
+            None => return None,
+            Some(occurrence) if occurrence >= start => return Some(occurrence),
+            Some(_) => {}
+        }
+    }
+    let next = prefilter.next_occurrence(line, start);
+    *entry = CursorSlot {
+        generation,
+        searched_from: start,
+        next_occurrence: next,
+    };
+    next
 }
 
 pub fn required_literal(pattern: &str) -> Option<String> {
@@ -675,6 +724,35 @@ struct LiteralTrieNode {
 }
 
 impl LiteralSet {
+    pub(crate) fn retained_heap_bytes(&self) -> usize {
+        let mut bytes = self
+            .literals
+            .capacity()
+            .saturating_mul(std::mem::size_of::<String>())
+            .saturating_add(
+                self.trie
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<LiteralTrieNode>()),
+            );
+        for literal in &self.literals {
+            bytes = bytes.saturating_add(literal.capacity());
+        }
+        for node in &self.trie {
+            bytes = bytes
+                .saturating_add(
+                    node.edges
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<(u8, usize)>()),
+                )
+                .saturating_add(
+                    node.terminal_patterns
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<usize>()),
+                );
+        }
+        bytes
+    }
+
     pub fn new(literals: Vec<String>) -> Self {
         let mut trie = vec![LiteralTrieNode::default()];
         let mut empty_pattern = None;
@@ -836,6 +914,26 @@ mod tests {
         // `he` is reached through the failure link after scanning `she`.
         assert_eq!(finder.find(b"ushers"), Some(1));
         assert_eq!(finder.find(b"nothing"), None);
+    }
+
+    #[test]
+    fn high_process_global_slots_use_a_bounded_collision_safe_memo() {
+        let keyword = parse("keyword");
+        let keyword = Prefilter::from_pattern(&keyword.ast);
+        let missing = parse("missing");
+        let missing = Prefilter::from_pattern(&missing.ast);
+        let mut cursors = PrefilterCursors::default();
+        let line = "keyword";
+        let high_slot = 1_000_000;
+        let colliding_slot = high_slot + MAX_PREFILTER_CURSOR_SLOTS as u32;
+        cursors.begin_line(line);
+
+        assert!(cursors.may_match(high_slot, &keyword, line, 0));
+        assert!(!cursors.may_match(colliding_slot, &missing, line, 0));
+        assert!(cursors.may_match(high_slot, &keyword, line, 0));
+        assert!(cursors.slots.is_empty());
+        assert!(!cursors.overflow_slots.is_empty());
+        assert!(cursors.overflow_slots.len() <= MAX_PREFILTER_CURSOR_SLOTS);
     }
 
     #[test]

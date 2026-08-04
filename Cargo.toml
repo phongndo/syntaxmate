@@ -89,6 +89,11 @@ path = "examples/profile-alloc.rs"
 required-features = ["bundled-grammars", "bundled-themes"]
 
 [[example]]
+name = "profile-prepared"
+path = "examples/profile-prepared.rs"
+required-features = ["bundled-grammars"]
+
+[[example]]
 name = "regex-parse"
 path = "examples/regex-parse.rs"
 required-features = ["diagnostics"]

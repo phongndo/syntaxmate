@@ -6,14 +6,20 @@ require a theme.
 
 ## Stable conceptual layers
 
-1. `GrammarRegistry` and `Tokenizer` compile grammars and emit exact scopes.
+1. `GrammarRegistry`, `PreparedLanguage`, and `Tokenizer` compile or retain
+   grammars and emit exact scopes.
 2. `Theme` maps exact scope stacks to generic RGB styles and font modifiers.
 3. `render_html` and `render_ansi` render an already styled document.
 4. `Highlighter` and `HighlightSession` are bundled-asset convenience APIs.
 
 The low-level grammar compiler, regex VM, numeric rule IDs, and mutable caches
-are deliberately private. Public state and checkpoint values are opaque and may
-only be reused with their originating tokenizer.
+are deliberately private. `PreparedLanguage` is the explicit caller-owned
+sharing boundary: derived tokenizers share immutable grammar/regex preparation
+but never continuation state, line caches, dynamic regexes, or source-specific
+candidate-set bindings. Its public statistics expose count and charged-byte
+ceilings; artifacts that exceed those ceilings stay tokenizer-local. Public
+state and checkpoint values are opaque and may only be reused with their
+originating tokenizer.
 
 ## Asset independence
 

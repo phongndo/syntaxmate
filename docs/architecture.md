@@ -22,10 +22,20 @@ optimizations can evolve without forcing downstream migrations.
 
 ## Ownership and isolation
 
-Mutable grammar, matcher, frame, state, and line caches are owned by a
-`Tokenizer` or `Highlighter`. Dropping that owner reclaims the state; separate
-instances do not communicate through hidden mutable global caches. Process-wide
-initialization is limited to immutable embedded bundle/theme data.
+Mutable dynamic-matcher, frame, state, candidate-state, and line caches are
+owned by a `Tokenizer` or `Highlighter`. Dropping that owner reclaims the state;
+separate instances do not communicate through hidden mutable global caches.
+A caller may explicitly retain a `PreparedLanguage`; tokenizers derived from it
+share only its immutable grammar closure, repository contexts, compiled static
+patterns, and static candidate descriptors. Static pattern retention is bounded
+by both the closure's exact slot count and a 64 MiB conservative byte charge.
+Reusable candidate descriptors have a 1,024-entry ceiling and share a 12 MiB
+charged ceiling with their scanners and canonical injection outcomes. Oversized
+or over-budget pattern/candidate artifacts remain tokenizer-local rather than
+escaping the bound. A custom dependency graph that exceeds the bounded
+preparation walk is rejected by `PreparedLanguage` and remains available to the
+direct tokenizer API. Process-wide initialization remains limited to immutable
+embedded bundle/theme data.
 
 `TokenizerState` and `CheckpointTable` are opaque and tied to the tokenizer that
 created them. This prevents accidental state reuse across grammar sets while

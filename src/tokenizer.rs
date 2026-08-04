@@ -5,7 +5,8 @@ use crate::engine::checkpoint::CheckpointTable as EngineCheckpointTable;
 use crate::{
     Error, HighlightScopeTable, Result, ScopeStackRef, TokenizerOptions,
     engine::tokenizer::{
-        GrammarSet as EngineGrammarSet, TextMateTokenizer, TokenizerState as EngineTokenizerState,
+        GrammarSet as EngineGrammarSet, PreparedLanguage as EnginePreparedLanguage,
+        TextMateTokenizer, TokenizerState as EngineTokenizerState,
     },
 };
 
@@ -103,6 +104,148 @@ pub struct GrammarId {
     inner: crate::engine::state::GrammarId,
 }
 
+fn preparation_limit_error(detail: &str) -> Error {
+    Error::Grammar(format!(
+        "grammar exceeds PreparedLanguage preparation bounds ({detail}); use Tokenizer directly"
+    ))
+}
+
+/// Caller-owned immutable preparation for one root TextMate grammar.
+///
+/// Preparing retains the grammar closure, repository contexts, the compiled
+/// root descriptor, and bounded lazily populated static regex/candidate caches.
+/// Tokenizers created from this value have independent mutable state and caches;
+/// they share only immutable preparation owned by this value. This is intended
+/// for repeated independent tokenizers; one-off callers should use
+/// [`Tokenizer::new`] or `Tokenizer::for_bundled_language` to avoid retaining
+/// preparation after the tokenizer is dropped.
+#[derive(Debug, Clone)]
+pub struct PreparedLanguage {
+    inner: Arc<EnginePreparedLanguage>,
+}
+
+impl PreparedLanguage {
+    /// Prepares one root from a snapshot of a custom grammar registry.
+    ///
+    /// Returns [`Error::Grammar`] when the root is foreign or the grammar graph
+    /// exceeds the hard preparation bounds; direct [`Tokenizer`] construction
+    /// remains available for such inputs.
+    pub fn new(registry: &GrammarRegistry, root: GrammarId) -> Result<Self> {
+        if root.registry != registry.id || registry.inner.grammar(root.inner).is_none() {
+            return Err(Error::Grammar(
+                "root grammar does not belong to this registry".to_owned(),
+            ));
+        }
+        let inner = EnginePreparedLanguage::try_new(registry.inner.clone(), root.inner)
+            .map_err(preparation_limit_error)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Prepares one language from the bundled grammar catalog.
+    ///
+    /// Bundled grammars are checked to remain inside the preparation bounds.
+    #[cfg(feature = "bundled-grammars")]
+    pub fn for_bundled_language(language: &str) -> Result<Self> {
+        let canonical = crate::grammars::canonical_language(language)
+            .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
+        let (grammars, root) = crate::engine::load_grammar_set(&canonical)?;
+        let inner =
+            EnginePreparedLanguage::try_new(grammars, root).map_err(preparation_limit_error)?;
+        Ok(Self {
+            inner: Arc::new(inner),
+        })
+    }
+
+    /// Creates a tokenizer with independent mutable state and caches.
+    pub fn tokenizer(&self, options: TokenizerOptions) -> Tokenizer {
+        Tokenizer::from_prepared(self, options)
+    }
+
+    /// Reports hard count/charged-byte bounds and current immutable population.
+    pub fn stats(&self) -> PreparedLanguageStats {
+        PreparedLanguageStats {
+            grammar_count: self.inner.grammar_count(),
+            static_pattern_capacity: self.inner.static_pattern_capacity(),
+            compiled_pattern_count: self.inner.compiled_pattern_count(),
+            static_pattern_byte_capacity: self.inner.static_pattern_byte_capacity(),
+            static_pattern_retained_bytes: self.inner.static_pattern_retained_bytes(),
+            static_candidate_capacity: self.inner.static_blueprint_capacity(),
+            static_candidate_count: self.inner.static_blueprint_count(),
+            static_candidate_byte_capacity: self.inner.static_blueprint_byte_capacity(),
+            static_candidate_retained_bytes: self.inner.static_blueprint_retained_bytes(),
+        }
+    }
+}
+
+/// Bounded preparation statistics for a [`PreparedLanguage`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreparedLanguageStats {
+    grammar_count: usize,
+    static_pattern_capacity: usize,
+    compiled_pattern_count: usize,
+    static_pattern_byte_capacity: usize,
+    static_pattern_retained_bytes: usize,
+    static_candidate_capacity: usize,
+    static_candidate_count: usize,
+    static_candidate_byte_capacity: usize,
+    static_candidate_retained_bytes: usize,
+}
+
+impl PreparedLanguageStats {
+    /// Number of grammars retained in this prepared root's dependency closure.
+    pub fn grammar_count(&self) -> usize {
+        self.grammar_count
+    }
+
+    /// Number of static pattern slots reserved for this preparation.
+    ///
+    /// The charged-byte ceiling may stop population before every slot is used.
+    pub fn static_pattern_capacity(&self) -> usize {
+        self.static_pattern_capacity
+    }
+
+    /// Number of static patterns compiled so far across all derived tokenizers.
+    pub fn compiled_pattern_count(&self) -> usize {
+        self.compiled_pattern_count
+    }
+
+    /// Maximum charged bytes for the prepared regex slot table and matchers.
+    pub fn static_pattern_byte_capacity(&self) -> usize {
+        self.static_pattern_byte_capacity
+    }
+
+    /// Charged bytes currently retained by the regex slot table and matchers.
+    pub fn static_pattern_retained_bytes(&self) -> usize {
+        self.static_pattern_retained_bytes
+    }
+
+    /// Maximum number of static candidate descriptors retained for reuse.
+    ///
+    /// The candidate charged-byte ceiling may stop population sooner.
+    pub fn static_candidate_capacity(&self) -> usize {
+        self.static_candidate_capacity
+    }
+
+    /// Number of reusable static candidate descriptors currently retained.
+    pub fn static_candidate_count(&self) -> usize {
+        self.static_candidate_count
+    }
+
+    /// Maximum charged bytes for prepared candidate descriptors, scanners,
+    /// and canonical injection outcomes.
+    pub fn static_candidate_byte_capacity(&self) -> usize {
+        self.static_candidate_byte_capacity
+    }
+
+    /// Charged bytes currently retained by candidate descriptors, scanners,
+    /// and canonical injection outcomes.
+    pub fn static_candidate_retained_bytes(&self) -> usize {
+        self.static_candidate_retained_bytes
+    }
+}
+
 /// A stateful tokenizer for one root TextMate grammar.
 #[derive(Debug)]
 pub struct Tokenizer {
@@ -122,13 +265,10 @@ impl Tokenizer {
                 "root grammar does not belong to this registry".to_owned(),
             ));
         }
-        let mut inner = TextMateTokenizer::new(registry.inner.clone(), root.inner);
-        inner.configure_options(options);
-        Ok(Self {
-            id: NEXT_TOKENIZER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            inner,
-            parse_line_buffer: String::new(),
-        })
+        Ok(Self::from_engine(
+            TextMateTokenizer::new(registry.inner.clone(), root.inner),
+            options,
+        ))
     }
 
     /// Constructs a tokenizer from the bundled grammar catalog.
@@ -137,13 +277,24 @@ impl Tokenizer {
         let canonical = crate::grammars::canonical_language(language)
             .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
         let (grammars, root) = crate::engine::load_grammar_set(&canonical)?;
-        let mut inner = TextMateTokenizer::new(grammars, root);
+        Ok(Self::from_engine(
+            TextMateTokenizer::new(grammars, root),
+            options,
+        ))
+    }
+
+    /// Constructs a tokenizer from caller-owned immutable preparation.
+    pub fn from_prepared(prepared: &PreparedLanguage, options: TokenizerOptions) -> Self {
+        Self::from_engine(prepared.inner.tokenizer(), options)
+    }
+
+    fn from_engine(mut inner: TextMateTokenizer, options: TokenizerOptions) -> Self {
         inner.configure_options(options);
-        Ok(Self {
+        Self {
             id: NEXT_TOKENIZER_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             inner,
             parse_line_buffer: String::new(),
-        })
+        }
     }
 
     /// Creates initial continuation state owned by this tokenizer.
@@ -424,6 +575,98 @@ impl TokenizedDocument {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_language_creates_independent_equivalent_tokenizers() {
+        let mut registry = GrammarRegistry::new();
+        let root = registry
+            .add_json(
+                r#"{"scopeName":"source.test","patterns":[{"match":"true","name":"constant.language.test"}]}"#,
+            )
+            .unwrap();
+        let prepared = PreparedLanguage::new(&registry, root).unwrap();
+        let initial_stats = prepared.stats();
+        assert_eq!(initial_stats.grammar_count(), 1);
+        assert_eq!(initial_stats.static_pattern_capacity(), 1);
+        assert_eq!(initial_stats.compiled_pattern_count(), 1);
+        assert!(initial_stats.static_pattern_retained_bytes() > 0);
+        assert!(
+            initial_stats.static_pattern_retained_bytes()
+                <= initial_stats.static_pattern_byte_capacity()
+        );
+        assert_eq!(initial_stats.static_candidate_capacity(), 1_024);
+        assert_eq!(initial_stats.static_candidate_count(), 1);
+        assert!(
+            initial_stats.static_candidate_retained_bytes()
+                <= initial_stats.static_candidate_byte_capacity()
+        );
+
+        // The prepared value is a snapshot. Later registry mutations do not
+        // alter tokenizers made from it.
+        registry
+            .add_json(r#"{"scopeName":"source.other","patterns":[]}"#)
+            .unwrap();
+        assert_eq!(prepared.stats().grammar_count(), 1);
+
+        let mut first = prepared.tokenizer(TokenizerOptions::default());
+        let mut second = Tokenizer::from_prepared(&prepared, TokenizerOptions::default());
+        assert_eq!(first.tokenize("true false"), second.tokenize("true false"));
+
+        let mut first_state = first.initial_state();
+        assert_eq!(
+            second.tokenize_line("true", &mut first_state),
+            Err(Error::StateMismatch)
+        );
+    }
+
+    #[test]
+    fn prepared_language_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<PreparedLanguage>();
+    }
+
+    #[test]
+    fn prepared_language_handles_concurrent_first_use() {
+        let mut registry = GrammarRegistry::new();
+        let root = registry
+            .add_json(
+                r#"{
+                    "scopeName":"source.concurrent-prepared",
+                    "patterns":[{
+                        "begin":"\"",
+                        "end":"\"",
+                        "name":"string.concurrent-prepared",
+                        "patterns":[{"match":"[a-z]+","name":"word.concurrent-prepared"}]
+                    }]
+                }"#,
+            )
+            .unwrap();
+        let prepared = PreparedLanguage::new(&registry, root).unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+        let outputs = std::thread::scope(|scope| {
+            (0..4)
+                .map(|_| {
+                    let prepared = prepared.clone();
+                    let barrier = Arc::clone(&barrier);
+                    scope.spawn(move || {
+                        let mut tokenizer = prepared.tokenizer(TokenizerOptions::default());
+                        barrier.wait();
+                        tokenizer.tokenize("\"word\"")
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+
+        assert!(outputs.windows(2).all(|pair| pair[0] == pair[1]));
+        let stats = prepared.stats();
+        assert!(stats.compiled_pattern_count() <= stats.static_pattern_capacity());
+        assert!(stats.static_pattern_retained_bytes() <= stats.static_pattern_byte_capacity());
+        assert!(stats.static_candidate_count() <= stats.static_candidate_capacity());
+        assert!(stats.static_candidate_retained_bytes() <= stats.static_candidate_byte_capacity());
+    }
 
     #[test]
     fn rejected_incremental_lines_do_not_grow_parse_buffer() {

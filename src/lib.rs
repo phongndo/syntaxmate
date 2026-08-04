@@ -47,7 +47,8 @@ pub use theme::{
 };
 pub use tokenizer::{
     CheckpointTable, DocumentLine, GrammarId, GrammarLimits, GrammarRegistry, HighlightStatus,
-    ScopedToken, TokenSpan, TokenizedDocument, TokenizedLine, Tokenizer, TokenizerState,
+    PreparedLanguage, PreparedLanguageStats, ScopedToken, TokenSpan, TokenizedDocument,
+    TokenizedLine, Tokenizer, TokenizerState,
 };
 pub use types::{
     DEFAULT_LINE_CACHE_ENTRIES, DEFAULT_MAX_LINE_BYTES, HighlightScopeTable, ScopeAtomId,

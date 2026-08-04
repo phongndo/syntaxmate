@@ -6,7 +6,7 @@
 //! losing the endpoint it reached.
 
 use super::AnchorContext;
-use super::ast::{Ast, CharClass, ParsedRegex, RegexFlags};
+use super::ast::{Ast, CharClass, ClassAtom, ParsedRegex, RegexFlags};
 use super::backtrack::{anchor_matches, char_at, class_contains};
 
 const NO_TARGET: usize = usize::MAX;
@@ -106,7 +106,77 @@ pub(crate) struct ScannerScratch {
     generation: u32,
 }
 
+fn char_class_heap_bytes(class: &CharClass) -> usize {
+    let mut bytes = class
+        .atoms
+        .capacity()
+        .saturating_mul(std::mem::size_of::<ClassAtom>())
+        .saturating_add(
+            class
+                .intersections
+                .capacity()
+                .saturating_mul(std::mem::size_of::<Vec<ClassAtom>>()),
+        );
+    for atom in &class.atoms {
+        bytes = bytes.saturating_add(class_atom_heap_bytes(atom));
+    }
+    for intersection in &class.intersections {
+        bytes = bytes.saturating_add(
+            intersection
+                .capacity()
+                .saturating_mul(std::mem::size_of::<ClassAtom>()),
+        );
+        for atom in intersection {
+            bytes = bytes.saturating_add(class_atom_heap_bytes(atom));
+        }
+    }
+    bytes
+}
+
+fn class_atom_heap_bytes(atom: &ClassAtom) -> usize {
+    match atom {
+        ClassAtom::Posix { name, .. } | ClassAtom::Unicode { name, .. } => name.capacity(),
+        ClassAtom::Nested(class) => {
+            std::mem::size_of::<CharClass>().saturating_add(char_class_heap_bytes(class))
+        }
+        ClassAtom::Char(_) | ClassAtom::Range(_, _) | ClassAtom::Perl(_) => 0,
+    }
+}
+
 impl Scanner {
+    pub(crate) fn retained_heap_bytes(&self) -> usize {
+        let mut bytes = self
+            .insts
+            .capacity()
+            .saturating_mul(std::mem::size_of::<Inst>())
+            .saturating_add(
+                self.entries
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            )
+            .saturating_add(
+                self.starts
+                    .unrestricted
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+            .saturating_add(
+                self.starts
+                    .restricted
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+            .saturating_add(
+                self.classes
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<CharClass>()),
+            );
+        for class in &self.classes {
+            bytes = bytes.saturating_add(char_class_heap_bytes(class));
+        }
+        bytes
+    }
+
     pub(crate) fn supports(parsed: &ParsedRegex) -> bool {
         !parsed.features.possessive_or_atomic && ast_is_supported(&parsed.ast)
     }
