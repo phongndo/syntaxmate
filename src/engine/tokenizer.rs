@@ -102,7 +102,7 @@ pub(crate) struct CompactScopedToken {
 
 pub(crate) trait SharedScopeSink {
     fn reserve(&mut self, token_count: usize);
-    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>);
+    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>);
 }
 
 #[derive(Debug, Default, Clone)]
@@ -2614,6 +2614,7 @@ impl TextMateTokenizer {
         for token in compact.tokens.iter() {
             sink.push(
                 token.range.clone(),
+                token.stack,
                 self.resolve_scope_stack_cached(token.stack),
             );
         }

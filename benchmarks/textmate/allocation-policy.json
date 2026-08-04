@@ -1,0 +1,287 @@
+{
+  "schemaVersion": 1,
+  "percentileMethod": "nearest-rank",
+  "reportedPercentiles": [
+    50,
+    95
+  ],
+  "metrics": [
+    "allocationCallsPerKib",
+    "allocatedBytesPerKib",
+    "peakRetainedBytesPerKib"
+  ],
+  "corpora": [
+    {
+      "language": "markdown",
+      "path": "tests/fixtures/textmate/markdown/stress.md",
+      "bytes": 5088,
+      "sha256": "280ef97aa5b2df06f01eea8fe97b15baaeb6ee24d27b6047c5e038a5a945db68",
+      "ceilings": {
+        "construct": {
+          "maxAllocationCalls": 129280,
+          "maxAllocatedBytes": 19975168,
+          "maxPeakRetainedBytes": 13805568
+        },
+        "highlight-lines-first": {
+          "maxAllocationCalls": 115030,
+          "maxAllocatedBytes": 12418048,
+          "maxPeakRetainedBytes": 5997568
+        },
+        "highlight-lines-warm": {
+          "maxAllocationCalls": 230,
+          "maxAllocatedBytes": 51200,
+          "maxPeakRetainedBytes": 14336
+        },
+        "incremental-first": {
+          "maxAllocationCalls": 115020,
+          "maxAllocatedBytes": 12360704,
+          "maxPeakRetainedBytes": 5967872
+        },
+        "incremental-warm": {
+          "maxAllocationCalls": 230,
+          "maxAllocatedBytes": 40960,
+          "maxPeakRetainedBytes": 13312
+        },
+        "prepare-language": {
+          "maxAllocationCalls": 99460,
+          "maxAllocatedBytes": 18902016,
+          "maxPeakRetainedBytes": 10962944
+        },
+        "prepared-first": {
+          "maxAllocationCalls": 154550,
+          "maxAllocatedBytes": 17249280,
+          "maxPeakRetainedBytes": 8460288
+        },
+        "prepared-new": {
+          "maxAllocationCalls": 110,
+          "maxAllocatedBytes": 21504,
+          "maxPeakRetainedBytes": 21504
+        },
+        "prepared-new-warm": {
+          "maxAllocationCalls": 110,
+          "maxAllocatedBytes": 21504,
+          "maxPeakRetainedBytes": 21504
+        },
+        "prepared-reuse": {
+          "maxAllocationCalls": 16030,
+          "maxAllocatedBytes": 2063360,
+          "maxPeakRetainedBytes": 645120
+        },
+        "tokenize-first": {
+          "maxAllocationCalls": 162070,
+          "maxAllocatedBytes": 18286592,
+          "maxPeakRetainedBytes": 9001984
+        },
+        "tokenize-warm": {
+          "maxAllocationCalls": 1200,
+          "maxAllocatedBytes": 136192,
+          "maxPeakRetainedBytes": 92160
+        }
+      }
+    },
+    {
+      "language": "cpp",
+      "path": "tests/fixtures/textmate/cpp/stress.cpp",
+      "bytes": 11814,
+      "sha256": "4d74bef8afda0a72f6d4978dc7e3abc9e0c68e13b8db9f8d22d62a8ac13836d0",
+      "ceilings": {
+        "construct": {
+          "maxAllocationCalls": 54150,
+          "maxAllocatedBytes": 6996992,
+          "maxPeakRetainedBytes": 5751808
+        },
+        "highlight-lines-first": {
+          "maxAllocationCalls": 252740,
+          "maxAllocatedBytes": 36469760,
+          "maxPeakRetainedBytes": 18304000
+        },
+        "highlight-lines-warm": {
+          "maxAllocationCalls": 280,
+          "maxAllocatedBytes": 168960,
+          "maxPeakRetainedBytes": 15360
+        },
+        "incremental-first": {
+          "maxAllocationCalls": 252730,
+          "maxAllocatedBytes": 36368384,
+          "maxPeakRetainedBytes": 18272256
+        },
+        "incremental-warm": {
+          "maxAllocationCalls": 280,
+          "maxAllocatedBytes": 119808,
+          "maxPeakRetainedBytes": 15360
+        },
+        "prepare-language": {
+          "maxAllocationCalls": 51190,
+          "maxAllocatedBytes": 8061952,
+          "maxPeakRetainedBytes": 3432448
+        },
+        "prepared-first": {
+          "maxAllocationCalls": 215450,
+          "maxAllocatedBytes": 30237696,
+          "maxPeakRetainedBytes": 15709184
+        },
+        "prepared-new": {
+          "maxAllocationCalls": 90,
+          "maxAllocatedBytes": 14336,
+          "maxPeakRetainedBytes": 14336
+        },
+        "prepared-new-warm": {
+          "maxAllocationCalls": 90,
+          "maxAllocatedBytes": 14336,
+          "maxPeakRetainedBytes": 14336
+        },
+        "prepared-reuse": {
+          "maxAllocationCalls": 50900,
+          "maxAllocatedBytes": 8098816,
+          "maxPeakRetainedBytes": 4081664
+        },
+        "tokenize-first": {
+          "maxAllocationCalls": 251600,
+          "maxAllocatedBytes": 36206592,
+          "maxPeakRetainedBytes": 18338816
+        },
+        "tokenize-warm": {
+          "maxAllocationCalls": 2780,
+          "maxAllocatedBytes": 270336,
+          "maxPeakRetainedBytes": 192512
+        }
+      }
+    },
+    {
+      "language": "rust",
+      "path": "tests/fixtures/textmate/rust/stress.rs",
+      "bytes": 5951,
+      "sha256": "6ea6f7ec196043ccfa1e3d0ca8c99b3f5c1f6f1de75f13b87b9f36853a199f21",
+      "ceilings": {
+        "construct": {
+          "maxAllocationCalls": 41190,
+          "maxAllocatedBytes": 4340736,
+          "maxPeakRetainedBytes": 4086784
+        },
+        "highlight-lines-first": {
+          "maxAllocationCalls": 11750,
+          "maxAllocatedBytes": 1668096,
+          "maxPeakRetainedBytes": 759808
+        },
+        "highlight-lines-warm": {
+          "maxAllocationCalls": 230,
+          "maxAllocatedBytes": 139264,
+          "maxPeakRetainedBytes": 15360
+        },
+        "incremental-first": {
+          "maxAllocationCalls": 11740,
+          "maxAllocatedBytes": 1616896,
+          "maxPeakRetainedBytes": 751616
+        },
+        "incremental-warm": {
+          "maxAllocationCalls": 230,
+          "maxAllocatedBytes": 99328,
+          "maxPeakRetainedBytes": 14336
+        },
+        "prepare-language": {
+          "maxAllocationCalls": 4990,
+          "maxAllocatedBytes": 672768,
+          "maxPeakRetainedBytes": 288768
+        },
+        "prepared-first": {
+          "maxAllocationCalls": 7720,
+          "maxAllocatedBytes": 1196032,
+          "maxPeakRetainedBytes": 622592
+        },
+        "prepared-new": {
+          "maxAllocationCalls": 100,
+          "maxAllocatedBytes": 15360,
+          "maxPeakRetainedBytes": 15360
+        },
+        "prepared-new-warm": {
+          "maxAllocationCalls": 100,
+          "maxAllocatedBytes": 15360,
+          "maxPeakRetainedBytes": 15360
+        },
+        "prepared-reuse": {
+          "maxAllocationCalls": 4340,
+          "maxAllocatedBytes": 672768,
+          "maxPeakRetainedBytes": 275456
+        },
+        "tokenize-first": {
+          "maxAllocationCalls": 11640,
+          "maxAllocatedBytes": 1608704,
+          "maxPeakRetainedBytes": 823296
+        },
+        "tokenize-warm": {
+          "maxAllocationCalls": 600,
+          "maxAllocatedBytes": 130048,
+          "maxPeakRetainedBytes": 104448
+        }
+      }
+    },
+    {
+      "language": "html",
+      "path": "tests/fixtures/textmate/html/stress.html",
+      "bytes": 9431,
+      "sha256": "7c381d9f0307f8430669b6363f3510604bc1b31e5d345072c8367bf7edf443a0",
+      "ceilings": {
+        "construct": {
+          "maxAllocationCalls": 47010,
+          "maxAllocatedBytes": 5621760,
+          "maxPeakRetainedBytes": 4880384
+        },
+        "highlight-lines-first": {
+          "maxAllocationCalls": 181870,
+          "maxAllocatedBytes": 21987328,
+          "maxPeakRetainedBytes": 10911744
+        },
+        "highlight-lines-warm": {
+          "maxAllocationCalls": 230,
+          "maxAllocatedBytes": 168960,
+          "maxPeakRetainedBytes": 16384
+        },
+        "incremental-first": {
+          "maxAllocationCalls": 181860,
+          "maxAllocatedBytes": 21866496,
+          "maxPeakRetainedBytes": 10869760
+        },
+        "incremental-warm": {
+          "maxAllocationCalls": 230,
+          "maxAllocatedBytes": 119808,
+          "maxPeakRetainedBytes": 15360
+        },
+        "prepare-language": {
+          "maxAllocationCalls": 28330,
+          "maxAllocatedBytes": 3850240,
+          "maxPeakRetainedBytes": 1767424
+        },
+        "prepared-first": {
+          "maxAllocationCalls": 157770,
+          "maxAllocatedBytes": 18736128,
+          "maxPeakRetainedBytes": 9360384
+        },
+        "prepared-new": {
+          "maxAllocationCalls": 60,
+          "maxAllocatedBytes": 8192,
+          "maxPeakRetainedBytes": 8192
+        },
+        "prepared-new-warm": {
+          "maxAllocationCalls": 50,
+          "maxAllocatedBytes": 8192,
+          "maxPeakRetainedBytes": 8192
+        },
+        "prepared-reuse": {
+          "maxAllocationCalls": 40250,
+          "maxAllocatedBytes": 5376000,
+          "maxPeakRetainedBytes": 1720320
+        },
+        "tokenize-first": {
+          "maxAllocationCalls": 179970,
+          "maxAllocatedBytes": 21628928,
+          "maxPeakRetainedBytes": 10903552
+        },
+        "tokenize-warm": {
+          "maxAllocationCalls": 3880,
+          "maxAllocatedBytes": 335872,
+          "maxPeakRetainedBytes": 241664
+        }
+      }
+    }
+  ]
+}

@@ -26,6 +26,90 @@ PERFORMANCE = load_tool(
 )
 STATUS = load_tool("generate_language_status", "generate-language-status.py")
 CORPORA = load_tool("build_textmate_corpora", "build-textmate-corpora.py")
+ALLOCATION = load_tool(
+    "check_allocation_performance", "check-allocation-performance.py"
+)
+
+
+class AllocationPerformanceTests(unittest.TestCase):
+    def phase(self, *, output):
+        return {
+            "allocations": 2,
+            "deallocations": 1,
+            "reallocations": 1,
+            "allocationCalls": 3,
+            "allocatedBytes": 20,
+            "deallocatedBytes": 8,
+            "retainedBytes": 12,
+            "peakRetainedBytes": 16,
+            "elapsedNanoseconds": 100,
+            "items": 4,
+            "complete": True if output else None,
+            "tokenDigest": "0123456789abcdef" if output else None,
+            "scopeDigest": "fedcba9876543210" if output else None,
+        }
+
+    def corpus(self):
+        return {
+            "language": "rust",
+            "bytes": 1024,
+            "ceilings": {
+                phase: {
+                    "maxAllocationCalls": 4,
+                    "maxAllocatedBytes": 24,
+                    "maxPeakRetainedBytes": 20,
+                }
+                for phase in ALLOCATION.REQUIRED_PHASES
+            },
+        }
+
+    def protocol(self):
+        return {
+            "schemaVersion": 1,
+            "language": "rust",
+            "sourceBytes": 1024,
+            "phases": {
+                phase: self.phase(output=phase in ALLOCATION.OUTPUT_PHASES)
+                for phase in ALLOCATION.REQUIRED_PHASES
+            },
+        }
+
+    def test_checked_policy_has_four_corpora_and_all_phase_ceilings(self):
+        policy = ALLOCATION.load_policy()
+        self.assertEqual(len(policy["corpora"]), 4)
+        for corpus in policy["corpora"]:
+            self.assertEqual(set(corpus["ceilings"]), set(ALLOCATION.REQUIRED_PHASES))
+
+    def test_protocol_locks_warm_token_and_scope_streams(self):
+        protocol = self.protocol()
+        ALLOCATION.validate_protocol(protocol, self.corpus())
+        protocol["phases"]["incremental-warm"]["scopeDigest"] = "0" * 16
+        with self.assertRaisesRegex(ValueError, "token/scope stream differs"):
+            ALLOCATION.validate_protocol(protocol, self.corpus())
+
+    def test_ceilings_reject_calls_bytes_and_peak_live_memory_independently(self):
+        protocol = self.protocol()
+        phases = ALLOCATION.validate_protocol(protocol, self.corpus())
+        self.assertEqual(ALLOCATION.evaluate_ceilings(phases, self.corpus()), [])
+        phases["construct"]["allocationCalls"] = 5
+        phases["incremental-first"]["allocatedBytes"] = 25
+        phases["tokenize-first"]["peakRetainedBytes"] = 21
+        failures = ALLOCATION.evaluate_ceilings(phases, self.corpus())
+        self.assertEqual(len(failures), 3)
+
+    def test_nearest_rank_and_corpus_percentiles_are_deterministic(self):
+        self.assertEqual(ALLOCATION.nearest_rank([4, 1, 3, 2], 50), 2)
+        self.assertEqual(ALLOCATION.nearest_rank([4, 1, 3, 2], 95), 4)
+        phases = self.protocol()["phases"]
+        results = [
+            {"bytes": 1024, "phases": phases},
+            {"bytes": 2048, "phases": phases},
+        ]
+        report = ALLOCATION.corpus_percentiles(results)
+        self.assertEqual(
+            report["construct"]["allocationCallsPerKib"],
+            {"p50": 1.5, "p95": 3.0},
+        )
 
 
 class CatalogPerformanceTests(unittest.TestCase):

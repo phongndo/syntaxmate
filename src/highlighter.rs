@@ -12,7 +12,7 @@ use crate::{
 #[cfg(feature = "bundled-grammars")]
 use crate::{
     TokenizerOptions,
-    engine::tokenizer::SharedScopeSink,
+    engine::{state::ScopeStackId, tokenizer::SharedScopeSink},
     tokenizer::{Tokenizer, TokenizerState},
 };
 
@@ -246,6 +246,7 @@ impl Highlighter {
             tokenizer,
             state,
             theme: theme.clone(),
+            style_cache: IncrementalStyleCache::default(),
         })
     }
 }
@@ -273,9 +274,45 @@ pub fn style_document(tokenized: TokenizedDocument, theme: &Theme) -> Highlighte
 }
 
 #[cfg(feature = "bundled-grammars")]
+const MAX_INCREMENTAL_STYLE_CACHE_ENTRIES: usize = 8_192;
+
+/// A dense session-local cache keyed by the originating tokenizer's stable
+/// scope-stack identity. IDs above the fixed slot bound remain uncached.
+#[cfg(feature = "bundled-grammars")]
+#[derive(Debug, Default)]
+struct IncrementalStyleCache {
+    styles: Vec<Option<ResolvedSyntaxStyle>>,
+}
+
+#[cfg(feature = "bundled-grammars")]
+impl IncrementalStyleCache {
+    fn resolve(
+        &mut self,
+        stack: ScopeStackId,
+        scopes: &[Arc<str>],
+        theme: &Theme,
+    ) -> ResolvedSyntaxStyle {
+        let index = stack.0 as usize;
+        if let Some(style) = self.styles.get(index).copied().flatten() {
+            return style;
+        }
+
+        let style = theme.resolve_shared_scope_names(scopes);
+        if index < MAX_INCREMENTAL_STYLE_CACHE_ENTRIES {
+            if self.styles.len() <= index {
+                self.styles.resize(index + 1, None);
+            }
+            self.styles[index] = Some(style);
+        }
+        style
+    }
+}
+
+#[cfg(feature = "bundled-grammars")]
 struct IncrementalSpanVecSink<'a> {
     line: &'a str,
     theme: &'a Theme,
+    style_cache: &'a mut IncrementalStyleCache,
     spans: &'a mut Vec<IncrementalHighlightedSpan>,
 }
 
@@ -289,8 +326,15 @@ impl SharedScopeSink for IncrementalSpanVecSink<'_> {
         }
     }
 
-    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
-        if let Some(span) = incremental_span(self.line, range, scopes, self.theme) {
+    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+        if let Some(span) = incremental_span(
+            self.line,
+            range,
+            stack,
+            scopes,
+            self.theme,
+            self.style_cache,
+        ) {
             self.spans.push(span);
         }
     }
@@ -300,6 +344,7 @@ impl SharedScopeSink for IncrementalSpanVecSink<'_> {
 struct IncrementalSpanCallbackSink<'a, F> {
     line: &'a str,
     theme: &'a Theme,
+    style_cache: &'a mut IncrementalStyleCache,
     callback: F,
 }
 
@@ -307,8 +352,15 @@ struct IncrementalSpanCallbackSink<'a, F> {
 impl<F: FnMut(IncrementalHighlightedSpan)> SharedScopeSink for IncrementalSpanCallbackSink<'_, F> {
     fn reserve(&mut self, _span_count: usize) {}
 
-    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
-        if let Some(span) = incremental_span(self.line, range, scopes, self.theme) {
+    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+        if let Some(span) = incremental_span(
+            self.line,
+            range,
+            stack,
+            scopes,
+            self.theme,
+            self.style_cache,
+        ) {
             (self.callback)(span);
         }
     }
@@ -318,45 +370,40 @@ impl<F: FnMut(IncrementalHighlightedSpan)> SharedScopeSink for IncrementalSpanCa
 fn incremental_span(
     line: &str,
     range: Range<usize>,
+    stack: ScopeStackId,
     scopes: Arc<[Arc<str>]>,
     theme: &Theme,
+    style_cache: &mut IncrementalStyleCache,
 ) -> Option<IncrementalHighlightedSpan> {
     let start = range.start.min(line.len());
     let end = range.end.min(line.len());
     (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then(|| {
         IncrementalHighlightedSpan {
             range: start..end,
-            style: theme.resolve_shared_scope_names(&scopes),
+            style: style_cache.resolve(stack, &scopes, theme),
             scopes,
         }
     })
 }
 
 /// A reusable incremental highlighter. Input lines exclude newline terminators.
+///
+/// Resolved styles are retained in a session-local cache for up to 8,192
+/// tokenizer scope-stack identities. Higher identities remain uncached.
 #[cfg(feature = "bundled-grammars")]
 #[derive(Debug)]
 pub struct HighlightSession {
     tokenizer: Tokenizer,
     state: TokenizerState,
     theme: Theme,
+    style_cache: IncrementalStyleCache,
 }
 
 #[cfg(feature = "bundled-grammars")]
 impl HighlightSession {
     pub fn highlight_line(&mut self, line: &str) -> Result<IncrementalHighlightedLine> {
-        let tokenized = self.tokenizer.tokenize_line(line, &mut self.state)?;
-        let (tokens, status) = tokenized.into_parts();
-        let spans = tokens
-            .into_iter()
-            .map(|token| {
-                let (range, scopes) = token.into_parts();
-                IncrementalHighlightedSpan {
-                    range,
-                    style: self.theme.resolve_shared_scope_names(&scopes),
-                    scopes,
-                }
-            })
-            .collect();
+        let mut spans = Vec::new();
+        let status = self.highlight_line_into(line, &mut spans)?;
         Ok(IncrementalHighlightedLine { spans, status })
     }
 
@@ -374,6 +421,7 @@ impl HighlightSession {
         let mut sink = IncrementalSpanVecSink {
             line,
             theme: &self.theme,
+            style_cache: &mut self.style_cache,
             spans,
         };
         Ok(self
@@ -393,10 +441,19 @@ impl HighlightSession {
         let mut sink = IncrementalSpanCallbackSink {
             line,
             theme: &self.theme,
+            style_cache: &mut self.style_cache,
             callback: sink,
         };
         self.tokenizer
             .tokenize_line_shared_with(line, &mut self.state, &mut sink)
+    }
+
+    /// Resets continuation state to the start of a document.
+    ///
+    /// Tokenizer and resolved-style caches are retained, making this suitable
+    /// for replaying a document after edits without rebuilding the session.
+    pub fn reset(&mut self) {
+        self.state = self.tokenizer.initial_state();
     }
 
     pub fn state(&self) -> &TokenizerState {
@@ -491,5 +548,87 @@ impl IncrementalHighlightedLine {
 
     pub fn status(&self) -> HighlightStatus {
         self.status
+    }
+}
+
+#[cfg(all(test, feature = "bundled-grammars"))]
+mod incremental_style_cache_tests {
+    use super::*;
+
+    fn test_theme() -> Theme {
+        Theme::from_json(
+            r##"{
+                "name": "Incremental cache test",
+                "colors": {"editor.foreground": "#010203"},
+                "tokenColors": [{
+                    "scope": "keyword",
+                    "settings": {"foreground": "#112233", "fontStyle": "bold"}
+                }]
+            }"##,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn incremental_style_cache_is_exact_and_hard_bounded() {
+        let theme = test_theme();
+        let scopes = [Arc::<str>::from("source.test"), Arc::from("keyword.test")];
+        let expected = theme.resolve_shared_scope_names(&scopes);
+        let mut cache = IncrementalStyleCache::default();
+
+        assert_eq!(cache.resolve(ScopeStackId(3), &scopes, &theme), expected);
+        assert_eq!(cache.styles.len(), 4);
+        assert_eq!(cache.styles[3], Some(expected));
+        assert_eq!(cache.resolve(ScopeStackId(3), &scopes, &theme), expected);
+
+        assert_eq!(
+            cache.resolve(
+                ScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32 - 1),
+                &scopes,
+                &theme,
+            ),
+            expected
+        );
+        assert_eq!(cache.styles.len(), MAX_INCREMENTAL_STYLE_CACHE_ENTRIES);
+        assert_eq!(
+            cache.resolve(
+                ScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32),
+                &scopes,
+                &theme,
+            ),
+            expected
+        );
+        assert_eq!(cache.styles.len(), MAX_INCREMENTAL_STYLE_CACHE_ENTRIES);
+    }
+
+    #[test]
+    fn incremental_session_reuses_scope_identity_styles_across_lines() {
+        let highlighter = Highlighter::bundled().unwrap();
+        let theme = test_theme();
+        let mut session = highlighter.session_with_theme("rust", &theme).unwrap();
+
+        let first = session.highlight_line("fn cached() {}").unwrap();
+        let cached_slots = session
+            .style_cache
+            .styles
+            .iter()
+            .filter(|style| style.is_some())
+            .count();
+        let cache_len = session.style_cache.styles.len();
+        assert!(cached_slots > 0);
+
+        session.reset();
+        let second = session.highlight_line("fn cached() {}").unwrap();
+        assert_eq!(second, first);
+        assert_eq!(session.style_cache.styles.len(), cache_len);
+        assert_eq!(
+            session
+                .style_cache
+                .styles
+                .iter()
+                .filter(|style| style.is_some())
+                .count(),
+            cached_slots
+        );
     }
 }

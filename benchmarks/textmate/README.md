@@ -17,6 +17,26 @@ target/release/examples/profile-cold \
 Run the command in a fresh process for each process-cold sample. The driver
 loads only the requested grammar's transitive external-include closure.
 
+## Allocation and live-memory guardrails
+
+`profile-alloc` exposes a stable JSON protocol for first/warm whole-document,
+incremental replay, incremental highlighting, and prepared-language phases. It
+records allocation calls, cumulative bytes, boundary retention, peak additional
+live bytes, and token/scope-stream digests without serializing output in the
+timed API intervals.
+
+```sh
+cargo build --release --example profile-alloc --locked
+python3 tools/check-allocation-performance.py \
+  --write-report target/textmate-performance/allocation-report.json
+```
+
+The checker validates the four fixed corpus paths, sizes, and SHA-256 digests in
+`allocation-policy.json`, enforces every phase's allocation-call,
+cumulative-byte, and peak-live-byte ceilings, and reports nearest-rank p50/p95
+values per KiB. Elapsed time is
+reported but not gated on variable shared CI runners.
+
 ## Pinned standalone vscode-textmate
 
 ```sh

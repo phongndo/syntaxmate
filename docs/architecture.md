@@ -35,7 +35,9 @@ or over-budget pattern/candidate artifacts remain tokenizer-local rather than
 escaping the bound. A custom dependency graph that exceeds the bounded
 preparation walk is rejected by `PreparedLanguage` and remains available to the
 direct tokenizer API. Process-wide initialization remains limited to immutable
-embedded bundle/theme data.
+embedded bundle/theme data. Incremental `HighlightSession` instances retain
+their own dense resolved-style cache for at most 8,192 tokenizer scope-stack
+identities; higher identities bypass that cache.
 
 `TokenizerState` and `CheckpointTable` are opaque and tied to the tokenizer that
 created them. This prevents accidental state reuse across grammar sets while

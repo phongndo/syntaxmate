@@ -183,6 +183,26 @@ fn incremental_highlight_sinks_match_owned_output() {
 }
 
 #[test]
+fn incremental_session_reset_replays_from_document_start() {
+    let highlighter = Highlighter::bundled().unwrap();
+    let mut session = highlighter.session("rust", "github-dark").unwrap();
+    let lines = ["fn replay() {", "    let text = r#\"open", "continued"];
+    let first = lines
+        .iter()
+        .map(|line| session.highlight_line(line).unwrap())
+        .collect::<Vec<_>>();
+    assert!(!session.state().is_initial());
+
+    session.reset();
+    assert!(session.state().is_initial());
+    let replayed = lines
+        .iter()
+        .map(|line| session.highlight_line(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(replayed, first);
+}
+
+#[test]
 fn incremental_session_accepts_a_custom_theme() {
     let theme = Theme::from_json(
         r##"{

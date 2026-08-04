@@ -10,10 +10,10 @@ Before marking an item complete:
 
 1. Compare an optimized release build with the commit immediately before the
    item using alternating-order, separate-process samples.
-2. Report construction, first and warm whole-document tokenization,
-   incremental tokenization, and incremental highlighting where relevant.
-3. Report allocation calls, cumulative allocated bytes, retained bytes, and
-   elapsed time with `examples/profile-alloc.rs`.
+2. Report construction plus first and warm whole-document, incremental, and
+   incremental-highlighting phases where relevant.
+3. Report allocation calls, cumulative allocated bytes, boundary and peak
+   retained bytes, and elapsed API time with `examples/profile-alloc.rs`.
 4. Confirm identical token counts and scope-stream digests on benchmark inputs.
 5. Run formatting, Clippy, all-feature tests, the complete TextMate golden suite,
    generated-asset checks, and package checks.
@@ -172,14 +172,59 @@ The raw median report is `target/profile-item6-comparison.json`.
 
 ### 7. Incremental theme cache
 
-- [ ] Carry internal scope-stack identity through incremental highlighting.
-- [ ] Cache `ScopeStackId -> ResolvedSyntaxStyle` per session with a hard bound.
+- [x] Carry internal scope-stack identity through incremental highlighting.
+- [x] Cache `ScopeStackId -> ResolvedSyntaxStyle` per session with a hard bound.
+
+Result: incremental sinks now carry the tokenizer's stable private
+`ScopeStackId` into `HighlightSession`, which caches resolved styles in a dense
+8,192-slot per-session table. Higher IDs are resolved without retention, so
+pathological dynamic scope generation cannot grow the cache beyond the fixed
+bound.
+
+Across seven alternating release samples, a second incremental highlighting
+pass with the cache populated improved elapsed time by 14.0% to 59.8% across
+owned, reusable-buffer, and callback APIs. First-pass reusable/callback elapsed
+time improved 3.4% to 3.6% for C++, 14.3% to 15.4% for Rust, and 0.9% to 1.7%
+for HTML; Markdown's -0.8% callback and +1.4% buffer medians were treated as
+neutral. The owned first pass improved 0.9%, 3.2%, 15.8%, and 1.2% for Markdown,
+C++, Rust, and HTML, respectively. It now fills its final span collection
+directly, removing 151 to 239 allocation calls and 8.7 to 58.9 KiB of cumulative
+allocation depending on the corpus.
+
+Initial cache population added one allocation and six to nine reallocations to
+the sink paths, retaining 2.25 to 18 KiB and adding 4.5 to 36 KiB cumulatively.
+Once populated, reusable-buffer and callback allocations, cumulative bytes, and
+retained bytes were unchanged while style-resolution time fell. All unrelated
+`profile-alloc` phases remained allocation- and byte-identical. Item counts,
+range/scope/style digests, and complete golden scope streams were unchanged.
+The raw median report is `target/profile-item7-comparison.json`.
 
 ### 8. Performance guardrails
 
-- [ ] Add warm incremental replay and warm incremental highlighting phases.
-- [ ] Add peak retained bytes and token/scope-stream digests.
-- [ ] Define reviewed CI allocation ceilings and corpus percentile reporting.
+- [x] Add warm incremental replay and warm incremental highlighting phases.
+- [x] Add peak retained bytes and token/scope-stream digests.
+- [x] Define reviewed CI allocation ceilings and corpus percentile reporting.
+
+Result: `profile-alloc` now resets incremental continuation state while
+retaining tokenizer and theme caches, then measures true warm tokenization and
+highlighting replays. Its human and versioned JSON outputs report allocation
+and reallocation calls, cumulative and boundary-retained bytes, peak additional
+live bytes, API elapsed time, completeness, item counts, and stable token-range
+and exact scope-stream digests. Digest work stays outside the timed API
+intervals, and first/warm output mismatches fail the profiler.
+
+The CI allocation policy fixes four representative Markdown, C++, Rust, and
+HTML stress corpora by path, byte count, and SHA-256. All 12 phases have reviewed
+per-corpus ceilings for allocation calls, cumulative allocated bytes, and peak
+live bytes, calibrated with approximately 5% headroom plus small fixed
+allowances. The checker rejects
+stale inputs, malformed accounting, degraded output, digest drift, and ceiling
+breaches. It also emits nearest-rank p50/p95 allocation-call, cumulative-byte,
+and peak-live-byte densities per KiB; elapsed time remains informational on
+shared runners. The checked policy is
+`benchmarks/textmate/allocation-policy.json`, and ad-hoc reports can be written
+to `target/textmate-performance/allocation-report.json`. The initial four-corpus
+CI replay passes every ceiling with exact first/warm token and scope digests.
 
 ## Experiments not to repeat unchanged
 

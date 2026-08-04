@@ -16,7 +16,12 @@ Incremental callers can choose owned line results, caller-reused
 `tokenize_line_into`/`highlight_line_into` buffers, or callback-based
 `tokenize_line_with`/`highlight_line_with` delivery. The forms preserve the
 same continuation-state and `HighlightStatus` contract; sink callbacks receive
-owned spans backed by shared immutable scope names.
+owned spans backed by shared immutable scope names. Each `HighlightSession`
+uses the tokenizer's private stable scope-stack identity to cache resolved
+styles in at most 8,192 dense slots. The identity remains an implementation
+detail, and higher IDs are resolved without retention. `HighlightSession::reset`
+returns continuation state to document start while preserving these private
+caches for deterministic replay.
 
 The low-level grammar compiler, regex VM, numeric rule IDs, and mutable caches
 are deliberately private. `PreparedLanguage` is the explicit caller-owned

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 - 2026-08-04
 
 - Fix participating capture ranges in the optimized Nix expression-end
   lookahead so they match `vscode-oniguruma`.
@@ -17,6 +17,10 @@
   preparation.
 - Add reusable incremental token/span buffers, callback sinks, and direct
   compact-token HTML/ANSI rendering paths while retaining the owned APIs.
+- Cache incremental theme resolution by private tokenizer scope-stack identity
+  with a fixed 8,192-slot per-session bound.
+- Add resettable warm incremental profiling, peak live-byte and output-digest
+  reporting, plus reviewed allocation and retention ceilings in CI.
 
 ## 0.1.0 - 2026-08-01
 

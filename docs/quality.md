@@ -19,7 +19,8 @@ checks.
 - Linux, macOS, and Windows public API tests;
 - dependency advisory/license/source policy;
 - packaged default and custom-assets downstream consumers;
-- package size and catalog performance floors.
+- package size, catalog throughput floors, and representative-corpus
+  allocation/peak-live-memory ceilings.
 
 Coverage is published for the focused library suite. Scheduled workflows run
 longer fuzz campaigns and static security analysis.
@@ -63,18 +64,43 @@ the reference-machine floor separate from conservative per-language and
 aggregate floors calibrated for variable GitHub-hosted runners.
 
 Use the allocation profiler to compare construction, first/warm whole-document
-runs, incremental tokenization/highlighting, and prepared-language creation and
-reuse on one corpus:
+runs, first/warm incremental replay, first/warm incremental highlighting, and
+prepared-language creation and reuse on one corpus:
 
 ```sh
 cargo run --release --example profile-alloc -- rust path/to/source.rs
+cargo run --release --example profile-alloc -- --json rust path/to/source.rs
 ```
 
-It reports allocation/reallocation calls, cumulative allocated bytes, retained
-bytes at the phase boundary, elapsed time, and allocations per KiB. For
-alternating, separate-process comparisons of multiple independent tokenizers,
-use `profile-prepared` in `direct`, `prepared-total`, and `prepared-reuse` modes.
-Its JSON also reports prepared count and charged-byte capacities/populations:
+It reports allocation/reallocation calls, cumulative allocated bytes, bytes
+retained at the phase boundary, peak additional live bytes, elapsed API time,
+and allocations per KiB. Output phases include stable token-range and exact
+scope-stream digests; warm replay is rejected if its item count, completeness,
+or either digest changes.
+
+CI runs the four fixed representative corpora in
+`benchmarks/textmate/allocation-policy.json`. Every phase has reviewed
+per-corpus ceilings for total allocation calls, cumulative allocated bytes, and
+peak live bytes. The checker
+also reports nearest-rank p50/p95 allocation calls, cumulative bytes, and peak
+live bytes per KiB, while deliberately leaving elapsed time informational on
+shared runners:
+
+```sh
+cargo build --release --example profile-alloc --locked
+python3 tools/check-allocation-performance.py \
+  --write-report target/textmate-performance/allocation-report.json
+```
+
+The checked ceilings allow approximately 5% headroom (plus 16 calls or 4 KiB
+before rounding) over their reviewed baseline. Raising them requires
+new profile evidence and review; corpus paths, byte counts, and SHA-256 digests
+prevent a fixture change from weakening the gate.
+
+For alternating, separate-process comparisons of multiple independent
+tokenizers, use `profile-prepared` in `direct`, `prepared-total`, and
+`prepared-reuse` modes. Its JSON also reports prepared count and charged-byte
+capacities/populations:
 
 ```sh
 cargo run --release --example profile-prepared -- \

@@ -4,6 +4,7 @@ use crate::engine::checkpoint::CheckpointTable as EngineCheckpointTable;
 
 use crate::{
     Error, HighlightScopeTable, Result, ScopeStackRef, TokenizerOptions,
+    engine::state::ScopeStackId,
     engine::tokenizer::{
         GrammarSet as EngineGrammarSet, PreparedLanguage as EnginePreparedLanguage,
         SharedScopeSink, TextMateTokenizer, TokenizerState as EngineTokenizerState,
@@ -27,7 +28,7 @@ impl SharedScopeSink for ScopedTokenVecSink<'_> {
         }
     }
 
-    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
+    fn push(&mut self, range: Range<usize>, _stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
         if let Some(token) = scoped_token(self.line, range, scopes) {
             self.tokens.push(token);
         }
@@ -42,7 +43,7 @@ struct ScopedTokenCallbackSink<'a, F> {
 impl<F: FnMut(ScopedToken)> SharedScopeSink for ScopedTokenCallbackSink<'_, F> {
     fn reserve(&mut self, _token_count: usize) {}
 
-    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
+    fn push(&mut self, range: Range<usize>, _stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
         if let Some(token) = scoped_token(self.line, range, scopes) {
             (self.callback)(token);
         }
@@ -634,11 +635,6 @@ impl ScopedToken {
     pub fn scopes(&self) -> impl ExactSizeIterator<Item = &str> {
         self.scopes.iter().map(AsRef::as_ref)
     }
-
-    #[cfg(feature = "bundled-grammars")]
-    pub(crate) fn into_parts(self) -> (Range<usize>, Arc<[Arc<str>]>) {
-        (self.range, self.scopes)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -654,11 +650,6 @@ impl TokenizedLine {
 
     pub fn status(&self) -> HighlightStatus {
         self.status
-    }
-
-    #[cfg(feature = "bundled-grammars")]
-    pub(crate) fn into_parts(self) -> (Vec<ScopedToken>, HighlightStatus) {
-        (self.tokens, self.status)
     }
 }
 
