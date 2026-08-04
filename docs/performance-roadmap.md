@@ -111,10 +111,35 @@ The raw median report is `target/profile-item4-comparison.json`.
 
 ### 5. Compact regex bytecode
 
-- [ ] Establish size assertions for instructions and backtrack frames.
-- [ ] Evaluate `u32` program counters, packed flags/operands, and improved frame
+- [x] Establish size assertions for instructions and backtrack frames.
+- [x] Evaluate `u32` program counters, packed flags/operands, and improved frame
       locality.
-- [ ] Add only byte-exact, measured superinstructions.
+- [x] Keep superinstructions limited to byte-exact, measured forms; no new
+      fusion met the bar for this item.
+
+Result: `u32` program counters and VM slots, packed regex flags and repeat
+bounds, and compact arena marks reduced each instruction from 56 to 24 bytes,
+the hot backtrack frame from 56 to 32 bytes, assertion frames from 120 to 64
+bytes, call frames from 16 to 8 bytes, and repeat state from 24 to 16 bytes.
+Compile-time and unit-test assertions protect those 64-bit layouts, and
+oversized operands reject bytecode compilation rather than truncating, leaving
+the bounded recursive fallback available.
+
+Across seven alternating release samples, first-tokenization cumulative bytes
+fell 8.6% for Markdown, 12.0% for C++, 4.8% for Rust, and 7.9% for HTML;
+retained bytes fell 14.3%, 14.7%, 7.3%, and 13.8%, respectively. Incremental
+cumulative bytes fell 4.8% to 11.9% and retained bytes fell 7.9% to 17.3%;
+prepared first-tokenization showed comparable 6.4% to 14.0% cumulative and 9.5%
+to 16.8% retained reductions. Allocation-call counts and warm cumulative bytes
+were unchanged. First, incremental, and highlighting elapsed medians improved
+across all four corpora by 1.0% to 4.8%; prepared reuse improved 3.1% to 8.0%.
+Prepared first-tokenization improved 0.8% to 5.1% outside Markdown's +0.061 ms
+(+0.7%) median. Construction and preparation do not materialize lazy bytecode
+and remained allocation-identical; their elapsed changes and the sub-0.2 ms
+warm phases were treated as process noise. No new superinstruction was added
+without separate byte-exact evidence. Benchmark token counts and the complete golden
+scope streams were unchanged. The raw median report is
+`target/profile-item5-comparison.json`.
 
 ### 6. Reusable-buffer and sink APIs
 

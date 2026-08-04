@@ -22,14 +22,20 @@ pub(crate) enum CompileError {
     TableOverflow,
 }
 
+type ProgramCounter = u32;
+type VmSlot = u32;
+
+const INVALID_PROGRAM_COUNTER: ProgramCounter = ProgramCounter::MAX;
+const UNBOUNDED_COUNT: u32 = u32::MAX;
+
 #[derive(Debug, Clone)]
 pub(crate) struct Program {
     instructions: Vec<Instruction>,
     literals: Vec<String>,
     literal_tries: Vec<LiteralTrie>,
     classes: Vec<CompiledClass>,
-    entry: usize,
-    repeat_slots: usize,
+    entry: ProgramCounter,
+    repeat_slots: VmSlot,
     /// Regex group numbers indexed by their compact VM slot. Position-only
     /// programs leave this empty. Group zero is always slot zero when present.
     capture_layout: Vec<u32>,
@@ -51,6 +57,95 @@ struct ClassId(u32);
 
 #[derive(Debug, Clone, Copy)]
 struct LiteralTrieId(u32);
+
+/// Four parsed regex booleans packed into the bytecode operand itself.
+/// Parsing keeps the ergonomic public `RegexFlags`; the VM should not pay four
+/// bytes in every instruction that happens to consume one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct InstructionFlags(u8);
+
+impl InstructionFlags {
+    const CASE_INSENSITIVE: u8 = 1 << 0;
+    const MULTI_LINE: u8 = 1 << 1;
+    const DOT_MATCHES_NEW_LINE: u8 = 1 << 2;
+    const IGNORE_WHITESPACE: u8 = 1 << 3;
+
+    fn case_insensitive(self) -> bool {
+        self.0 & Self::CASE_INSENSITIVE != 0
+    }
+
+    fn dot_matches_new_line(self) -> bool {
+        self.0 & Self::DOT_MATCHES_NEW_LINE != 0
+    }
+
+    fn regex(self) -> RegexFlags {
+        RegexFlags {
+            case_insensitive: self.case_insensitive(),
+            multi_line: self.0 & Self::MULTI_LINE != 0,
+            dot_matches_new_line: self.dot_matches_new_line(),
+            ignore_whitespace: self.0 & Self::IGNORE_WHITESPACE != 0,
+        }
+    }
+}
+
+impl From<RegexFlags> for InstructionFlags {
+    fn from(flags: RegexFlags) -> Self {
+        Self(
+            (u8::from(flags.case_insensitive) * Self::CASE_INSENSITIVE)
+                | (u8::from(flags.multi_line) * Self::MULTI_LINE)
+                | (u8::from(flags.dot_matches_new_line) * Self::DOT_MATCHES_NEW_LINE)
+                | (u8::from(flags.ignore_whitespace) * Self::IGNORE_WHITESPACE),
+        )
+    }
+}
+
+/// Inclusive repeat bounds. `u32::MAX` is reserved for an unbounded maximum;
+/// compilation rejects larger source operands rather than silently truncating.
+#[derive(Debug, Clone, Copy)]
+struct RepeatBounds {
+    min: u32,
+    max: u32,
+}
+
+impl RepeatBounds {
+    fn new(min: usize, max: Option<usize>) -> Result<Self, CompileError> {
+        let min = u32::try_from(min).map_err(|_| CompileError::TableOverflow)?;
+        let max = match max {
+            Some(max) => {
+                let max = u32::try_from(max).map_err(|_| CompileError::TableOverflow)?;
+                if max == UNBOUNDED_COUNT {
+                    return Err(CompileError::TableOverflow);
+                }
+                max
+            }
+            None => UNBOUNDED_COUNT,
+        };
+        Ok(Self { min, max })
+    }
+
+    fn max(self) -> Option<u32> {
+        (self.max != UNBOUNDED_COUNT).then_some(self.max)
+    }
+}
+
+fn program_counter(index: usize) -> Result<ProgramCounter, CompileError> {
+    let index = u32::try_from(index).map_err(|_| CompileError::TableOverflow)?;
+    (index != INVALID_PROGRAM_COUNTER)
+        .then_some(index)
+        .ok_or(CompileError::TableOverflow)
+}
+
+fn vm_slot(index: usize) -> Result<VmSlot, CompileError> {
+    u32::try_from(index).map_err(|_| CompileError::TableOverflow)
+}
+
+fn arena_mark(index: usize) -> Result<u32, BudgetExceeded> {
+    u32::try_from(index).map_err(|_| BudgetExceeded)
+}
+
+fn arena_index(index: u32) -> usize {
+    index as usize
+}
 
 // Keep speculative trie allocation proportional for small inventories while
 // bounding over-reservation when many branches share the same prefixes.
@@ -294,98 +389,96 @@ fn ascii_masks_by_evaluation(class: &CharClass) -> (AsciiMask, AsciiMask) {
 enum Instruction {
     Literal {
         id: LiteralId,
-        flags: RegexFlags,
-        next: usize,
+        flags: InstructionFlags,
+        next: ProgramCounter,
     },
     LiteralTrie {
         id: LiteralTrieId,
-        flags: RegexFlags,
-        next: usize,
+        flags: InstructionFlags,
+        next: ProgramCounter,
     },
     Class {
         id: ClassId,
-        flags: RegexFlags,
-        next: usize,
+        flags: InstructionFlags,
+        next: ProgramCounter,
     },
     Any {
-        flags: RegexFlags,
-        next: usize,
+        flags: InstructionFlags,
+        next: ProgramCounter,
     },
     Anchor {
         kind: super::ast::AnchorKind,
-        next: usize,
+        next: ProgramCounter,
     },
     Jump {
-        target: usize,
+        target: ProgramCounter,
     },
     Call {
-        entry: usize,
-        next: usize,
+        entry: ProgramCounter,
+        next: ProgramCounter,
     },
     Return,
     Split {
-        preferred: usize,
-        alternate: usize,
+        preferred: ProgramCounter,
+        alternate: ProgramCounter,
     },
     RepeatInit {
-        slot: usize,
-        next: usize,
+        slot: VmSlot,
+        next: ProgramCounter,
     },
     Repeat {
-        slot: usize,
-        min: usize,
-        max: Option<usize>,
+        slot: VmSlot,
+        bounds: RepeatBounds,
         greedy: bool,
-        body: usize,
-        next: usize,
+        body: ProgramCounter,
+        next: ProgramCounter,
     },
     RepeatEnd {
-        slot: usize,
-        repeat: usize,
+        slot: VmSlot,
+        repeat: ProgramCounter,
     },
     SaveStart {
-        slot: usize,
-        next: usize,
+        slot: VmSlot,
+        next: ProgramCounter,
     },
     SaveEnd {
-        slot: usize,
-        next: usize,
+        slot: VmSlot,
+        next: ProgramCounter,
     },
     Backref {
-        slot: usize,
-        flags: RegexFlags,
-        next: usize,
+        slot: VmSlot,
+        flags: InstructionFlags,
+        next: ProgramCounter,
     },
     Conditional {
-        slot: usize,
-        matched: usize,
-        unmatched: usize,
+        slot: VmSlot,
+        matched: ProgramCounter,
+        unmatched: ProgramCounter,
     },
     Assert {
-        entry: usize,
+        entry: ProgramCounter,
         positive: bool,
         direction: AssertDirection,
-        next: usize,
+        next: ProgramCounter,
     },
     /// Opens an atomic region: records the backtrack depth and a landing-pad
     /// frame so a total failure of the region unwinds the cut bookkeeping.
     CutStart {
-        next: usize,
+        next: ProgramCounter,
     },
     /// Commits an atomic region by discarding backtrack frames created inside
     /// it. Captures and repeat effects stay committed; outer frames keep
     /// their undo marks, so backtracking past the region still restores them.
     CutEnd {
-        next: usize,
+        next: ProgramCounter,
     },
     /// Possessive repeat of a single-consumer node (`\s*+`, `[^x]++`, …):
     /// consume greedily in place with no backtrack frames or cut bookkeeping.
     ScanRepeat {
         node: ScanNode,
-        flags: RegexFlags,
-        min: usize,
-        max: Option<usize>,
-        next: usize,
+        flags: InstructionFlags,
+        bounds: RepeatBounds,
+        next: ProgramCounter,
     },
     /// C/C++ grammars repeat this separator between declaration fragments:
     /// block-comments, whitespace, word-boundary assertions, and text/line
@@ -393,7 +486,7 @@ enum Instruction {
     /// emit the branch-ordered endpoints directly instead of expanding the
     /// nested possessive/comment regex at every candidate offset.
     CppSpaceCommentSeparator {
-        next: usize,
+        next: ProgramCounter,
     },
     Accept,
     Fail,
@@ -406,18 +499,58 @@ enum ScanNode {
     Any,
 }
 
+/// Packed assertion direction. `min_width == u32::MAX` denotes lookahead;
+/// otherwise `max_width == u32::MAX` denotes unbounded lookbehind.
 #[derive(Debug, Clone, Copy)]
-enum AssertDirection {
-    Ahead,
-    Behind {
-        min_width: usize,
-        max_width: Option<usize>,
-    },
+struct AssertDirection {
+    min_width: u32,
+    max_width: u32,
+}
+
+impl AssertDirection {
+    const AHEAD: Self = Self {
+        min_width: u32::MAX,
+        max_width: u32::MAX,
+    };
+
+    fn behind(min_width: usize, max_width: Option<usize>) -> Result<Self, CompileError> {
+        let min_width = u32::try_from(min_width).map_err(|_| CompileError::TableOverflow)?;
+        if min_width == u32::MAX {
+            return Err(CompileError::TableOverflow);
+        }
+        let max_width = match max_width {
+            Some(max_width) => {
+                let max_width =
+                    u32::try_from(max_width).map_err(|_| CompileError::TableOverflow)?;
+                if max_width == u32::MAX {
+                    return Err(CompileError::TableOverflow);
+                }
+                max_width
+            }
+            None => u32::MAX,
+        };
+        Ok(Self {
+            min_width,
+            max_width,
+        })
+    }
+
+    fn is_ahead(self) -> bool {
+        self.min_width == u32::MAX
+    }
+
+    fn min_width(self) -> usize {
+        self.min_width as usize
+    }
+
+    fn max_width(self) -> Option<usize> {
+        (self.max_width != u32::MAX).then_some(self.max_width as usize)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 struct RepeatState {
-    count: usize,
+    count: u32,
     last_position: usize,
     stalled: bool,
 }
@@ -433,43 +566,60 @@ enum CaptureState {
 #[derive(Debug, Clone, Copy)]
 enum ResumeAction {
     None,
-    EnterRepeat(usize),
+    EnterRepeat(VmSlot),
     /// Landing pad for an atomic region: the region failed outright, so pop
     /// its cut mark and keep failing outward.
     PopCut,
 }
 
+/// Hot DFS frame. Positions remain native-width because they index caller
+/// strings; all program and arena indexes are bounded 32-bit operands.
 #[derive(Debug, Clone, Copy)]
 struct BacktrackFrame {
-    pc: usize,
     position: usize,
-    repeat_undo_mark: usize,
-    capture_undo_mark: usize,
-    call_depth: usize,
     action: ResumeAction,
+    pc: ProgramCounter,
+    repeat_undo_mark: u32,
+    capture_undo_mark: u32,
+    call_depth: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct AssertionFrame {
-    entry: usize,
-    parent_pc: usize,
     parent_position: usize,
-    parent_repeat_undo_mark: usize,
-    parent_capture_undo_mark: usize,
-    parent_call_depth: usize,
-    backtrack_base: usize,
-    cut_base: usize,
-    positive: bool,
-    direction: AssertDirection,
     target_end: usize,
-    next_probe: Option<usize>,
+    next_probe: usize,
+    direction: AssertDirection,
+    entry: ProgramCounter,
+    parent_pc: ProgramCounter,
+    parent_repeat_undo_mark: u32,
+    parent_capture_undo_mark: u32,
+    parent_call_depth: u32,
+    backtrack_base: u32,
+    cut_base: u32,
+    positive: bool,
+    has_next_probe: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct CallFrame {
-    return_pc: usize,
-    capture_undo_mark: usize,
+    return_pc: ProgramCounter,
+    capture_undo_mark: u32,
 }
+
+// These are performance contracts, not incidental implementation details.
+// Keep them compile-time checked on the 64-bit targets used for profiling and
+// normal desktop/server deployment.
+#[cfg(target_pointer_width = "64")]
+const _: () = {
+    assert!(std::mem::size_of::<Instruction>() == 24);
+    assert!(std::mem::size_of::<BacktrackFrame>() == 32);
+    assert!(std::mem::size_of::<AssertionFrame>() == 64);
+    assert!(std::mem::size_of::<CallFrame>() == 8);
+    assert!(std::mem::size_of::<RepeatState>() == 16);
+    assert!(std::mem::size_of::<ResumeAction>() == 8);
+    assert!(std::mem::size_of::<AssertDirection>() == 8);
+};
 
 /// Reusable position-only VM arena. Lengths are cleared for each root run;
 /// capacities are retained.
@@ -479,11 +629,11 @@ pub(crate) struct BytecodeScratch {
     assertions: Vec<AssertionFrame>,
     repeats: Vec<RepeatState>,
     captures: Vec<CaptureState>,
-    repeat_undo: Vec<(usize, RepeatState)>,
-    capture_undo: Vec<(usize, CaptureState)>,
+    repeat_undo: Vec<(VmSlot, RepeatState)>,
+    capture_undo: Vec<(VmSlot, CaptureState)>,
     calls: Vec<CallFrame>,
-    call_depth: usize,
-    cuts: Vec<usize>,
+    call_depth: u32,
+    cuts: Vec<u32>,
     literal_matches: Vec<(u32, usize)>,
     scanner: super::scanner::ScannerScratch,
     prefilter_cursors: super::prefilter::PrefilterCursors,
@@ -612,6 +762,22 @@ fn cpp_is_word_char(ch: char) -> bool {
     is_unicode_word_char(ch)
 }
 
+fn backtrack_frame(
+    scratch: &BytecodeScratch,
+    pc: ProgramCounter,
+    position: usize,
+    action: ResumeAction,
+) -> Result<BacktrackFrame, BudgetExceeded> {
+    Ok(BacktrackFrame {
+        position,
+        action,
+        pc,
+        repeat_undo_mark: arena_mark(scratch.repeat_undo.len())?,
+        capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
+        call_depth: scratch.call_depth,
+    })
+}
+
 fn is_line_end_position(line: &str, pos: usize) -> bool {
     pos == line.len() || line.as_bytes().get(pos) == Some(&b'\n')
 }
@@ -727,16 +893,16 @@ impl Program {
         budget: &mut StepBudget,
         scratch: &mut BytecodeScratch,
     ) -> Result<Option<usize>, BudgetExceeded> {
-        scratch.reset(self.repeat_slots, self.capture_layout.len());
+        scratch.reset(arena_index(self.repeat_slots), self.capture_layout.len());
         let mut pc = self.entry;
         let mut position = start;
 
         loop {
             budget.step()?;
-            match &self.instructions[pc] {
+            match &self.instructions[arena_index(pc)] {
                 Instruction::Literal { id, flags, next } => {
                     let value = &self.literals[id.0 as usize];
-                    if let Some(end) = match_literal_end(line, position, value, *flags) {
+                    if let Some(end) = match_literal_end(line, position, value, flags.regex()) {
                         position = end;
                         pc = *next;
                     } else if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
@@ -748,7 +914,7 @@ impl Program {
                     trie.collect_matches(
                         line,
                         position,
-                        *flags,
+                        flags.regex(),
                         budget,
                         &mut scratch.literal_matches,
                     )?;
@@ -762,14 +928,12 @@ impl Program {
                         // `next` without re-walking the shared trie.
                         for index in (1..scratch.literal_matches.len()).rev() {
                             let (_, alternate_position) = scratch.literal_matches[index];
-                            scratch.backtrack.push(BacktrackFrame {
-                                pc: *next,
-                                position: alternate_position,
-                                repeat_undo_mark: scratch.repeat_undo.len(),
-                                capture_undo_mark: scratch.capture_undo.len(),
-                                call_depth: scratch.call_depth,
-                                action: ResumeAction::None,
-                            });
+                            scratch.backtrack.push(backtrack_frame(
+                                scratch,
+                                *next,
+                                alternate_position,
+                                ResumeAction::None,
+                            )?);
                         }
                         position = scratch.literal_matches[0].1;
                         pc = *next;
@@ -781,10 +945,10 @@ impl Program {
                     let class = &self.classes[id.0 as usize];
                     let matched = match line.as_bytes().get(position).copied() {
                         Some(byte) if byte.is_ascii() => class
-                            .matches_ascii(byte, flags.case_insensitive)
+                            .matches_ascii(byte, flags.case_insensitive())
                             .then_some(position + 1),
                         Some(_) => char_at(line, position)
-                            .filter(|(ch, _)| class_contains(&class.source, *ch, *flags))
+                            .filter(|(ch, _)| class_contains(&class.source, *ch, flags.regex()))
                             .map(|(_, end)| end),
                         None => None,
                     };
@@ -797,7 +961,7 @@ impl Program {
                 }
                 Instruction::Any { flags, next } => {
                     if let Some((ch, end)) = char_at(line, position)
-                        && (ch != '\n' || flags.dot_matches_new_line)
+                        && (ch != '\n' || flags.dot_matches_new_line())
                     {
                         position = end;
                         pc = *next;
@@ -821,12 +985,13 @@ impl Program {
                     } else {
                         let frame = CallFrame {
                             return_pc: *next,
-                            capture_undo_mark: scratch.capture_undo.len(),
+                            capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
                         };
-                        if scratch.call_depth == scratch.calls.len() {
+                        let call_depth = arena_index(scratch.call_depth);
+                        if call_depth == scratch.calls.len() {
                             scratch.calls.push(frame);
                         } else {
-                            scratch.calls[scratch.call_depth] = frame;
+                            scratch.calls[call_depth] = frame;
                         }
                         scratch.call_depth += 1;
                         pc = *entry;
@@ -835,18 +1000,18 @@ impl Program {
                 Instruction::Return => {
                     debug_assert!(scratch.call_depth > 0, "Return outside subroutine");
                     scratch.call_depth -= 1;
-                    let frame = scratch.calls[scratch.call_depth];
+                    let frame = scratch.calls[arena_index(scratch.call_depth)];
                     // Recursive calls to the same capturing group overwrite
                     // an enclosing pending start. Restore pending captures on
                     // return; completed captures remain observable.
-                    for index in frame.capture_undo_mark..scratch.capture_undo.len() {
+                    for index in arena_index(frame.capture_undo_mark)..scratch.capture_undo.len() {
                         let (slot, previous) = &scratch.capture_undo[index];
                         if let CaptureState::Open(start) = previous
-                            && !scratch.capture_undo[frame.capture_undo_mark..index]
+                            && !scratch.capture_undo[arena_index(frame.capture_undo_mark)..index]
                                 .iter()
                                 .any(|(earlier, _)| earlier == slot)
                         {
-                            scratch.captures[*slot] = CaptureState::Open(*start);
+                            scratch.captures[arena_index(*slot)] = CaptureState::Open(*start);
                         }
                     }
                     pc = frame.return_pc;
@@ -855,14 +1020,12 @@ impl Program {
                     preferred,
                     alternate,
                 } => {
-                    scratch.backtrack.push(BacktrackFrame {
-                        pc: *alternate,
+                    scratch.backtrack.push(backtrack_frame(
+                        scratch,
+                        *alternate,
                         position,
-                        repeat_undo_mark: scratch.repeat_undo.len(),
-                        capture_undo_mark: scratch.capture_undo.len(),
-                        call_depth: scratch.call_depth,
-                        action: ResumeAction::None,
-                    });
+                        ResumeAction::None,
+                    )?);
                     pc = *preferred;
                 }
                 Instruction::RepeatInit { slot, next } => {
@@ -879,38 +1042,34 @@ impl Program {
                 }
                 Instruction::Repeat {
                     slot,
-                    min,
-                    max,
+                    bounds,
                     greedy,
                     body,
                     next,
                 } => {
-                    let count = scratch.repeats[*slot].count;
-                    let can_exit = count >= *min;
-                    let can_repeat = max.is_none_or(|max| count < max)
-                        && (!scratch.repeats[*slot].stalled || count < *min);
+                    let repeat = scratch.repeats[arena_index(*slot)];
+                    let count = repeat.count;
+                    let can_exit = count >= bounds.min;
+                    let can_repeat = bounds.max().is_none_or(|max| count < max)
+                        && (!repeat.stalled || count < bounds.min);
                     match (can_repeat, can_exit, greedy) {
                         (true, true, true) => {
-                            scratch.backtrack.push(BacktrackFrame {
-                                pc: *next,
+                            scratch.backtrack.push(backtrack_frame(
+                                scratch,
+                                *next,
                                 position,
-                                repeat_undo_mark: scratch.repeat_undo.len(),
-                                capture_undo_mark: scratch.capture_undo.len(),
-                                call_depth: scratch.call_depth,
-                                action: ResumeAction::None,
-                            });
+                                ResumeAction::None,
+                            )?);
                             enter_repeat(scratch, *slot, position);
                             pc = *body;
                         }
                         (true, true, false) => {
-                            scratch.backtrack.push(BacktrackFrame {
-                                pc: *body,
+                            scratch.backtrack.push(backtrack_frame(
+                                scratch,
+                                *body,
                                 position,
-                                repeat_undo_mark: scratch.repeat_undo.len(),
-                                capture_undo_mark: scratch.capture_undo.len(),
-                                call_depth: scratch.call_depth,
-                                action: ResumeAction::EnterRepeat(*slot),
-                            });
+                                ResumeAction::EnterRepeat(*slot),
+                            )?);
                             pc = *next;
                         }
                         (true, false, _) => {
@@ -926,8 +1085,9 @@ impl Program {
                     }
                 }
                 Instruction::RepeatEnd { slot, repeat } => {
-                    if scratch.repeats[*slot].last_position == position {
-                        let mut value = scratch.repeats[*slot];
+                    let index = arena_index(*slot);
+                    if scratch.repeats[index].last_position == position {
+                        let mut value = scratch.repeats[index];
                         value.stalled = true;
                         set_repeat(scratch, *slot, value);
                     }
@@ -938,17 +1098,17 @@ impl Program {
                     pc = *next;
                 }
                 Instruction::SaveEnd { slot, next } => {
-                    let CaptureState::Open(start) = scratch.captures[*slot] else {
+                    let CaptureState::Open(start) = scratch.captures[arena_index(*slot)] else {
                         unreachable!("SaveEnd without SaveStart")
                     };
                     set_capture(scratch, *slot, CaptureState::Matched(start..position));
                     pc = *next;
                 }
                 Instruction::Backref { slot, flags, next } => {
-                    let matched = match &scratch.captures[*slot] {
+                    let matched = match &scratch.captures[arena_index(*slot)] {
                         CaptureState::Matched(range) => {
                             line.get(range.clone()).and_then(|captured| {
-                                match_literal_end(line, position, captured, *flags)
+                                match_literal_end(line, position, captured, flags.regex())
                             })
                         }
                         CaptureState::Unset | CaptureState::Open(_) => None,
@@ -965,7 +1125,10 @@ impl Program {
                     matched,
                     unmatched,
                 } => {
-                    pc = if matches!(scratch.captures[*slot], CaptureState::Matched(_)) {
+                    pc = if matches!(
+                        scratch.captures[arena_index(*slot)],
+                        CaptureState::Matched(_)
+                    ) {
                         *matched
                     } else {
                         *unmatched
@@ -978,18 +1141,19 @@ impl Program {
                     next,
                 } => {
                     let mut frame = AssertionFrame {
+                        parent_position: position,
+                        target_end: position,
+                        next_probe: 0,
+                        direction: *direction,
                         entry: *entry,
                         parent_pc: *next,
-                        parent_position: position,
-                        parent_repeat_undo_mark: scratch.repeat_undo.len(),
-                        parent_capture_undo_mark: scratch.capture_undo.len(),
+                        parent_repeat_undo_mark: arena_mark(scratch.repeat_undo.len())?,
+                        parent_capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
                         parent_call_depth: scratch.call_depth,
-                        backtrack_base: scratch.backtrack.len(),
-                        cut_base: scratch.cuts.len(),
+                        backtrack_base: arena_mark(scratch.backtrack.len())?,
+                        cut_base: arena_mark(scratch.cuts.len())?,
                         positive: *positive,
-                        direction: *direction,
-                        target_end: position,
-                        next_probe: None,
+                        has_next_probe: false,
                     };
                     if let Some(probe) = first_probe(line, position, *direction, &mut frame) {
                         scratch.assertions.push(frame);
@@ -1013,13 +1177,11 @@ impl Program {
                     let Some(assertion) = scratch.assertions.last().copied() else {
                         return Ok(Some(position));
                     };
-                    let assertion_match = match assertion.direction {
-                        AssertDirection::Ahead => true,
-                        AssertDirection::Behind { .. } => position == assertion.target_end,
-                    };
+                    let assertion_match =
+                        assertion.direction.is_ahead() || position == assertion.target_end;
                     if assertion_match {
                         self.finish_assertion(scratch, true, &mut pc, &mut position);
-                        if pc == usize::MAX
+                        if pc == INVALID_PROGRAM_COUNTER
                             && !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)?
                         {
                             return Ok(None);
@@ -1029,51 +1191,49 @@ impl Program {
                     }
                 }
                 Instruction::CutStart { next } => {
-                    scratch.cuts.push(scratch.backtrack.len());
-                    scratch.backtrack.push(BacktrackFrame {
-                        pc: usize::MAX,
+                    scratch.cuts.push(arena_mark(scratch.backtrack.len())?);
+                    scratch.backtrack.push(backtrack_frame(
+                        scratch,
+                        INVALID_PROGRAM_COUNTER,
                         position,
-                        repeat_undo_mark: scratch.repeat_undo.len(),
-                        capture_undo_mark: scratch.capture_undo.len(),
-                        call_depth: scratch.call_depth,
-                        action: ResumeAction::PopCut,
-                    });
+                        ResumeAction::PopCut,
+                    )?);
                     pc = *next;
                 }
                 Instruction::CutEnd { next } => {
                     let mark = scratch.cuts.pop().expect("CutEnd without CutStart");
-                    scratch.backtrack.truncate(mark);
+                    scratch.backtrack.truncate(arena_index(mark));
                     pc = *next;
                 }
                 Instruction::ScanRepeat {
                     node,
                     flags,
-                    min,
-                    max,
+                    bounds,
                     next,
                 } => {
-                    let mut count = 0usize;
+                    let mut count = 0u32;
                     let mut cursor = position;
-                    while max.is_none_or(|max| count < max) {
+                    while bounds.max().is_none_or(|max| count < max) {
                         let advanced = match node {
                             ScanNode::Literal(id) => {
                                 let value = &self.literals[id.0 as usize];
-                                match_literal_end(line, cursor, value, *flags)
+                                match_literal_end(line, cursor, value, flags.regex())
                             }
                             ScanNode::Class(id) => {
                                 let class = &self.classes[id.0 as usize];
                                 match line.as_bytes().get(cursor).copied() {
                                     Some(byte) if byte.is_ascii() => class
-                                        .matches_ascii(byte, flags.case_insensitive)
+                                        .matches_ascii(byte, flags.case_insensitive())
                                         .then_some(cursor + 1),
                                     Some(_) => char_at(line, cursor).and_then(|(ch, end)| {
-                                        class_contains(&class.source, ch, *flags).then_some(end)
+                                        class_contains(&class.source, ch, flags.regex())
+                                            .then_some(end)
                                     }),
                                     None => None,
                                 }
                             }
                             ScanNode::Any => char_at(line, cursor).and_then(|(ch, end)| {
-                                (ch != '\n' || flags.dot_matches_new_line).then_some(end)
+                                (ch != '\n' || flags.dot_matches_new_line()).then_some(end)
                             }),
                         };
                         match advanced {
@@ -1084,7 +1244,7 @@ impl Program {
                             _ => break,
                         }
                     }
-                    if count >= *min {
+                    if count >= bounds.min {
                         position = cursor;
                         pc = *next;
                     } else if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
@@ -1100,14 +1260,12 @@ impl Program {
                     );
                     if let Some((_, preferred)) = scratch.literal_matches.first().copied() {
                         for &(_, alternate) in scratch.literal_matches[1..].iter().rev() {
-                            scratch.backtrack.push(BacktrackFrame {
-                                pc: *next,
-                                position: alternate,
-                                repeat_undo_mark: scratch.repeat_undo.len(),
-                                capture_undo_mark: scratch.capture_undo.len(),
-                                call_depth: scratch.call_depth,
-                                action: ResumeAction::None,
-                            });
+                            scratch.backtrack.push(backtrack_frame(
+                                scratch,
+                                *next,
+                                alternate,
+                                ResumeAction::None,
+                            )?);
                         }
                         position = preferred;
                         pc = *next;
@@ -1128,7 +1286,7 @@ impl Program {
         &self,
         line: &str,
         scratch: &mut BytecodeScratch,
-        pc: &mut usize,
+        pc: &mut ProgramCounter,
         position: &mut usize,
     ) -> Result<bool, BudgetExceeded> {
         loop {
@@ -1136,7 +1294,7 @@ impl Program {
                 .assertions
                 .last()
                 .map_or(0, |assertion| assertion.backtrack_base);
-            if scratch.backtrack.len() > base {
+            if scratch.backtrack.len() > arena_index(base) {
                 let frame = scratch.backtrack.pop().expect("frame above base");
                 undo_repeats_to(scratch, frame.repeat_undo_mark);
                 undo_captures_to(scratch, frame.capture_undo_mark);
@@ -1167,7 +1325,7 @@ impl Program {
             undo_repeats_to(scratch, assertion.parent_repeat_undo_mark);
             undo_captures_to(scratch, assertion.parent_capture_undo_mark);
             scratch.call_depth = assertion.parent_call_depth;
-            scratch.cuts.truncate(assertion.cut_base);
+            scratch.cuts.truncate(arena_index(assertion.cut_base));
             if let Some(probe) = next_probe(line, &mut assertion) {
                 let entry = assertion.entry;
                 scratch.assertions.push(assertion);
@@ -1175,7 +1333,9 @@ impl Program {
                 *position = probe;
                 return Ok(true);
             }
-            scratch.backtrack.truncate(assertion.backtrack_base);
+            scratch
+                .backtrack
+                .truncate(arena_index(assertion.backtrack_base));
             let passed = !assertion.positive;
             *position = assertion.parent_position;
             if passed {
@@ -1190,12 +1350,14 @@ impl Program {
         &self,
         scratch: &mut BytecodeScratch,
         matched: bool,
-        pc: &mut usize,
+        pc: &mut ProgramCounter,
         position: &mut usize,
     ) {
         let assertion = scratch.assertions.pop().expect("assertion accept");
-        scratch.backtrack.truncate(assertion.backtrack_base);
-        scratch.cuts.truncate(assertion.cut_base);
+        scratch
+            .backtrack
+            .truncate(arena_index(assertion.backtrack_base));
+        scratch.cuts.truncate(arena_index(assertion.cut_base));
         undo_repeats_to(scratch, assertion.parent_repeat_undo_mark);
         let exports_captures = matched && assertion.positive;
         if !exports_captures {
@@ -1206,7 +1368,7 @@ impl Program {
         if matched == assertion.positive {
             *pc = assertion.parent_pc;
         } else {
-            *pc = usize::MAX;
+            *pc = INVALID_PROGRAM_COUNTER;
         }
     }
 }
@@ -1304,36 +1466,38 @@ impl BytecodeScratch {
     }
 }
 
-fn set_repeat(scratch: &mut BytecodeScratch, slot: usize, value: RepeatState) {
-    let old = scratch.repeats[slot];
+fn set_repeat(scratch: &mut BytecodeScratch, slot: VmSlot, value: RepeatState) {
+    let index = arena_index(slot);
+    let old = scratch.repeats[index];
     scratch.repeat_undo.push((slot, old));
-    scratch.repeats[slot] = value;
+    scratch.repeats[index] = value;
 }
 
-fn set_capture(scratch: &mut BytecodeScratch, slot: usize, value: CaptureState) {
-    let old = std::mem::replace(&mut scratch.captures[slot], value);
+fn set_capture(scratch: &mut BytecodeScratch, slot: VmSlot, value: CaptureState) {
+    let index = arena_index(slot);
+    let old = std::mem::replace(&mut scratch.captures[index], value);
     scratch.capture_undo.push((slot, old));
 }
 
-fn enter_repeat(scratch: &mut BytecodeScratch, slot: usize, position: usize) {
-    let mut value = scratch.repeats[slot];
+fn enter_repeat(scratch: &mut BytecodeScratch, slot: VmSlot, position: usize) {
+    let mut value = scratch.repeats[arena_index(slot)];
     value.count = value.count.saturating_add(1);
     value.last_position = position;
     value.stalled = false;
     set_repeat(scratch, slot, value);
 }
 
-fn undo_repeats_to(scratch: &mut BytecodeScratch, mark: usize) {
-    while scratch.repeat_undo.len() > mark {
+fn undo_repeats_to(scratch: &mut BytecodeScratch, mark: u32) {
+    while scratch.repeat_undo.len() > arena_index(mark) {
         let (slot, value) = scratch.repeat_undo.pop().expect("repeat undo above mark");
-        scratch.repeats[slot] = value;
+        scratch.repeats[arena_index(slot)] = value;
     }
 }
 
-fn undo_captures_to(scratch: &mut BytecodeScratch, mark: usize) {
-    while scratch.capture_undo.len() > mark {
+fn undo_captures_to(scratch: &mut BytecodeScratch, mark: u32) {
+    while scratch.capture_undo.len() > arena_index(mark) {
         let (slot, value) = scratch.capture_undo.pop().expect("capture undo above mark");
-        scratch.captures[slot] = value;
+        scratch.captures[arena_index(slot)] = value;
     }
 }
 
@@ -1343,39 +1507,35 @@ fn first_probe(
     direction: AssertDirection,
     frame: &mut AssertionFrame,
 ) -> Option<usize> {
-    match direction {
-        AssertDirection::Ahead => Some(position),
-        AssertDirection::Behind {
-            min_width,
-            max_width,
-        } => {
-            let latest = position.checked_sub(min_width)?;
-            let earliest = max_width.map_or(0, |max| position.saturating_sub(max));
-            let probe = boundary_at_or_before(line, latest, earliest)?;
-            frame.next_probe = probe.checked_sub(1).filter(|next| *next >= earliest);
-            Some(probe)
-        }
+    if direction.is_ahead() {
+        return Some(position);
     }
+    let latest = position.checked_sub(direction.min_width())?;
+    let earliest = direction
+        .max_width()
+        .map_or(0, |max| position.saturating_sub(max));
+    let probe = boundary_at_or_before(line, latest, earliest)?;
+    set_next_probe(frame, probe.checked_sub(1).filter(|next| *next >= earliest));
+    Some(probe)
 }
 
 fn next_probe(line: &str, frame: &mut AssertionFrame) -> Option<usize> {
-    let AssertDirection::Behind { min_width, .. } = frame.direction else {
+    if frame.direction.is_ahead() || !frame.has_next_probe {
         return None;
-    };
-    let latest = frame.target_end.checked_sub(min_width)?;
-    let earliest = match frame.direction {
-        AssertDirection::Behind {
-            max_width: Some(max),
-            ..
-        } => frame.target_end.saturating_sub(max),
-        AssertDirection::Behind {
-            max_width: None, ..
-        } => 0,
-        AssertDirection::Ahead => unreachable!(),
-    };
-    let probe = boundary_at_or_before(line, frame.next_probe?.min(latest), earliest)?;
-    frame.next_probe = probe.checked_sub(1).filter(|next| *next >= earliest);
+    }
+    let latest = frame.target_end.checked_sub(frame.direction.min_width())?;
+    let earliest = frame
+        .direction
+        .max_width()
+        .map_or(0, |max| frame.target_end.saturating_sub(max));
+    let probe = boundary_at_or_before(line, frame.next_probe.min(latest), earliest)?;
+    set_next_probe(frame, probe.checked_sub(1).filter(|next| *next >= earliest));
     Some(probe)
+}
+
+fn set_next_probe(frame: &mut AssertionFrame, next: Option<usize>) {
+    frame.has_next_probe = next.is_some();
+    frame.next_probe = next.unwrap_or(0);
 }
 
 fn boundary_at_or_before(line: &str, mut position: usize, earliest: usize) -> Option<usize> {
@@ -1398,10 +1558,10 @@ struct Compiler {
     literals: Vec<String>,
     literal_tries: Vec<LiteralTrie>,
     classes: Vec<CompiledClass>,
-    repeat_slots: usize,
+    repeat_slots: VmSlot,
     capture_layout: Vec<u32>,
     named_captures: std::collections::BTreeMap<String, u32>,
-    routine_entries: std::collections::BTreeMap<u32, usize>,
+    routine_entries: std::collections::BTreeMap<u32, ProgramCounter>,
 }
 
 impl Compiler {
@@ -1440,7 +1600,7 @@ impl Compiler {
                 let return_pc = self.push(Instruction::Return);
                 let actual = self.compile_node(&node, flags, return_pc)?;
                 let placeholder = self.routine_entries[&group];
-                self.instructions[placeholder] = Instruction::Jump { target: actual };
+                self.instructions[arena_index(placeholder)] = Instruction::Jump { target: actual };
             }
         }
         let accept = self.push(Instruction::Accept);
@@ -1460,18 +1620,29 @@ impl Compiler {
         &mut self,
         ast: &Ast,
         flags: RegexFlags,
-        next: usize,
-    ) -> Result<usize, CompileError> {
+        next: ProgramCounter,
+    ) -> Result<ProgramCounter, CompileError> {
         Ok(match ast {
             Ast::Empty => next,
             Ast::Literal(value) => {
                 let id = self.intern_literal(value)?;
-                self.push(Instruction::Literal { id, flags, next })
+                self.push(Instruction::Literal {
+                    id,
+                    flags: flags.into(),
+                    next,
+                })
             }
-            Ast::Dot => self.push(Instruction::Any { flags, next }),
+            Ast::Dot => self.push(Instruction::Any {
+                flags: flags.into(),
+                next,
+            }),
             Ast::Class(class) => {
                 let id = self.intern_class(class)?;
-                self.push(Instruction::Class { id, flags, next })
+                self.push(Instruction::Class {
+                    id,
+                    flags: flags.into(),
+                    next,
+                })
             }
             Ast::Anchor(kind) => self.push(Instruction::Anchor { kind: *kind, next }),
             Ast::Concat(nodes) => {
@@ -1491,7 +1662,11 @@ impl Compiler {
                     && let Some(literals) = exact_literal_branches(branches, flags)
                 {
                     let id = self.intern_literal_trie(&literals, flags)?;
-                    return Ok(self.push(Instruction::LiteralTrie { id, flags, next }));
+                    return Ok(self.push(Instruction::LiteralTrie {
+                        id,
+                        flags: flags.into(),
+                        next,
+                    }));
                 }
                 let mut entries = Vec::with_capacity(branches.len());
                 let mut branch = 0;
@@ -1519,7 +1694,11 @@ impl Compiler {
                         }
                         if literals.len() >= 4 {
                             let id = self.intern_literal_trie(&literals, flags)?;
-                            entries.push(self.push(Instruction::LiteralTrie { id, flags, next }));
+                            entries.push(self.push(Instruction::LiteralTrie {
+                                id,
+                                flags: flags.into(),
+                                next,
+                            }));
                         } else {
                             for branch in &branches[run_start..branch] {
                                 entries.push(self.compile_node(branch, flags, next)?);
@@ -1555,9 +1734,8 @@ impl Compiler {
                     let (scan, scan_flags) = scan;
                     return Ok(self.push(Instruction::ScanRepeat {
                         node: scan,
-                        flags: scan_flags,
-                        min: *min,
-                        max: *max,
+                        flags: scan_flags.into(),
+                        bounds: RepeatBounds::new(*min, *max)?,
                         next,
                     }));
                 }
@@ -1572,14 +1750,16 @@ impl Compiler {
                     self.compile_node(node, flags, exit)?
                 } else {
                     let slot = self.repeat_slots;
-                    self.repeat_slots += 1;
+                    self.repeat_slots = self
+                        .repeat_slots
+                        .checked_add(1)
+                        .ok_or(CompileError::TableOverflow)?;
                     let repeat = self.push(Instruction::Fail);
                     let end = self.push(Instruction::RepeatEnd { slot, repeat });
                     let body = self.compile_node(node, flags, end)?;
-                    self.instructions[repeat] = Instruction::Repeat {
+                    self.instructions[arena_index(repeat)] = Instruction::Repeat {
                         slot,
-                        min: *min,
-                        max: *max,
+                        bounds: RepeatBounds::new(*min, *max)?,
                         greedy: *greedy,
                         body,
                         next: exit,
@@ -1593,12 +1773,16 @@ impl Compiler {
                 }
             }
             Ast::Group { index, child, .. } => {
-                if let Some(slot) = index.and_then(|index| {
-                    self.capture_layout
-                        .binary_search(&index)
-                        .ok()
-                        .filter(|slot| *slot != 0)
-                }) {
+                if let Some(slot) = index
+                    .and_then(|index| {
+                        self.capture_layout
+                            .binary_search(&index)
+                            .ok()
+                            .filter(|slot| *slot != 0)
+                    })
+                    .map(vm_slot)
+                    .transpose()?
+                {
                     let end = self.push(Instruction::SaveEnd { slot, next });
                     let child = self.compile_node(child, flags, end)?;
                     self.push(Instruction::SaveStart { slot, next: child })
@@ -1610,10 +1794,10 @@ impl Compiler {
                 let accept = self.push(Instruction::Accept);
                 let entry = self.compile_node(child, flags, accept)?;
                 let (positive, direction) = match kind {
-                    LookKind::Ahead => (true, AssertDirection::Ahead),
-                    LookKind::NotAhead => (false, AssertDirection::Ahead),
-                    LookKind::Behind => (true, lookbehind_direction(child)),
-                    LookKind::NotBehind => (false, lookbehind_direction(child)),
+                    LookKind::Ahead => (true, AssertDirection::AHEAD),
+                    LookKind::NotAhead => (false, AssertDirection::AHEAD),
+                    LookKind::Behind => (true, lookbehind_direction(child)?),
+                    LookKind::NotBehind => (false, lookbehind_direction(child)?),
                 };
                 self.push(Instruction::Assert {
                     entry,
@@ -1635,11 +1819,16 @@ impl Compiler {
                         .copied()
                         .ok_or(CompileError::Backreference)?,
                 };
-                let slot = self
-                    .capture_layout
-                    .binary_search(&group)
-                    .map_err(|_| CompileError::Backreference)?;
-                self.push(Instruction::Backref { slot, flags, next })
+                let slot = vm_slot(
+                    self.capture_layout
+                        .binary_search(&group)
+                        .map_err(|_| CompileError::Backreference)?,
+                )?;
+                self.push(Instruction::Backref {
+                    slot,
+                    flags: flags.into(),
+                    next,
+                })
             }
             Ast::Conditional {
                 condition,
@@ -1654,10 +1843,11 @@ impl Compiler {
                         .copied()
                         .ok_or(CompileError::Conditional)?,
                 };
-                let slot = self
-                    .capture_layout
-                    .binary_search(&group)
-                    .map_err(|_| CompileError::Conditional)?;
+                let slot = vm_slot(
+                    self.capture_layout
+                        .binary_search(&group)
+                        .map_err(|_| CompileError::Conditional)?,
+                )?;
                 let matched = self.compile_node(matched, flags, next)?;
                 let unmatched = self.compile_node(unmatched, flags, next)?;
                 self.push(Instruction::Conditional {
@@ -1686,8 +1876,9 @@ impl Compiler {
         })
     }
 
-    fn push(&mut self, instruction: Instruction) -> usize {
-        let index = self.instructions.len();
+    fn push(&mut self, instruction: Instruction) -> ProgramCounter {
+        let index = program_counter(self.instructions.len())
+            .expect("bytecode program exceeds compact program-counter space");
         self.instructions.push(instruction);
         index
     }
@@ -2007,12 +2198,9 @@ fn instruction_capacity_hint(ast: &Ast) -> usize {
     }
 }
 
-fn lookbehind_direction(ast: &Ast) -> AssertDirection {
+fn lookbehind_direction(ast: &Ast) -> Result<AssertDirection, CompileError> {
     let (min_width, max_width) = byte_width(ast);
-    AssertDirection::Behind {
-        min_width,
-        max_width,
-    }
+    AssertDirection::behind(min_width, max_width)
 }
 
 fn byte_width(ast: &Ast) -> (usize, Option<usize>) {
@@ -2095,6 +2283,43 @@ mod tests {
             )
             .unwrap()?;
         Some(start..end)
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn bytecode_and_hot_frame_layouts_stay_compact() {
+        // Baseline before compact operands: 56, 56, 120, 16, and 24 bytes.
+        assert_eq!(std::mem::size_of::<Instruction>(), 24);
+        assert_eq!(std::mem::size_of::<BacktrackFrame>(), 32);
+        assert_eq!(std::mem::size_of::<AssertionFrame>(), 64);
+        assert_eq!(std::mem::size_of::<CallFrame>(), 8);
+        assert_eq!(std::mem::size_of::<RepeatState>(), 16);
+        assert_eq!(std::mem::size_of::<ResumeAction>(), 8);
+        assert_eq!(std::mem::size_of::<AssertDirection>(), 8);
+        assert_eq!(std::mem::size_of::<InstructionFlags>(), 1);
+        assert_eq!(std::mem::size_of::<RepeatBounds>(), 8);
+    }
+
+    #[test]
+    fn packed_instruction_flags_round_trip_every_combination() {
+        for bits in 0u8..16 {
+            let flags = RegexFlags {
+                case_insensitive: bits & 1 != 0,
+                multi_line: bits & 2 != 0,
+                dot_matches_new_line: bits & 4 != 0,
+                ignore_whitespace: bits & 8 != 0,
+            };
+            assert_eq!(InstructionFlags::from(flags).regex(), flags);
+        }
+    }
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn oversized_compact_operands_fall_back_instead_of_truncating() {
+        assert_eq!(
+            Program::compile(&parse(r"a{4294967295}")).unwrap_err(),
+            CompileError::TableOverflow
+        );
     }
 
     #[test]
