@@ -7,8 +7,8 @@
 
 A fast, Rust-native syntax highlighter powered by TextMate grammars.
 
-264 validated languages, four GitHub themes, incremental highlighting, safe
-HTML and ANSI output, and no native Oniguruma dependency.
+Bundled languages and GitHub themes, incremental highlighting, safe HTML and
+ANSI output, and no native Oniguruma dependency.
 
 [**Documentation**](https://docs.rs/syntaxmate) ·
 [**Examples**](examples) ·

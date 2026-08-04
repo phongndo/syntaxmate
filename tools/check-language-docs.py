@@ -389,11 +389,22 @@ def without_generated_snippets(text):
     return text
 
 
+def has_unmanaged_count_claim(text):
+    # Markdown wraps prose freely. Search each paragraph as one logical line so
+    # a line break cannot hide an otherwise unmanaged generated count.
+    text = without_generated_snippets(text)
+    paragraphs = re.split(r"\n[ \t]*\n", text)
+    return any(
+        TOP_README_COUNT_CLAIM.search(" ".join(paragraph.splitlines()))
+        for paragraph in paragraphs
+    )
+
+
 def render_docs(root, counts, policy):
     result = {}
     for path in MANAGED_DOCS:
         text = (root / path).read_text()
-        if TOP_README_COUNT_CLAIM.search(without_generated_snippets(text)):
+        if has_unmanaged_count_claim(text):
             raise ValueError(f"{path} has an unmanaged language-count claim; add generated markers")
         text = replace_snippet(text, COUNT_START, COUNT_END, count_snippet(path, counts), path)
         if path == Path("docs/textmate-engine.md"):
@@ -401,7 +412,7 @@ def render_docs(root, counts, policy):
         result[path] = text
 
     top = (root / TOP_README).read_text()
-    if TOP_README_COUNT_CLAIM.search(without_generated_snippets(top)):
+    if has_unmanaged_count_claim(top):
         raise ValueError(
             f"{TOP_README} has an unmanaged language-count claim; add generated markers"
         )

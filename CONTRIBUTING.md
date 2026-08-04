@@ -9,6 +9,10 @@ Install Rust 1.88 or newer. The checked-in toolchain file selects the normal
 stable toolchain. Node 24 is needed only when regenerating the pinned
 `vscode-textmate` oracle.
 
+The repository includes an [hk](https://hk.jdx.dev/) configuration for fast
+local consistency checks. With `hk` installed, enable it once with `hk install`
+(or the recommended global `hk install --global`).
+
 Start with focused checks while iterating:
 
 ```sh
@@ -23,6 +27,7 @@ Before submitting a pull request, run:
 cargo fmt --all --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo check --lib --no-default-features --locked
+python3 tools/check-language-docs.py --check
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
 cargo test --all-features --locked
 cargo run --bin syntaxmate-bundle --features bundle-tools --locked -- --check

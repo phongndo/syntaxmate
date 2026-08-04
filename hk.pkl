@@ -1,0 +1,31 @@
+amends "package://github.com/jdx/hk/releases/download/v1.54.0/hk@1.54.0#/Config.pkl"
+
+local languageDocGlobs = List(
+  "README.md",
+  "docs/language-status.md",
+  "docs/textmate-engine.md",
+  "tests/fixtures/textmate/README.md",
+  "assets/grammars/coverage.toml",
+  "tests/fixtures/textmate/cases.toml",
+  "benchmarks/textmate/corpora.toml",
+  "benchmarks/textmate/validation-policy.json",
+  "tools/textmate-golden-scale-policy.json",
+  "tools/check-language-docs.py",
+)
+
+local languageDocs = new Mapping<String, Step | Group> {
+  ["language-docs"] {
+    glob = languageDocGlobs
+    check = "python3 tools/check-language-docs.py --check"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    stash = "git"
+    steps = languageDocs
+  }
+
+  ["pre-push"] { steps = languageDocs }
+  ["check"] { steps = languageDocs }
+}
