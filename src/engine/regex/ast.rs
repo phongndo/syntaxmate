@@ -1,5 +1,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::OnceLock;
+
+use super::analysis::RegexAnalysis;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RegexFlags {
@@ -275,7 +278,7 @@ fn resolve_subroutine_paths(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ParsedRegex {
     pub source: String,
     pub ast: Ast,
@@ -284,9 +287,36 @@ pub struct ParsedRegex {
     pub capture_count: u32,
     pub named_captures: BTreeMap<String, u32>,
     pub diagnostics: Vec<String>,
+    analysis: OnceLock<RegexAnalysis>,
 }
 
+impl PartialEq for ParsedRegex {
+    fn eq(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.ast == other.ast
+            && self.features == other.features
+            && self.flags == other.flags
+            && self.capture_count == other.capture_count
+            && self.named_captures == other.named_captures
+            && self.diagnostics == other.diagnostics
+    }
+}
+
+impl Eq for ParsedRegex {}
+
 impl ParsedRegex {
+    pub(crate) fn initialize_analysis(&self) -> &RegexAnalysis {
+        self.analysis.get_or_init(|| RegexAnalysis::new(self))
+    }
+
+    pub(crate) fn analysis(&self) -> &RegexAnalysis {
+        self.initialize_analysis()
+    }
+
+    pub(crate) fn prefilter(&self) -> &super::prefilter::Prefilter {
+        self.analysis().prefilter(self)
+    }
+
     pub fn route_reason(&self) -> &'static str {
         if self.features.requires_fallback() {
             "fallback"
@@ -302,59 +332,6 @@ pub fn parse(pattern: &str) -> ParsedRegex {
 
 pub fn classify_features(pattern: &str) -> RegexFeatures {
     parse(pattern).features
-}
-
-pub(crate) fn has_case_insensitive_scope(ast: &Ast) -> bool {
-    match ast {
-        Ast::Flags { flags, child } => flags.case_insensitive || has_case_insensitive_scope(child),
-        Ast::Concat(nodes) | Ast::Alternation(nodes) => {
-            nodes.iter().any(has_case_insensitive_scope)
-        }
-        Ast::Conditional {
-            matched, unmatched, ..
-        } => has_case_insensitive_scope(matched) || has_case_insensitive_scope(unmatched),
-        Ast::Repeat { node, .. }
-        | Ast::Group { child: node, .. }
-        | Ast::Look { child: node, .. } => has_case_insensitive_scope(node),
-        _ => false,
-    }
-}
-
-pub(crate) fn uniform_effective_flags(ast: &Ast) -> Option<RegexFlags> {
-    fn visit(ast: &Ast, inherited: RegexFlags) -> Result<Option<RegexFlags>, ()> {
-        match ast {
-            Ast::Empty => Ok(None),
-            Ast::Flags { flags, child } => visit(child, *flags),
-            Ast::Concat(nodes) | Ast::Alternation(nodes) => {
-                let mut uniform = None;
-                for node in nodes {
-                    if let Some(flags) = visit(node, inherited)? {
-                        if uniform.is_some_and(|uniform| uniform != flags) {
-                            return Err(());
-                        }
-                        uniform = Some(flags);
-                    }
-                }
-                Ok(uniform)
-            }
-            Ast::Conditional {
-                matched, unmatched, ..
-            } => {
-                let left = visit(matched, inherited)?;
-                let right = visit(unmatched, inherited)?;
-                if left.is_some() && right.is_some() && left != right {
-                    Err(())
-                } else {
-                    Ok(left.or(right))
-                }
-            }
-            Ast::Repeat { node, .. }
-            | Ast::Group { child: node, .. }
-            | Ast::Look { child: node, .. } => visit(node, inherited),
-            _ => Ok(Some(inherited)),
-        }
-    }
-    visit(ast, RegexFlags::default()).ok().flatten()
 }
 
 fn is_quantifier_start(ch: char) -> bool {
@@ -416,6 +393,7 @@ impl<'a> Parser<'a> {
             capture_count: self.next_capture.saturating_sub(1),
             named_captures: self.named_captures,
             diagnostics: self.diagnostics,
+            analysis: OnceLock::new(),
         }
     }
 

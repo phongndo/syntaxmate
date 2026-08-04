@@ -92,9 +92,22 @@ The raw median report is `target/profile-item3-comparison.json`.
 
 ### 4. Single-pass regex analysis
 
-- [ ] Compute start bytes, effective flags, start class, skip prefix, required
+- [x] Compute start bytes, effective flags, start class, skip prefix, required
       literals, and capture/backreference metadata in one immutable analysis.
-- [ ] Reuse that analysis in matcher, scanner, prefilter, and bytecode setup.
+- [x] Reuse that analysis in matcher, scanner, prefilter, and bytecode setup.
+
+Result: seven alternating release samples reduced first-tokenization allocation
+calls by 0.9% for Markdown, 0.2% for C++, 1.8% for Rust, and 0.2% for HTML;
+incremental and highlighting calls fell by 0.2% to 1.7%. First-tokenization
+elapsed time improved 2.7%, 2.9%, 3.6%, and 2.3%, respectively, and prepared
+first-tokenization improved 1.1% to 2.6%. Warm allocation counts and tokenizer
+construction allocations were unchanged. Preparation calls were effectively
+flat for Markdown and HTML and fell 0.2% for C++ and 3.2% for Rust. Sharing the
+immutable metadata increased retained bytes by 1.3 to 30.9 KiB depending on the
+phase and corpus (at most 0.9% in tokenization and 2.2% in the small Rust
+preparation), within the existing conservative prepared-pattern charge.
+Benchmark token counts and the complete golden scope streams were unchanged.
+The raw median report is `target/profile-item4-comparison.json`.
 
 ### 5. Compact regex bytecode
 

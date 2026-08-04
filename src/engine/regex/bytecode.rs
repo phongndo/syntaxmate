@@ -4,6 +4,7 @@
 //! Mutable DFS, assertion, and repeat state lives in [`BytecodeScratch`], so a
 //! caller can reuse its allocations across candidate attempts.
 
+use super::analysis::RegexAnalysis;
 use super::ast::{Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, RegexFlags};
 use super::backtrack::{
     BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
@@ -628,8 +629,23 @@ impl Program {
         parsed: &ParsedRegex,
         live_captures: &[u32],
     ) -> Result<Self, CompileError> {
-        validate_capture_ast(&parsed.ast)?;
-        let mut layout = Vec::with_capacity(live_captures.len() + 1);
+        Self::compile_captures_with_analysis(parsed, parsed.analysis(), live_captures)
+    }
+
+    pub(crate) fn compile_captures_with_analysis(
+        parsed: &ParsedRegex,
+        analysis: &RegexAnalysis,
+        live_captures: &[u32],
+    ) -> Result<Self, CompileError> {
+        if !analysis.capture().capture_bytecode_supported() {
+            return Err(CompileError::Unsupported);
+        }
+        let mut layout = Vec::with_capacity(
+            live_captures
+                .len()
+                .saturating_add(analysis.capture().referenced_groups().len())
+                .saturating_add(1),
+        );
         layout.push(0);
         layout.extend(
             live_captures
@@ -637,7 +653,7 @@ impl Program {
                 .copied()
                 .filter(|index| *index > 0 && *index <= parsed.capture_count),
         );
-        collect_backref_groups(&parsed.ast, parsed, &mut layout);
+        layout.extend_from_slice(analysis.capture().referenced_groups());
         layout.sort_unstable();
         layout.dedup();
         Compiler::with_captures(layout).compile(parsed)
@@ -1195,32 +1211,6 @@ impl Program {
     }
 }
 
-fn validate_capture_ast(ast: &Ast) -> Result<(), CompileError> {
-    match ast {
-        Ast::Grapheme | Ast::Unsupported(_) => Err(CompileError::Unsupported),
-        Ast::Repeat { node, .. }
-        | Ast::Group { child: node, .. }
-        | Ast::Look { child: node, .. }
-        | Ast::Flags { child: node, .. } => validate_capture_ast(node),
-        Ast::Concat(nodes) | Ast::Alternation(nodes) => {
-            nodes.iter().try_for_each(validate_capture_ast)
-        }
-        Ast::Conditional {
-            matched, unmatched, ..
-        } => {
-            validate_capture_ast(matched)?;
-            validate_capture_ast(unmatched)
-        }
-        Ast::Empty
-        | Ast::Literal(_)
-        | Ast::Dot
-        | Ast::Class(_)
-        | Ast::Anchor(_)
-        | Ast::Backref(_)
-        | Ast::Subroutine(_) => Ok(()),
-    }
-}
-
 fn collect_group_definitions(
     ast: &Ast,
     flags: RegexFlags,
@@ -1260,50 +1250,6 @@ fn collect_group_definitions(
         | Ast::Class(_)
         | Ast::Anchor(_)
         | Ast::Backref(_)
-        | Ast::Subroutine(_)
-        | Ast::Unsupported(_) => {}
-    }
-}
-
-fn collect_backref_groups(ast: &Ast, parsed: &ParsedRegex, groups: &mut Vec<u32>) {
-    match ast {
-        Ast::Backref(Backref::Number(group)) => groups.push(*group),
-        Ast::Backref(Backref::Name(name)) => {
-            if let Some(group) = parsed.named_captures.get(name) {
-                groups.push(*group);
-            }
-        }
-        Ast::Concat(nodes) | Ast::Alternation(nodes) => {
-            for node in nodes {
-                collect_backref_groups(node, parsed, groups);
-            }
-        }
-        Ast::Repeat { node, .. }
-        | Ast::Group { child: node, .. }
-        | Ast::Look { child: node, .. }
-        | Ast::Flags { child: node, .. } => collect_backref_groups(node, parsed, groups),
-        Ast::Conditional {
-            condition,
-            matched,
-            unmatched,
-        } => {
-            match condition {
-                Backref::Number(group) => groups.push(*group),
-                Backref::Name(name) => {
-                    if let Some(group) = parsed.named_captures.get(name) {
-                        groups.push(*group);
-                    }
-                }
-            }
-            collect_backref_groups(matched, parsed, groups);
-            collect_backref_groups(unmatched, parsed, groups);
-        }
-        Ast::Empty
-        | Ast::Literal(_)
-        | Ast::Dot
-        | Ast::Grapheme
-        | Ast::Class(_)
-        | Ast::Anchor(_)
         | Ast::Subroutine(_)
         | Ast::Unsupported(_) => {}
     }

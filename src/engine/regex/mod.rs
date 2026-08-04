@@ -1,3 +1,4 @@
+pub(crate) mod analysis;
 pub mod ast;
 pub mod backtrack;
 pub(crate) mod bytecode;
@@ -239,8 +240,6 @@ pub struct CompiledPattern {
     matcher: RegexMatcher,
     unanchored_literal: Option<String>,
     restricted_start_bytes: Option<Vec<u8>>,
-    start_class_mask: u8,
-    skip_gate: Option<skip_prefix::SkipGate>,
     parsed: Arc<ParsedRegex>,
     live_captures: Arc<[u32]>,
     capture_program: std::sync::OnceLock<Option<Arc<bytecode::Program>>>,
@@ -268,8 +267,6 @@ impl CompiledPattern {
         let matcher = RegexMatcher::from_translation(pattern, translation);
         let unanchored_literal = matcher.unanchored_literal().map(str::to_owned);
         let restricted_start_bytes = matcher.restricted_start_bytes();
-        let start_class_mask = start_class::start_class_mask(&parsed);
-        let skip_gate = skip_prefix::SkipGate::analyze(&parsed);
         Self {
             id: CompiledPatternId(NEXT_COMPILED_PATTERN_ID.fetch_add(1, Ordering::Relaxed)),
             source: Arc::from(pattern),
@@ -277,8 +274,6 @@ impl CompiledPattern {
             matcher,
             unanchored_literal,
             restricted_start_bytes,
-            start_class_mask,
-            skip_gate,
             parsed,
             live_captures: live_captures.into(),
             capture_program: std::sync::OnceLock::new(),
@@ -329,15 +324,19 @@ impl CompiledPattern {
     }
 
     pub(crate) fn start_class_mask(&self) -> u8 {
-        self.start_class_mask
+        self.parsed.analysis().start_class_mask()
     }
 
     pub(crate) fn skip_gate(&self) -> Option<&skip_prefix::SkipGate> {
-        self.skip_gate.as_ref()
+        self.parsed.analysis().skip_gate()
     }
 
     pub(crate) fn parsed(&self) -> &ParsedRegex {
         &self.parsed
+    }
+
+    pub(crate) fn analysis(&self) -> &analysis::RegexAnalysis {
+        self.parsed.analysis()
     }
 
     pub(crate) fn needs_capture_replay(&self) -> bool {
@@ -377,9 +376,13 @@ impl CompiledPattern {
         let program = self
             .capture_program
             .get_or_init(|| {
-                bytecode::Program::compile_captures(&self.parsed, &self.live_captures)
-                    .ok()
-                    .map(Arc::new)
+                bytecode::Program::compile_captures_with_analysis(
+                    &self.parsed,
+                    self.parsed.analysis(),
+                    &self.live_captures,
+                )
+                .ok()
+                .map(Arc::new)
             })
             .as_deref()?;
         let mut budget = StepBudget::new(backtrack::DEFAULT_STEP_BUDGET);

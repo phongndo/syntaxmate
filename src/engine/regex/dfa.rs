@@ -2,7 +2,7 @@ use std::{collections::HashSet, fmt, sync::Arc};
 
 use super::ast::{AnchorKind, Ast, ClassAtom, LookKind, PerlClassKind, RegexFlags};
 use super::backtrack::{FallbackMatcher, is_line_end_position};
-use super::prefilter::{LiteralSet, Prefilter};
+use super::prefilter::LiteralSet;
 use super::scanner::Scanner;
 use super::translate::{AnchorStrategy, Translation, translate};
 use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
@@ -1204,7 +1204,7 @@ fn is_word_char(ch: char) -> bool {
 pub struct AutomataMatcher {
     engine: NativeEngine,
     translation: Translation,
-    prefilter: Prefilter,
+    generic_prefilter: bool,
 }
 
 impl AutomataMatcher {
@@ -1223,18 +1223,16 @@ impl AutomataMatcher {
             ))
         });
         // Native specializations already carry an exact literal/start-byte
-        // search. Building the generic required-literal prefilter as well is
-        // redundant, and is particularly expensive for the large symbol
-        // inventories used by Emacs Lisp and other grammar definitions.
-        let prefilter = if matches!(&engine, NativeEngine::Vm(_)) {
-            Prefilter::from_regex(&translation.parsed)
-        } else {
-            Prefilter::None
-        };
+        // search, so only VM-backed matchers consult the shared generic
+        // prefilter retained by the immutable analysis.
+        let generic_prefilter = matches!(&engine, NativeEngine::Vm(_));
+        if !generic_prefilter {
+            translation.parsed.initialize_analysis();
+        }
         Ok(Self {
             engine,
             translation,
-            prefilter,
+            generic_prefilter,
         })
     }
 
@@ -1244,10 +1242,11 @@ impl AutomataMatcher {
     /// without relabeling every fallback expression as an automata matcher.
     pub(crate) fn from_specialized_translation(translation: Translation) -> Option<Self> {
         let engine = specialized_engine(&translation)?;
+        translation.parsed.initialize_analysis();
         Some(Self {
             engine,
             translation,
-            prefilter: Prefilter::None,
+            generic_prefilter: false,
         })
     }
 
@@ -1289,9 +1288,12 @@ impl AutomataMatcher {
     }
 
     pub fn prefilter_may_match(&self, line: &str, from: usize) -> Option<bool> {
-        self.prefilter
+        let prefilter = self
+            .generic_prefilter
+            .then(|| self.translation.parsed.prefilter())?;
+        prefilter
             .is_enabled()
-            .then(|| self.prefilter.may_match(line, from))
+            .then(|| prefilter.may_match(line, from))
     }
 
     pub(crate) fn find_report_for_selection(
@@ -1700,7 +1702,7 @@ impl PatternSetMatcher {
             } else {
                 let regular = patterns
                     .iter()
-                    .filter(|pattern| Scanner::supports(pattern.parsed()))
+                    .filter(|pattern| pattern.analysis().scanner_supported())
                     .count();
                 let opaque = entries.len() - regular;
                 if opaque == 0 {

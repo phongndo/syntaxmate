@@ -18,9 +18,7 @@
 //! Gates are over-approximations: `allows` may return true for a position
 //! with no real match, but must never return false for one that has any.
 
-use super::ast::{
-    Ast, ParsedRegex, PerlClassKind, has_case_insensitive_scope, uniform_effective_flags,
-};
+use super::ast::{Ast, ParsedRegex, PerlClassKind};
 use super::backtrack::{
     StartByteSet, concat_start_bytes, expand_case_insensitive_start_bytes,
     is_cpp_space_comment_separator, is_perl_class, strip_nonsemantic_group,
@@ -59,7 +57,16 @@ pub(crate) enum SkipGateDecision {
 }
 
 impl SkipGate {
+    #[cfg(test)]
     pub(crate) fn analyze(parsed: &ParsedRegex) -> Option<Self> {
+        parsed.analysis().skip_gate().cloned()
+    }
+
+    pub(crate) fn analyze_with_effective_flags(
+        parsed: &ParsedRegex,
+        uniform_flags: Option<super::ast::RegexFlags>,
+        has_case_insensitive_scope: bool,
+    ) -> Option<Self> {
         let mut ast = &parsed.ast;
         while let Ast::Flags { child, .. } = ast {
             ast = child;
@@ -96,8 +103,7 @@ impl SkipGate {
         // Mirror the fallback matcher's start-byte policy: bail out on mixed
         // case-insensitive scopes, expand ASCII case pairs (plus non-ASCII
         // lead bytes) when the effective flags fold case.
-        let uniform_flags = uniform_effective_flags(&parsed.ast);
-        if has_case_insensitive_scope(&parsed.ast) && uniform_flags.is_none() {
+        if has_case_insensitive_scope && uniform_flags.is_none() {
             return None;
         }
         let info = concat_start_bytes(rest)?;

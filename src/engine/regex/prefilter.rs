@@ -1,9 +1,6 @@
 use std::collections::VecDeque;
 
-use super::ast::{
-    Ast, CharClass, ClassAtom, LookKind, ParsedRegex, has_case_insensitive_scope,
-    uniform_effective_flags,
-};
+use super::ast::{Ast, CharClass, ClassAtom, LookKind, ParsedRegex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RequiredLiterals {
@@ -37,36 +34,14 @@ pub enum Prefilter {
 
 impl Prefilter {
     pub fn from_regex(parsed: &ParsedRegex) -> Self {
-        if let Some(flags) = uniform_effective_flags(&parsed.ast)
-            && has_case_insensitive_scope(&parsed.ast)
-        {
-            return Self::from_required(required_literals(&parsed.ast), flags.case_insensitive);
-        }
-        if let Ast::Flags { flags, child } = &parsed.ast
-            && !has_flag_scope(child)
-        {
-            // TextMate grammars commonly spell a whole pattern as
-            // `(?i:...)`. Treat that as a uniform case policy instead of
-            // disabling required-literal filtering for the scoped flag node.
-            return Self::from_required(required_literals(child), flags.case_insensitive);
-        }
-        if parsed.flags.case_insensitive {
-            Self::from_case_insensitive_pattern(&parsed.ast)
-        } else if has_case_insensitive_scope(&parsed.ast) {
-            // A single prefilter cannot safely apply one case-folding policy
-            // to a pattern containing scoped flags. False negatives would
-            // change TextMate rule selection, so leave filtering disabled.
-            Self::None
-        } else {
-            Self::from_pattern(&parsed.ast)
-        }
+        parsed.prefilter().clone()
     }
 
     pub fn from_pattern(ast: &Ast) -> Self {
         Self::from_required(required_literals(ast), false)
     }
 
-    fn from_required(required: RequiredLiterals, ascii_case_insensitive: bool) -> Self {
+    pub(crate) fn from_required(required: RequiredLiterals, ascii_case_insensitive: bool) -> Self {
         if ascii_case_insensitive {
             let literals = match required {
                 RequiredLiterals::None => return Self::None,
@@ -114,10 +89,6 @@ impl Prefilter {
                 ascii_case_insensitive: false,
             },
         }
-    }
-
-    fn from_case_insensitive_pattern(ast: &Ast) -> Self {
-        Self::from_required(required_literals(ast), true)
     }
 
     pub fn may_match(&self, haystack: &str, from: usize) -> bool {
@@ -206,20 +177,6 @@ impl Prefilter {
             Self::Any { literals, .. } => literals,
             Self::None | Self::Byte(_) | Self::ByteSet { .. } | Self::Literal(_) => &[],
         }
-    }
-}
-
-fn has_flag_scope(ast: &Ast) -> bool {
-    match ast {
-        Ast::Flags { .. } => true,
-        Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().any(has_flag_scope),
-        Ast::Conditional {
-            matched, unmatched, ..
-        } => has_flag_scope(matched) || has_flag_scope(unmatched),
-        Ast::Repeat { node, .. }
-        | Ast::Group { child: node, .. }
-        | Ast::Look { child: node, .. } => has_flag_scope(node),
-        _ => false,
     }
 }
 

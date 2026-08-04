@@ -6,10 +6,9 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::ast::{
     AnchorKind, Ast, AstPathStep, Backref, CharClass, ClassAtom, LookKind, ParsedRegex,
-    PerlClassKind, RegexFlags, has_case_insensitive_scope, parse, uniform_effective_flags,
+    PerlClassKind, RegexFlags, parse,
 };
 use super::bytecode::{BytecodeScratch, CompileError, Program};
-use super::prefilter::Prefilter;
 use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
 
 pub(crate) const DEFAULT_STEP_BUDGET: usize = 100_000;
@@ -68,12 +67,7 @@ pub struct FallbackReport {
 pub struct FallbackMatcher {
     parsed: Arc<ParsedRegex>,
     bytecode: OnceLock<Option<Arc<Program>>>,
-    prefilter: Prefilter,
     special: Option<SpecialFallbackMatcher>,
-    start_bytes: Option<StartByteSet>,
-    /// True when the pattern can match the empty string at a start position.
-    /// Used with `start_bytes` so we still try `from` for patterns like `a?`.
-    start_nullable: bool,
     start_hint: StartHint,
     budget: usize,
     /// Process-unique id keying scan-local prefilter cursors.
@@ -463,31 +457,10 @@ impl FallbackMatcher {
     }
 
     pub(crate) fn from_parsed(parsed: Arc<ParsedRegex>, budget: usize) -> Self {
-        let prefilter = Prefilter::from_regex(&parsed);
-        let uniform_flags = uniform_effective_flags(&parsed.ast);
-        let (start_bytes, start_nullable) =
-            if has_case_insensitive_scope(&parsed.ast) && uniform_flags.is_none() {
-                (None, false)
-            } else {
-                match first_start_bytes(&parsed.ast) {
-                    Some(mut info) if !info.bytes.is_empty() => {
-                        if uniform_flags.unwrap_or(parsed.flags).case_insensitive {
-                            expand_case_insensitive_start_bytes(&mut info.bytes);
-                        }
-                        if info.bytes.len() < 128 {
-                            (Some(info.bytes), info.nullable)
-                        } else {
-                            (None, info.nullable)
-                        }
-                    }
-                    Some(info) => (None, info.nullable),
-                    None => (None, false),
-                }
-            };
         let start_hint = start_hint(&parsed.ast);
         static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
             std::sync::atomic::AtomicU32::new(0);
-        let prefilter_slot = if prefilter.is_enabled() {
+        let prefilter_slot = if parsed.prefilter().is_enabled() {
             NEXT_PREFILTER_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         } else {
             u32::MAX
@@ -496,10 +469,7 @@ impl FallbackMatcher {
         Self {
             parsed,
             bytecode: OnceLock::new(),
-            prefilter,
             special,
-            start_bytes,
-            start_nullable,
             start_hint,
             budget,
             prefilter_slot,
@@ -513,7 +483,9 @@ impl FallbackMatcher {
     fn bytecode(&self) -> Option<&Program> {
         self.bytecode
             .get_or_init(|| {
-                Program::is_beneficial(&self.parsed)
+                self.parsed
+                    .analysis()
+                    .bytecode_beneficial()
                     .then(|| {
                         // Subroutine calls need capture slots and routine
                         // entries even for position selection; compile with
@@ -529,7 +501,11 @@ impl FallbackMatcher {
                                 CompileError::Backreference
                                 | CompileError::Subroutine
                                 | CompileError::Conditional => {
-                                    Program::compile_captures(&self.parsed, &[])
+                                    Program::compile_captures_with_analysis(
+                                        &self.parsed,
+                                        self.parsed.analysis(),
+                                        &[],
+                                    )
                                 }
                                 other => Err(other),
                             })
@@ -548,13 +524,17 @@ impl FallbackMatcher {
     }
 
     pub fn prefilter_may_match(&self, line: &str, from: usize) -> Option<bool> {
-        self.prefilter
+        let prefilter = self.parsed.prefilter();
+        prefilter
             .is_enabled()
-            .then(|| self.prefilter.may_match(line, from))
+            .then(|| prefilter.may_match(line, from))
     }
 
     pub(crate) fn restricted_start_bytes(&self) -> Option<Vec<u8>> {
-        let bytes = self.start_bytes.as_ref().filter(|_| !self.start_nullable)?;
+        let analysis = self.parsed.analysis();
+        let bytes = analysis
+            .start_bytes()
+            .filter(|_| !analysis.start_nullable())?;
         Some(
             (0u8..=u8::MAX)
                 .filter(|byte| bytes.contains(*byte))
@@ -579,9 +559,11 @@ impl FallbackMatcher {
     ) -> Result<FallbackReport, FallbackError> {
         let capture_count = if self.active_bytecode().is_some() {
             0
-        } else if self.parsed.features.backreference
-            || self.parsed.features.conditional
-            || self.parsed.features.subroutine
+        } else if self
+            .parsed
+            .analysis()
+            .capture()
+            .selection_requires_captures()
         {
             self.parsed.capture_count as usize + 1
         } else {
@@ -604,7 +586,7 @@ impl FallbackMatcher {
         if !line.is_char_boundary(from) {
             return Err(FallbackError::InvalidStart { from });
         }
-        if !self.prefilter.may_match(line, from) {
+        if !self.parsed.prefilter().may_match(line, from) {
             return Ok(FallbackReport {
                 result: None,
                 steps: 0,
@@ -612,11 +594,11 @@ impl FallbackMatcher {
         }
         let mut budget = StepBudget::new(self.budget);
         if self.start_hint == StartHint::Unanchored
-            && let Some(start_bytes) = &self.start_bytes
+            && let Some(start_bytes) = self.parsed.analysis().start_bytes()
         {
             // Nullable patterns (e.g. `a?`, optional prefixes) can match empty
             // at `from` even when no start-byte candidate exists later.
-            if self.start_nullable
+            if self.parsed.analysis().start_nullable()
                 && let Some(result) = self.try_match_at_start_with_capture_count(
                     line,
                     from,
@@ -638,7 +620,7 @@ impl FallbackMatcher {
                 .enumerate()
             {
                 let start = from + offset;
-                if self.start_nullable && start == from {
+                if self.parsed.analysis().start_nullable() && start == from {
                     continue;
                 }
                 if !start_bytes.contains(*byte) || !line.is_char_boundary(start) {
@@ -711,9 +693,11 @@ impl FallbackMatcher {
     ) -> Result<FallbackReport, FallbackError> {
         let capture_count = if self.active_bytecode().is_some() {
             0
-        } else if self.parsed.features.backreference
-            || self.parsed.features.conditional
-            || self.parsed.features.subroutine
+        } else if self
+            .parsed
+            .analysis()
+            .capture()
+            .selection_requires_captures()
         {
             self.parsed.capture_count as usize + 1
         } else {
@@ -758,11 +742,11 @@ impl FallbackMatcher {
         let prefilter_viable = match scratch.as_deref_mut() {
             Some(scratch) => scratch.prefilter_cursors().may_match(
                 self.prefilter_slot,
-                &self.prefilter,
+                self.parsed.prefilter(),
                 line,
                 start,
             ),
-            None => self.prefilter.may_match(line, start),
+            None => self.parsed.prefilter().may_match(line, start),
         };
         if !prefilter_viable {
             return Ok(FallbackReport {
@@ -791,8 +775,8 @@ impl FallbackMatcher {
             }
             _ => {}
         }
-        if let Some(bytes) = &self.start_bytes
-            && !self.start_nullable
+        if let Some(bytes) = self.parsed.analysis().start_bytes()
+            && !self.parsed.analysis().start_nullable()
             && line
                 .as_bytes()
                 .get(start)
@@ -917,7 +901,7 @@ impl FallbackMatcher {
                 captures: Vec::new(),
             }));
         }
-        if capture_count == 0 && position_only_eligible(&self.parsed) {
+        if capture_count == 0 && self.parsed.analysis().capture().position_only_eligible() {
             let end = recursive_position_end(&self.parsed, line, start, ctx, budget)?;
             return Ok(end.map(|end| MatchResult {
                 start,
@@ -992,7 +976,7 @@ impl StartByteSet {
         self.len == 0
     }
 
-    fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.len
     }
 }
@@ -1018,7 +1002,7 @@ pub(crate) fn expand_case_insensitive_start_bytes(bytes: &mut StartByteSet) {
     }
 }
 
-fn first_start_bytes(ast: &Ast) -> Option<StartBytes> {
+pub(crate) fn first_start_bytes(ast: &Ast) -> Option<StartBytes> {
     match ast {
         Ast::Empty | Ast::Anchor(_) => Some(StartBytes {
             bytes: StartByteSet::empty(),
@@ -1200,16 +1184,6 @@ fn insert_range(bytes: &mut StartByteSet, start: u8, end: u8) {
     for byte in start..=end {
         bytes.insert(byte);
     }
-}
-
-fn position_only_eligible(parsed: &ParsedRegex) -> bool {
-    let features = &parsed.features;
-    parsed.capture_count > 0
-        && !features.backreference
-        && !features.subroutine
-        && !features.possessive_or_atomic
-        && !features.conditional
-        && !features.unsupported_escape
 }
 
 fn match_position_node(
