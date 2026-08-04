@@ -6,12 +6,59 @@ use crate::{
     Error, HighlightScopeTable, Result, ScopeStackRef, TokenizerOptions,
     engine::tokenizer::{
         GrammarSet as EngineGrammarSet, PreparedLanguage as EnginePreparedLanguage,
-        TextMateTokenizer, TokenizerState as EngineTokenizerState,
+        SharedScopeSink, TextMateTokenizer, TokenizerState as EngineTokenizerState,
     },
 };
 
 static NEXT_REGISTRY_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 static NEXT_TOKENIZER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+struct ScopedTokenVecSink<'a> {
+    line: &'a str,
+    tokens: &'a mut Vec<ScopedToken>,
+}
+
+impl SharedScopeSink for ScopedTokenVecSink<'_> {
+    fn reserve(&mut self, token_count: usize) {
+        if self.tokens.capacity() == 0 {
+            *self.tokens = Vec::with_capacity(token_count);
+        } else if self.tokens.capacity() < token_count {
+            self.tokens.reserve(token_count);
+        }
+    }
+
+    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
+        if let Some(token) = scoped_token(self.line, range, scopes) {
+            self.tokens.push(token);
+        }
+    }
+}
+
+struct ScopedTokenCallbackSink<'a, F> {
+    line: &'a str,
+    callback: F,
+}
+
+impl<F: FnMut(ScopedToken)> SharedScopeSink for ScopedTokenCallbackSink<'_, F> {
+    fn reserve(&mut self, _token_count: usize) {}
+
+    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
+        if let Some(token) = scoped_token(self.line, range, scopes) {
+            (self.callback)(token);
+        }
+    }
+}
+
+fn scoped_token(line: &str, range: Range<usize>, scopes: Arc<[Arc<str>]>) -> Option<ScopedToken> {
+    let start = range.start.min(line.len());
+    let end = range.end.min(line.len());
+    (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then_some(
+        ScopedToken {
+            range: start..end,
+            scopes,
+        },
+    )
+}
 
 /// Resource limits applied while constructing a custom grammar registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -311,13 +358,7 @@ impl Tokenizer {
         line: &str,
         state: &mut TokenizerState,
     ) -> Result<TokenizedLine> {
-        if state.owner != self.id {
-            return Err(Error::StateMismatch);
-        }
-        if line.contains('\n') {
-            return Err(Error::InvalidLine);
-        }
-
+        self.validate_line(line, state)?;
         let tokenized = if self
             .inner
             .max_line_bytes()
@@ -338,28 +379,122 @@ impl Tokenizer {
         let tokens = tokenized
             .tokens
             .into_iter()
-            .filter_map(|token| {
-                let start = token.range.start.min(line.len());
-                let end = token.range.end.min(line.len());
-                (start < end && line.is_char_boundary(start) && line.is_char_boundary(end))
-                    .then_some(ScopedToken {
-                        range: start..end,
-                        scopes: token.scopes,
-                    })
-            })
+            .filter_map(|token| scoped_token(line, token.range, token.scopes))
             .collect();
-        let status = if self.inner.take_degraded() {
-            HighlightStatus::Degraded
-        } else {
-            HighlightStatus::Complete
+        Ok(TokenizedLine {
+            tokens,
+            status: self.take_status(),
+        })
+    }
+
+    /// Tokenizes one logical line into a caller-owned reusable buffer.
+    ///
+    /// The buffer is cleared after input validation and retains its capacity
+    /// for subsequent calls. This is the allocation-conscious counterpart to
+    /// [`Tokenizer::tokenize_line`].
+    pub fn tokenize_line_into(
+        &mut self,
+        line: &str,
+        state: &mut TokenizerState,
+        tokens: &mut Vec<ScopedToken>,
+    ) -> Result<HighlightStatus> {
+        self.validate_line(line, state)?;
+        tokens.clear();
+        let mut sink = ScopedTokenVecSink { line, tokens };
+        Ok(self.tokenize_line_with_validated(line, state, &mut sink))
+    }
+
+    /// Tokenizes one logical line and sends each token to `sink` in byte order.
+    ///
+    /// The callback receives owned tokens backed by shared immutable scope
+    /// names, so no output collection is required. It is not called when input
+    /// validation fails. The returned status covers the complete line.
+    pub fn tokenize_line_with(
+        &mut self,
+        line: &str,
+        state: &mut TokenizerState,
+        sink: impl FnMut(ScopedToken),
+    ) -> Result<HighlightStatus> {
+        self.validate_line(line, state)?;
+        let mut sink = ScopedTokenCallbackSink {
+            line,
+            callback: sink,
         };
-        Ok(TokenizedLine { tokens, status })
+        Ok(self.tokenize_line_with_validated(line, state, &mut sink))
+    }
+
+    #[cfg(feature = "bundled-grammars")]
+    pub(crate) fn tokenize_line_shared_with(
+        &mut self,
+        line: &str,
+        state: &mut TokenizerState,
+        sink: &mut impl SharedScopeSink,
+    ) -> Result<HighlightStatus> {
+        self.validate_line(line, state)?;
+        Ok(self.tokenize_line_shared_with_validated(line, state, sink))
+    }
+
+    #[cfg(feature = "bundled-grammars")]
+    pub(crate) fn tokenize_line_shared_with_validated(
+        &mut self,
+        line: &str,
+        state: &mut TokenizerState,
+        sink: &mut impl SharedScopeSink,
+    ) -> HighlightStatus {
+        self.tokenize_line_with_validated(line, state, sink)
+    }
+
+    pub(crate) fn validate_line(&self, line: &str, state: &TokenizerState) -> Result<()> {
+        if state.owner != self.id {
+            return Err(Error::StateMismatch);
+        }
+        if line.contains('\n') {
+            return Err(Error::InvalidLine);
+        }
+        Ok(())
+    }
+
+    fn tokenize_line_with_validated(
+        &mut self,
+        line: &str,
+        state: &mut TokenizerState,
+        sink: &mut impl SharedScopeSink,
+    ) -> HighlightStatus {
+        let next_state = if self
+            .inner
+            .max_line_bytes()
+            .is_some_and(|max_line_bytes| line.len() >= max_line_bytes)
+        {
+            // The parser adds one synthetic newline, so a line at the byte
+            // limit is already too large. Skip it without filling the buffer.
+            self.inner
+                .tokenize_line_shared_scopes_skipped_with(line, state.inner.clone(), sink)
+        } else {
+            self.parse_line_buffer.clear();
+            self.parse_line_buffer.push_str(line);
+            self.parse_line_buffer.push('\n');
+            self.inner.tokenize_line_shared_scopes_with(
+                &self.parse_line_buffer,
+                state.inner.clone(),
+                sink,
+            )
+        };
+        state.inner = next_state;
+        self.take_status()
     }
 
     /// Tokenizes a complete UTF-8 source document.
     pub fn tokenize(&mut self, source: &str) -> TokenizedDocument {
+        let (highlighted, status) = self.tokenize_compact(source);
+        self.finish_document(highlighted, status)
+    }
+
+    pub(crate) fn tokenize_compact(
+        &mut self,
+        source: &str,
+    ) -> (crate::HighlightedText, HighlightStatus) {
         let highlighted = self.inner.tokenize_source(source);
-        self.finish_document(highlighted)
+        (highlighted, self.take_status())
     }
 
     /// Creates an owned checkpoint table for viewport tokenization.
@@ -383,15 +518,15 @@ impl Tokenizer {
         let highlighted =
             self.inner
                 .highlight_viewport(source, visible_lines, &mut checkpoints.inner);
-        Ok(self.finish_document(highlighted))
+        let status = self.take_status();
+        Ok(self.finish_document(highlighted, status))
     }
 
-    fn finish_document(&mut self, highlighted: crate::HighlightedText) -> TokenizedDocument {
-        let status = if self.inner.take_degraded() {
-            HighlightStatus::Degraded
-        } else {
-            HighlightStatus::Complete
-        };
+    fn finish_document(
+        &mut self,
+        highlighted: crate::HighlightedText,
+        status: HighlightStatus,
+    ) -> TokenizedDocument {
         let lines = highlighted
             .lines
             .into_iter()
@@ -408,6 +543,14 @@ impl Tokenizer {
             })
             .collect();
         TokenizedDocument { lines, status }
+    }
+
+    fn take_status(&mut self) -> HighlightStatus {
+        if self.inner.take_degraded() {
+            HighlightStatus::Degraded
+        } else {
+            HighlightStatus::Complete
+        }
     }
 
     #[cfg(feature = "diagnostics")]
@@ -666,6 +809,63 @@ mod tests {
         assert!(stats.static_pattern_retained_bytes() <= stats.static_pattern_byte_capacity());
         assert!(stats.static_candidate_count() <= stats.static_candidate_capacity());
         assert!(stats.static_candidate_retained_bytes() <= stats.static_candidate_byte_capacity());
+    }
+
+    #[test]
+    fn reusable_and_callback_line_apis_match_owned_output() {
+        let mut registry = GrammarRegistry::new();
+        let root = registry
+            .add_json(
+                r#"{
+                    "scopeName":"source.sink-test",
+                    "patterns":[{
+                        "begin":"\"",
+                        "end":"\"",
+                        "name":"string.sink-test"
+                    },{
+                        "match":"\\btrue\\b",
+                        "name":"constant.sink-test"
+                    }]
+                }"#,
+            )
+            .unwrap();
+        let mut owned = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+        let mut reusable = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+        let mut callback = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+        let mut owned_state = owned.initial_state();
+        let mut reusable_state = reusable.initial_state();
+        let mut callback_state = callback.initial_state();
+        let mut buffer = Vec::new();
+
+        for line in ["true \"open", "inside\" true", "plain"] {
+            let expected = owned.tokenize_line(line, &mut owned_state).unwrap();
+            let status = reusable
+                .tokenize_line_into(line, &mut reusable_state, &mut buffer)
+                .unwrap();
+            let mut emitted = Vec::new();
+            let callback_status = callback
+                .tokenize_line_with(line, &mut callback_state, |token| emitted.push(token))
+                .unwrap();
+
+            assert_eq!(status, expected.status());
+            assert_eq!(callback_status, expected.status());
+            assert_eq!(buffer, expected.tokens());
+            assert_eq!(emitted, expected.tokens());
+        }
+
+        let capacity = buffer.capacity();
+        let snapshot = buffer.clone();
+        assert_eq!(
+            reusable
+                .tokenize_line_into("invalid\nline", &mut reusable_state, &mut buffer)
+                .unwrap_err(),
+            Error::InvalidLine
+        );
+        assert_eq!(
+            buffer, snapshot,
+            "validation errors leave the sink untouched"
+        );
+        assert_eq!(buffer.capacity(), capacity);
     }
 
     #[test]

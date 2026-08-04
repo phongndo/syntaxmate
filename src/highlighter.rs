@@ -12,6 +12,7 @@ use crate::{
 #[cfg(feature = "bundled-grammars")]
 use crate::{
     TokenizerOptions,
+    engine::tokenizer::SharedScopeSink,
     tokenizer::{Tokenizer, TokenizerState},
 };
 
@@ -76,7 +77,7 @@ impl Theme {
     }
 
     #[cfg(feature = "bundled-grammars")]
-    fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> ResolvedSyntaxStyle {
+    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> ResolvedSyntaxStyle {
         self.inner.get().resolve_shared_scope_names(scopes)
     }
 }
@@ -114,6 +115,10 @@ impl Highlighter {
     /// Tokenizes a complete document and preserves exact TextMate scope stacks.
     #[cfg(feature = "bundled-grammars")]
     pub fn tokenize(&mut self, language: &str, source: &str) -> Result<TokenizedDocument> {
+        Ok(self.tokenizer_for(language)?.tokenize(source))
+    }
+
+    fn tokenizer_for(&mut self, language: &str) -> Result<&mut Tokenizer> {
         let canonical = crate::grammars::canonical_language(language)
             .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
         if !self.tokenizers.contains_key(&canonical) {
@@ -125,8 +130,16 @@ impl Highlighter {
         Ok(self
             .tokenizers
             .get_mut(&canonical)
-            .expect("tokenizer inserted before use")
-            .tokenize(source))
+            .expect("tokenizer inserted before use"))
+    }
+
+    #[cfg(all(feature = "bundled-themes", any(feature = "html", feature = "ansi")))]
+    fn tokenize_compact(
+        &mut self,
+        language: &str,
+        source: &str,
+    ) -> Result<(crate::HighlightedText, HighlightStatus)> {
+        Ok(self.tokenizer_for(language)?.tokenize_compact(source))
     }
 
     /// Tokenizes and styles a complete source document with a bundled theme.
@@ -149,8 +162,21 @@ impl Highlighter {
         source: &str,
         theme: &str,
     ) -> Result<crate::RenderedOutput> {
-        let document = self.highlight(language, source, theme)?;
-        crate::render_html(source, &document, &crate::HtmlOptions::default())
+        self.highlight_html_with_options(language, source, theme, &crate::HtmlOptions::default())
+    }
+
+    /// Highlights and renders escaped HTML directly from compact tokens.
+    #[cfg(all(feature = "bundled-themes", feature = "html"))]
+    pub fn highlight_html_with_options(
+        &mut self,
+        language: &str,
+        source: &str,
+        theme: &str,
+        options: &crate::HtmlOptions,
+    ) -> Result<crate::RenderedOutput> {
+        let theme = Theme::bundled(theme)?;
+        let (tokens, status) = self.tokenize_compact(language, source)?;
+        crate::render::render_html_compact(source, &tokens, status, &theme, options)
     }
 
     /// Highlights source and renders 24-bit ANSI output with control sanitization.
@@ -161,8 +187,21 @@ impl Highlighter {
         source: &str,
         theme: &str,
     ) -> Result<crate::RenderedOutput> {
-        let document = self.highlight(language, source, theme)?;
-        crate::render_ansi(source, &document, &crate::AnsiOptions::default())
+        self.highlight_ansi_with_options(language, source, theme, &crate::AnsiOptions::default())
+    }
+
+    /// Highlights and renders ANSI output directly from compact tokens.
+    #[cfg(all(feature = "bundled-themes", feature = "ansi"))]
+    pub fn highlight_ansi_with_options(
+        &mut self,
+        language: &str,
+        source: &str,
+        theme: &str,
+        options: &crate::AnsiOptions,
+    ) -> Result<crate::RenderedOutput> {
+        let theme = Theme::bundled(theme)?;
+        let (tokens, status) = self.tokenize_compact(language, source)?;
+        crate::render::render_ansi_compact(source, &tokens, status, &theme, options)
     }
 
     #[cfg(feature = "bundled-grammars")]
@@ -233,6 +272,66 @@ pub fn style_document(tokenized: TokenizedDocument, theme: &Theme) -> Highlighte
     HighlightedDocument { lines, status }
 }
 
+#[cfg(feature = "bundled-grammars")]
+struct IncrementalSpanVecSink<'a> {
+    line: &'a str,
+    theme: &'a Theme,
+    spans: &'a mut Vec<IncrementalHighlightedSpan>,
+}
+
+#[cfg(feature = "bundled-grammars")]
+impl SharedScopeSink for IncrementalSpanVecSink<'_> {
+    fn reserve(&mut self, span_count: usize) {
+        if self.spans.capacity() == 0 {
+            *self.spans = Vec::with_capacity(span_count);
+        } else if self.spans.capacity() < span_count {
+            self.spans.reserve(span_count);
+        }
+    }
+
+    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
+        if let Some(span) = incremental_span(self.line, range, scopes, self.theme) {
+            self.spans.push(span);
+        }
+    }
+}
+
+#[cfg(feature = "bundled-grammars")]
+struct IncrementalSpanCallbackSink<'a, F> {
+    line: &'a str,
+    theme: &'a Theme,
+    callback: F,
+}
+
+#[cfg(feature = "bundled-grammars")]
+impl<F: FnMut(IncrementalHighlightedSpan)> SharedScopeSink for IncrementalSpanCallbackSink<'_, F> {
+    fn reserve(&mut self, _span_count: usize) {}
+
+    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>) {
+        if let Some(span) = incremental_span(self.line, range, scopes, self.theme) {
+            (self.callback)(span);
+        }
+    }
+}
+
+#[cfg(feature = "bundled-grammars")]
+fn incremental_span(
+    line: &str,
+    range: Range<usize>,
+    scopes: Arc<[Arc<str>]>,
+    theme: &Theme,
+) -> Option<IncrementalHighlightedSpan> {
+    let start = range.start.min(line.len());
+    let end = range.end.min(line.len());
+    (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then(|| {
+        IncrementalHighlightedSpan {
+            range: start..end,
+            style: theme.resolve_shared_scope_names(&scopes),
+            scopes,
+        }
+    })
+}
+
 /// A reusable incremental highlighter. Input lines exclude newline terminators.
 #[cfg(feature = "bundled-grammars")]
 #[derive(Debug)]
@@ -259,6 +358,45 @@ impl HighlightSession {
             })
             .collect();
         Ok(IncrementalHighlightedLine { spans, status })
+    }
+
+    /// Highlights one logical line into a caller-owned reusable span buffer.
+    ///
+    /// The buffer is cleared after input validation, retains its capacity, and
+    /// is left untouched when validation fails.
+    pub fn highlight_line_into(
+        &mut self,
+        line: &str,
+        spans: &mut Vec<IncrementalHighlightedSpan>,
+    ) -> Result<HighlightStatus> {
+        self.tokenizer.validate_line(line, &self.state)?;
+        spans.clear();
+        let mut sink = IncrementalSpanVecSink {
+            line,
+            theme: &self.theme,
+            spans,
+        };
+        Ok(self
+            .tokenizer
+            .tokenize_line_shared_with_validated(line, &mut self.state, &mut sink))
+    }
+
+    /// Highlights one logical line and sends each styled span to `sink`.
+    ///
+    /// Spans arrive in byte order and the callback is not invoked when input
+    /// validation fails. The returned status covers the complete line.
+    pub fn highlight_line_with(
+        &mut self,
+        line: &str,
+        sink: impl FnMut(IncrementalHighlightedSpan),
+    ) -> Result<HighlightStatus> {
+        let mut sink = IncrementalSpanCallbackSink {
+            line,
+            theme: &self.theme,
+            callback: sink,
+        };
+        self.tokenizer
+            .tokenize_line_shared_with(line, &mut self.state, &mut sink)
     }
 
     pub fn state(&self) -> &TokenizerState {

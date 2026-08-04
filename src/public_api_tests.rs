@@ -151,6 +151,38 @@ fn incremental_output_matches_complete_document_scopes() {
 }
 
 #[test]
+fn incremental_highlight_sinks_match_owned_output() {
+    let highlighter = Highlighter::bundled().unwrap();
+    let mut owned = highlighter.session("rust", "github-dark").unwrap();
+    let mut reusable = highlighter.session("rust", "github-dark").unwrap();
+    let mut callback = highlighter.session("rust", "github-dark").unwrap();
+    let mut buffer = Vec::new();
+
+    for line in ["fn main() {", "    let value = \"λ\";", "}"] {
+        let expected = owned.highlight_line(line).unwrap();
+        let status = reusable.highlight_line_into(line, &mut buffer).unwrap();
+        let mut emitted = Vec::new();
+        let callback_status = callback
+            .highlight_line_with(line, |span| emitted.push(span))
+            .unwrap();
+
+        assert_eq!(status, expected.status());
+        assert_eq!(callback_status, expected.status());
+        assert_eq!(buffer, expected.spans());
+        assert_eq!(emitted, expected.spans());
+    }
+
+    let snapshot = buffer.clone();
+    assert_eq!(
+        reusable
+            .highlight_line_into("invalid\nline", &mut buffer)
+            .unwrap_err(),
+        Error::InvalidLine
+    );
+    assert_eq!(buffer, snapshot);
+}
+
+#[test]
 fn incremental_session_accepts_a_custom_theme() {
     let theme = Theme::from_json(
         r##"{

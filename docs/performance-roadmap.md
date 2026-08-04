@@ -137,15 +137,38 @@ Prepared first-tokenization improved 0.8% to 5.1% outside Markdown's +0.061 ms
 (+0.7%) median. Construction and preparation do not materialize lazy bytecode
 and remained allocation-identical; their elapsed changes and the sub-0.2 ms
 warm phases were treated as process noise. No new superinstruction was added
-without separate byte-exact evidence. Benchmark token counts and the complete golden
-scope streams were unchanged. The raw median report is
+without separate byte-exact evidence. Benchmark token counts and the complete
+golden scope streams were unchanged. The raw median report is
 `target/profile-item5-comparison.json`.
 
 ### 6. Reusable-buffer and sink APIs
 
-- [ ] Add optional `tokenize_line_into` and callback/sink APIs.
-- [ ] Add direct compact-token HTML/ANSI rendering paths.
-- [ ] Keep existing owned-output APIs unchanged.
+- [x] Add optional `tokenize_line_into` and callback/sink APIs.
+- [x] Add direct compact-token HTML/ANSI rendering paths.
+- [x] Keep existing owned-output APIs unchanged.
+
+Result: `tokenize_line_into` and `highlight_line_into` reuse caller-owned
+buffers, while `tokenize_line_with` and `highlight_line_with` deliver owned
+scope-backed values without an output collection. Against the corresponding
+owned APIs, seven alternating release samples removed 194 to 244 allocation
+calls and 17 to 92 KiB cumulatively for token lines, and 346 to 484 calls and 39
+to 219 KiB for styled lines. Depending on corpus size, that is a 0.1% to 1.9%
+call and 0.1% to 4.9% byte reduction for token sinks, and 0.2% to 3.5% and 0.3%
+to 10.8% for styled sinks. Callback retained bytes were unchanged; reusable
+buffers retained only their final 0.75 to 4.5 KiB capacity. Most sink elapsed
+medians were neutral or improved; regressions were at most 0.274 ms.
+
+The bundled `Highlighter` HTML/ANSI conveniences now render the engine's compact
+scope-stack spans directly; standalone structured-document renderers and all
+owned token APIs are unchanged. Warm HTML allocation calls fell 6.1% to 24.4%
+and cumulative bytes fell 11.2% to 16.2%. Warm ANSI calls fell 70.5% to 92.1%,
+cumulative bytes fell 45.8% to 59.3%, and elapsed time improved 23.1% to 49.5%.
+First ANSI rendering also reduced calls 1.0% to 36.2%, bytes 0.5% to 18.3%, and
+elapsed time 0.7% to 16.3%. First HTML rendering reduced calls 0.1% to 1.3%
+and bytes 0.2% to 3.7%, with elapsed time effectively neutral. Rendered byte lengths, tokenizer item counts, and complete
+golden scope streams were unchanged. Existing owned phases remained
+allocation- and byte-identical except one fewer Markdown construction call.
+The raw median report is `target/profile-item6-comparison.json`.
 
 ### 7. Incremental theme cache
 

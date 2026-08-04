@@ -6,6 +6,12 @@ use std::fmt::Write as _;
 use crate::HighlightStatus;
 #[cfg(feature = "ansi")]
 use crate::theme::RgbColor;
+#[cfg(all(
+    feature = "bundled-grammars",
+    feature = "bundled-themes",
+    any(feature = "ansi", feature = "html")
+))]
+use crate::{EngineHighlightedLine, HighlightedText, Theme};
 #[cfg(any(feature = "ansi", feature = "html"))]
 use crate::{Error, HighlightedDocument, HighlightedLine, Result, Style, theme::SyntaxModifiers};
 
@@ -93,6 +99,94 @@ pub fn render_html(
         content: output,
         status: document.status(),
     })
+}
+
+/// Renders the engine's compact scope-stack tokens directly, avoiding owned
+/// public token and styled-document intermediates.
+#[cfg(all(
+    feature = "html",
+    feature = "bundled-grammars",
+    feature = "bundled-themes"
+))]
+pub(crate) fn render_html_compact(
+    source: &str,
+    tokens: &HighlightedText,
+    status: HighlightStatus,
+    theme: &Theme,
+    options: &HtmlOptions,
+) -> Result<RenderedOutput> {
+    let mut output = String::with_capacity(source.len().saturating_mul(2));
+    if options.include_wrapper {
+        output.push_str("<pre");
+        if let Some(class) = options.class.as_deref() {
+            output.push_str(" class=\"");
+            escape_html_attribute(class, &mut output);
+            output.push('"');
+        }
+        output.push_str("><code>");
+    }
+
+    let mut source_lines = crate::engine::line::LineChunks::new(source);
+    for (line_index, line) in tokens.lines.iter().enumerate() {
+        let chunk = source_lines.next().ok_or_else(compact_line_count_error)?;
+        render_html_compact_line(chunk.text, line, theme, options, &mut output);
+        if line_index + 1 < tokens.lines.len() {
+            output.push('\n');
+        }
+    }
+    if source_lines.next().is_some() {
+        return Err(compact_line_count_error());
+    }
+
+    if options.include_wrapper {
+        output.push_str("</code></pre>");
+    }
+    Ok(RenderedOutput {
+        content: output,
+        status,
+    })
+}
+
+#[cfg(all(
+    feature = "html",
+    feature = "bundled-grammars",
+    feature = "bundled-themes"
+))]
+fn render_html_compact_line(
+    text: &str,
+    line: &EngineHighlightedLine,
+    theme: &Theme,
+    options: &HtmlOptions,
+    output: &mut String,
+) {
+    let mut cursor = 0;
+    for span in &line.segments {
+        debug_assert!(
+            cursor <= span.byte_start
+                && span.byte_start <= span.byte_end
+                && span.byte_end <= text.len()
+                && text.is_char_boundary(span.byte_start)
+                && text.is_char_boundary(span.byte_end)
+        );
+        escape_html_text(&text[cursor..span.byte_start], output);
+        output.push_str("<span");
+        write_html_style(theme.resolve(&line.scope_table, span.scope_stack), output);
+        if options.include_scopes {
+            output.push_str(" data-scopes=\"");
+            for (index, scope) in line.scope_table.stack_names(span.scope_stack).enumerate() {
+                if index != 0 {
+                    output.push(' ');
+                }
+                escape_html_attribute(scope, output);
+            }
+            output.push('"');
+        }
+        output.push('>');
+        escape_html_text(&text[span.byte_start..span.byte_end], output);
+        output.push_str("</span>");
+        cursor = span.byte_end;
+    }
+    escape_html_text(&text[cursor..], output);
 }
 
 #[cfg(feature = "html")]
@@ -247,6 +341,81 @@ pub fn render_ansi(
     })
 }
 
+/// ANSI counterpart to the compact HTML renderer.
+#[cfg(all(
+    feature = "ansi",
+    feature = "bundled-grammars",
+    feature = "bundled-themes"
+))]
+pub(crate) fn render_ansi_compact(
+    source: &str,
+    tokens: &HighlightedText,
+    status: HighlightStatus,
+    theme: &Theme,
+    options: &AnsiOptions,
+) -> Result<RenderedOutput> {
+    let mut output = String::with_capacity(source.len().saturating_mul(2));
+    let mut source_lines = crate::engine::line::LineChunks::new(source);
+    for (line_index, line) in tokens.lines.iter().enumerate() {
+        let chunk = source_lines.next().ok_or_else(compact_line_count_error)?;
+        render_ansi_compact_line(chunk.text, line, theme, options, &mut output);
+        if line_index + 1 < tokens.lines.len() {
+            output.push('\n');
+        }
+    }
+    if source_lines.next().is_some() {
+        return Err(compact_line_count_error());
+    }
+    Ok(RenderedOutput {
+        content: output,
+        status,
+    })
+}
+
+#[cfg(all(
+    feature = "ansi",
+    feature = "bundled-grammars",
+    feature = "bundled-themes"
+))]
+fn render_ansi_compact_line(
+    text: &str,
+    line: &EngineHighlightedLine,
+    theme: &Theme,
+    options: &AnsiOptions,
+    output: &mut String,
+) {
+    let mut cursor = 0;
+    let mut active_style = Style::default();
+    for span in &line.segments {
+        debug_assert!(
+            cursor <= span.byte_start
+                && span.byte_start <= span.byte_end
+                && span.byte_end <= text.len()
+                && text.is_char_boundary(span.byte_start)
+                && text.is_char_boundary(span.byte_end)
+        );
+        write_ansi_source(&text[cursor..span.byte_start], options, output);
+        let style = if options.colors {
+            theme.resolve(&line.scope_table, span.scope_stack)
+        } else {
+            Style::default()
+        };
+        if style != active_style {
+            if active_style != Style::default() {
+                output.push_str("\x1b[0m");
+            }
+            write_ansi_style(style, output);
+            active_style = style;
+        }
+        write_ansi_source(&text[span.byte_start..span.byte_end], options, output);
+        cursor = span.byte_end;
+    }
+    if active_style != Style::default() {
+        output.push_str("\x1b[0m");
+    }
+    write_ansi_source(&text[cursor..], options, output);
+}
+
 #[cfg(feature = "ansi")]
 fn render_ansi_line(
     text: &str,
@@ -282,35 +451,44 @@ fn render_ansi_line(
 
 #[cfg(feature = "ansi")]
 fn write_ansi_style(style: Style, output: &mut String) {
-    let mut codes = Vec::with_capacity(6);
-    if style.modifiers.contains(SyntaxModifiers::BOLD) {
-        codes.push("1".to_owned());
+    let has_codes =
+        !style.modifiers.is_empty() || style.foreground.is_some() || style.background.is_some();
+    if !has_codes {
+        return;
     }
-    if style.modifiers.contains(SyntaxModifiers::ITALIC) {
-        codes.push("3".to_owned());
-    }
-    if style.modifiers.contains(SyntaxModifiers::UNDERLINED) {
-        codes.push("4".to_owned());
-    }
-    if style.modifiers.contains(SyntaxModifiers::CROSSED_OUT) {
-        codes.push("9".to_owned());
+    output.push_str("\x1b[");
+    let mut separator = "";
+    for (enabled, code) in [
+        (style.modifiers.contains(SyntaxModifiers::BOLD), "1"),
+        (style.modifiers.contains(SyntaxModifiers::ITALIC), "3"),
+        (style.modifiers.contains(SyntaxModifiers::UNDERLINED), "4"),
+        (style.modifiers.contains(SyntaxModifiers::CROSSED_OUT), "9"),
+    ] {
+        if enabled {
+            output.push_str(separator);
+            output.push_str(code);
+            separator = ";";
+        }
     }
     if let Some(color) = style.foreground {
-        codes.push(ansi_color("38", color));
+        output.push_str(separator);
+        write_ansi_color("38", color, output);
+        separator = ";";
     }
     if let Some(color) = style.background {
-        codes.push(ansi_color("48", color));
+        output.push_str(separator);
+        write_ansi_color("48", color, output);
     }
-    if !codes.is_empty() {
-        output.push_str("\x1b[");
-        output.push_str(&codes.join(";"));
-        output.push('m');
-    }
+    output.push('m');
 }
 
 #[cfg(feature = "ansi")]
-fn ansi_color(prefix: &str, color: RgbColor) -> String {
-    format!("{prefix};2;{};{};{}", color.red, color.green, color.blue)
+fn write_ansi_color(prefix: &str, color: RgbColor, output: &mut String) {
+    let _ = write!(
+        output,
+        "{prefix};2;{};{};{}",
+        color.red, color.green, color.blue
+    );
 }
 
 #[cfg(feature = "ansi")]
@@ -335,6 +513,15 @@ fn write_ansi_source(text: &str, options: &AnsiOptions, output: &mut String) {
             }
         }
     }
+}
+
+#[cfg(all(
+    feature = "bundled-grammars",
+    feature = "bundled-themes",
+    any(feature = "ansi", feature = "html")
+))]
+fn compact_line_count_error() -> Error {
+    Error::Render("source and compact token document have different logical line counts".to_owned())
 }
 
 #[cfg(any(feature = "ansi", feature = "html"))]
@@ -420,6 +607,48 @@ mod tests {
     }
 
     #[test]
+    fn ansi_style_writer_preserves_sgr_code_order_without_temporary_strings() {
+        let mut output = String::new();
+        write_ansi_style(
+            Style {
+                foreground: Some(RgbColor {
+                    red: 1,
+                    green: 2,
+                    blue: 3,
+                }),
+                background: Some(RgbColor {
+                    red: 4,
+                    green: 5,
+                    blue: 6,
+                }),
+                modifiers: SyntaxModifiers::BOLD,
+            },
+            &mut output,
+        );
+        assert_eq!(output, "\x1b[1;38;2;1;2;3;48;2;4;5;6m");
+
+        for (modifier, expected) in [
+            (SyntaxModifiers::ITALIC, "\x1b[3m"),
+            (SyntaxModifiers::UNDERLINED, "\x1b[4m"),
+            (SyntaxModifiers::CROSSED_OUT, "\x1b[9m"),
+        ] {
+            output.clear();
+            write_ansi_style(
+                Style {
+                    modifiers: modifier,
+                    ..Style::default()
+                },
+                &mut output,
+            );
+            assert_eq!(output, expected);
+        }
+
+        output.clear();
+        write_ansi_style(Style::default(), &mut output);
+        assert!(output.is_empty());
+    }
+
+    #[test]
     fn ansi_sanitizes_source_escape_sequences() {
         let source = "let value = \"\x1b[31m\";";
         let mut highlighter = Highlighter::bundled().unwrap();
@@ -430,6 +659,51 @@ mod tests {
         assert!(output.as_str().contains('␛'));
         assert!(!output.as_str().contains("\x1b[31m"));
         assert!(output.as_str().contains("\x1b["));
+    }
+
+    #[test]
+    fn direct_compact_rendering_is_byte_exact_with_owned_rendering() {
+        let source = "fn main() {\n\tprintln!(\"λ<&>\");\n}\n";
+
+        let mut direct = Highlighter::bundled().unwrap();
+        let direct_html = direct
+            .highlight_html("rust", source, "github-dark")
+            .unwrap();
+        let direct_ansi = direct
+            .highlight_ansi("rust", source, "github-dark")
+            .unwrap();
+
+        let mut owned = Highlighter::bundled().unwrap();
+        let document = owned.highlight("rust", source, "github-dark").unwrap();
+        let owned_html = render_html(source, &document, &HtmlOptions::default()).unwrap();
+        let owned_ansi = render_ansi(source, &document, &AnsiOptions::default()).unwrap();
+
+        assert_eq!(direct_html, owned_html);
+        assert_eq!(direct_ansi, owned_ansi);
+
+        let html_options = HtmlOptions {
+            include_wrapper: false,
+            class: None,
+            include_scopes: true,
+        };
+        let ansi_options = AnsiOptions {
+            colors: false,
+            sanitize_control_characters: false,
+        };
+        let direct_html = direct
+            .highlight_html_with_options("rust", source, "github-dark", &html_options)
+            .unwrap();
+        let direct_ansi = direct
+            .highlight_ansi_with_options("rust", source, "github-dark", &ansi_options)
+            .unwrap();
+        assert_eq!(
+            direct_html,
+            render_html(source, &document, &html_options).unwrap()
+        );
+        assert_eq!(
+            direct_ansi,
+            render_ansi(source, &document, &ansi_options).unwrap()
+        );
     }
 
     #[test]

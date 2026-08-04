@@ -15,6 +15,8 @@
 - Add caller-owned `PreparedLanguage` snapshots for constructing independent
   tokenizers while reusing count- and byte-bounded immutable grammar and regex
   preparation.
+- Add reusable incremental token/span buffers, callback sinks, and direct
+  compact-token HTML/ANSI rendering paths while retaining the owned APIs.
 
 ## 0.1.0 - 2026-08-01
 

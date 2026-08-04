@@ -12,6 +12,12 @@ require a theme.
 3. `render_html` and `render_ansi` render an already styled document.
 4. `Highlighter` and `HighlightSession` are bundled-asset convenience APIs.
 
+Incremental callers can choose owned line results, caller-reused
+`tokenize_line_into`/`highlight_line_into` buffers, or callback-based
+`tokenize_line_with`/`highlight_line_with` delivery. The forms preserve the
+same continuation-state and `HighlightStatus` contract; sink callbacks receive
+owned spans backed by shared immutable scope names.
+
 The low-level grammar compiler, regex VM, numeric rule IDs, and mutable caches
 are deliberately private. `PreparedLanguage` is the explicit caller-owned
 sharing boundary: derived tokenizers share immutable grammar/regex preparation
@@ -19,7 +25,8 @@ but never continuation state, line caches, dynamic regexes, or source-specific
 candidate-set bindings. Its public statistics expose count and charged-byte
 ceilings; artifacts that exceed those ceilings stay tokenizer-local. Public
 state and checkpoint values are opaque and may only be reused with their
-originating tokenizer.
+originating tokenizer. Reusable output buffers remain caller-owned and are
+cleared only after line/state validation succeeds.
 
 ## Asset independence
 

@@ -100,6 +100,11 @@ pub(crate) struct CompactScopedToken {
     pub(crate) stack: ScopeStackId,
 }
 
+pub(crate) trait SharedScopeSink {
+    fn reserve(&mut self, token_count: usize);
+    fn push(&mut self, range: Range<usize>, scopes: Arc<[Arc<str>]>);
+}
+
 #[derive(Debug, Default, Clone)]
 struct OutputScopeTableCache {
     tables: FastMap<Vec<ScopeStackId>, Weak<HighlightScopeTable>>,
@@ -2578,6 +2583,41 @@ impl TextMateTokenizer {
             tokens,
             state: compact.state,
         }
+    }
+
+    pub(crate) fn tokenize_line_shared_scopes_with(
+        &mut self,
+        parse_text: &str,
+        state: TokenizerState,
+        sink: &mut impl SharedScopeSink,
+    ) -> TokenizerState {
+        let compact = self.tokenize_line_compact_at_line(parse_text, state, 0);
+        self.resolve_shared_compact_line_with(compact, sink)
+    }
+
+    pub(crate) fn tokenize_line_shared_scopes_skipped_with(
+        &mut self,
+        parse_text: &str,
+        state: TokenizerState,
+        sink: &mut impl SharedScopeSink,
+    ) -> TokenizerState {
+        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, 0, true);
+        self.resolve_shared_compact_line_with(compact, sink)
+    }
+
+    fn resolve_shared_compact_line_with(
+        &mut self,
+        compact: CompactTokenizedLine,
+        sink: &mut impl SharedScopeSink,
+    ) -> TokenizerState {
+        sink.reserve(compact.tokens.len());
+        for token in compact.tokens.iter() {
+            sink.push(
+                token.range.clone(),
+                self.resolve_scope_stack_cached(token.stack),
+            );
+        }
+        compact.state
     }
 
     fn tokenize_line_compact_at_line(
