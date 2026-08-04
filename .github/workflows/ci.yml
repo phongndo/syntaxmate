@@ -211,14 +211,16 @@ jobs:
       - run: cargo package --locked
       - name: Check packaged default API
         run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          package_path="$(pwd)/target/package/syntaxmate-${version}"
           mkdir -p target/package-consumer/src
-          cat > target/package-consumer/Cargo.toml <<'TOML'
+          cat > target/package-consumer/Cargo.toml <<TOML
           [package]
           name = "syntaxmate-package-consumer"
           version = "0.0.0"
           edition = "2024"
           [dependencies]
-          syntaxmate = { path = "../package/syntaxmate-0.1.0" }
+          syntaxmate = { path = "${package_path}" }
           TOML
           cat > target/package-consumer/src/main.rs <<'RS'
           use syntaxmate::Highlighter;
@@ -234,14 +236,16 @@ jobs:
           cargo run --manifest-path target/package-consumer/Cargo.toml --quiet
       - name: Check packaged custom-assets API
         run: |
+          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          package_path="$(pwd)/target/package/syntaxmate-${version}"
           mkdir -p target/package-custom-consumer/src
-          cat > target/package-custom-consumer/Cargo.toml <<'TOML'
+          cat > target/package-custom-consumer/Cargo.toml <<TOML
           [package]
           name = "syntaxmate-package-custom-consumer"
           version = "0.0.0"
           edition = "2024"
           [dependencies]
-          syntaxmate = { path = "../package/syntaxmate-0.1.0", default-features = false, features = ["html"] }
+          syntaxmate = { path = "${package_path}", default-features = false, features = ["html"] }
           TOML
           cat > target/package-custom-consumer/src/main.rs <<'RS'
           use syntaxmate::{
