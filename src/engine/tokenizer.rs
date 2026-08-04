@@ -931,7 +931,171 @@ impl RepositoryBindings {
     }
 }
 
-type RuleRepositoryContexts = FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>;
+#[derive(Debug)]
+struct GrammarRuleRepositoryContexts {
+    dense: Box<[Option<Arc<RepositoryBindings>>]>,
+    // `CompiledGrammar` is public and its rule IDs can therefore be sparse,
+    // even though both native compilers produce dense IDs. Keep those unusual
+    // callers correct without putting the ordinary lookup path behind a hash.
+    sparse: Vec<(RuleId, Arc<RepositoryBindings>)>,
+}
+
+impl GrammarRuleRepositoryContexts {
+    fn new(dense_len: usize) -> Self {
+        Self {
+            dense: std::iter::repeat_with(|| None)
+                .take(dense_len)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+            sparse: Vec::new(),
+        }
+    }
+
+    fn get(&self, rule_id: RuleId) -> Option<&Arc<RepositoryBindings>> {
+        if let Some(context) = self.dense.get(rule_id.0 as usize) {
+            return context.as_ref();
+        }
+        self.sparse
+            .iter()
+            .find_map(|(candidate, context)| (*candidate == rule_id).then_some(context))
+    }
+
+    fn insert_first(&mut self, rule_id: RuleId, context: Arc<RepositoryBindings>) -> bool {
+        if let Some(slot) = self.dense.get_mut(rule_id.0 as usize) {
+            if slot.is_some() {
+                return false;
+            }
+            *slot = Some(context);
+            return true;
+        }
+        if self
+            .sparse
+            .iter()
+            .any(|(candidate, _)| *candidate == rule_id)
+        {
+            return false;
+        }
+        self.sparse.push((rule_id, context));
+        true
+    }
+}
+
+/// Repository contexts indexed first by grammar and then directly by rule ID.
+///
+/// The outer table is compact, while each per-grammar rule table is allocated
+/// only when the lazy-compilation walk first reaches one of that grammar's
+/// rules. This keeps external grammar closures cheap without hashing the hot
+/// `(GrammarId, RuleId)` pair.
+#[derive(Debug)]
+struct RuleRepositoryContexts {
+    grammars: Box<[Option<Box<GrammarRuleRepositoryContexts>>]>,
+}
+
+impl RuleRepositoryContexts {
+    fn new(grammar_count: usize) -> Self {
+        Self {
+            grammars: std::iter::repeat_with(|| None)
+                .take(grammar_count)
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        }
+    }
+
+    fn empty() -> Self {
+        Self::new(0)
+    }
+
+    fn get(&self, grammar_id: GrammarId, rule_id: RuleId) -> Option<&Arc<RepositoryBindings>> {
+        self.grammars
+            .get(grammar_id.0 as usize)
+            .and_then(Option::as_deref)
+            .and_then(|grammar| grammar.get(rule_id))
+    }
+
+    fn has_grammar_table(&self, grammar_id: GrammarId) -> bool {
+        self.grammars
+            .get(grammar_id.0 as usize)
+            .is_some_and(Option::is_some)
+    }
+
+    fn insert_first(
+        &mut self,
+        grammar_id: GrammarId,
+        rule_id: RuleId,
+        dense_len: usize,
+        context: Arc<RepositoryBindings>,
+    ) -> bool {
+        let Some(grammar) = self.grammars.get_mut(grammar_id.0 as usize) else {
+            return false;
+        };
+        let grammar =
+            grammar.get_or_insert_with(|| Box::new(GrammarRuleRepositoryContexts::new(dense_len)));
+        grammar.insert_first(rule_id, context)
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.grammars
+            .iter()
+            .filter_map(Option::as_deref)
+            .map(|grammar| {
+                grammar
+                    .dense
+                    .iter()
+                    .filter(|context| context.is_some())
+                    .count()
+                    + grammar.sparse.len()
+            })
+            .sum()
+    }
+
+    #[cfg(test)]
+    fn allocated_grammar_count(&self) -> usize {
+        self.grammars
+            .iter()
+            .filter(|grammar| grammar.is_some())
+            .count()
+    }
+
+    #[cfg(test)]
+    fn dense_slot_count(&self, grammar_id: GrammarId) -> usize {
+        self.grammars
+            .get(grammar_id.0 as usize)
+            .and_then(Option::as_deref)
+            .map_or(0, |grammar| grammar.dense.len())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct RepositoryNameId(u32);
+
+/// Assigns compact IDs to repository names for traversal sets. The grammar IR
+/// retains its public string representation; only walk/cycle keys are interned.
+#[derive(Debug, Clone, Default)]
+struct RepositoryNameInterner {
+    ids: FastMap<String, RepositoryNameId>,
+}
+
+impl RepositoryNameInterner {
+    fn get(&self, name: &str) -> Option<RepositoryNameId> {
+        self.ids.get(name).copied()
+    }
+
+    fn intern(&mut self, name: &str) -> (RepositoryNameId, bool) {
+        if let Some(id) = self.get(name) {
+            return (id, false);
+        }
+        let id = RepositoryNameId(
+            u32::try_from(self.ids.len()).expect("repository-name count fits in u32"),
+        );
+        self.ids.insert(name.to_owned(), id);
+        (id, true)
+    }
+
+    fn clear(&mut self) {
+        self.ids.clear();
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct GrammarSet {
@@ -1399,7 +1563,8 @@ struct PreparedGrammarWalker<'a> {
     reachable: Vec<bool>,
     pending: Vec<(GrammarId, GrammarId, PreparedPendingRefs<'a>)>,
     visited_rules: HashSet<(GrammarId, GrammarId, RuleId)>,
-    visited_repositories: HashSet<(GrammarId, GrammarId, String)>,
+    visited_repositories: HashSet<(GrammarId, GrammarId, RepositoryNameId)>,
+    repository_names: RepositoryNameInterner,
     visited_top_levels: HashSet<(GrammarId, GrammarId)>,
     injection_bases: HashSet<GrammarId>,
     visited_state_count: usize,
@@ -1475,10 +1640,19 @@ impl<'a> PreparedGrammarWalker<'a> {
 
     fn visit_repository(&mut self, grammar_id: GrammarId, base_grammar_id: GrammarId, name: &str) {
         self.mark(grammar_id);
-        let first_visit =
-            self.visited_repositories
-                .insert((grammar_id, base_grammar_id, name.to_owned()));
-        if !first_visit || !self.charge_state(name.len()) {
+        let (name_id, name_bytes) = if let Some(name_id) = self.repository_names.get(name) {
+            (name_id, 0)
+        } else {
+            // Charge the one retained interner copy before allocating it.
+            if !self.charge_state(name.len()) {
+                return;
+            }
+            (self.repository_names.intern(name).0, name.len())
+        };
+        let first_visit = self
+            .visited_repositories
+            .insert((grammar_id, base_grammar_id, name_id));
+        if !first_visit || (name_bytes == 0 && !self.charge_state(0)) {
             return;
         }
         let grammars = self.grammars;
@@ -1558,7 +1732,7 @@ impl<'a> PreparedGrammarWalker<'a> {
         };
         let context = self
             .rule_repository_contexts
-            .get(&(grammar_id, rule_id))
+            .get(grammar_id, rule_id)
             .cloned();
         let context = context.as_deref();
         match &rule.body {
@@ -1676,6 +1850,7 @@ fn prepared_grammar_closure(
         pending: Vec::new(),
         visited_rules: HashSet::new(),
         visited_repositories: HashSet::new(),
+        repository_names: RepositoryNameInterner::default(),
         visited_top_levels: HashSet::new(),
         injection_bases: HashSet::new(),
         visited_state_count: 0,
@@ -2085,6 +2260,7 @@ pub struct TextMateTokenizer {
     prepared_injection_outcome_ids: FastMap<InjectionOutcomeId, Option<PreparedInjectionOutcomeId>>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
     include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
+    include_repository_names: RefCell<RepositoryNameInterner>,
     rule_repository_contexts: Arc<RuleRepositoryContexts>,
     /// Owns exact frame identities and stack edges for this tokenizer.
     frame_stack_interner: FrameStackInternTable,
@@ -2109,7 +2285,7 @@ pub struct TextMateTokenizer {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum IncludeAvailabilityNode {
     Rule(GrammarId, GrammarId, RuleId),
-    Repository(GrammarId, GrammarId, String),
+    Repository(GrammarId, GrammarId, RepositoryNameId),
     TopLevel(GrammarId, GrammarId),
 }
 
@@ -2178,6 +2354,7 @@ impl TextMateTokenizer {
             prepared_injection_outcome_ids: hashing::fast_map(),
             inline_candidate_cache: hashing::fast_map(),
             include_availability_cache: RefCell::new(HashMap::new()),
+            include_repository_names: RefCell::new(RepositoryNameInterner::default()),
             rule_repository_contexts,
             frame_stack_interner: FrameStackInternTable::new(),
             frame_edge_cache: hashing::fast_map(),
@@ -2681,6 +2858,7 @@ impl TextMateTokenizer {
             .rule_repository_contexts(root, &injection_selectors);
         self.injection_selectors = injection_selectors;
         self.include_availability_cache.borrow_mut().clear();
+        self.include_repository_names.borrow_mut().clear();
         self.rule_repository_contexts = rule_repository_contexts;
         self.current_scope_stack_cache.clear();
         self.clear_line_cache();
@@ -3187,7 +3365,7 @@ impl TextMateTokenizer {
                     };
                     let repository_context = self
                         .rule_repository_contexts
-                        .get(&(grammar_id, *rule_id))
+                        .get(grammar_id, *rule_id)
                         .map(Arc::as_ref);
                     match &rule.body {
                         RuleBody::Match {
@@ -3456,7 +3634,7 @@ impl TextMateTokenizer {
                         | RuleBody::IncludeOnly { patterns } => {
                             let repository_context = self
                                 .rule_repository_contexts
-                                .get(&(grammar_id, *rule_id))
+                                .get(grammar_id, *rule_id)
                                 .map(Arc::as_ref);
                             let patterns = contextualize_refs(patterns, repository_context);
                             // vscode-textmate drops a compiled container only when
@@ -3526,8 +3704,12 @@ impl TextMateTokenizer {
         visiting: &mut HashSet<IncludeAvailabilityNode>,
         depth: usize,
     ) -> bool {
-        let key =
-            IncludeAvailabilityNode::Repository(grammar_id, base_grammar_id, repository.to_owned());
+        let repository_id = self
+            .include_repository_names
+            .borrow_mut()
+            .intern(repository)
+            .0;
+        let key = IncludeAvailabilityNode::Repository(grammar_id, base_grammar_id, repository_id);
         if let Some(available) = self.include_availability_cache.borrow().get(&key) {
             return *available;
         }
@@ -5956,9 +6138,32 @@ impl RepositoryContextBudget {
         self.charge(std::mem::size_of::<RuleRef>())
     }
 
-    fn charge_rule(&mut self, local: &BTreeMap<String, String>) -> bool {
-        let mut bytes = std::mem::size_of::<((GrammarId, RuleId), Arc<RepositoryBindings>)>()
-            .saturating_add(std::mem::size_of::<RepositoryBindings>());
+    fn charge_context_table(&mut self, grammar_count: usize) -> bool {
+        self.charge(grammar_count.saturating_mul(std::mem::size_of::<
+            Option<Box<GrammarRuleRepositoryContexts>>,
+        >()))
+    }
+
+    fn charge_rule_table(&mut self, rule_count: usize) -> bool {
+        self.charge(
+            std::mem::size_of::<GrammarRuleRepositoryContexts>().saturating_add(
+                rule_count.saturating_mul(std::mem::size_of::<Option<Arc<RepositoryBindings>>>()),
+            ),
+        )
+    }
+
+    fn charge_rule(&mut self, local: &BTreeMap<String, String>, sparse: bool) -> bool {
+        let mut bytes = if local.is_empty() {
+            0
+        } else {
+            std::mem::size_of::<RepositoryBindings>()
+        };
+        if sparse {
+            // A public, hand-built grammar can have out-of-range IDs. Charge
+            // conservatively for Vec growth in the uncommon fallback table.
+            bytes =
+                bytes.saturating_add(2 * std::mem::size_of::<(RuleId, Arc<RepositoryBindings>)>());
+        }
         for (name, binding) in local {
             let entry_bytes = (4 * std::mem::size_of::<usize>())
                 .saturating_add(2 * std::mem::size_of::<String>())
@@ -5971,10 +6176,18 @@ impl RepositoryContextBudget {
         self.charge(bytes)
     }
 
-    fn charge_repository(&mut self, name: &str) -> bool {
-        let key_bytes =
-            std::mem::size_of::<(GrammarId, String, usize)>().saturating_add(name.len());
-        self.charge(key_bytes.saturating_mul(2))
+    fn charge_repository(&mut self, name: &str, newly_interned: bool) -> bool {
+        let key_bytes = std::mem::size_of::<(GrammarId, RepositoryNameId, usize)>();
+        let interned_bytes = newly_interned.then_some(
+            (4 * std::mem::size_of::<usize>())
+                .saturating_add(std::mem::size_of::<String>())
+                .saturating_add(name.len()),
+        );
+        self.charge(
+            key_bytes
+                .saturating_mul(2)
+                .saturating_add(interned_bytes.unwrap_or(0)),
+        )
     }
 }
 
@@ -6004,7 +6217,7 @@ fn compile_rule_repository_contexts<'a>(
             index: usize,
             context: Arc<RepositoryBindings>,
         },
-        RepositoryExit((GrammarId, String, usize)),
+        RepositoryExit((GrammarId, RepositoryNameId, usize)),
     }
 
     fn push_refs<'a>(
@@ -6043,10 +6256,14 @@ fn compile_rule_repository_contexts<'a>(
     }
 
     let empty_context = Arc::clone(empty_repository_context());
-    let mut compiled = hashing::fast_map();
-    let mut compiled_top_levels = hashing::fast_set();
-    let mut visiting_repositories = HashSet::new();
     let mut budget = RepositoryContextBudget::new(bounded);
+    if !budget.charge_context_table(grammars.grammars().len()) {
+        return (RuleRepositoryContexts::empty(), false);
+    }
+    let mut compiled = RuleRepositoryContexts::new(grammars.grammars().len());
+    let mut compiled_top_levels = hashing::fast_set();
+    let mut repository_names = RepositoryNameInterner::default();
+    let mut visiting_repositories = HashSet::new();
     let mut work = Vec::new();
     for injection in injections.iter().rev() {
         push_refs(
@@ -6116,14 +6333,19 @@ fn compile_rule_repository_contexts<'a>(
                 };
                 match rule_ref {
                     RuleRef::Rule(rule_id) => {
-                        let key = (grammar_id, *rule_id);
-                        if compiled.contains_key(&key) {
+                        if compiled.get(grammar_id, *rule_id).is_some() {
                             continue;
                         }
                         let Some(rule) = grammar.rule(*rule_id) else {
                             continue;
                         };
-                        if !budget.charge_rule(&rule.local_repository) {
+                        if !compiled.has_grammar_table(grammar_id)
+                            && !budget.charge_rule_table(grammar.rules.len())
+                        {
+                            break;
+                        }
+                        let sparse = rule_id.0 as usize >= grammar.rules.len();
+                        if !budget.charge_rule(&rule.local_repository, sparse) {
                             break;
                         }
                         let context = if rule.local_repository.is_empty() {
@@ -6135,7 +6357,16 @@ fn compile_rule_repository_contexts<'a>(
                                 !bounded,
                             )
                         };
-                        compiled.insert(key, Arc::clone(&context));
+                        // Never overwrite an earlier context: vscode-textmate
+                        // binds a raw rule to the repository from its first
+                        // lazy-compilation path.
+                        let inserted = compiled.insert_first(
+                            grammar_id,
+                            *rule_id,
+                            grammar.rules.len(),
+                            Arc::clone(&context),
+                        );
+                        debug_assert!(inserted);
                         match &rule.body {
                             RuleBody::Match { captures, .. } => {
                                 push_captures(&mut work, grammar_id, captures, &context);
@@ -6178,12 +6409,15 @@ fn compile_rule_repository_contexts<'a>(
                         }
                     }
                     RuleRef::Repository(name) => {
-                        let bound_name = context.get(name).cloned().unwrap_or_else(|| name.clone());
-                        if !budget.charge_repository(&bound_name) {
+                        let bound_name = context.get(name).map_or(name.as_str(), String::as_str);
+                        let known_name = repository_names.get(bound_name);
+                        if !budget.charge_repository(bound_name, known_name.is_none()) {
                             break;
                         }
-                        let key = (grammar_id, bound_name, Arc::as_ptr(&context) as usize);
-                        if !visiting_repositories.insert(key.clone()) {
+                        let name_id =
+                            known_name.unwrap_or_else(|| repository_names.intern(bound_name).0);
+                        let key = (grammar_id, name_id, Arc::as_ptr(&context) as usize);
+                        if !visiting_repositories.insert(key) {
                             continue;
                         }
                         work.push(Work::RepositoryExit(key));
@@ -6219,15 +6453,14 @@ fn compile_rule_repository_contexts<'a>(
                             continue;
                         };
                         if let Some(repository) = repository {
-                            if !budget.charge_repository(repository) {
+                            let known_name = repository_names.get(repository);
+                            if !budget.charge_repository(repository, known_name.is_none()) {
                                 break;
                             }
-                            let key = (
-                                external_id,
-                                repository.clone(),
-                                Arc::as_ptr(&empty_context) as usize,
-                            );
-                            if !visiting_repositories.insert(key.clone()) {
+                            let name_id =
+                                known_name.unwrap_or_else(|| repository_names.intern(repository).0);
+                            let key = (external_id, name_id, Arc::as_ptr(&empty_context) as usize);
+                            if !visiting_repositories.insert(key) {
                                 continue;
                             }
                             work.push(Work::RepositoryExit(key));
@@ -7206,7 +7439,7 @@ mod tests {
             Arc::clone(&patterns),
             Arc::clone(&blueprints),
             Vec::new(),
-            Arc::new(hashing::fast_map()),
+            Arc::new(RuleRepositoryContexts::new(1)),
         );
 
         tokenizer.prepare_root_candidate();
@@ -8277,6 +8510,71 @@ mod tests {
     }
 
     #[test]
+    fn repository_contexts_allocate_dense_tables_only_for_reached_grammars() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r##"{
+                    "scopeName": "source.dense-root",
+                    "patterns": [{"include":"#entry"}],
+                    "repository": {
+                        "entry": {"match":"x", "name":"keyword.dense-root"},
+                        "unreached": {"match":"y"}
+                    }
+                }"##,
+            )
+            .unwrap();
+        grammars
+            .load_and_add(
+                r##"{
+                    "scopeName": "source.dense-unreached",
+                    "patterns": [{"match":"z"}]
+                }"##,
+            )
+            .unwrap();
+
+        let (contexts, complete) = compile_rule_repository_contexts(&grammars, root, &[], true);
+
+        assert!(complete);
+        assert_eq!(contexts.len(), 1);
+        assert_eq!(contexts.allocated_grammar_count(), 1);
+        assert_eq!(
+            contexts.dense_slot_count(root),
+            grammars.grammar(root).unwrap().rules.len()
+        );
+        assert_eq!(contexts.dense_slot_count(GrammarId(1)), 0);
+    }
+
+    #[test]
+    fn dense_repository_contexts_preserve_sparse_public_rule_ids() {
+        let context = Arc::new(RepositoryBindings::default());
+        let mut contexts = RuleRepositoryContexts::new(1);
+
+        assert!(contexts.insert_first(GrammarId(0), RuleId(99), 1, Arc::clone(&context)));
+        assert!(!contexts.insert_first(GrammarId(0), RuleId(99), 1, Arc::clone(&context)));
+        assert!(Arc::ptr_eq(
+            contexts.get(GrammarId(0), RuleId(99)).unwrap(),
+            &context
+        ));
+    }
+
+    #[test]
+    fn repository_name_interner_deduplicates_traversal_keys() {
+        let mut names = RepositoryNameInterner::default();
+
+        let (first, inserted_first) = names.intern("shared");
+        let (second, inserted_second) = names.intern("shared");
+        let (other, inserted_other) = names.intern("other");
+
+        assert!(inserted_first);
+        assert!(!inserted_second);
+        assert!(inserted_other);
+        assert_eq!(first, second);
+        assert_ne!(first, other);
+        assert_eq!(names.ids.len(), 2);
+    }
+
+    #[test]
     fn prepared_language_rejects_closure_work_over_the_hard_bound() {
         let mut grammars = GrammarSet::new();
         let root = grammars.add(CompiledGrammar {
@@ -8367,7 +8665,7 @@ mod tests {
         )]);
         let mut budget = RepositoryContextBudget::new(true);
         let mut admitted = 0usize;
-        while budget.charge_rule(&local) {
+        while budget.charge_rule(&local, false) {
             admitted += 1;
         }
 

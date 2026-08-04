@@ -72,10 +72,23 @@ allocation counts. Raw reports are `target/profile-item2-comparison.json` and
 
 ### 3. Dense repository-context tables
 
-- [ ] Replace `(GrammarId, RuleId)` hash lookups with grammar-indexed, lazily
+- [x] Replace `(GrammarId, RuleId)` hash lookups with grammar-indexed, lazily
       allocated dense rule tables.
-- [ ] Intern repository names used by traversal and cycle detection.
-- [ ] Preserve first-lazy-binding compatibility with `vscode-textmate`.
+- [x] Intern repository names used by traversal and cycle detection.
+- [x] Preserve first-lazy-binding compatibility with `vscode-textmate`.
+
+Result: seven alternating release samples reduced construction allocation calls
+by 12.2% for Markdown, 6.0% for C++, 0.5% for Rust, and 2.7% for HTML;
+preparation calls fell by 36.5%, 11.7%, 5.5%, and 6.3%, respectively.
+Construction elapsed time improved 6.2%, 4.5%, 1.6%, and 2.6%, while
+preparation improved 5.3%, 6.6%, 8.7%, and 4.3%. First, incremental, and
+highlighting calls also fell 0.4% to 0.7%; warm tokenization allocations were
+unchanged. Cumulative and retained bytes declined across all four corpora. One
+Rust first-tokenization median (+1.7%), one HTML prepared-reuse median (+0.9%),
+and the sub-0.2 ms warm medians were within process noise; the other measured
+elapsed phases improved. Benchmark token counts and the complete golden scope
+streams were unchanged.
+The raw median report is `target/profile-item3-comparison.json`.
 
 ### 4. Single-pass regex analysis
 
