@@ -5,7 +5,10 @@ use std::{
     collections::HashSet,
     hash::{BuildHasherDefault, Hash, Hasher},
     ops::{Deref, Range},
-    sync::{Arc, Mutex, OnceLock, Weak},
+    sync::{
+        Arc, Condvar, Mutex, OnceLock, Weak,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Instant,
 };
 
@@ -31,6 +34,10 @@ use super::scopes::{ScopeInterner, ScopeStackInterner, ScopeTemplateId, ScopeTem
 use super::state::{GrammarId, LineTokens, PatternId, RuleId, ScopeId, ScopeStackId, StateId};
 
 const MAX_INCLUDE_DEPTH: usize = 128;
+const MAX_PREPARED_GRAMMAR_WALK_STATES: usize = 1_048_576;
+const MAX_PREPARED_GRAMMAR_WALK_BYTES: usize = 32 * 1024 * 1024;
+const MAX_PREPARED_GRAMMAR_PENDING_REFS: usize = 262_144;
+const MAX_PREPARED_GRAMMAR_PENDING_BYTES: usize = 32 * 1024 * 1024;
 const MAX_TOKENIZER_STEPS_PER_LINE: usize = 20_000;
 const MAX_FALLBACK_STEPS_PER_LINE: u64 = 2_000_000;
 const MIN_FALLBACK_STEPS_PER_CALL: u64 = 10_000_000;
@@ -40,7 +47,14 @@ const MAX_DYNAMIC_MATCHERS: usize = 512;
 const MAX_INLINE_CANDIDATE_SETS: usize = 1024;
 const MAX_CANDIDATE_SETS: usize = 4096;
 const MAX_CANDIDATE_BLUEPRINTS: usize = 1024;
+const MAX_PREPARED_BLUEPRINT_KEY_BYTES: usize = 1024 * 1024;
+const MAX_PREPARED_BLUEPRINT_BYTES: usize = 8 * 1024 * 1024;
+const MAX_PREPARED_PATTERN_SLOT_BYTES: usize = 1024 * 1024;
+const MAX_PREPARED_PATTERN_BYTES: usize = 64 * 1024 * 1024;
 const MAX_INJECTION_OUTCOMES: usize = 1024;
+const MAX_PREPARED_INJECTION_OUTCOME_BYTES: usize = 4 * 1024 * 1024;
+const MAX_PREPARED_CANDIDATE_BYTES: usize =
+    MAX_PREPARED_BLUEPRINT_BYTES + MAX_PREPARED_INJECTION_OUTCOME_BYTES;
 const MAX_SCOPE_STACK_CACHE_ENTRIES: usize = 8192;
 const MAX_FRAME_NODE_CACHE_ENTRIES: usize = 16384;
 const MAX_OUTPUT_SCOPE_TABLES: usize = 512;
@@ -828,7 +842,95 @@ impl<'a> Iterator for FrameStackIter<'a> {
 #[cfg(test)]
 impl ExactSizeIterator for FrameStackIter<'_> {}
 
-type RepositoryBindings = BTreeMap<String, String>;
+const REPOSITORY_BINDING_FLAT_ENTRIES: usize = 32;
+const REPOSITORY_BINDING_BLOCK_LAYERS: u16 = 256;
+
+#[derive(Debug, Default)]
+struct RepositoryBindings {
+    parent: Option<Arc<RepositoryBindings>>,
+    local: BTreeMap<String, String>,
+    uncompacted_layers: u16,
+    has_bindings: bool,
+}
+
+impl RepositoryBindings {
+    fn overlay(
+        parent: Arc<RepositoryBindings>,
+        local: BTreeMap<String, String>,
+        flatten_small: bool,
+    ) -> Arc<Self> {
+        // Keep ordinary unbounded tokenizer contexts flat. Prepared contexts
+        // disable this path so every binding has a strict retained-byte charge.
+        // The fixed entry ceiling bounds direct-path copy work; larger/deeper
+        // contexts switch to the persistent representation below.
+        if flatten_small
+            && parent.parent.is_none()
+            && parent.local.len().saturating_add(local.len()) <= REPOSITORY_BINDING_FLAT_ENTRIES
+        {
+            let mut merged = parent.local.clone();
+            merged.extend(local);
+            return Arc::new(Self {
+                has_bindings: !merged.is_empty(),
+                parent: None,
+                local: merged,
+                uncompacted_layers: 0,
+            });
+        }
+
+        let uncompacted_layers = parent.uncompacted_layers + 1;
+        if uncompacted_layers < REPOSITORY_BINDING_BLOCK_LAYERS {
+            return Arc::new(Self {
+                has_bindings: parent.has_bindings || !local.is_empty(),
+                parent: Some(parent),
+                local,
+                uncompacted_layers,
+            });
+        }
+
+        // Coalesce each fixed-size run into one immutable lookup block. Older
+        // contexts keep sharing their original nodes, while new contexts need
+        // at most one BTreeMap lookup per block rather than one per overlay.
+        let mut merged = local;
+        let mut cursor = Some(parent);
+        for _ in 1..REPOSITORY_BINDING_BLOCK_LAYERS {
+            let bindings = cursor
+                .take()
+                .expect("the uncompacted layer count matches the parent chain");
+            for (name, binding) in &bindings.local {
+                merged
+                    .entry(name.clone())
+                    .or_insert_with(|| binding.clone());
+            }
+            cursor = bindings.parent.clone();
+        }
+        let has_bindings = !merged.is_empty()
+            || cursor
+                .as_ref()
+                .is_some_and(|bindings| bindings.has_bindings);
+        Arc::new(Self {
+            parent: cursor,
+            local: merged,
+            uncompacted_layers: 0,
+            has_bindings,
+        })
+    }
+
+    fn get(&self, name: &str) -> Option<&String> {
+        let mut current = Some(self);
+        while let Some(bindings) = current {
+            if let Some(binding) = bindings.local.get(name) {
+                return Some(binding);
+            }
+            current = bindings.parent.as_deref();
+        }
+        None
+    }
+
+    fn is_empty(&self) -> bool {
+        !self.has_bindings
+    }
+}
+
 type RuleRepositoryContexts = FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>;
 
 #[derive(Debug, Clone, Default)]
@@ -887,6 +989,64 @@ impl GrammarSet {
         self.grammars.as_slice()
     }
 
+    fn into_prepared_closure(
+        self,
+        root: GrammarId,
+        grammar_closure: &[bool],
+    ) -> (Self, GrammarId, bool) {
+        let selected = self
+            .grammars
+            .iter()
+            .filter(|grammar| {
+                grammar_closure
+                    .get(grammar.id.0 as usize)
+                    .copied()
+                    .unwrap_or(false)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if selected.len() == self.grammars.len() {
+            return (self, root, false);
+        }
+
+        // Preserve shared grammar allocations when filtering leaves a dense
+        // ID prefix. Otherwise compact the selected records and remap their
+        // grammar IDs; external references are scope-based and local rule,
+        // pattern, scope, and string IDs remain unchanged.
+        if selected
+            .iter()
+            .enumerate()
+            .all(|(index, grammar)| grammar.id.0 as usize == index)
+        {
+            let scope_to_id = selected
+                .iter()
+                .map(|grammar| (grammar.scope_name.clone(), grammar.id))
+                .collect();
+            return (
+                Self {
+                    grammars: Arc::new(selected),
+                    scope_to_id: Arc::new(scope_to_id),
+                    rule_repository_context_cache: Arc::new(Mutex::new(hashing::fast_map())),
+                },
+                root,
+                false,
+            );
+        }
+
+        let mut subset = Self::new();
+        let mut remapped_root = None;
+        for grammar in selected {
+            let is_root = grammar.id == root;
+            let mut grammar = grammar.as_ref().clone();
+            grammar.id = GrammarId(subset.grammars.len() as u16);
+            let grammar_id = subset.add(grammar);
+            if is_root {
+                remapped_root = Some(grammar_id);
+            }
+        }
+        (subset, remapped_root.unwrap_or(root), true)
+    }
+
     fn rule_repository_contexts(
         &self,
         root: GrammarId,
@@ -904,7 +1064,8 @@ impl GrammarSet {
 
         // Do the recursive work outside the lock. Concurrent first users may
         // compute the same immutable value, but only one is shared.
-        let compiled = Arc::new(compile_rule_repository_contexts(self, root, injections));
+        let (compiled, _) = compile_rule_repository_contexts(self, root, injections, false);
+        let compiled = Arc::new(compiled);
         let mut cache = self
             .rule_repository_context_cache
             .lock()
@@ -915,6 +1076,15 @@ impl GrammarSet {
         cache.retain(|_, contexts| contexts.strong_count() != 0);
         cache.insert(root, Arc::downgrade(&compiled));
         compiled
+    }
+
+    fn prepared_rule_repository_contexts(
+        &self,
+        root: GrammarId,
+        injections: &[CompiledInjectionSelector],
+    ) -> Option<Arc<RuleRepositoryContexts>> {
+        let (contexts, complete) = compile_rule_repository_contexts(self, root, injections, true);
+        complete.then(|| Arc::new(contexts))
     }
 
     pub fn validate_include_graph(&self) -> Result<(), GrammarValidationError> {
@@ -1062,6 +1232,832 @@ impl GrammarSet {
     }
 }
 
+/// Caller-owned immutable preparation shared by independent tokenizers.
+///
+/// The pristine tokenizer retains the root candidate descriptor and its
+/// tokenizer-local ID seed. Static regex slots are populated once across every
+/// tokenizer made from this value and are bounded by both slot-table and
+/// compiled-payload bytes; lazily discovered static descriptors use a
+/// separate bounded cache.
+#[derive(Debug)]
+pub struct PreparedLanguage {
+    prototype: Mutex<TextMateTokenizer>,
+    static_patterns: Arc<PreparedPatternCache>,
+    static_blueprints: Arc<PreparedBlueprintCache>,
+    grammar_count: usize,
+}
+
+impl PreparedLanguage {
+    #[cfg(test)]
+    pub fn new(grammars: GrammarSet, root: GrammarId) -> Self {
+        Self::try_new(grammars, root).expect("test grammar exceeds preparation bounds")
+    }
+
+    pub fn try_new(grammars: GrammarSet, root: GrammarId) -> Result<Self, &'static str> {
+        let initial_injection_selectors = compile_injection_selectors(&grammars, root);
+        let initial_rule_repository_contexts = grammars
+            .prepared_rule_repository_contexts(root, &initial_injection_selectors)
+            .ok_or("repository-context walk exceeded its preparation bound")?;
+        let initial_grammar_closure = prepared_grammar_closure(
+            &grammars,
+            root,
+            &initial_injection_selectors,
+            &initial_rule_repository_contexts,
+        )
+        .ok_or("grammar-closure walk exceeded its preparation bound")?;
+
+        let (grammars, root, injection_selectors, rule_repository_contexts, grammar_closure) = {
+            let (grammars, root, ids_remapped) =
+                grammars.into_prepared_closure(root, &initial_grammar_closure);
+            if ids_remapped {
+                let injection_selectors = compile_injection_selectors(&grammars, root);
+                let contexts = grammars
+                    .prepared_rule_repository_contexts(root, &injection_selectors)
+                    .ok_or("remapped repository-context walk exceeded its preparation bound")?;
+                let grammar_closure =
+                    prepared_grammar_closure(&grammars, root, &injection_selectors, &contexts)
+                        .ok_or("remapped grammar-closure walk exceeded its preparation bound")?;
+                (
+                    grammars,
+                    root,
+                    injection_selectors,
+                    contexts,
+                    grammar_closure,
+                )
+            } else {
+                (
+                    grammars,
+                    root,
+                    initial_injection_selectors,
+                    initial_rule_repository_contexts,
+                    initial_grammar_closure,
+                )
+            }
+        };
+
+        let grammar_count = grammar_closure
+            .iter()
+            .filter(|reachable| **reachable)
+            .count();
+        let static_patterns = Arc::new(PreparedPatternCache::new(&grammars, &grammar_closure));
+        let static_blueprints = Arc::new(PreparedBlueprintCache::default());
+        let mut prototype = TextMateTokenizer::new_with_prepared_caches(
+            grammars,
+            root,
+            Arc::clone(&static_patterns),
+            Arc::clone(&static_blueprints),
+            injection_selectors,
+            rule_repository_contexts,
+        );
+        prototype.prepare_root_candidate();
+        Ok(Self {
+            prototype: Mutex::new(prototype),
+            static_patterns,
+            static_blueprints,
+            grammar_count,
+        })
+    }
+
+    pub fn tokenizer(&self) -> TextMateTokenizer {
+        self.prototype
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    pub fn grammar_count(&self) -> usize {
+        self.grammar_count
+    }
+
+    pub fn static_pattern_capacity(&self) -> usize {
+        self.static_patterns.capacity()
+    }
+
+    pub fn compiled_pattern_count(&self) -> usize {
+        self.static_patterns.initialized_count()
+    }
+
+    pub fn static_pattern_byte_capacity(&self) -> usize {
+        MAX_PREPARED_PATTERN_BYTES
+    }
+
+    pub fn static_pattern_retained_bytes(&self) -> usize {
+        self.static_patterns.retained_bytes()
+    }
+
+    pub fn static_blueprint_capacity(&self) -> usize {
+        MAX_CANDIDATE_BLUEPRINTS
+    }
+
+    pub fn static_blueprint_count(&self) -> usize {
+        self.static_blueprints.len()
+    }
+
+    pub fn static_blueprint_byte_capacity(&self) -> usize {
+        MAX_PREPARED_CANDIDATE_BYTES
+    }
+
+    pub fn static_blueprint_retained_bytes(&self) -> usize {
+        self.static_blueprints.retained_bytes()
+    }
+}
+
+#[derive(Clone)]
+enum PreparedPendingRefs<'a> {
+    Borrowed(&'a [RuleRef]),
+    Owned(Vec<RuleRef>),
+}
+
+impl PreparedPendingRefs<'_> {
+    fn as_slice(&self) -> &[RuleRef] {
+        match self {
+            Self::Borrowed(refs) => refs,
+            Self::Owned(refs) => refs,
+        }
+    }
+}
+
+fn contextualize_pending_refs<'a>(
+    refs: &'a [RuleRef],
+    context: Option<&RepositoryBindings>,
+) -> PreparedPendingRefs<'a> {
+    let Some(context) = context.filter(|context| !context.is_empty()) else {
+        return PreparedPendingRefs::Borrowed(refs);
+    };
+    if !refs.iter().any(
+        |rule_ref| matches!(rule_ref, RuleRef::Repository(name) if context.get(name).is_some()),
+    ) {
+        return PreparedPendingRefs::Borrowed(refs);
+    }
+    PreparedPendingRefs::Owned(contextualize_refs(refs, Some(context)))
+}
+
+struct PreparedGrammarWalker<'a> {
+    grammars: &'a GrammarSet,
+    injections: &'a [CompiledInjectionSelector],
+    rule_repository_contexts: &'a RuleRepositoryContexts,
+    reachable: Vec<bool>,
+    pending: Vec<(GrammarId, GrammarId, PreparedPendingRefs<'a>)>,
+    visited_rules: HashSet<(GrammarId, GrammarId, RuleId)>,
+    visited_repositories: HashSet<(GrammarId, GrammarId, String)>,
+    visited_top_levels: HashSet<(GrammarId, GrammarId)>,
+    injection_bases: HashSet<GrammarId>,
+    visited_state_count: usize,
+    visited_state_bytes: usize,
+    pending_ref_count: usize,
+    pending_ref_bytes: usize,
+    budget_exceeded: bool,
+}
+
+impl<'a> PreparedGrammarWalker<'a> {
+    fn mark(&mut self, grammar_id: GrammarId) {
+        if self.grammars.grammar(grammar_id).is_some()
+            && let Some(reachable) = self.reachable.get_mut(grammar_id.0 as usize)
+        {
+            *reachable = true;
+        }
+    }
+
+    fn charge_state(&mut self, dynamic_bytes: usize) -> bool {
+        self.visited_state_count = self.visited_state_count.saturating_add(1);
+        self.visited_state_bytes = self.visited_state_bytes.saturating_add(dynamic_bytes);
+        if self.visited_state_count > MAX_PREPARED_GRAMMAR_WALK_STATES
+            || self.visited_state_bytes > MAX_PREPARED_GRAMMAR_WALK_BYTES
+        {
+            self.budget_exceeded = true;
+            return false;
+        }
+        true
+    }
+
+    fn enqueue_refs(
+        &mut self,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        refs: PreparedPendingRefs<'a>,
+    ) {
+        self.mark(grammar_id);
+        let refs_slice = refs.as_slice();
+        if refs_slice.is_empty() || self.budget_exceeded {
+            return;
+        }
+        let refs_bytes = rule_refs_retained_bytes(refs_slice);
+        let pending_ref_count = self.pending_ref_count.saturating_add(refs_slice.len());
+        let pending_ref_bytes = self.pending_ref_bytes.saturating_add(refs_bytes);
+        if pending_ref_count > MAX_PREPARED_GRAMMAR_PENDING_REFS
+            || pending_ref_bytes > MAX_PREPARED_GRAMMAR_PENDING_BYTES
+        {
+            self.budget_exceeded = true;
+            return;
+        }
+        self.pending_ref_count = pending_ref_count;
+        self.pending_ref_bytes = pending_ref_bytes;
+        self.pending.push((grammar_id, base_grammar_id, refs));
+    }
+
+    fn visit_top_level(&mut self, grammar_id: GrammarId, base_grammar_id: GrammarId) {
+        self.mark(grammar_id);
+        let first_visit = self
+            .visited_top_levels
+            .insert((grammar_id, base_grammar_id));
+        if !first_visit || !self.charge_state(0) {
+            return;
+        }
+        let grammars = self.grammars;
+        if let Some(grammar) = grammars.grammar(grammar_id) {
+            self.enqueue_refs(
+                grammar_id,
+                base_grammar_id,
+                PreparedPendingRefs::Borrowed(&grammar.top_level),
+            );
+        }
+    }
+
+    fn visit_repository(&mut self, grammar_id: GrammarId, base_grammar_id: GrammarId, name: &str) {
+        self.mark(grammar_id);
+        let first_visit =
+            self.visited_repositories
+                .insert((grammar_id, base_grammar_id, name.to_owned()));
+        if !first_visit || !self.charge_state(name.len()) {
+            return;
+        }
+        let grammars = self.grammars;
+        if let Some(rule_ref) = grammars
+            .grammar(grammar_id)
+            .and_then(|grammar| grammar.repository.get(name))
+        {
+            self.enqueue_refs(
+                grammar_id,
+                base_grammar_id,
+                PreparedPendingRefs::Borrowed(std::slice::from_ref(rule_ref)),
+            );
+        }
+    }
+
+    fn add_injection_base(&mut self, base_grammar_id: GrammarId) {
+        if !self.injection_bases.insert(base_grammar_id) || !self.charge_state(0) {
+            return;
+        }
+        let mut injection_ref_count = 0usize;
+        let mut injection_ref_bytes = 0usize;
+        for injection in self.injections {
+            injection_ref_count = injection_ref_count.saturating_add(injection.patterns.len());
+            injection_ref_bytes =
+                injection_ref_bytes.saturating_add(rule_refs_retained_bytes(&injection.patterns));
+        }
+        if self.pending_ref_count.saturating_add(injection_ref_count)
+            > MAX_PREPARED_GRAMMAR_PENDING_REFS
+            || self.pending_ref_bytes.saturating_add(injection_ref_bytes)
+                > MAX_PREPARED_GRAMMAR_PENDING_BYTES
+        {
+            self.budget_exceeded = true;
+            return;
+        }
+        let injections = self.injections;
+        for injection in injections {
+            self.enqueue_refs(
+                injection.grammar_id,
+                base_grammar_id,
+                PreparedPendingRefs::Borrowed(&injection.patterns),
+            );
+        }
+    }
+
+    fn visit_captures(
+        &mut self,
+        grammar_id: GrammarId,
+        captures: &'a CaptureSpec,
+        context: Option<&RepositoryBindings>,
+    ) {
+        for entry in captures.entries.values() {
+            if entry.patterns.is_empty() {
+                continue;
+            }
+            self.add_injection_base(grammar_id);
+            self.enqueue_refs(
+                grammar_id,
+                grammar_id,
+                contextualize_pending_refs(&entry.patterns, context),
+            );
+        }
+    }
+
+    fn visit_rule(&mut self, grammar_id: GrammarId, base_grammar_id: GrammarId, rule_id: RuleId) {
+        let first_visit = self
+            .visited_rules
+            .insert((grammar_id, base_grammar_id, rule_id));
+        if !first_visit || !self.charge_state(0) {
+            return;
+        }
+        let grammars = self.grammars;
+        let Some(rule) = grammars
+            .grammar(grammar_id)
+            .and_then(|grammar| grammar.rule(rule_id))
+        else {
+            return;
+        };
+        let context = self
+            .rule_repository_contexts
+            .get(&(grammar_id, rule_id))
+            .cloned();
+        let context = context.as_deref();
+        match &rule.body {
+            RuleBody::Match { captures, .. } => {
+                self.visit_captures(grammar_id, captures, context);
+            }
+            RuleBody::BeginEnd {
+                begin_captures,
+                end_captures,
+                patterns,
+                ..
+            } => {
+                self.visit_captures(grammar_id, begin_captures, context);
+                self.visit_captures(grammar_id, end_captures, context);
+                self.enqueue_refs(
+                    grammar_id,
+                    base_grammar_id,
+                    contextualize_pending_refs(patterns, context),
+                );
+            }
+            RuleBody::BeginWhile {
+                begin_captures,
+                while_captures,
+                content_name,
+                patterns,
+                ..
+            } => {
+                self.visit_captures(grammar_id, begin_captures, context);
+                self.visit_captures(grammar_id, while_captures, context);
+                let patterns = contextualize_pending_refs(patterns, context);
+                let retokenizes_begin = begin_captures.entries.is_empty()
+                    && content_name.is_some()
+                    && !patterns.as_slice().is_empty();
+                if retokenizes_begin {
+                    self.add_injection_base(grammar_id);
+                    if grammar_id != base_grammar_id {
+                        self.enqueue_refs(grammar_id, grammar_id, patterns.clone());
+                    }
+                }
+                self.enqueue_refs(grammar_id, base_grammar_id, patterns);
+            }
+            RuleBody::IncludeOnly { patterns } => self.enqueue_refs(
+                grammar_id,
+                base_grammar_id,
+                contextualize_pending_refs(patterns, context),
+            ),
+        }
+    }
+
+    fn walk(mut self, root: GrammarId) -> Option<Vec<bool>> {
+        self.add_injection_base(root);
+        self.visit_top_level(root, root);
+        while !self.budget_exceeded {
+            let Some((grammar_id, base_grammar_id, refs)) = self.pending.pop() else {
+                break;
+            };
+            let refs = refs.as_slice();
+            self.pending_ref_count = self.pending_ref_count.saturating_sub(refs.len());
+            self.pending_ref_bytes = self
+                .pending_ref_bytes
+                .saturating_sub(rule_refs_retained_bytes(refs));
+            for rule_ref in refs {
+                if self.budget_exceeded {
+                    break;
+                }
+                match rule_ref {
+                    RuleRef::Rule(rule_id) => {
+                        self.visit_rule(grammar_id, base_grammar_id, *rule_id);
+                    }
+                    RuleRef::Repository(name) => {
+                        self.visit_repository(grammar_id, base_grammar_id, name);
+                    }
+                    RuleRef::SelfRef => {
+                        self.visit_top_level(grammar_id, base_grammar_id);
+                    }
+                    RuleRef::BaseRef => {
+                        self.visit_top_level(base_grammar_id, base_grammar_id);
+                    }
+                    RuleRef::External { scope, repository } => {
+                        let external_id = self
+                            .grammars
+                            .grammar(grammar_id)
+                            .and_then(|grammar| grammar.scope(*scope))
+                            .and_then(|scope| self.grammars.grammar_id_by_scope(scope));
+                        let Some(external_id) = external_id else {
+                            continue;
+                        };
+                        if let Some(repository) = repository {
+                            self.visit_repository(external_id, base_grammar_id, repository);
+                        } else {
+                            self.visit_top_level(external_id, base_grammar_id);
+                        }
+                    }
+                }
+            }
+        }
+        (!self.budget_exceeded).then_some(self.reachable)
+    }
+}
+
+/// Walk exactly the rule/repository/capture graph that the root and its
+/// registered injections can reach. Injection refs are revisited for each base
+/// grammar introduced by capture retokenization, matching runtime `$base`.
+fn prepared_grammar_closure(
+    grammars: &GrammarSet,
+    root: GrammarId,
+    injections: &[CompiledInjectionSelector],
+    rule_repository_contexts: &RuleRepositoryContexts,
+) -> Option<Vec<bool>> {
+    PreparedGrammarWalker {
+        grammars,
+        injections,
+        rule_repository_contexts,
+        reachable: vec![false; grammars.grammars().len()],
+        pending: Vec::new(),
+        visited_rules: HashSet::new(),
+        visited_repositories: HashSet::new(),
+        visited_top_levels: HashSet::new(),
+        injection_bases: HashSet::new(),
+        visited_state_count: 0,
+        visited_state_bytes: 0,
+        pending_ref_count: 0,
+        pending_ref_bytes: 0,
+        budget_exceeded: false,
+    }
+    .walk(root)
+}
+
+type PreparedPatternSlot = OnceLock<Option<Arc<CompiledPattern>>>;
+type PreparedGrammarPatternSlots = Box<[PreparedPatternSlot]>;
+
+#[derive(Debug)]
+struct PreparedPatternCache {
+    slots: Box<[Option<PreparedGrammarPatternSlots>]>,
+    capacity: usize,
+    retained_bytes: AtomicUsize,
+    compile_permit: Mutex<()>,
+}
+
+impl PreparedPatternCache {
+    fn new(grammars: &GrammarSet, grammar_closure: &[bool]) -> Self {
+        let outer_slot_bytes = std::mem::size_of::<Option<PreparedGrammarPatternSlots>>();
+        let pattern_slot_bytes = std::mem::size_of::<PreparedPatternSlot>();
+        let outer_capacity = grammars
+            .grammars()
+            .len()
+            .min(MAX_PREPARED_PATTERN_SLOT_BYTES / outer_slot_bytes);
+        let mut slot_bytes = outer_capacity.saturating_mul(outer_slot_bytes);
+        let mut capacity = 0usize;
+        let slots = grammars
+            .grammars()
+            .iter()
+            .take(outer_capacity)
+            .enumerate()
+            .map(|(index, grammar)| {
+                if !grammar_closure.get(index).copied().unwrap_or(false) {
+                    return None;
+                }
+                let remaining_bytes = MAX_PREPARED_PATTERN_SLOT_BYTES.saturating_sub(slot_bytes);
+                let slot_capacity = grammar
+                    .patterns
+                    .len()
+                    .min(remaining_bytes / pattern_slot_bytes);
+                let grammar_slot_bytes = slot_capacity.saturating_mul(pattern_slot_bytes);
+                slot_bytes = slot_bytes.saturating_add(grammar_slot_bytes);
+                capacity = capacity.saturating_add(slot_capacity);
+                let grammar_slots = (0..slot_capacity)
+                    .map(|_| OnceLock::new())
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice();
+                Some(grammar_slots)
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
+        Self {
+            slots,
+            capacity,
+            retained_bytes: AtomicUsize::new(slot_bytes),
+            compile_permit: Mutex::new(()),
+        }
+    }
+
+    fn try_reserve_pattern_bytes(&self, bytes: usize) -> bool {
+        self.retained_bytes
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |retained| {
+                retained
+                    .checked_add(bytes)
+                    .filter(|total| *total <= MAX_PREPARED_PATTERN_BYTES)
+            })
+            .is_ok()
+    }
+
+    fn get_or_compile(
+        &self,
+        grammar_id: GrammarId,
+        pattern_id: PatternId,
+        pattern: &str,
+        live_captures: Option<Vec<u32>>,
+    ) -> (Arc<CompiledPattern>, bool, bool) {
+        let slot = self
+            .slots
+            .get(grammar_id.0 as usize)
+            .and_then(Option::as_ref)
+            .and_then(|grammar| grammar.get(pattern_id.0 as usize));
+        if let Some(Some(compiled)) = slot.and_then(OnceLock::get)
+            && compiled.has_live_captures(live_captures.as_deref())
+        {
+            return (Arc::clone(compiled), false, true);
+        }
+
+        // Distinct misses otherwise compile their full parser/matcher payloads
+        // before byte admission can reject them. Bound transient preparation
+        // memory by allowing one such construction at a time. Cache hits avoid
+        // this permit entirely.
+        let _compile_permit = self
+            .compile_permit
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(slot) = slot else {
+            let compiled = Arc::new(match live_captures {
+                Some(live_captures) => {
+                    CompiledPattern::new_with_live_captures(pattern, live_captures)
+                }
+                None => CompiledPattern::new(pattern),
+            });
+            return (compiled, true, false);
+        };
+        let mut compiled_now = false;
+        let mut rejected = None;
+        let winner = slot.get_or_init(|| {
+            compiled_now = true;
+            let compiled = Arc::new(match live_captures.as_ref() {
+                Some(live_captures) => {
+                    CompiledPattern::new_with_live_captures(pattern, live_captures.clone())
+                }
+                None => CompiledPattern::new(pattern),
+            });
+            if self.try_reserve_pattern_bytes(compiled.prepared_retained_bytes()) {
+                Some(compiled)
+            } else {
+                rejected = Some(compiled);
+                None
+            }
+        });
+        let Some(winner) = winner else {
+            let compiled = rejected.unwrap_or_else(|| {
+                Arc::new(match live_captures {
+                    Some(live_captures) => {
+                        CompiledPattern::new_with_live_captures(pattern, live_captures)
+                    }
+                    None => CompiledPattern::new(pattern),
+                })
+            });
+            return (compiled, true, false);
+        };
+        if winner.has_live_captures(live_captures.as_deref()) {
+            return (Arc::clone(winner), compiled_now, true);
+        }
+
+        // A PatternId normally has one capture layout. Preserve the safe
+        // fallback for malformed/synthetic grammars that request a genuinely
+        // different layout without replacing the canonical prepared value.
+        let compiled = Arc::new(match live_captures {
+            Some(live_captures) => CompiledPattern::new_with_live_captures(pattern, live_captures),
+            None => CompiledPattern::new(pattern),
+        });
+        debug_assert!(!winner.has_same_live_captures(&compiled));
+        (compiled, true, false)
+    }
+
+    fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    fn retained_bytes(&self) -> usize {
+        self.retained_bytes.load(Ordering::Acquire)
+    }
+
+    fn initialized_count(&self) -> usize {
+        let mut count = 0usize;
+        for grammar in self.slots.iter().flatten() {
+            for slot in grammar.as_ref() {
+                count += usize::from(matches!(slot.get(), Some(Some(_))));
+            }
+        }
+        count
+    }
+}
+
+#[derive(Debug, Default)]
+struct PreparedBlueprintCache {
+    state: Mutex<PreparedBlueprintCacheState>,
+    initialized: Condvar,
+    build_permit: Mutex<()>,
+}
+
+#[derive(Debug, Default)]
+struct PreparedBlueprintCacheState {
+    blueprints: FastMap<PreparedBlueprintKey, (Arc<CandidateBlueprint>, usize)>,
+    blueprint_bytes: usize,
+    building: FastMap<PreparedBlueprintKey, usize>,
+    building_key_bytes: usize,
+    injection_outcome_ids: FastMap<InjectionOutcome, PreparedInjectionOutcomeId>,
+    injection_outcome_bytes: usize,
+    next_injection_outcome_id: u64,
+    // The first insertion is the eagerly prepared root descriptor. Keep it in
+    // the bounded map so statistics include every artifact retained solely by
+    // the prepared value and fresh tokenizers can always bind it.
+    pinned_root: Option<PreparedBlueprintKey>,
+}
+
+struct PreparedBlueprintBuildGuard<'a> {
+    cache: &'a PreparedBlueprintCache,
+    key: Option<PreparedBlueprintKey>,
+}
+
+impl Drop for PreparedBlueprintBuildGuard<'_> {
+    fn drop(&mut self) {
+        let Some(key) = self.key.take() else {
+            return;
+        };
+        let mut state = self
+            .cache
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(key_bytes) = state.building.remove(&key) {
+            state.building_key_bytes = state.building_key_bytes.saturating_sub(key_bytes);
+        }
+        drop(state);
+        self.cache.initialized.notify_all();
+    }
+}
+
+impl PreparedBlueprintCache {
+    fn intern_injection_outcome(
+        &self,
+        injection_outcome: &InjectionOutcome,
+    ) -> Option<PreparedInjectionOutcomeId> {
+        let outcome_bytes = injection_outcome_retained_bytes(injection_outcome);
+        if outcome_bytes > MAX_PREPARED_INJECTION_OUTCOME_BYTES {
+            // Oversized grammar-owned outcomes stay tokenizer-local rather
+            // than defeating the preparation's retained-byte bound.
+            return None;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let injection_outcome = if let Some(id) = state.injection_outcome_ids.get(injection_outcome)
+        {
+            *id
+        } else {
+            if state.injection_outcome_ids.len() >= MAX_INJECTION_OUTCOMES
+                || state.injection_outcome_bytes.saturating_add(outcome_bytes)
+                    > MAX_PREPARED_INJECTION_OUTCOME_BYTES
+            {
+                state.injection_outcome_ids = hashing::fast_map();
+                state.injection_outcome_bytes = 0;
+            }
+            let id = PreparedInjectionOutcomeId(state.next_injection_outcome_id);
+            state.next_injection_outcome_id = state.next_injection_outcome_id.wrapping_add(1);
+            state
+                .injection_outcome_ids
+                .insert(injection_outcome.clone(), id);
+            state.injection_outcome_bytes =
+                state.injection_outcome_bytes.saturating_add(outcome_bytes);
+            id
+        };
+        Some(injection_outcome)
+    }
+
+    fn get_or_insert_with(
+        &self,
+        key: PreparedBlueprintKey,
+        build: impl FnOnce() -> (Arc<CandidateBlueprint>, bool),
+    ) -> Arc<CandidateBlueprint> {
+        let key_bytes = prepared_blueprint_key_retained_bytes(&key);
+        if key_bytes > MAX_PREPARED_BLUEPRINT_KEY_BYTES {
+            let _build_permit = self
+                .build_permit
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            return build().0;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if let Some((blueprint, _)) = state.blueprints.get(&key) {
+                return Arc::clone(blueprint);
+            }
+            if state.building.contains_key(&key)
+                || state.building.len() >= MAX_CANDIDATE_BLUEPRINTS
+                || state.building_key_bytes.saturating_add(key_bytes)
+                    > MAX_PREPARED_BLUEPRINT_KEY_BYTES
+            {
+                state = self
+                    .initialized
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                continue;
+            }
+            state.building.insert(key.clone(), key_bytes);
+            state.building_key_bytes = state.building_key_bytes.saturating_add(key_bytes);
+            break;
+        }
+        drop(state);
+
+        // Candidate and scanner payload sizes are known only after building.
+        // Serialize those payload builds so distinct oversized misses cannot
+        // multiply their transient allocation before admission rejects them.
+        let _build_permit = self
+            .build_permit
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut build_guard = PreparedBlueprintBuildGuard {
+            cache: self,
+            key: Some(key.clone()),
+        };
+        let (blueprint, cacheable) = build();
+        let blueprint_bytes = candidate_blueprint_retained_bytes(&blueprint);
+        let retained_bytes = key_bytes.saturating_add(blueprint_bytes);
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let removed = state.building.remove(&key);
+        debug_assert!(
+            removed.is_some(),
+            "prepared-blueprint build key was not registered"
+        );
+        if let Some(building_bytes) = removed {
+            state.building_key_bytes = state.building_key_bytes.saturating_sub(building_bytes);
+        }
+        if cacheable && retained_bytes <= MAX_PREPARED_BLUEPRINT_BYTES {
+            if state.pinned_root.is_none() {
+                state.pinned_root = Some(key.clone());
+            }
+            if state.blueprints.len() >= MAX_CANDIDATE_BLUEPRINTS
+                || state.blueprint_bytes.saturating_add(retained_bytes)
+                    > MAX_PREPARED_BLUEPRINT_BYTES
+            {
+                let pinned = state.pinned_root.as_ref().and_then(|root| {
+                    state
+                        .blueprints
+                        .get(root)
+                        .map(|(blueprint, bytes)| (root.clone(), Arc::clone(blueprint), *bytes))
+                });
+                state.blueprints.clear();
+                state.blueprint_bytes = 0;
+                if let Some((root, blueprint, bytes)) = pinned {
+                    state.blueprints.insert(root, (blueprint, bytes));
+                    state.blueprint_bytes = bytes;
+                }
+            }
+            if state.blueprint_bytes.saturating_add(retained_bytes) <= MAX_PREPARED_BLUEPRINT_BYTES
+            {
+                state
+                    .blueprints
+                    .insert(key, (Arc::clone(&blueprint), retained_bytes));
+                state.blueprint_bytes = state.blueprint_bytes.saturating_add(retained_bytes);
+            }
+        }
+        build_guard.key = None;
+        drop(state);
+        self.initialized.notify_all();
+        blueprint
+    }
+
+    fn retains(&self, blueprint: &Arc<CandidateBlueprint>) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .blueprints
+            .values()
+            .any(|(cached, _)| Arc::ptr_eq(cached, blueprint))
+    }
+
+    fn len(&self) -> usize {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .blueprints
+            .len()
+    }
+
+    fn retained_bytes(&self) -> usize {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state
+            .blueprint_bytes
+            .saturating_add(state.injection_outcome_bytes)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TextMateTokenizer {
     grammars: GrammarSet,
@@ -1069,6 +2065,9 @@ pub struct TextMateTokenizer {
     root_scope_key: String,
     injection_selectors: Arc<Vec<CompiledInjectionSelector>>,
     matcher_cache: FastMap<(GrammarId, PatternId), Arc<CompiledPattern>>,
+    unprepared_static_matcher_generation: usize,
+    prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
+    prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
     dynamic_matcher_cache: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
     scope_names: ScopeInterner,
     scope_templates: ScopeTemplateInterner,
@@ -1080,9 +2079,10 @@ pub struct TextMateTokenizer {
     state_interner: StateInterner,
     line_cache: LineCache<LineCacheKey, CachedLine>,
     candidate_cache: HashMap<StateId, Arc<CandidateSet>, BuildHasherDefault<StateIdentityHasher>>,
-    candidate_blueprint_cache: FastMap<CandidateBlueprintKey, Arc<CandidateBlueprint>>,
+    candidate_blueprint_cache: FastMap<CandidateBlueprintKey, BoundCandidateBlueprint>,
     injection_outcomes: InjectionOutcomeInterner,
     injection_outcome_cache: FastMap<ScopeStackId, (InjectionOutcomeId, Arc<InjectionOutcome>)>,
+    prepared_injection_outcome_ids: FastMap<InjectionOutcomeId, Option<PreparedInjectionOutcomeId>>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
     include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
     rule_repository_contexts: Arc<RuleRepositoryContexts>,
@@ -1115,19 +2115,52 @@ enum IncludeAvailabilityNode {
 
 impl TextMateTokenizer {
     pub fn new(grammars: GrammarSet, root: GrammarId) -> Self {
+        Self::new_inner(grammars, root, None, None, None, None)
+    }
+
+    fn new_with_prepared_caches(
+        grammars: GrammarSet,
+        root: GrammarId,
+        prepared_patterns: Arc<PreparedPatternCache>,
+        prepared_blueprints: Arc<PreparedBlueprintCache>,
+        injection_selectors: Vec<CompiledInjectionSelector>,
+        rule_repository_contexts: Arc<RuleRepositoryContexts>,
+    ) -> Self {
+        Self::new_inner(
+            grammars,
+            root,
+            Some(prepared_patterns),
+            Some(prepared_blueprints),
+            Some(Arc::new(injection_selectors)),
+            Some(rule_repository_contexts),
+        )
+    }
+
+    fn new_inner(
+        grammars: GrammarSet,
+        root: GrammarId,
+        prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
+        prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
+        injection_selectors: Option<Arc<Vec<CompiledInjectionSelector>>>,
+        rule_repository_contexts: Option<Arc<RuleRepositoryContexts>>,
+    ) -> Self {
         let root_scope_key = grammars
             .grammar(root)
             .map(|grammar| grammar.scope_name.clone())
             .unwrap_or_else(|| format!("grammar:{}", root.0));
-        let injection_selectors = Arc::new(compile_injection_selectors(&grammars, root));
-        let rule_repository_contexts =
-            grammars.rule_repository_contexts(root, &injection_selectors);
+        let injection_selectors = injection_selectors
+            .unwrap_or_else(|| Arc::new(compile_injection_selectors(&grammars, root)));
+        let rule_repository_contexts = rule_repository_contexts
+            .unwrap_or_else(|| grammars.rule_repository_contexts(root, &injection_selectors));
         Self {
             grammars,
             root,
             root_scope_key,
             injection_selectors,
             matcher_cache: hashing::fast_map(),
+            unprepared_static_matcher_generation: 0,
+            prepared_pattern_cache,
+            prepared_blueprint_cache,
             dynamic_matcher_cache: hashing::fast_map(),
             scope_names: ScopeInterner::default(),
             scope_templates: ScopeTemplateInterner::default(),
@@ -1142,6 +2175,7 @@ impl TextMateTokenizer {
             candidate_blueprint_cache: hashing::fast_map(),
             injection_outcomes: InjectionOutcomeInterner::default(),
             injection_outcome_cache: hashing::fast_map(),
+            prepared_injection_outcome_ids: hashing::fast_map(),
             inline_candidate_cache: hashing::fast_map(),
             include_availability_cache: RefCell::new(HashMap::new()),
             rule_repository_contexts,
@@ -1157,6 +2191,23 @@ impl TextMateTokenizer {
             counters_enabled: false,
             hot_counters_enabled: false,
             degraded_since_last: false,
+        }
+    }
+
+    fn prepare_root_candidate(&mut self) {
+        let candidates = self.cached_candidates_for_state(&TokenizerState::default());
+        let rejected = self
+            .prepared_blueprint_cache
+            .as_ref()
+            .is_some_and(|cache| !cache.retains(candidates.blueprint.blueprint_arc()));
+        if rejected {
+            // The root descriptor remains usable for this construction call,
+            // but an oversized value must not become part of the clonable
+            // preparation prototype after cache admission rejected it.
+            drop(candidates);
+            self.clear_candidate_cache();
+            self.matcher_cache.clear();
+            self.dynamic_matcher_cache.clear();
         }
     }
 
@@ -1519,6 +2570,7 @@ impl TextMateTokenizer {
                 &mut state,
                 &mut tokens,
                 &candidates.candidates[candidate_index],
+                candidates.blueprint.match_name_template(candidate_index),
                 &result,
                 &mut anchor_pos,
                 &mut frame_anchor_positions,
@@ -1612,6 +2664,11 @@ impl TextMateTokenizer {
             return;
         }
         debug_assert!(self.grammars.grammar(root).is_some());
+        // Prepared caches are scoped to their original root closure. A
+        // tokenizer explicitly repointed at another root becomes an ordinary
+        // tokenizer instead of reaching outside that immutable preparation.
+        self.prepared_pattern_cache = None;
+        self.prepared_blueprint_cache = None;
         self.root = root;
         self.root_scope_key = self
             .grammars
@@ -1677,6 +2734,7 @@ impl TextMateTokenizer {
         self.resolved_scope_stack_cache.clear();
         self.injection_outcomes.clear();
         self.injection_outcome_cache.clear();
+        self.prepared_injection_outcome_ids.clear();
         self.inline_candidate_cache.clear();
     }
 
@@ -2564,8 +3622,39 @@ impl TextMateTokenizer {
             self.injection_outcomes.clear();
             self.candidate_blueprint_cache.clear();
             self.injection_outcome_cache.clear();
+            self.prepared_injection_outcome_ids.clear();
         }
         self.injection_outcomes.intern(outcome)
+    }
+
+    fn prepared_blueprint_key(
+        &mut self,
+        source: CandidateSourceKey,
+        injection_outcome_id: InjectionOutcomeId,
+        injection_outcome: &InjectionOutcome,
+    ) -> Option<(Arc<PreparedBlueprintCache>, PreparedBlueprintKey)> {
+        if !source.is_static() {
+            return None;
+        }
+        let cache = self.prepared_blueprint_cache.as_ref().map(Arc::clone)?;
+        let prepared_outcome_id = if let Some(prepared) = self
+            .prepared_injection_outcome_ids
+            .get(&injection_outcome_id)
+        {
+            *prepared
+        } else {
+            let prepared = cache.intern_injection_outcome(injection_outcome);
+            self.prepared_injection_outcome_ids
+                .insert(injection_outcome_id, prepared);
+            prepared
+        }?;
+        Some((
+            cache,
+            PreparedBlueprintKey {
+                source,
+                injection_outcome: prepared_outcome_id,
+            },
+        ))
     }
 
     fn cached_candidates_for_state(&mut self, state: &TokenizerState) -> Arc<CandidateSet> {
@@ -2593,16 +3682,34 @@ impl TextMateTokenizer {
                     .insert(active_stack_id, outcome.clone());
                 outcome
             };
+        let source = CandidateSourceKey::for_state(self.root, state);
         let blueprint_key = CandidateBlueprintKey {
-            source: CandidateSourceKey::for_state(self.root, state),
+            source: source.clone(),
             injection_outcome: injection_outcome_id,
         };
         let blueprint =
             if let Some(blueprint) = self.candidate_blueprint_cache.get(&blueprint_key).cloned() {
                 blueprint
             } else {
-                let candidates = self.candidates_for_state(state, &injection_outcome);
-                let blueprint = Arc::new(self.build_candidate_blueprint(candidates));
+                let prepared = self.prepared_blueprint_key(
+                    source,
+                    injection_outcome_id,
+                    injection_outcome.as_ref(),
+                );
+                let blueprint = match prepared {
+                    Some((cache, key)) => {
+                        let shared = cache.get_or_insert_with(key, || {
+                            let candidates = self.candidates_for_state(state, &injection_outcome);
+                            self.build_shareable_candidate_blueprint(candidates)
+                        });
+                        self.bind_shared_candidate_blueprint(shared)
+                    }
+                    None => {
+                        let candidates = self.candidates_for_state(state, &injection_outcome);
+                        let owned = self.build_candidate_blueprint(candidates);
+                        self.bind_owned_candidate_blueprint(owned)
+                    }
+                };
                 if self.candidate_blueprint_cache.len() >= MAX_CANDIDATE_BLUEPRINTS {
                     self.candidate_blueprint_cache.clear();
                 }
@@ -2624,11 +3731,22 @@ impl TextMateTokenizer {
 
     fn build_candidate_set(
         &mut self,
-        candidates: Vec<Candidate>,
+        prepared: Option<(Arc<PreparedBlueprintCache>, PreparedBlueprintKey)>,
         active_stack_id: ScopeStackId,
         end_stack_id: ScopeStackId,
+        candidates: impl FnOnce(&mut Self) -> Vec<Candidate>,
     ) -> CandidateSet {
-        let blueprint = Arc::new(self.build_candidate_blueprint(candidates));
+        let blueprint = if let Some((cache, key)) = prepared {
+            let shared = cache.get_or_insert_with(key, || {
+                let candidates = candidates(self);
+                self.build_shareable_candidate_blueprint(candidates)
+            });
+            self.bind_shared_candidate_blueprint(shared)
+        } else {
+            let candidates = candidates(self);
+            let blueprint = self.build_candidate_blueprint(candidates);
+            self.bind_owned_candidate_blueprint(blueprint)
+        };
         CandidateSet {
             blueprint,
             active_stack_id,
@@ -2636,8 +3754,11 @@ impl TextMateTokenizer {
         }
     }
 
-    fn build_candidate_blueprint(&mut self, mut candidates: Vec<Candidate>) -> CandidateBlueprint {
-        for candidate in &mut candidates {
+    fn bind_owned_candidate_blueprint(
+        &mut self,
+        mut blueprint: CandidateBlueprint,
+    ) -> BoundCandidateBlueprint {
+        for candidate in &mut blueprint.candidates {
             if let CandidateKind::Match {
                 name,
                 name_template,
@@ -2651,6 +3772,49 @@ impl TextMateTokenizer {
                 );
             }
         }
+        BoundCandidateBlueprint::Owned(Arc::new(blueprint))
+    }
+
+    fn bind_shared_candidate_blueprint(
+        &mut self,
+        blueprint: Arc<CandidateBlueprint>,
+    ) -> BoundCandidateBlueprint {
+        let match_name_templates = blueprint
+            .candidates
+            .iter()
+            .map(|candidate| match &candidate.kind {
+                CandidateKind::Match { name, .. } => name
+                    .as_deref()
+                    .filter(|name| !name.contains('$'))
+                    .map(|name| {
+                        self.scope_templates
+                            .intern_scope_template(name, &mut self.scope_names)
+                    }),
+                CandidateKind::BeginEnd { .. }
+                | CandidateKind::BeginWhile { .. }
+                | CandidateKind::End { .. } => None,
+            })
+            .collect::<Vec<_>>()
+            .into();
+        BoundCandidateBlueprint::Shared {
+            blueprint,
+            match_name_templates,
+        }
+    }
+
+    fn build_shareable_candidate_blueprint(
+        &mut self,
+        candidates: Vec<Candidate>,
+    ) -> (Arc<CandidateBlueprint>, bool) {
+        let generation = self.unprepared_static_matcher_generation;
+        let blueprint = Arc::new(self.build_candidate_blueprint(candidates));
+        (
+            blueprint,
+            generation == self.unprepared_static_matcher_generation,
+        )
+    }
+
+    fn build_candidate_blueprint(&mut self, candidates: Vec<Candidate>) -> CandidateBlueprint {
         let mut matchers = Vec::with_capacity(candidates.len());
         for candidate in &candidates {
             let live_captures = self.live_captures_for_candidate(candidate);
@@ -2662,6 +3826,10 @@ impl TextMateTokenizer {
                     live_captures,
                 )
             } else {
+                if self.prepared_pattern_cache.is_some() {
+                    self.unprepared_static_matcher_generation =
+                        self.unprepared_static_matcher_generation.wrapping_add(1);
+                }
                 self.cached_dynamic_matcher_with_live_captures(&candidate.pattern, live_captures)
             };
             matchers.push(matcher);
@@ -2680,6 +3848,29 @@ impl TextMateTokenizer {
         }
     }
 
+    fn prepared_static_matcher(
+        &mut self,
+        grammar_id: GrammarId,
+        pattern_id: PatternId,
+        pattern: &str,
+        live_captures: Option<Vec<u32>>,
+    ) -> Option<Arc<CompiledPattern>> {
+        let cache = Arc::clone(self.prepared_pattern_cache.as_ref()?);
+        let (matcher, compiled_now, retained) =
+            cache.get_or_compile(grammar_id, pattern_id, pattern, live_captures);
+        debug_assert_eq!(matcher.source(), pattern);
+        if !retained {
+            self.unprepared_static_matcher_generation =
+                self.unprepared_static_matcher_generation.wrapping_add(1);
+            self.matcher_cache
+                .insert((grammar_id, pattern_id), Arc::clone(&matcher));
+        }
+        if compiled_now && let Some(counters) = self.counters_mut() {
+            counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
+        }
+        Some(matcher)
+    }
+
     fn cached_matcher(
         &mut self,
         grammar_id: GrammarId,
@@ -2687,8 +3878,15 @@ impl TextMateTokenizer {
         pattern: &str,
     ) -> Arc<CompiledPattern> {
         let key = (grammar_id, pattern_id);
-        if let Some(matcher) = self.matcher_cache.get(&key) {
-            return matcher.clone();
+        if let Some(matcher) = self.matcher_cache.get(&key).cloned() {
+            if self.prepared_pattern_cache.is_some() {
+                self.unprepared_static_matcher_generation =
+                    self.unprepared_static_matcher_generation.wrapping_add(1);
+            }
+            return matcher;
+        }
+        if let Some(matcher) = self.prepared_static_matcher(grammar_id, pattern_id, pattern, None) {
+            return matcher;
         }
         let matcher = Arc::new(CompiledPattern::new(pattern));
         self.matcher_cache.insert(key, matcher.clone());
@@ -2706,8 +3904,22 @@ impl TextMateTokenizer {
         live_captures: Vec<u32>,
     ) -> Arc<CompiledPattern> {
         let key = (grammar_id, pattern_id);
-        if let Some(matcher) = self.matcher_cache.get(&key) {
-            return matcher.clone();
+        if let Some(matcher) = self.matcher_cache.get(&key).cloned() {
+            if self.prepared_pattern_cache.is_some() {
+                self.unprepared_static_matcher_generation =
+                    self.unprepared_static_matcher_generation.wrapping_add(1);
+            }
+            return matcher;
+        }
+        if self.prepared_pattern_cache.is_some()
+            && let Some(matcher) = self.prepared_static_matcher(
+                grammar_id,
+                pattern_id,
+                pattern,
+                Some(live_captures.clone()),
+            )
+        {
+            return matcher;
         }
         let matcher = Arc::new(CompiledPattern::new_with_live_captures(
             pattern,
@@ -3162,6 +4374,7 @@ impl TextMateTokenizer {
         state: &mut TokenizerState,
         tokens: &mut Vec<CompactScopedToken>,
         candidate: &Candidate,
+        match_name_template: Option<ScopeTemplateId>,
         result: &MatchResult,
         anchor_pos: &mut Option<usize>,
         frame_anchor_positions: &mut Vec<Option<usize>>,
@@ -3173,8 +4386,8 @@ impl TextMateTokenizer {
             CandidateKind::Match {
                 grammar_id,
                 name,
-                name_template,
                 captures,
+                ..
             } => {
                 let consumed_end = specified_outside_capture_end(result, captures);
                 let mut stack = active_stack;
@@ -3188,7 +4401,7 @@ impl TextMateTokenizer {
                     *grammar_id,
                     stack,
                     name.as_deref(),
-                    *name_template,
+                    match_name_template,
                     captures,
                 );
                 consumed_end
@@ -3707,34 +4920,57 @@ impl TextMateTokenizer {
                 {
                     cached.clone()
                 } else {
-                    let (candidates, active_stack_id, end_stack_id) = if state.is_initial() {
-                        let mut candidates = Vec::new();
-                        let mut order = 0usize;
-                        self.flatten_refs(
+                    let candidate_set = if state.is_initial() {
+                        let (injection_outcome_id, injection_outcome) =
+                            self.injection_outcome(&[] as &[Arc<str>]);
+                        let source = CandidateSourceKey::Inline {
                             grammar_id,
-                            grammar_id,
-                            patterns,
-                            None,
-                            &mut candidates,
-                            &mut order,
-                            0,
+                            patterns: Arc::from(patterns),
+                            compound_patterns,
+                        };
+                        let prepared = self.prepared_blueprint_key(
+                            source,
+                            injection_outcome_id,
+                            injection_outcome.as_ref(),
                         );
-                        (candidates, base_stack_id, base_stack_id)
+                        self.build_candidate_set(
+                            prepared,
+                            base_stack_id,
+                            base_stack_id,
+                            |tokenizer| {
+                                let mut candidates = Vec::new();
+                                let mut order = 0usize;
+                                tokenizer.flatten_refs(
+                                    grammar_id,
+                                    grammar_id,
+                                    patterns,
+                                    None,
+                                    &mut candidates,
+                                    &mut order,
+                                    0,
+                                );
+                                candidates
+                            },
+                        )
                     } else {
                         let stacks = self.current_scope_stack_ids(&state, Some(base_stack_id));
                         let active_scopes = self.resolve_scope_stack_cached(stacks.active_stack_id);
-                        let (_, injection_outcome) = self.injection_outcome(active_scopes.as_ref());
-                        (
-                            self.candidates_for_state(&state, &injection_outcome),
+                        let (injection_outcome_id, injection_outcome) =
+                            self.injection_outcome(active_scopes.as_ref());
+                        let source = CandidateSourceKey::for_state(self.root, &state);
+                        let prepared = self.prepared_blueprint_key(
+                            source,
+                            injection_outcome_id,
+                            injection_outcome.as_ref(),
+                        );
+                        self.build_candidate_set(
+                            prepared,
                             stacks.active_stack_id,
                             stacks.end_stack_id,
+                            |tokenizer| tokenizer.candidates_for_state(&state, &injection_outcome),
                         )
                     };
-                    let candidate_set = Arc::new(self.build_candidate_set(
-                        candidates,
-                        active_stack_id,
-                        end_stack_id,
-                    ));
+                    let candidate_set = Arc::new(candidate_set);
                     if self.inline_candidate_cache.len() >= MAX_INLINE_CANDIDATE_SETS {
                         self.inline_candidate_cache.clear();
                     }
@@ -3802,6 +5038,7 @@ impl TextMateTokenizer {
                 &mut state,
                 tokens,
                 candidate,
+                candidate_set.blueprint.match_name_template(candidate_index),
                 &result,
                 &mut anchor_pos,
                 &mut frame_anchor_positions,
@@ -4077,7 +5314,7 @@ impl TextMateTokenizer {
 
 #[derive(Debug, Clone)]
 struct CandidateSet {
-    blueprint: Arc<CandidateBlueprint>,
+    blueprint: BoundCandidateBlueprint,
     active_stack_id: ScopeStackId,
     end_stack_id: ScopeStackId,
 }
@@ -4126,7 +5363,52 @@ impl Deref for CandidateSet {
     type Target = CandidateBlueprint;
 
     fn deref(&self) -> &Self::Target {
-        &self.blueprint
+        self.blueprint.blueprint()
+    }
+}
+
+#[derive(Debug, Clone)]
+enum BoundCandidateBlueprint {
+    Owned(Arc<CandidateBlueprint>),
+    Shared {
+        blueprint: Arc<CandidateBlueprint>,
+        match_name_templates: Arc<[Option<ScopeTemplateId>]>,
+    },
+}
+
+impl BoundCandidateBlueprint {
+    fn blueprint(&self) -> &CandidateBlueprint {
+        self.blueprint_arc()
+    }
+
+    fn blueprint_arc(&self) -> &Arc<CandidateBlueprint> {
+        match self {
+            Self::Owned(blueprint) => blueprint,
+            Self::Shared { blueprint, .. } => blueprint,
+        }
+    }
+
+    fn shared_blueprint(&self) -> Option<&Arc<CandidateBlueprint>> {
+        match self {
+            Self::Owned(_) => None,
+            Self::Shared { blueprint, .. } => Some(blueprint),
+        }
+    }
+
+    fn match_name_template(&self, index: usize) -> Option<ScopeTemplateId> {
+        match self {
+            Self::Owned(blueprint) => blueprint.candidates.get(index).and_then(|candidate| {
+                if let CandidateKind::Match { name_template, .. } = &candidate.kind {
+                    *name_template
+                } else {
+                    None
+                }
+            }),
+            Self::Shared {
+                match_name_templates,
+                ..
+            } => match_name_templates.get(index).copied().flatten(),
+        }
     }
 }
 
@@ -4141,6 +5423,163 @@ struct CandidateBlueprint {
 struct CandidateBlueprintKey {
     source: CandidateSourceKey,
     injection_outcome: InjectionOutcomeId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct PreparedInjectionOutcomeId(u64);
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct PreparedBlueprintKey {
+    source: CandidateSourceKey,
+    injection_outcome: PreparedInjectionOutcomeId,
+}
+
+fn rule_ref_retained_bytes(rule_ref: &RuleRef) -> usize {
+    match rule_ref {
+        RuleRef::Repository(name) => name.len(),
+        RuleRef::External {
+            repository: Some(name),
+            ..
+        } => name.len(),
+        RuleRef::Rule(_)
+        | RuleRef::SelfRef
+        | RuleRef::BaseRef
+        | RuleRef::External {
+            repository: None, ..
+        } => 0,
+    }
+}
+
+fn injection_candidate_retained_bytes(candidate: &InjectionCandidate) -> usize {
+    let mut owned_bytes = 0usize;
+    for rule_ref in &candidate.patterns {
+        owned_bytes = owned_bytes.saturating_add(rule_ref_retained_bytes(rule_ref));
+    }
+    std::mem::size_of::<InjectionCandidate>()
+        .saturating_add(
+            candidate
+                .patterns
+                .len()
+                .saturating_mul(std::mem::size_of::<RuleRef>()),
+        )
+        .saturating_add(owned_bytes)
+}
+
+fn injection_outcome_retained_bytes(outcome: &InjectionOutcome) -> usize {
+    let map_entry_bytes = std::mem::size_of::<(InjectionOutcome, PreparedInjectionOutcomeId)>();
+    let mut bytes = std::mem::size_of::<InjectionOutcome>()
+        .saturating_add(std::mem::size_of::<PreparedInjectionOutcomeId>())
+        // Cover the hash table's spare buckets and control bytes, including
+        // its relatively high first-allocation overhead.
+        .saturating_add(map_entry_bytes.saturating_mul(3));
+    for candidate in outcome.left.iter().chain(&outcome.right) {
+        bytes = bytes.saturating_add(injection_candidate_retained_bytes(candidate));
+    }
+    bytes
+}
+
+fn prepared_blueprint_key_retained_bytes(key: &PreparedBlueprintKey) -> usize {
+    let dynamic_bytes = match &key.source {
+        CandidateSourceKey::Root(_) => 0,
+        CandidateSourceKey::Inline { patterns, .. } => rule_refs_retained_bytes(patterns),
+        CandidateSourceKey::Frame {
+            scope_prefix,
+            end_pattern,
+            ..
+        } => scope_prefix
+            .as_deref()
+            .map_or(0, str::len)
+            .saturating_add(end_pattern.as_deref().map_or(0, str::len)),
+    };
+    std::mem::size_of::<PreparedBlueprintKey>().saturating_add(dynamic_bytes)
+}
+
+fn rule_refs_retained_bytes(refs: &[RuleRef]) -> usize {
+    let mut bytes = refs.len().saturating_mul(std::mem::size_of::<RuleRef>());
+    for rule_ref in refs {
+        bytes = bytes.saturating_add(rule_ref_retained_bytes(rule_ref));
+    }
+    bytes
+}
+
+fn capture_spec_retained_bytes(captures: &CaptureSpec) -> usize {
+    let mut bytes = std::mem::size_of::<CaptureSpec>();
+    for entry in captures.entries.values() {
+        bytes = bytes
+            .saturating_add(std::mem::size_of_val(entry))
+            .saturating_add(rule_refs_retained_bytes(&entry.patterns));
+    }
+    bytes
+}
+
+fn candidate_dynamic_retained_bytes(candidate: &Candidate) -> usize {
+    let mut bytes = candidate
+        .pattern
+        .len()
+        .saturating_add(candidate.scope_prefix.as_deref().map_or(0, str::len));
+    bytes = bytes.saturating_add(match &candidate.kind {
+        CandidateKind::Match { name, captures, .. } => name
+            .as_deref()
+            .map_or(0, str::len)
+            .saturating_add(capture_spec_retained_bytes(captures)),
+        CandidateKind::BeginEnd {
+            begin_captures,
+            end_captures,
+            name,
+            content_name,
+            patterns,
+            end_static,
+            ..
+        } => capture_spec_retained_bytes(begin_captures)
+            .saturating_add(capture_spec_retained_bytes(end_captures))
+            .saturating_add(name.as_deref().map_or(0, str::len))
+            .saturating_add(content_name.as_deref().map_or(0, str::len))
+            .saturating_add(rule_refs_retained_bytes(patterns))
+            .saturating_add(end_static.as_deref().map_or(0, str::len)),
+        CandidateKind::BeginWhile {
+            begin_captures,
+            while_captures,
+            name,
+            content_name,
+            patterns,
+            while_static,
+            ..
+        } => capture_spec_retained_bytes(begin_captures)
+            .saturating_add(capture_spec_retained_bytes(while_captures))
+            .saturating_add(name.as_deref().map_or(0, str::len))
+            .saturating_add(content_name.as_deref().map_or(0, str::len))
+            .saturating_add(rule_refs_retained_bytes(patterns))
+            .saturating_add(while_static.as_deref().map_or(0, str::len)),
+        CandidateKind::End { captures, .. } => capture_spec_retained_bytes(captures),
+    });
+    bytes
+}
+
+/// Conservative admission charge for data uniquely retained by a prepared
+/// blueprint. Compiled regexes are charged to the separately bounded pattern
+/// cache; the set surcharge covers its per-pattern scanner/index allocations.
+fn candidate_blueprint_retained_bytes(blueprint: &CandidateBlueprint) -> usize {
+    let mut candidate_bytes = blueprint
+        .candidates
+        .capacity()
+        .saturating_mul(std::mem::size_of::<Candidate>());
+    for candidate in &blueprint.candidates {
+        let dynamic_bytes = candidate_dynamic_retained_bytes(candidate);
+        candidate_bytes = candidate_bytes.saturating_add(dynamic_bytes);
+    }
+    let matcher_bytes = blueprint
+        .matchers
+        .len()
+        .saturating_mul(std::mem::size_of::<Arc<CompiledPattern>>());
+    let set_bytes = blueprint
+        .pattern_set_search
+        .as_ref()
+        .map_or(0, PatternSetMatcher::retained_heap_bytes);
+    std::mem::size_of::<CandidateBlueprint>()
+        .saturating_add(candidate_bytes)
+        .saturating_add(matcher_bytes)
+        .saturating_add(set_bytes)
+        .saturating_mul(2)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -4159,6 +5598,11 @@ struct CachedCurrentScopeStackIds {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum CandidateSourceKey {
     Root(GrammarId),
+    Inline {
+        grammar_id: GrammarId,
+        patterns: Arc<[RuleRef]>,
+        compound_patterns: bool,
+    },
     Frame {
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
@@ -4184,6 +5628,17 @@ impl CandidateSourceKey {
                 end_pattern_id: frame.end_pattern_id,
                 apply_end_pattern_last: frame.apply_end_pattern_last,
             })
+    }
+
+    fn is_static(&self) -> bool {
+        match self {
+            Self::Root(_) | Self::Inline { .. } => true,
+            Self::Frame {
+                end_pattern,
+                end_pattern_id,
+                ..
+            } => end_pattern.is_none() || end_pattern_id.is_some(),
+        }
     }
 }
 
@@ -4424,7 +5879,7 @@ struct CandidateSearchResult {
 
 fn empty_repository_context() -> &'static Arc<RepositoryBindings> {
     static EMPTY: OnceLock<Arc<RepositoryBindings>> = OnceLock::new();
-    EMPTY.get_or_init(|| Arc::new(RepositoryBindings::new()))
+    EMPTY.get_or_init(|| Arc::new(RepositoryBindings::default()))
 }
 
 fn resolve_repository_in_context<'a>(
@@ -4465,6 +5920,64 @@ fn contextualize_capture_spec(
     Arc::new(contextualized)
 }
 
+struct RepositoryContextBudget {
+    bounded: bool,
+    state_count: usize,
+    retained_bytes: usize,
+    exceeded: bool,
+}
+
+impl RepositoryContextBudget {
+    fn new(bounded: bool) -> Self {
+        Self {
+            bounded,
+            state_count: 0,
+            retained_bytes: 0,
+            exceeded: false,
+        }
+    }
+
+    fn charge(&mut self, bytes: usize) -> bool {
+        if !self.bounded {
+            return true;
+        }
+        self.state_count = self.state_count.saturating_add(1);
+        self.retained_bytes = self.retained_bytes.saturating_add(bytes);
+        if self.state_count > MAX_PREPARED_GRAMMAR_WALK_STATES
+            || self.retained_bytes > MAX_PREPARED_GRAMMAR_WALK_BYTES
+        {
+            self.exceeded = true;
+            return false;
+        }
+        true
+    }
+
+    fn charge_ref(&mut self) -> bool {
+        self.charge(std::mem::size_of::<RuleRef>())
+    }
+
+    fn charge_rule(&mut self, local: &BTreeMap<String, String>) -> bool {
+        let mut bytes = std::mem::size_of::<((GrammarId, RuleId), Arc<RepositoryBindings>)>()
+            .saturating_add(std::mem::size_of::<RepositoryBindings>());
+        for (name, binding) in local {
+            let entry_bytes = (4 * std::mem::size_of::<usize>())
+                .saturating_add(2 * std::mem::size_of::<String>())
+                .saturating_add(name.len())
+                .saturating_add(binding.len());
+            // Every binding is retained in its overlay and may be copied once
+            // when that fixed-size overlay run is compacted.
+            bytes = bytes.saturating_add(entry_bytes.saturating_mul(2));
+        }
+        self.charge(bytes)
+    }
+
+    fn charge_repository(&mut self, name: &str) -> bool {
+        let key_bytes =
+            std::mem::size_of::<(GrammarId, String, usize)>().saturating_add(name.len());
+        self.charge(key_bytes.saturating_mul(2))
+    }
+}
+
 /// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
 ///
 /// Raw rules receive an id the first time they are reached. That first walk's
@@ -4472,313 +5985,275 @@ fn contextualize_capture_spec(
 /// root rule is reached later through a different repository. The native
 /// loader assigns ids ahead of time, so retain the first repository context in
 /// a side table and apply it when candidates/capture rules are materialized.
-fn compile_rule_repository_contexts(
-    grammars: &GrammarSet,
+fn compile_rule_repository_contexts<'a>(
+    grammars: &'a GrammarSet,
     root: GrammarId,
-    injections: &[CompiledInjectionSelector],
-) -> RuleRepositoryContexts {
-    // Keep the recursive walk's grammar identity and three independent cycle/
-    // memo tables explicit; bundling them would obscure which state is shared
-    // across recursive edges.
-    #[allow(clippy::too_many_arguments)]
-    fn visit_captures(
-        grammars: &GrammarSet,
+    injections: &'a [CompiledInjectionSelector],
+    bounded: bool,
+) -> (RuleRepositoryContexts, bool) {
+    enum Work<'a> {
+        TopLevel {
+            grammar_id: GrammarId,
+            base_grammar_id: GrammarId,
+            context: Arc<RepositoryBindings>,
+        },
+        Refs {
+            grammar_id: GrammarId,
+            base_grammar_id: GrammarId,
+            refs: &'a [RuleRef],
+            index: usize,
+            context: Arc<RepositoryBindings>,
+        },
+        RepositoryExit((GrammarId, String, usize)),
+    }
+
+    fn push_refs<'a>(
+        work: &mut Vec<Work<'a>>,
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
-        captures: &CaptureSpec,
-        context: &Arc<RepositoryBindings>,
-        compiled: &mut FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
-        compiled_top_levels: &mut hashing::FastSet<GrammarId>,
-        visiting_repositories: &mut HashSet<(GrammarId, String, usize)>,
+        refs: &'a [RuleRef],
+        context: Arc<RepositoryBindings>,
     ) {
-        for entry in captures.entries.values() {
-            visit_refs(
-                grammars,
+        if !refs.is_empty() {
+            work.push(Work::Refs {
                 grammar_id,
                 base_grammar_id,
+                refs,
+                index: 0,
+                context,
+            });
+        }
+    }
+
+    fn push_captures<'a>(
+        work: &mut Vec<Work<'a>>,
+        grammar_id: GrammarId,
+        captures: &'a CaptureSpec,
+        context: &Arc<RepositoryBindings>,
+    ) {
+        for entry in captures.entries.values().rev() {
+            push_refs(
+                work,
+                grammar_id,
+                grammar_id,
                 &entry.patterns,
-                context,
-                compiled,
-                compiled_top_levels,
-                visiting_repositories,
+                Arc::clone(context),
             );
         }
     }
 
-    fn visit_top_level(
-        grammars: &GrammarSet,
-        grammar_id: GrammarId,
-        base_grammar_id: GrammarId,
-        context: &Arc<RepositoryBindings>,
-        compiled: &mut FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
-        compiled_top_levels: &mut hashing::FastSet<GrammarId>,
-        visiting_repositories: &mut HashSet<(GrammarId, String, usize)>,
-    ) {
-        if !compiled_top_levels.insert(grammar_id) {
-            return;
-        }
-        if let Some(grammar) = grammars.grammar(grammar_id) {
-            visit_refs(
-                grammars,
+    let empty_context = Arc::clone(empty_repository_context());
+    let mut compiled = hashing::fast_map();
+    let mut compiled_top_levels = hashing::fast_set();
+    let mut visiting_repositories = HashSet::new();
+    let mut budget = RepositoryContextBudget::new(bounded);
+    let mut work = Vec::new();
+    for injection in injections.iter().rev() {
+        push_refs(
+            &mut work,
+            injection.grammar_id,
+            root,
+            &injection.patterns,
+            Arc::clone(&empty_context),
+        );
+    }
+    work.push(Work::TopLevel {
+        grammar_id: root,
+        base_grammar_id: root,
+        context: Arc::clone(&empty_context),
+    });
+
+    while !budget.exceeded {
+        let Some(next) = work.pop() else {
+            break;
+        };
+        match next {
+            Work::RepositoryExit(key) => {
+                visiting_repositories.remove(&key);
+            }
+            Work::TopLevel {
                 grammar_id,
                 base_grammar_id,
-                &grammar.top_level,
                 context,
-                compiled,
-                compiled_top_levels,
-                visiting_repositories,
-            );
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn visit_refs(
-        grammars: &GrammarSet,
-        grammar_id: GrammarId,
-        base_grammar_id: GrammarId,
-        refs: &[RuleRef],
-        context: &Arc<RepositoryBindings>,
-        compiled: &mut FastMap<(GrammarId, RuleId), Arc<RepositoryBindings>>,
-        compiled_top_levels: &mut hashing::FastSet<GrammarId>,
-        visiting_repositories: &mut HashSet<(GrammarId, String, usize)>,
-    ) {
-        let Some(grammar) = grammars.grammar(grammar_id) else {
-            return;
-        };
-        let empty_context = empty_repository_context();
-        for rule_ref in refs {
-            match rule_ref {
-                RuleRef::Rule(rule_id) => {
-                    let key = (grammar_id, *rule_id);
-                    if compiled.contains_key(&key) {
-                        continue;
-                    }
-                    let Some(rule) = grammar.rule(*rule_id) else {
-                        continue;
-                    };
-                    // RuleFactory merges a raw rule's repository over the
-                    // repository passed by its first caller. Register that
-                    // merged context before walking children, just as
-                    // getCompiledRuleId registers the raw rule before its
-                    // constructor recursively compiles patterns.
-                    let merged_context;
-                    let context = if rule.local_repository.is_empty() {
-                        context
-                    } else {
-                        let mut bindings = context.as_ref().clone();
-                        bindings.extend(rule.local_repository.clone());
-                        merged_context = Arc::new(bindings);
-                        &merged_context
-                    };
-                    compiled.insert(key, Arc::clone(context));
-                    match &rule.body {
-                        RuleBody::Match { captures, .. } => visit_captures(
-                            grammars,
-                            grammar_id,
-                            base_grammar_id,
-                            captures,
-                            context,
-                            compiled,
-                            compiled_top_levels,
-                            visiting_repositories,
-                        ),
-                        RuleBody::BeginEnd {
-                            begin_captures,
-                            end_captures,
-                            patterns,
-                            ..
-                        } => {
-                            visit_captures(
-                                grammars,
-                                grammar_id,
-                                base_grammar_id,
-                                begin_captures,
-                                context,
-                                compiled,
-                                compiled_top_levels,
-                                visiting_repositories,
-                            );
-                            visit_captures(
-                                grammars,
-                                grammar_id,
-                                base_grammar_id,
-                                end_captures,
-                                context,
-                                compiled,
-                                compiled_top_levels,
-                                visiting_repositories,
-                            );
-                            visit_refs(
-                                grammars,
-                                grammar_id,
-                                base_grammar_id,
-                                patterns,
-                                context,
-                                compiled,
-                                compiled_top_levels,
-                                visiting_repositories,
-                            );
-                        }
-                        RuleBody::BeginWhile {
-                            begin_captures,
-                            while_captures,
-                            patterns,
-                            ..
-                        } => {
-                            visit_captures(
-                                grammars,
-                                grammar_id,
-                                base_grammar_id,
-                                begin_captures,
-                                context,
-                                compiled,
-                                compiled_top_levels,
-                                visiting_repositories,
-                            );
-                            visit_captures(
-                                grammars,
-                                grammar_id,
-                                base_grammar_id,
-                                while_captures,
-                                context,
-                                compiled,
-                                compiled_top_levels,
-                                visiting_repositories,
-                            );
-                            visit_refs(
-                                grammars,
-                                grammar_id,
-                                base_grammar_id,
-                                patterns,
-                                context,
-                                compiled,
-                                compiled_top_levels,
-                                visiting_repositories,
-                            );
-                        }
-                        RuleBody::IncludeOnly { patterns } => visit_refs(
-                            grammars,
-                            grammar_id,
-                            base_grammar_id,
-                            patterns,
-                            context,
-                            compiled,
-                            compiled_top_levels,
-                            visiting_repositories,
-                        ),
-                    }
+            } => {
+                if !compiled_top_levels.insert(grammar_id) {
+                    continue;
                 }
-                RuleRef::Repository(name) => {
-                    let bound_name = context.get(name).cloned().unwrap_or_else(|| name.clone());
-                    // Repository-only recursion preserves this immutable Arc.
-                    // Its pointer is therefore a complete path identity and
-                    // avoids cloning and hashing every binding at each edge.
-                    let repository_key = (grammar_id, bound_name, Arc::as_ptr(context) as usize);
-                    if !visiting_repositories.insert(repository_key.clone()) {
-                        continue;
-                    }
-                    if let Some(target) = resolve_repository_in_context(grammar, name, context) {
-                        visit_refs(
-                            grammars,
-                            grammar_id,
-                            base_grammar_id,
-                            std::slice::from_ref(target),
-                            context,
-                            compiled,
-                            compiled_top_levels,
-                            visiting_repositories,
-                        );
-                    }
-                    visiting_repositories.remove(&repository_key);
-                }
-                RuleRef::SelfRef => visit_top_level(
-                    grammars,
-                    grammar_id,
-                    base_grammar_id,
-                    context,
-                    compiled,
-                    compiled_top_levels,
-                    visiting_repositories,
-                ),
-                RuleRef::BaseRef => {
-                    visit_top_level(
-                        grammars,
+                if let Some(grammar) = grammars.grammar(grammar_id) {
+                    push_refs(
+                        &mut work,
+                        grammar_id,
                         base_grammar_id,
-                        base_grammar_id,
-                        empty_context,
-                        compiled,
-                        compiled_top_levels,
-                        visiting_repositories,
+                        &grammar.top_level,
+                        context,
                     );
                 }
-                RuleRef::External { scope, repository } => {
-                    let Some(external_id) = grammar
-                        .scope(*scope)
-                        .and_then(|scope| grammars.grammar_id_by_scope(scope))
-                    else {
-                        continue;
-                    };
-                    let Some(external) = grammars.grammar(external_id) else {
-                        continue;
-                    };
-                    if let Some(repository) = repository {
-                        if let Some(target) = external.repository.get(repository) {
-                            visit_refs(
-                                grammars,
-                                external_id,
+            }
+            Work::Refs {
+                grammar_id,
+                base_grammar_id,
+                refs,
+                index,
+                context,
+            } => {
+                let Some(rule_ref) = refs.get(index) else {
+                    continue;
+                };
+                if !budget.charge_ref() {
+                    break;
+                }
+                if index + 1 < refs.len() {
+                    work.push(Work::Refs {
+                        grammar_id,
+                        base_grammar_id,
+                        refs,
+                        index: index + 1,
+                        context: Arc::clone(&context),
+                    });
+                }
+                let Some(grammar) = grammars.grammar(grammar_id) else {
+                    continue;
+                };
+                match rule_ref {
+                    RuleRef::Rule(rule_id) => {
+                        let key = (grammar_id, *rule_id);
+                        if compiled.contains_key(&key) {
+                            continue;
+                        }
+                        let Some(rule) = grammar.rule(*rule_id) else {
+                            continue;
+                        };
+                        if !budget.charge_rule(&rule.local_repository) {
+                            break;
+                        }
+                        let context = if rule.local_repository.is_empty() {
+                            context
+                        } else {
+                            RepositoryBindings::overlay(
+                                context,
+                                rule.local_repository.clone(),
+                                !bounded,
+                            )
+                        };
+                        compiled.insert(key, Arc::clone(&context));
+                        match &rule.body {
+                            RuleBody::Match { captures, .. } => {
+                                push_captures(&mut work, grammar_id, captures, &context);
+                            }
+                            RuleBody::BeginEnd {
+                                begin_captures,
+                                end_captures,
+                                patterns,
+                                ..
+                            } => {
+                                push_refs(
+                                    &mut work,
+                                    grammar_id,
+                                    base_grammar_id,
+                                    patterns,
+                                    Arc::clone(&context),
+                                );
+                                push_captures(&mut work, grammar_id, end_captures, &context);
+                                push_captures(&mut work, grammar_id, begin_captures, &context);
+                            }
+                            RuleBody::BeginWhile {
+                                begin_captures,
+                                while_captures,
+                                patterns,
+                                ..
+                            } => {
+                                push_refs(
+                                    &mut work,
+                                    grammar_id,
+                                    base_grammar_id,
+                                    patterns,
+                                    Arc::clone(&context),
+                                );
+                                push_captures(&mut work, grammar_id, while_captures, &context);
+                                push_captures(&mut work, grammar_id, begin_captures, &context);
+                            }
+                            RuleBody::IncludeOnly { patterns } => {
+                                push_refs(&mut work, grammar_id, base_grammar_id, patterns, context)
+                            }
+                        }
+                    }
+                    RuleRef::Repository(name) => {
+                        let bound_name = context.get(name).cloned().unwrap_or_else(|| name.clone());
+                        if !budget.charge_repository(&bound_name) {
+                            break;
+                        }
+                        let key = (grammar_id, bound_name, Arc::as_ptr(&context) as usize);
+                        if !visiting_repositories.insert(key.clone()) {
+                            continue;
+                        }
+                        work.push(Work::RepositoryExit(key));
+                        if let Some(target) = resolve_repository_in_context(grammar, name, &context)
+                        {
+                            push_refs(
+                                &mut work,
+                                grammar_id,
                                 base_grammar_id,
                                 std::slice::from_ref(target),
-                                empty_context,
-                                compiled,
-                                compiled_top_levels,
-                                visiting_repositories,
+                                context,
                             );
                         }
-                    } else {
-                        visit_top_level(
-                            grammars,
-                            external_id,
-                            base_grammar_id,
-                            empty_context,
-                            compiled,
-                            compiled_top_levels,
-                            visiting_repositories,
-                        );
+                    }
+                    RuleRef::SelfRef => work.push(Work::TopLevel {
+                        grammar_id,
+                        base_grammar_id,
+                        context,
+                    }),
+                    RuleRef::BaseRef => work.push(Work::TopLevel {
+                        grammar_id: base_grammar_id,
+                        base_grammar_id,
+                        context: Arc::clone(&empty_context),
+                    }),
+                    RuleRef::External { scope, repository } => {
+                        let Some(external_id) = grammar
+                            .scope(*scope)
+                            .and_then(|scope| grammars.grammar_id_by_scope(scope))
+                        else {
+                            continue;
+                        };
+                        let Some(external) = grammars.grammar(external_id) else {
+                            continue;
+                        };
+                        if let Some(repository) = repository {
+                            if !budget.charge_repository(repository) {
+                                break;
+                            }
+                            let key = (
+                                external_id,
+                                repository.clone(),
+                                Arc::as_ptr(&empty_context) as usize,
+                            );
+                            if !visiting_repositories.insert(key.clone()) {
+                                continue;
+                            }
+                            work.push(Work::RepositoryExit(key));
+                            if let Some(target) = external.repository.get(repository) {
+                                push_refs(
+                                    &mut work,
+                                    external_id,
+                                    base_grammar_id,
+                                    std::slice::from_ref(target),
+                                    Arc::clone(&empty_context),
+                                );
+                            }
+                        } else {
+                            work.push(Work::TopLevel {
+                                grammar_id: external_id,
+                                base_grammar_id,
+                                context: Arc::clone(&empty_context),
+                            });
+                        }
                     }
                 }
             }
         }
     }
 
-    let mut compiled = hashing::fast_map();
-    let mut compiled_top_levels = hashing::fast_set();
-    let mut visiting_repositories = HashSet::new();
-    let empty_context = empty_repository_context();
-    visit_top_level(
-        grammars,
-        root,
-        root,
-        empty_context,
-        &mut compiled,
-        &mut compiled_top_levels,
-        &mut visiting_repositories,
-    );
-    // vscode-textmate compiles the root before lazily collecting injections.
-    // Preserve selector order so a raw rule shared with an injection is still
-    // bound to the repository from its first compilation path.
-    for injection in injections {
-        visit_refs(
-            grammars,
-            injection.grammar_id,
-            root,
-            &injection.patterns,
-            empty_context,
-            &mut compiled,
-            &mut compiled_top_levels,
-            &mut visiting_repositories,
-        );
-    }
-    compiled
+    (compiled, !budget.exceeded)
 }
 
 #[derive(Debug, Clone)]
@@ -5403,6 +6878,639 @@ mod tests {
     }
 
     #[test]
+    fn prepared_language_shares_immutable_root_work_but_not_mutable_caches() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{"scopeName":"source.prepared","patterns":[{"match":"true","name":"constant.language.prepared"}]}"#,
+            )
+            .unwrap();
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.static_pattern_capacity(), 1);
+        assert_eq!(prepared.compiled_pattern_count(), 1);
+
+        let mut first = prepared.tokenizer();
+        let second = prepared.tokenizer();
+        let first_root = first.candidate_cache.get(&StateId(0)).unwrap();
+        let second_root = second.candidate_cache.get(&StateId(0)).unwrap();
+        assert!(Arc::ptr_eq(first_root, second_root));
+        assert!(Arc::ptr_eq(
+            &first_root.matchers[0],
+            &second_root.matchers[0]
+        ));
+
+        first.clear_candidate_cache();
+        assert_eq!(first.candidate_cache_len(), 0);
+        assert_eq!(second.candidate_cache_len(), 1);
+    }
+
+    #[test]
+    fn prepared_pattern_slots_are_scoped_to_the_root_grammar_closure() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{
+                    "scopeName":"source.prepared-closure",
+                    "patterns":[
+                        {"match":"root"},
+                        {"include":"source.prepared-dependency"}
+                    ]
+                }"#,
+            )
+            .unwrap();
+        grammars
+            .load_and_add(
+                r#"{
+                    "scopeName":"source.prepared-dependency",
+                    "patterns":[{"match":"dependency"}]
+                }"#,
+            )
+            .unwrap();
+        grammars
+            .load_and_add(
+                r#"{
+                    "scopeName":"source.prepared-injection",
+                    "injectionSelector":"L:source.prepared-closure",
+                    "injectTo":["source.prepared-closure"],
+                    "patterns":[{"match":"injected"}]
+                }"#,
+            )
+            .unwrap();
+        grammars
+            .load_and_add(
+                r#"{
+                    "scopeName":"source.prepared-unrelated",
+                    "patterns":[{"match":"unused-one"},{"match":"unused-two"}]
+                }"#,
+            )
+            .unwrap();
+
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.grammar_count(), 3);
+        assert_eq!(prepared.static_pattern_capacity(), 3);
+        assert!(
+            prepared
+                .tokenizer()
+                .grammars()
+                .grammar_by_scope("source.prepared-unrelated")
+                .is_none(),
+            "preparation retained an unrelated registry grammar"
+        );
+    }
+
+    #[test]
+    fn prepared_closure_ignores_unreachable_repository_dependencies() {
+        let root_grammar = r#"{
+            "scopeName":"source.prepared-unused-root",
+            "patterns":[{"match":"x","name":"constant.prepared-unused-root"}],
+            "repository":{
+                "unused":{
+                    "patterns":[{"include":"source.prepared-unused-large"}]
+                }
+            }
+        }"#;
+        let unused_grammar = r#"{
+            "scopeName":"source.prepared-unused-large",
+            "patterns":[{"match":"unused","name":"constant.prepared-unused-large"}]
+        }"#;
+        let mut grammars = GrammarSet::new();
+        let root = grammars.load_and_add(root_grammar).unwrap();
+        grammars.load_and_add(unused_grammar).unwrap();
+
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.grammar_count(), 1);
+        assert!(
+            prepared
+                .tokenizer()
+                .grammars()
+                .grammar_by_scope("source.prepared-unused-large")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn prepared_closure_follows_inline_capture_base_dependencies() {
+        let root_grammar = r#"{
+            "scopeName":"source.prepared-base-root",
+            "patterns":[{"include":"source.prepared-base-a#entry"}]
+        }"#;
+        let grammar_a = r#"{
+            "scopeName":"source.prepared-base-a",
+            "patterns":[{"include":"source.prepared-base-b"}],
+            "repository":{
+                "entry":{
+                    "match":"x",
+                    "captures":{"0":{"patterns":[{"include":"$base"}]}}
+                }
+            }
+        }"#;
+        let grammar_b = r#"{
+            "scopeName":"source.prepared-base-b",
+            "patterns":[{"match":"x","name":"constant.prepared-base-b"}]
+        }"#;
+        let mut grammars = GrammarSet::new();
+        grammars
+            .load_and_add(
+                r#"{"scopeName":"source.prepared-base-unrelated","patterns":[{"match":"unused"}]}"#,
+            )
+            .unwrap();
+        let root = grammars.load_and_add(root_grammar).unwrap();
+        grammars.load_and_add(grammar_a).unwrap();
+        grammars.load_and_add(grammar_b).unwrap();
+
+        let mut direct = TextMateTokenizer::new(grammars.clone(), root);
+        let direct_line = direct.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(line_has_scope(&direct_line, "constant.prepared-base-b"));
+
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.grammar_count(), 3);
+        let mut tokenizer = prepared.tokenizer();
+        let prepared_line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(line_has_scope(&prepared_line, "constant.prepared-base-b"));
+    }
+
+    #[test]
+    fn prepared_closure_follows_begin_while_inline_base() {
+        let root_grammar = r#"{
+            "scopeName":"source.prepared-while-root",
+            "patterns":[{"include":"source.prepared-while-a#entry"}]
+        }"#;
+        let grammar_a = r#"{
+            "scopeName":"source.prepared-while-a",
+            "patterns":[{"include":"source.prepared-while-b"}],
+            "repository":{
+                "entry":{
+                    "begin":">",
+                    "while":"z",
+                    "contentName":"meta.prepared-while-content",
+                    "patterns":[{"include":"$base"}]
+                }
+            }
+        }"#;
+        let grammar_b = r#"{
+            "scopeName":"source.prepared-while-b",
+            "patterns":[{"match":">","name":"constant.prepared-while-b"}]
+        }"#;
+        let mut grammars = GrammarSet::new();
+        let root = grammars.load_and_add(root_grammar).unwrap();
+        grammars.load_and_add(grammar_a).unwrap();
+        grammars.load_and_add(grammar_b).unwrap();
+
+        let mut direct = TextMateTokenizer::new(grammars.clone(), root);
+        let direct_line = direct.tokenize_line_scopes(">", TokenizerState::default());
+        assert!(line_has_scope(&direct_line, "constant.prepared-while-b"));
+
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.grammar_count(), 3);
+        let mut tokenizer = prepared.tokenizer();
+        let line = tokenizer.tokenize_line_scopes(">", TokenizerState::default());
+        assert!(line_has_scope(&line, "constant.prepared-while-b"));
+    }
+
+    #[test]
+    fn prepared_closure_retains_external_forwarding_grammars() {
+        let root_grammar = r#"{
+            "scopeName":"source.prepared-forward-root",
+            "patterns":[{"include":"source.prepared-forward-wrapper"}]
+        }"#;
+        let wrapper_grammar = r#"{
+            "scopeName":"source.prepared-forward-wrapper",
+            "patterns":[{"include":"source.prepared-forward-leaf"}]
+        }"#;
+        let leaf_grammar = r#"{
+            "scopeName":"source.prepared-forward-leaf",
+            "patterns":[{"match":"x","name":"constant.prepared-forward-leaf"}]
+        }"#;
+        let mut grammars = GrammarSet::new();
+        let root = grammars.load_and_add(root_grammar).unwrap();
+        grammars.load_and_add(wrapper_grammar).unwrap();
+        grammars.load_and_add(leaf_grammar).unwrap();
+
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.grammar_count(), 3);
+        let mut tokenizer = prepared.tokenizer();
+        let line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
+        assert!(line_has_scope(&line, "constant.prepared-forward-leaf"));
+    }
+
+    #[test]
+    fn prepared_closure_retains_inline_injection_base_dependencies() {
+        let root_grammar = r#"{
+            "scopeName":"source.prepared-injection-base-root",
+            "patterns":[{"include":"source.prepared-injection-base-a#entry"}],
+            "injections":{
+                "L:meta.inner.prepared-injection-base":{
+                    "patterns":[{"include":"$base"}]
+                }
+            }
+        }"#;
+        let grammar_a = r#"{
+            "scopeName":"source.prepared-injection-base-a",
+            "patterns":[{"include":"source.prepared-injection-base-b"}],
+            "repository":{
+                "entry":{
+                    "match":"x(\\[foo\\])",
+                    "captures":{
+                        "1":{
+                            "patterns":[{
+                                "begin":"\\[",
+                                "end":"\\]",
+                                "name":"meta.inner.prepared-injection-base"
+                            }]
+                        }
+                    }
+                }
+            }
+        }"#;
+        let grammar_b = r#"{
+            "scopeName":"source.prepared-injection-base-b",
+            "patterns":[{"match":"foo","name":"constant.prepared-injection-base-b"}]
+        }"#;
+        let mut grammars = GrammarSet::new();
+        let root = grammars.load_and_add(root_grammar).unwrap();
+        grammars.load_and_add(grammar_a).unwrap();
+        grammars.load_and_add(grammar_b).unwrap();
+
+        let mut direct = TextMateTokenizer::new(grammars.clone(), root);
+        let direct_line = direct.tokenize_line_scopes("x[foo]", TokenizerState::default());
+        assert!(line_has_scope(
+            &direct_line,
+            "constant.prepared-injection-base-b"
+        ));
+
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.grammar_count(), 3);
+        let mut tokenizer = prepared.tokenizer();
+        let prepared_line = tokenizer.tokenize_line_scopes("x[foo]", TokenizerState::default());
+        assert!(line_has_scope(
+            &prepared_line,
+            "constant.prepared-injection-base-b"
+        ));
+    }
+
+    #[test]
+    fn prepared_pattern_slots_fall_back_safely_for_distinct_capture_layouts() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(r#"{"scopeName":"source.capture-layout","patterns":[{"match":"(a)"}]}"#)
+            .unwrap();
+        let cache = PreparedPatternCache::new(&grammars, &[true]);
+        let first = cache
+            .get_or_compile(root, PatternId(0), "(a)", Some(vec![0]))
+            .0;
+        let second = cache
+            .get_or_compile(root, PatternId(0), "(a)", Some(vec![1]))
+            .0;
+
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert!(first.has_live_captures(Some(&[0])));
+        assert!(second.has_live_captures(Some(&[1])));
+        assert_eq!(cache.initialized_count(), 1);
+    }
+
+    #[test]
+    fn prepared_pattern_cache_rejects_values_over_the_remaining_byte_budget() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(r#"{"scopeName":"source.oversized-pattern","patterns":[{"match":"a"}]}"#)
+            .unwrap();
+        let cache = PreparedPatternCache::new(&grammars, &[true]);
+        cache
+            .retained_bytes
+            .store(MAX_PREPARED_PATTERN_BYTES, Ordering::Release);
+        let (matcher, compiled_now, retained) = cache.get_or_compile(root, PatternId(0), "a", None);
+
+        assert!(compiled_now);
+        assert!(!retained);
+        assert_eq!(matcher.source(), "a");
+        assert_eq!(cache.initialized_count(), 0);
+        assert_eq!(cache.retained_bytes(), MAX_PREPARED_PATTERN_BYTES);
+    }
+
+    #[test]
+    fn rejected_prepared_patterns_do_not_leak_through_root_blueprints() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{"scopeName":"source.rejected-root-pattern","patterns":[{"match":"a"}]}"#,
+            )
+            .unwrap();
+        let patterns = Arc::new(PreparedPatternCache::new(&grammars, &[true]));
+        patterns
+            .retained_bytes
+            .store(MAX_PREPARED_PATTERN_BYTES, Ordering::Release);
+        let blueprints = Arc::new(PreparedBlueprintCache::default());
+        let mut tokenizer = TextMateTokenizer::new_with_prepared_caches(
+            grammars,
+            root,
+            Arc::clone(&patterns),
+            Arc::clone(&blueprints),
+            Vec::new(),
+            Arc::new(hashing::fast_map()),
+        );
+
+        tokenizer.prepare_root_candidate();
+
+        assert_eq!(patterns.initialized_count(), 0);
+        assert_eq!(blueprints.len(), 0);
+        assert!(tokenizer.matcher_cache.is_empty());
+        assert_eq!(tokenizer.candidate_cache_len(), 0);
+    }
+
+    #[test]
+    fn concurrent_prepared_pattern_use_compiles_one_canonical_value() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{"scopeName":"source.concurrent-pattern","patterns":[{"match":"(a)"}]}"#,
+            )
+            .unwrap();
+        let cache = Arc::new(PreparedPatternCache::new(&grammars, &[true]));
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let compiled = AtomicUsize::new(0);
+        let matchers = std::thread::scope(|scope| {
+            let threads = (0..8)
+                .map(|_| {
+                    let cache = Arc::clone(&cache);
+                    let barrier = Arc::clone(&barrier);
+                    let compiled = &compiled;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        let (matcher, compiled_now, retained) =
+                            cache.get_or_compile(root, PatternId(0), "(a)", Some(vec![0]));
+                        assert!(retained);
+                        compiled.fetch_add(compiled_now as usize, Ordering::Relaxed);
+                        matcher
+                    })
+                })
+                .collect::<Vec<_>>();
+            threads
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(compiled.load(Ordering::Relaxed), 1);
+        assert!(
+            matchers
+                .iter()
+                .skip(1)
+                .all(|matcher| Arc::ptr_eq(&matchers[0], matcher))
+        );
+    }
+
+    #[test]
+    fn concurrent_prepared_blueprint_use_runs_one_builder_per_key() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let cache = Arc::new(PreparedBlueprintCache::default());
+        let key = PreparedBlueprintKey {
+            source: CandidateSourceKey::Root(GrammarId(0)),
+            injection_outcome: PreparedInjectionOutcomeId(0),
+        };
+        let barrier = Arc::new(std::sync::Barrier::new(8));
+        let builds = AtomicUsize::new(0);
+        let blueprints = std::thread::scope(|scope| {
+            let threads = (0..8)
+                .map(|_| {
+                    let cache = Arc::clone(&cache);
+                    let key = key.clone();
+                    let barrier = Arc::clone(&barrier);
+                    let builds = &builds;
+                    scope.spawn(move || {
+                        barrier.wait();
+                        cache.get_or_insert_with(key, || {
+                            builds.fetch_add(1, Ordering::Relaxed);
+                            (
+                                Arc::new(CandidateBlueprint {
+                                    candidates: Vec::new(),
+                                    matchers: Arc::from([]),
+                                    pattern_set_search: None,
+                                }),
+                                true,
+                            )
+                        })
+                    })
+                })
+                .collect::<Vec<_>>();
+            threads
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(builds.load(Ordering::Relaxed), 1);
+        assert_eq!(cache.len(), 1);
+        assert!(
+            blueprints
+                .iter()
+                .skip(1)
+                .all(|blueprint| Arc::ptr_eq(&blueprints[0], blueprint))
+        );
+    }
+
+    #[test]
+    fn prepared_blueprint_payload_builds_are_serialized() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let cache = Arc::new(PreparedBlueprintCache::default());
+        let barrier = Arc::new(std::sync::Barrier::new(4));
+        let active = AtomicUsize::new(0);
+        let peak = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for grammar in 0..4 {
+                let cache = Arc::clone(&cache);
+                let barrier = Arc::clone(&barrier);
+                let active = &active;
+                let peak = &peak;
+                scope.spawn(move || {
+                    let key = PreparedBlueprintKey {
+                        source: CandidateSourceKey::Root(GrammarId(grammar)),
+                        injection_outcome: PreparedInjectionOutcomeId(0),
+                    };
+                    barrier.wait();
+                    cache.get_or_insert_with(key, || {
+                        let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(current, Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        active.fetch_sub(1, Ordering::SeqCst);
+                        (
+                            Arc::new(CandidateBlueprint {
+                                candidates: Vec::new(),
+                                matchers: Arc::from([]),
+                                pattern_set_search: None,
+                            }),
+                            true,
+                        )
+                    });
+                });
+            }
+        });
+
+        assert_eq!(peak.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn prepared_blueprint_keys_intern_injection_outcomes_once() {
+        let cache = PreparedBlueprintCache::default();
+        let outcome = InjectionOutcome {
+            left: vec![InjectionCandidate {
+                grammar_id: GrammarId(1),
+                patterns: vec![RuleRef::Repository("shared-injection".repeat(128))],
+            }],
+            right: Vec::new(),
+        };
+
+        let first = cache.intern_injection_outcome(&outcome).unwrap();
+        let second = cache.intern_injection_outcome(&outcome).unwrap();
+        assert_eq!(first, second);
+        let state = cache
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(state.injection_outcome_ids.len(), 1);
+        assert!(state.injection_outcome_bytes <= MAX_PREPARED_INJECTION_OUTCOME_BYTES);
+        let outcome_bytes = state.injection_outcome_bytes;
+        drop(state);
+        assert!(cache.retained_bytes() >= outcome_bytes);
+        assert!(cache.retained_bytes() <= MAX_PREPARED_CANDIDATE_BYTES);
+    }
+
+    #[test]
+    fn prepared_blueprint_cache_rejects_oversized_values() {
+        let cache = PreparedBlueprintCache::default();
+        let key = PreparedBlueprintKey {
+            source: CandidateSourceKey::Root(GrammarId(0)),
+            injection_outcome: PreparedInjectionOutcomeId(0),
+        };
+        let blueprint = Arc::new(CandidateBlueprint {
+            candidates: vec![Candidate {
+                order: 0,
+                base_grammar_id: GrammarId(0),
+                pattern: "x".repeat(MAX_PREPARED_BLUEPRINT_BYTES),
+                pattern_id: None,
+                scope_prefix: None,
+                kind: CandidateKind::Match {
+                    grammar_id: GrammarId(0),
+                    name: None,
+                    name_template: None,
+                    captures: Arc::new(CaptureSpec::default()),
+                },
+            }],
+            matchers: Arc::from([]),
+            pattern_set_search: None,
+        });
+
+        let returned = cache.get_or_insert_with(key, || (Arc::clone(&blueprint), true));
+        assert!(Arc::ptr_eq(&returned, &blueprint));
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn prepared_blueprint_charge_includes_pattern_set_scanner() {
+        let pattern = Arc::new(CompiledPattern::new("(a){4000}"));
+        let matchers: Arc<[Arc<CompiledPattern>]> =
+            Arc::from([Arc::clone(&pattern), Arc::clone(&pattern)]);
+        let pattern_set_search = PatternSetMatcher::from_shared_compiled(Arc::clone(&matchers));
+        let scanner_bytes = pattern_set_search.retained_heap_bytes();
+        let blueprint = CandidateBlueprint {
+            candidates: Vec::new(),
+            matchers,
+            pattern_set_search: Some(pattern_set_search),
+        };
+
+        assert!(scanner_bytes > 100_000);
+        assert!(candidate_blueprint_retained_bytes(&blueprint) >= scanner_bytes);
+    }
+
+    #[test]
+    fn prepared_language_reuses_inline_candidate_blueprints() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{
+                    "scopeName":"source.prepared-inline",
+                    "patterns":[{
+                        "match":"(x)",
+                        "captures":{
+                            "1":{"patterns":[
+                                {"match":"x","name":"constant.prepared-inline"},
+                                {"match":"y"}
+                            ]}
+                        }
+                    }]
+                }"#,
+            )
+            .unwrap();
+        let prepared = PreparedLanguage::new(grammars, root);
+        let mut first = prepared.tokenizer();
+        first.tokenize_source("x");
+        let first_inline = first
+            .inline_candidate_cache
+            .values()
+            .find_map(|set| set.blueprint.shared_blueprint().map(Arc::clone))
+            .expect("first tokenizer bound a shared inline blueprint");
+
+        let mut second = prepared.tokenizer();
+        second.tokenize_source("x");
+        let second_inline = second
+            .inline_candidate_cache
+            .values()
+            .find_map(|set| set.blueprint.shared_blueprint().map(Arc::clone))
+            .expect("second tokenizer bound a shared inline blueprint");
+        assert!(Arc::ptr_eq(&first_inline, &second_inline));
+    }
+
+    #[test]
+    fn prepared_language_reuses_lazily_discovered_static_blueprints() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{
+                    "scopeName":"source.prepared-nested",
+                    "patterns":[{
+                        "begin":"\"",
+                        "end":"\"",
+                        "name":"string.prepared",
+                        "patterns":[{"match":"[a-z]+","name":"word.prepared"}]
+                    }]
+                }"#,
+            )
+            .unwrap();
+        let prepared = PreparedLanguage::new(grammars, root);
+        assert_eq!(prepared.static_blueprint_count(), 1);
+
+        let mut first = prepared.tokenizer();
+        first.tokenize_source("\"word\"");
+        assert!(prepared.static_blueprint_count() >= 2);
+        let first_nested = first
+            .candidate_blueprint_cache
+            .iter()
+            .find_map(|(key, value)| {
+                matches!(key.source, CandidateSourceKey::Frame { .. })
+                    .then(|| value.shared_blueprint().map(Arc::clone))
+                    .flatten()
+            })
+            .expect("first tokenizer built nested static blueprint");
+
+        let mut second = prepared.tokenizer();
+        second.tokenize_source("\"word\"");
+        let second_nested = second
+            .candidate_blueprint_cache
+            .iter()
+            .find_map(|(key, value)| {
+                matches!(key.source, CandidateSourceKey::Frame { .. })
+                    .then(|| value.shared_blueprint().map(Arc::clone))
+                    .flatten()
+            })
+            .expect("second tokenizer bound nested static blueprint");
+        assert!(Arc::ptr_eq(&first_nested, &second_nested));
+        assert!(prepared.static_blueprint_count() <= MAX_CANDIDATE_BLUEPRINTS);
+    }
+
+    #[test]
     fn parent_linked_frame_stack_preserves_prefixes_hashes_and_exact_equality() {
         let mut state = TokenizerState::default();
         let mut independently_built = TokenizerState::default();
@@ -5912,7 +8020,10 @@ mod tests {
             .get(&beta_body.entry_state_id)
             .expect("beta candidates");
 
-        assert!(Arc::ptr_eq(&alpha_set.blueprint, &beta_set.blueprint));
+        assert!(Arc::ptr_eq(
+            alpha_set.blueprint.blueprint_arc(),
+            beta_set.blueprint.blueprint_arc()
+        ));
         assert_ne!(alpha_set.active_stack_id, beta_set.active_stack_id);
         assert_ne!(alpha_set.end_stack_id, beta_set.end_stack_id);
         assert!(
@@ -5959,7 +8070,10 @@ mod tests {
 
         let foo_set = tokenizer.candidate_cache.get(&foo.exit_state_id).unwrap();
         let bar_set = tokenizer.candidate_cache.get(&bar.exit_state_id).unwrap();
-        assert!(!Arc::ptr_eq(&foo_set.blueprint, &bar_set.blueprint));
+        assert!(!Arc::ptr_eq(
+            foo_set.blueprint.blueprint_arc(),
+            bar_set.blueprint.blueprint_arc()
+        ));
         assert_eq!(foo_set.candidates[0].pattern, "^FOO$");
         assert_eq!(bar_set.candidates[0].pattern, "^BAR$");
     }
@@ -5995,7 +8109,10 @@ mod tests {
             .candidate_cache
             .get(&beta_body.entry_state_id)
             .unwrap();
-        assert!(!Arc::ptr_eq(&alpha_set.blueprint, &beta_set.blueprint));
+        assert!(!Arc::ptr_eq(
+            alpha_set.blueprint.blueprint_arc(),
+            beta_set.blueprint.blueprint_arc()
+        ));
         assert!(
             alpha_body.tokens[0]
                 .scopes
@@ -6121,6 +8238,141 @@ mod tests {
             "{second_line:#?}"
         );
         assert!(!line_has_scope(&second_line, "plain.second-host"));
+    }
+
+    #[test]
+    fn prepared_repository_context_walk_is_iterative() {
+        let rule_count = 5_000u32;
+        let rules = (0..rule_count)
+            .map(|index| crate::engine::grammar::Rule {
+                id: RuleId(index),
+                local_repository: BTreeMap::new(),
+                body: RuleBody::IncludeOnly {
+                    patterns: if index + 1 < rule_count {
+                        vec![RuleRef::Rule(RuleId(index + 1))]
+                    } else {
+                        Vec::new()
+                    },
+                },
+            })
+            .collect();
+        let mut grammars = GrammarSet::new();
+        let root = grammars.add(CompiledGrammar {
+            id: GrammarId(0),
+            scope_name: "source.deep-context".to_owned(),
+            metadata: crate::engine::grammar::GrammarMetadata::default(),
+            string_names: Vec::new(),
+            patterns: Vec::new(),
+            rules,
+            repository: BTreeMap::new(),
+            top_level: vec![RuleRef::Rule(RuleId(0))],
+            injections: Vec::new(),
+            scope_names: Vec::new(),
+        });
+
+        let (contexts, complete) = compile_rule_repository_contexts(&grammars, root, &[], true);
+
+        assert!(complete);
+        assert_eq!(contexts.len(), rule_count as usize);
+    }
+
+    #[test]
+    fn prepared_language_rejects_closure_work_over_the_hard_bound() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars.add(CompiledGrammar {
+            id: GrammarId(0),
+            scope_name: "source.over-budget-context".to_owned(),
+            metadata: crate::engine::grammar::GrammarMetadata::default(),
+            string_names: Vec::new(),
+            patterns: Vec::new(),
+            rules: vec![crate::engine::grammar::Rule {
+                id: RuleId(0),
+                local_repository: BTreeMap::new(),
+                body: RuleBody::IncludeOnly {
+                    patterns: Vec::new(),
+                },
+            }],
+            repository: BTreeMap::new(),
+            top_level: vec![RuleRef::Rule(RuleId(0)); MAX_PREPARED_GRAMMAR_PENDING_REFS + 1],
+            injections: Vec::new(),
+            scope_names: Vec::new(),
+        });
+
+        assert!(PreparedLanguage::try_new(grammars, root).is_err());
+    }
+
+    #[test]
+    fn repository_bindings_flatten_small_unbounded_overlays() {
+        let root = Arc::new(RepositoryBindings::default());
+        let first = RepositoryBindings::overlay(
+            root,
+            BTreeMap::from([
+                ("first".to_owned(), "one".to_owned()),
+                ("$mark.local.0.user-entry".to_owned(), "prefixed".to_owned()),
+            ]),
+            true,
+        );
+        let second = RepositoryBindings::overlay(
+            Arc::clone(&first),
+            BTreeMap::from([("second".to_owned(), "two".to_owned())]),
+            true,
+        );
+
+        assert_eq!(second.get("first").map(String::as_str), Some("one"));
+        assert_eq!(second.get("second").map(String::as_str), Some("two"));
+        assert_eq!(
+            second.get("$mark.local.0.user-entry").map(String::as_str),
+            Some("prefixed")
+        );
+        assert_eq!(first.local.len(), 2);
+        assert_eq!(second.local.len(), 3);
+        assert!(second.parent.is_none());
+    }
+
+    #[test]
+    fn repository_binding_blocks_bound_deep_lookup_chains() {
+        let layer_count = usize::from(REPOSITORY_BINDING_BLOCK_LAYERS) * 4;
+        let mut context = Arc::new(RepositoryBindings::default());
+        for index in 0..layer_count {
+            context = RepositoryBindings::overlay(
+                context,
+                BTreeMap::from([(format!("name-{index}"), format!("value-{index}"))]),
+                false,
+            );
+        }
+
+        assert_eq!(context.get("name-0").map(String::as_str), Some("value-0"));
+        assert_eq!(
+            context
+                .get(&format!("name-{}", layer_count - 1))
+                .map(String::as_str),
+            Some(format!("value-{}", layer_count - 1).as_str())
+        );
+        assert_eq!(context.get("$mark.local.999.entry"), None);
+
+        let mut block_count = 0;
+        let mut cursor = Some(context.as_ref());
+        while let Some(bindings) = cursor {
+            block_count += 1;
+            cursor = bindings.parent.as_deref();
+        }
+        assert!(block_count <= layer_count / usize::from(REPOSITORY_BINDING_BLOCK_LAYERS) + 1);
+    }
+
+    #[test]
+    fn prepared_repository_context_budget_stops_before_cloning_the_next_overlay() {
+        let local = BTreeMap::from([(
+            "large".to_owned(),
+            "x".repeat(MAX_PREPARED_GRAMMAR_WALK_BYTES / 8),
+        )]);
+        let mut budget = RepositoryContextBudget::new(true);
+        let mut admitted = 0usize;
+        while budget.charge_rule(&local) {
+            admitted += 1;
+        }
+
+        assert!(budget.exceeded);
+        assert!(admitted < 8);
     }
 
     #[test]

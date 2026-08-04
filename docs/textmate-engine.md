@@ -75,7 +75,8 @@ first-class concern, not a rare escape hatch.
 Syntaxmate exposes engine-independent, exact-scope types rather than product or
 renderer-specific classes:
 
-- `Catalog`, `GrammarRegistry`, `Tokenizer`, and `TokenizerState`;
+- `Catalog`, `GrammarRegistry`, `PreparedLanguage`, `Tokenizer`, and
+  `TokenizerState`;
 - `TokenizedDocument`, `TokenizedLine`, `TokenSpan`, and scope-table references;
 - `CheckpointTable` for bounded viewport replay;
 - `Highlighter`, `HighlightSession`, and caller-supplied `Theme` values;
@@ -340,8 +341,12 @@ Syntaxmate these proven optimizations are deterministic engine behavior rather
 than environment switches. Compiled-pattern, frame, candidate, and dynamic-rule
 caches are tokenizer-owned. Immutable repository-binding walks are shared by
 clones of a grammar registry, while only immutable bundled assets are
-initialized globally. `profile-cold --mode process-cold` constructs a fresh
-tokenizer per iteration.
+initialized globally. Callers that need multiple independent tokenizers can own
+a `PreparedLanguage`, which retains bounded static pattern/candidate preparation
+without sharing mutable tokenizer state. Regex preparation has a 64 MiB charged
+ceiling; candidate/scanner/injection preparation has a combined 12 MiB charged
+ceiling and 1,024-descriptor limit. `profile-cold --mode process-cold`
+constructs a fresh tokenizer per iteration.
 
 **Reverted experiments — do not retry as-is** (measured deltas in the git
 history of this file):

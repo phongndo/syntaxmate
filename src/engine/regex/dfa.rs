@@ -1465,6 +1465,12 @@ struct StartByteBuckets {
 }
 
 impl StartByteBuckets {
+    fn retained_heap_bytes(&self) -> usize {
+        self.entries
+            .len()
+            .saturating_mul(std::mem::size_of::<usize>())
+    }
+
     fn from_patterns(patterns: &[Arc<super::CompiledPattern>]) -> (Self, Vec<usize>) {
         let mut counts = [0u32; 256];
         let mut unrestricted = Vec::new();
@@ -1583,6 +1589,43 @@ pub struct PatternSetMatcher {
 }
 
 impl PatternSetMatcher {
+    /// Heap allocations uniquely retained by the selector. The shared
+    /// compiled-pattern Arc slice is charged by the owning candidate blueprint.
+    pub(crate) fn retained_heap_bytes(&self) -> usize {
+        let entry_bytes = self
+            .entries
+            .capacity()
+            .saturating_mul(std::mem::size_of::<PatternEntry>());
+        let unrestricted_bytes = self
+            .unrestricted_entries
+            .capacity()
+            .saturating_mul(std::mem::size_of::<usize>());
+        let mask_bytes = self
+            .start_class_masks
+            .capacity()
+            .saturating_mul(std::mem::size_of::<u8>());
+        let skip_gate_size = std::mem::size_of::<Option<super::skip_prefix::SkipGate>>();
+        let skip_gate_bytes = self.skip_gates.capacity().saturating_mul(skip_gate_size);
+        let mut bytes = entry_bytes
+            .saturating_add(unrestricted_bytes)
+            .saturating_add(self.start_byte_entries.retained_heap_bytes())
+            .saturating_add(mask_bytes)
+            .saturating_add(skip_gate_bytes);
+        if let Some(prefilter) = &self.start_prefilter {
+            bytes = bytes.saturating_add(prefilter.retained_heap_bytes());
+        }
+        if let Some(literal_set) = &self.literal_set {
+            bytes = bytes.saturating_add(literal_set.retained_heap_bytes());
+        }
+        if let Some(scanner) = &self.scanner {
+            bytes = bytes.saturating_add(scanner.retained_heap_bytes());
+        }
+        if let Some(frontier) = &self.frontier {
+            bytes = bytes.saturating_add(frontier.retained_heap_bytes());
+        }
+        bytes
+    }
+
     pub fn new(patterns: &[String]) -> Result<Self, AutomataBuildError> {
         let patterns = patterns
             .iter()
@@ -2020,6 +2063,22 @@ impl PatternSetMatcher {
 }
 
 impl CandidateFrontier {
+    fn retained_heap_bytes(&self) -> usize {
+        let mut bytes = self
+            .scanner
+            .retained_heap_bytes()
+            .saturating_add(
+                self.opaque_unrestricted_entries
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<usize>()),
+            )
+            .saturating_add(self.opaque_start_byte_entries.retained_heap_bytes());
+        if let Some(prefilter) = &self.opaque_start_prefilter {
+            bytes = bytes.saturating_add(prefilter.retained_heap_bytes());
+        }
+        bytes
+    }
+
     fn new(
         scanner: Scanner,
         opaque_entries: &[usize],
@@ -2063,6 +2122,12 @@ impl CandidateFrontier {
 }
 
 impl StartBytePrefilter {
+    fn retained_heap_bytes(&self) -> usize {
+        self.bytes
+            .capacity()
+            .saturating_mul(std::mem::size_of::<u8>())
+    }
+
     fn from_buckets(
         unrestricted_entries: &[usize],
         start_byte_entries: &StartByteBuckets,

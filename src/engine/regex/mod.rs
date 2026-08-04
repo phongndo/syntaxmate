@@ -293,6 +293,25 @@ impl CompiledPattern {
         self.id
     }
 
+    /// Conservative charge used when admitting a compiled matcher to a
+    /// long-lived prepared-language cache. The parser, native matcher,
+    /// prefilters, and lazily compiled capture program all retain structures
+    /// proportional to the source. Charging their potential expansion up
+    /// front keeps later capture-program initialization inside the same bound.
+    pub(crate) fn prepared_retained_bytes(&self) -> usize {
+        const FIXED_ALLOCATION_CHARGE: usize = 16 * 1024;
+        const SOURCE_EXPANSION_CHARGE: usize = 256;
+
+        std::mem::size_of::<Self>()
+            .saturating_add(FIXED_ALLOCATION_CHARGE)
+            .saturating_add(self.source.len().saturating_mul(SOURCE_EXPANSION_CHARGE))
+            .saturating_add(
+                self.live_captures
+                    .len()
+                    .saturating_mul(std::mem::size_of::<u32>()),
+            )
+    }
+
     pub fn matcher(&self) -> &RegexMatcher {
         &self.matcher
     }
@@ -323,6 +342,24 @@ impl CompiledPattern {
 
     pub(crate) fn needs_capture_replay(&self) -> bool {
         !self.live_captures.is_empty()
+    }
+
+    pub(crate) fn has_live_captures(&self, requested: Option<&[u32]>) -> bool {
+        match requested {
+            Some(requested) => self.live_captures.as_ref() == requested,
+            None => {
+                self.live_captures.len() == self.parsed.capture_count as usize + 1
+                    && self
+                        .live_captures
+                        .iter()
+                        .copied()
+                        .eq(0..=self.parsed.capture_count)
+            }
+        }
+    }
+
+    pub(crate) fn has_same_live_captures(&self, other: &Self) -> bool {
+        self.live_captures == other.live_captures
     }
 
     pub(crate) fn find_live_captures_at(

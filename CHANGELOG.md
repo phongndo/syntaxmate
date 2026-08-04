@@ -12,6 +12,9 @@
   unions, sharing interned scopes and capture specs, and compacting regex tries.
 - Store deterministic versioned compiled-grammar IR in the bundled asset,
   removing runtime JSON parsing and rule compilation for bundled languages.
+- Add caller-owned `PreparedLanguage` snapshots for constructing independent
+  tokenizers while reusing count- and byte-bounded immutable grammar and regex
+  preparation.
 
 ## 0.1.0 - 2026-08-01
 

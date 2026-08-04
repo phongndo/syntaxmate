@@ -49,11 +49,26 @@ The raw report is `target/profile-item1-comparison.json`.
 
 ### 2. Explicit prepared-language API
 
-- [ ] Add a caller-owned `PreparedLanguage` that can construct independent
+- [x] Add a caller-owned `PreparedLanguage` that can construct independent
       tokenizers while retaining immutable parsed regexes, repository contexts,
       compiled patterns, and static candidate descriptors.
-- [ ] Keep hidden process-global mutable caches out of the runtime.
-- [ ] Bound and report retained memory.
+- [x] Keep hidden process-global mutable caches out of the runtime.
+- [x] Bound and report retained memory.
+
+Result: for one preparation plus four independent first-tokenization sessions,
+seven alternating release samples improved Markdown by 2.52x, C++ by 1.75x,
+Rust by 1.31x, and HTML by 1.96x. Reusing an already prepared value improved
+the session-only phase by 5.23x, 1.95x, 1.89x, and 2.12x, respectively. Total
+allocation calls fell 64.1%, 57.9%, 26.3%, and 57.8%; cumulative bytes fell
+66.7%, 60.2%, 31.4%, and 57.3%. Process-retained totals were 21.48, 21.97,
+4.16, and 13.60 MiB, explicitly owned by the prepared value plus the embedded
+bundle. Static regex retention is bounded by each closure's exact slot count
+and a 64 MiB conservative byte charge. Reusable static candidate descriptors
+have a 1,024-entry ceiling and share a 12 MiB charge with scanners and canonical
+injection outcomes. The direct path stayed within 2.3% elapsed time and 0.4%
+allocation calls, with exact token/scope-digest parity and unchanged warm
+allocation counts. Raw reports are `target/profile-item2-comparison.json` and
+`target/profile-item2-alloc.json`.
 
 ### 3. Dense repository-context tables
 

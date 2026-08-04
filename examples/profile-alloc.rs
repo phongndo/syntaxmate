@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use syntaxmate::{Highlighter, Tokenizer, TokenizerOptions};
+use syntaxmate::{Highlighter, PreparedLanguage, Tokenizer, TokenizerOptions};
 
 struct CountingAllocator;
 
@@ -156,6 +156,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         black_box(output);
     }
     report("highlight-lines", before, started, spans, source.len());
+
+    let before = Stats::now();
+    let started = Instant::now();
+    let prepared = PreparedLanguage::for_bundled_language(&language)?;
+    report(
+        "prepare-language",
+        before,
+        started,
+        prepared.stats().compiled_pattern_count(),
+        source.len(),
+    );
+
+    let before = Stats::now();
+    let started = Instant::now();
+    let mut tokenizer = prepared.tokenizer(TokenizerOptions::default());
+    report("prepared-new", before, started, 1, source.len());
+
+    let before = Stats::now();
+    let started = Instant::now();
+    let document = tokenizer.tokenize(black_box(&source));
+    let tokens = document
+        .lines()
+        .iter()
+        .map(|line| line.spans().len())
+        .sum::<usize>();
+    black_box(&document);
+    report("prepared-first", before, started, tokens, source.len());
+    drop(document);
+    drop(tokenizer);
+
+    let before = Stats::now();
+    let started = Instant::now();
+    let mut tokenizer = prepared.tokenizer(TokenizerOptions::default());
+    report("prepared-new-warm", before, started, 1, source.len());
+
+    let before = Stats::now();
+    let started = Instant::now();
+    let document = tokenizer.tokenize(black_box(&source));
+    let tokens = document
+        .lines()
+        .iter()
+        .map(|line| line.spans().len())
+        .sum::<usize>();
+    black_box(&document);
+    report("prepared-reuse", before, started, tokens, source.len());
 
     Ok(())
 }
