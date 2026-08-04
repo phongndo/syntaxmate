@@ -1,0 +1,13 @@
+{
+  "name": "syntaxmate-competitive-benchmarks",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "shiki": "4.4.1",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  }
+}

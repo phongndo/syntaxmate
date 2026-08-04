@@ -28,6 +28,7 @@ cargo fmt --all --check
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo check --lib --no-default-features --locked
 python3 tools/check-language-docs.py --check
+python3 tools/test_competitive_benchmarks.py
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
 cargo test --all-features --locked
 cargo run --bin syntaxmate-bundle --features bundle-tools --locked -- --check

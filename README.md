@@ -12,6 +12,7 @@ ANSI output, and no native Oniguruma dependency.
 
 [**Documentation**](https://docs.rs/syntaxmate) ·
 [**Examples**](examples) ·
+[**Benchmarks**](benchmarks/competitors/README.md) ·
 [**Languages**](docs/language-status.md) ·
 [**Compatibility**](docs/compatibility.md)
 

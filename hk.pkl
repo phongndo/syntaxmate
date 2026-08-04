@@ -20,12 +20,29 @@ local languageDocs = new Mapping<String, Step | Group> {
   }
 }
 
+local competitiveBenchmarkGlobs = List(
+  ".github/workflows/ci.yml",
+  "benchmarks/competitors/**",
+  "examples/profile-engine.rs",
+  "examples/profile-product.rs",
+  "tools/run-competitive-benchmarks.py",
+  "tools/test_competitive_benchmarks.py",
+)
+
+local checks = new Mapping<String, Step | Group> {
+  ...languageDocs
+  ["competitive-benchmarks"] {
+    glob = competitiveBenchmarkGlobs
+    check = "python3 tools/test_competitive_benchmarks.py"
+  }
+}
+
 hooks {
   ["pre-commit"] {
     stash = "git"
-    steps = languageDocs
+    steps = checks
   }
 
-  ["pre-push"] { steps = languageDocs }
-  ["check"] { steps = languageDocs }
+  ["pre-push"] { steps = checks }
+  ["check"] { steps = checks }
 }

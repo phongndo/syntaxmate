@@ -51,10 +51,11 @@ node tools/textmate-bench.mjs \
 
 Use `--mode same-driver --iterations 3` for repeated passes after one setup.
 
-## Reproducible engine comparison
+## Pinned-oracle engine smoke comparison
 
-Compare Syntaxmate and the pinned VS Code implementation on identical grammar
-assets and source fixtures, excluding each driver's setup phase:
+Compare Syntaxmate and the compatibility oracle's pinned VS Code implementation
+on identical grammar assets and source fixtures, excluding each driver's setup
+phase:
 
 ```sh
 npm ci --prefix tools/golden-oracle
@@ -65,12 +66,22 @@ RUSTUP_TOOLCHAIN=1.88.0 python3 tools/compare-textmate-performance.py \
 
 The committed reference result is `engine-comparison.json`; use a `target/`
 path for ad-hoc runs and replace the reference only after reviewing the complete
-environment and per-language output. The report records raw elapsed time,
-processed bytes, token counts, and the runtime environment. Token counts may
-differ and are never treated as a speed score. Syntect uses Sublime syntax
-definitions rather than the same TextMate JSON assets, so it is intentionally
-excluded from this like-for-like report; any separate Syntect measurement must
-be labeled as a different-grammar comparison.
+environment and per-language output. This is a focused development smoke test,
+not the publication benchmark.
+
+The separate-process first/steady/replay engine benchmark and the end-to-end
+Syntaxmate/Shiki/Syntect comparison live in
+[`../competitors`](../competitors/README.md). That runner uses current pinned
+competitor versions, seven rotating-order process samples, p50/p95 reporting,
+and normalized scope-stream digest equality for the engine track.
+
+Both runners account for elapsed time, processed bytes, token counts, and the
+runtime environment; the publication runner can retain every raw sample with
+`--include-samples`. Token counts may differ and are never treated as a speed
+score. Syntect uses Sublime syntax definitions rather than the same TextMate
+JSON assets, so it is intentionally excluded from like-for-like engine reports;
+its end-to-end measurement is labeled as a different-grammar product
+comparison.
 
 ## Quality oracle
 

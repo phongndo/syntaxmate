@@ -2,6 +2,8 @@
 /fuzz/target
 /fuzz/artifacts
 /tools/golden-oracle/node_modules
+/benchmarks/competitors/node_modules
+/benchmarks/competitors/syntect-driver/target
 .DS_Store
 *.profraw
 __pycache__/

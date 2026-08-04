@@ -1,0 +1,1579 @@
+{
+  "aggregates": {
+    "end-to-end": {
+      "cold": {
+        "shiki": {
+          "aggregateMegabytesPerSecond": 0.046,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 142.457,
+          "syntaxmateSpeedup": 12.738,
+          "totalSourceBytes": 59553
+        },
+        "syntaxmate": {
+          "aggregateMegabytesPerSecond": 0.592,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 11.184,
+          "syntaxmateSpeedup": 1.0,
+          "totalSourceBytes": 59553
+        },
+        "syntect": {
+          "aggregateMegabytesPerSecond": 0.726,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 9.118,
+          "syntaxmateSpeedup": 0.815,
+          "totalSourceBytes": 59553
+        }
+      },
+      "replay": {
+        "shiki": {
+          "aggregateMegabytesPerSecond": 0.712,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 9.299,
+          "syntaxmateSpeedup": 27.123,
+          "totalSourceBytes": 59553
+        },
+        "syntaxmate": {
+          "aggregateMegabytesPerSecond": 19.3,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 0.343,
+          "syntaxmateSpeedup": 1.0,
+          "totalSourceBytes": 59553
+        },
+        "syntect": {
+          "aggregateMegabytesPerSecond": 2.246,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 2.946,
+          "syntaxmateSpeedup": 8.594,
+          "totalSourceBytes": 59553
+        }
+      },
+      "steady": {
+        "shiki": {
+          "aggregateMegabytesPerSecond": 0.714,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 9.271,
+          "syntaxmateSpeedup": 5.499,
+          "totalSourceBytes": 59553
+        },
+        "syntaxmate": {
+          "aggregateMegabytesPerSecond": 3.925,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 1.686,
+          "syntaxmateSpeedup": 1.0,
+          "totalSourceBytes": 59553
+        },
+        "syntect": {
+          "aggregateMegabytesPerSecond": 2.253,
+          "corpora": 9,
+          "meanLatencyMilliseconds": 2.937,
+          "syntaxmateSpeedup": 1.742,
+          "totalSourceBytes": 59553
+        }
+      }
+    },
+    "engine": {
+      "first": {
+        "syntaxmate": {
+          "aggregateMegabytesPerSecond": 1.261,
+          "corpora": 10,
+          "meanLatencyMilliseconds": 5.19,
+          "syntaxmateSpeedup": 1.0,
+          "totalSourceBytes": 65456
+        },
+        "vscode-textmate": {
+          "aggregateMegabytesPerSecond": 0.082,
+          "corpora": 10,
+          "meanLatencyMilliseconds": 79.494,
+          "syntaxmateSpeedup": 15.317,
+          "totalSourceBytes": 65456
+        }
+      },
+      "replay": {
+        "syntaxmate": {
+          "aggregateMegabytesPerSecond": 198.085,
+          "corpora": 10,
+          "meanLatencyMilliseconds": 0.033,
+          "syntaxmateSpeedup": 1.0,
+          "totalSourceBytes": 65456
+        },
+        "vscode-textmate": {
+          "aggregateMegabytesPerSecond": 0.821,
+          "corpora": 10,
+          "meanLatencyMilliseconds": 7.976,
+          "syntaxmateSpeedup": 241.366,
+          "totalSourceBytes": 65456
+        }
+      },
+      "steady": {
+        "syntaxmate": {
+          "aggregateMegabytesPerSecond": 4.707,
+          "corpora": 10,
+          "meanLatencyMilliseconds": 1.391,
+          "syntaxmateSpeedup": 1.0,
+          "totalSourceBytes": 65456
+        },
+        "vscode-textmate": {
+          "aggregateMegabytesPerSecond": 0.83,
+          "corpora": 10,
+          "meanLatencyMilliseconds": 7.885,
+          "syntaxmateSpeedup": 5.67,
+          "totalSourceBytes": 65456
+        }
+      }
+    }
+  },
+  "contracts": {
+    "end-to-end": "same source fixtures through each product's normal bundled syntax, theme, highlighting, and HTML API; process-cold includes process launch; steady disables Syntaxmate's line-result cache; replay retains normal caches",
+    "engine": "identical TextMate grammar assets and source fixtures; grammar setup excluded; normalized UTF-8 scope streams must match; steady disables Syntaxmate's line-result cache; replay retains normal caches"
+  },
+  "environment": {
+    "cpu": "Apple M4 Max",
+    "machine": "arm64",
+    "memoryBytes": 68719476736,
+    "node": "v26.6.0",
+    "platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "python": "3.14.6",
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)"
+  },
+  "languages": {
+    "end-to-end": [
+      "bash",
+      "cpp",
+      "html",
+      "java",
+      "json",
+      "markdown",
+      "python",
+      "rust",
+      "yaml"
+    ],
+    "engine": [
+      "bash",
+      "cpp",
+      "html",
+      "java",
+      "json",
+      "markdown",
+      "python",
+      "rust",
+      "typescript",
+      "yaml"
+    ]
+  },
+  "measuredAt": "2026-08-04",
+  "minimumWarmSampleMilliseconds": 100,
+  "percentileMethod": "nearest-rank",
+  "sampleCount": 987,
+  "samplesPerSet": 7,
+  "schemaVersion": 1,
+  "summaries": {
+    "end-to-end": {
+      "cold": {
+        "bash": {
+          "shiki": {
+            "latencyNanosecondsP50": 92596042,
+            "latencyNanosecondsP95": 95140125,
+            "megabytesPerSecondP50": 0.063,
+            "outputBytes": 41518,
+            "outputDigest": "941c51b078e460a3",
+            "samples": 7,
+            "setupNanosecondsP50": 20725166
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 7508875,
+            "latencyNanosecondsP95": 7709625,
+            "megabytesPerSecondP50": 0.782,
+            "outputBytes": 109083,
+            "outputDigest": "bfa14ffc15c278fd",
+            "samples": 7,
+            "setupNanosecondsP50": 1179000
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 7576000,
+            "latencyNanosecondsP95": 7942000,
+            "megabytesPerSecondP50": 0.775,
+            "outputBytes": 42270,
+            "outputDigest": "1e289422b34e6ab0",
+            "samples": 7,
+            "setupNanosecondsP50": 568542
+          }
+        },
+        "cpp": {
+          "shiki": {
+            "latencyNanosecondsP50": 396529625,
+            "latencyNanosecondsP95": 398356583,
+            "megabytesPerSecondP50": 0.03,
+            "outputBytes": 72553,
+            "outputDigest": "7147fe638143f40a",
+            "samples": 7,
+            "setupNanosecondsP50": 27525667
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 21239917,
+            "latencyNanosecondsP95": 22063041,
+            "megabytesPerSecondP50": 0.556,
+            "outputBytes": 177343,
+            "outputDigest": "0a36eba49e5722f8",
+            "samples": 7,
+            "setupNanosecondsP50": 1170875
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 16035042,
+            "latencyNanosecondsP95": 16224875,
+            "megabytesPerSecondP50": 0.737,
+            "outputBytes": 49874,
+            "outputDigest": "ab34937cb2e4b3a4",
+            "samples": 7,
+            "setupNanosecondsP50": 542584
+          }
+        },
+        "html": {
+          "shiki": {
+            "latencyNanosecondsP50": 258830959,
+            "latencyNanosecondsP95": 260001709,
+            "megabytesPerSecondP50": 0.036,
+            "outputBytes": 73982,
+            "outputDigest": "098b2636963c459c",
+            "samples": 7,
+            "setupNanosecondsP50": 23145958
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 18080250,
+            "latencyNanosecondsP95": 18818458,
+            "megabytesPerSecondP50": 0.522,
+            "outputBytes": 178899,
+            "outputDigest": "0359b139218dd1eb",
+            "samples": 7,
+            "setupNanosecondsP50": 1149083
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 14455042,
+            "latencyNanosecondsP95": 14656417,
+            "megabytesPerSecondP50": 0.652,
+            "outputBytes": 72741,
+            "outputDigest": "11735586d2ed28fc",
+            "samples": 7,
+            "setupNanosecondsP50": 547500
+          }
+        },
+        "java": {
+          "shiki": {
+            "latencyNanosecondsP50": 101466875,
+            "latencyNanosecondsP95": 103159875,
+            "megabytesPerSecondP50": 0.058,
+            "outputBytes": 38513,
+            "outputDigest": "97d28157c693148d",
+            "samples": 7,
+            "setupNanosecondsP50": 20433708
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 6550750,
+            "latencyNanosecondsP95": 7039833,
+            "megabytesPerSecondP50": 0.905,
+            "outputBytes": 103175,
+            "outputDigest": "836549fe45db517b",
+            "samples": 7,
+            "setupNanosecondsP50": 1172667
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 7428583,
+            "latencyNanosecondsP95": 7648416,
+            "megabytesPerSecondP50": 0.798,
+            "outputBytes": 37753,
+            "outputDigest": "831bf768759801a2",
+            "samples": 7,
+            "setupNanosecondsP50": 545917
+          }
+        },
+        "json": {
+          "shiki": {
+            "latencyNanosecondsP50": 77537083,
+            "latencyNanosecondsP95": 78548500,
+            "megabytesPerSecondP50": 0.073,
+            "outputBytes": 35541,
+            "outputDigest": "93e892a90bb72b66",
+            "samples": 7,
+            "setupNanosecondsP50": 19988958
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 4330000,
+            "latencyNanosecondsP95": 4849917,
+            "megabytesPerSecondP50": 1.315,
+            "outputBytes": 105879,
+            "outputDigest": "e7075e0a5275f9da",
+            "samples": 7,
+            "setupNanosecondsP50": 1199417
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 3986542,
+            "latencyNanosecondsP95": 4502292,
+            "megabytesPerSecondP50": 1.428,
+            "outputBytes": 38376,
+            "outputDigest": "41a4ae4161780ac4",
+            "samples": 7,
+            "setupNanosecondsP50": 540416
+          }
+        },
+        "markdown": {
+          "shiki": {
+            "latencyNanosecondsP50": 84985125,
+            "latencyNanosecondsP95": 86871583,
+            "megabytesPerSecondP50": 0.06,
+            "outputBytes": 21465,
+            "outputDigest": "d8e6b7b75512a35d",
+            "samples": 7,
+            "setupNanosecondsP50": 20947625
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 24019042,
+            "latencyNanosecondsP95": 24916292,
+            "megabytesPerSecondP50": 0.212,
+            "outputBytes": 57641,
+            "outputDigest": "7b9aadf06244c466",
+            "samples": 7,
+            "setupNanosecondsP50": 1154417
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 7197291,
+            "latencyNanosecondsP95": 7482500,
+            "megabytesPerSecondP50": 0.707,
+            "outputBytes": 17692,
+            "outputDigest": "7efd065a4564c5b7",
+            "samples": 7,
+            "setupNanosecondsP50": 545208
+          }
+        },
+        "python": {
+          "shiki": {
+            "latencyNanosecondsP50": 99378417,
+            "latencyNanosecondsP95": 100147125,
+            "megabytesPerSecondP50": 0.054,
+            "outputBytes": 38834,
+            "outputDigest": "241ef4ad14f5372b",
+            "samples": 7,
+            "setupNanosecondsP50": 21140667
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 7005834,
+            "latencyNanosecondsP95": 7250375,
+            "megabytesPerSecondP50": 0.769,
+            "outputBytes": 108704,
+            "outputDigest": "c5d69dc42741a0dd",
+            "samples": 7,
+            "setupNanosecondsP50": 1162500
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 11006000,
+            "latencyNanosecondsP95": 11525166,
+            "megabytesPerSecondP50": 0.49,
+            "outputBytes": 37217,
+            "outputDigest": "e58e044e4e7fa2e9",
+            "samples": 7,
+            "setupNanosecondsP50": 544250
+          }
+        },
+        "rust": {
+          "shiki": {
+            "latencyNanosecondsP50": 88083000,
+            "latencyNanosecondsP95": 90235083,
+            "megabytesPerSecondP50": 0.068,
+            "outputBytes": 54616,
+            "outputDigest": "b8b3ec96c0c4ff4f",
+            "samples": 7,
+            "setupNanosecondsP50": 20373542
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 5145250,
+            "latencyNanosecondsP95": 5902500,
+            "megabytesPerSecondP50": 1.157,
+            "outputBytes": 136493,
+            "outputDigest": "05dcb0b33478c329",
+            "samples": 7,
+            "setupNanosecondsP50": 1174542
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 8593375,
+            "latencyNanosecondsP95": 8841708,
+            "megabytesPerSecondP50": 0.693,
+            "outputBytes": 32720,
+            "outputDigest": "e3332af507af58be",
+            "samples": 7,
+            "setupNanosecondsP50": 545417
+          }
+        },
+        "yaml": {
+          "shiki": {
+            "latencyNanosecondsP50": 82709958,
+            "latencyNanosecondsP95": 85872875,
+            "megabytesPerSecondP50": 0.053,
+            "outputBytes": 28717,
+            "outputDigest": "849148478e2d7894",
+            "samples": 7,
+            "setupNanosecondsP50": 20448708
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 6772583,
+            "latencyNanosecondsP95": 7143917,
+            "megabytesPerSecondP50": 0.648,
+            "outputBytes": 68921,
+            "outputDigest": "8fade3ac897a918b",
+            "samples": 7,
+            "setupNanosecondsP50": 1220250
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 5787791,
+            "latencyNanosecondsP95": 6000584,
+            "megabytesPerSecondP50": 0.758,
+            "outputBytes": 29125,
+            "outputDigest": "9e47965ed9b5a9bb",
+            "samples": 7,
+            "setupNanosecondsP50": 547250
+          }
+        }
+      },
+      "replay": {
+        "bash": {
+          "shiki": {
+            "latencyNanosecondsP50": 4825529,
+            "latencyNanosecondsP95": 4877538,
+            "megabytesPerSecondP50": 1.217,
+            "outputBytes": 41518,
+            "outputDigest": "941c51b078e460a3",
+            "samples": 7,
+            "setupNanosecondsP50": 20724917
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 362131,
+            "latencyNanosecondsP95": 366130,
+            "megabytesPerSecondP50": 16.212,
+            "outputBytes": 109083,
+            "outputDigest": "bfa14ffc15c278fd",
+            "samples": 7,
+            "setupNanosecondsP50": 1174291
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2559574,
+            "latencyNanosecondsP95": 2676451,
+            "megabytesPerSecondP50": 2.294,
+            "outputBytes": 42270,
+            "outputDigest": "1e289422b34e6ab0",
+            "samples": 7,
+            "setupNanosecondsP50": 552666
+          }
+        },
+        "cpp": {
+          "shiki": {
+            "latencyNanosecondsP50": 23574547,
+            "latencyNanosecondsP95": 24141448,
+            "megabytesPerSecondP50": 0.501,
+            "outputBytes": 72553,
+            "outputDigest": "7147fe638143f40a",
+            "samples": 7,
+            "setupNanosecondsP50": 27381458
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 596451,
+            "latencyNanosecondsP95": 603546,
+            "megabytesPerSecondP50": 19.807,
+            "outputBytes": 177343,
+            "outputDigest": "0a36eba49e5722f8",
+            "samples": 7,
+            "setupNanosecondsP50": 1165333
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 6750555,
+            "latencyNanosecondsP95": 6821300,
+            "megabytesPerSecondP50": 1.75,
+            "outputBytes": 49874,
+            "outputDigest": "ab34937cb2e4b3a4",
+            "samples": 7,
+            "setupNanosecondsP50": 556666
+          }
+        },
+        "html": {
+          "shiki": {
+            "latencyNanosecondsP50": 34512948,
+            "latencyNanosecondsP95": 34872938,
+            "megabytesPerSecondP50": 0.273,
+            "outputBytes": 73982,
+            "outputDigest": "098b2636963c459c",
+            "samples": 7,
+            "setupNanosecondsP50": 23101166
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 641733,
+            "latencyNanosecondsP95": 645714,
+            "megabytesPerSecondP50": 14.696,
+            "outputBytes": 178899,
+            "outputDigest": "0359b139218dd1eb",
+            "samples": 7,
+            "setupNanosecondsP50": 1177250
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 3030104,
+            "latencyNanosecondsP95": 3052637,
+            "megabytesPerSecondP50": 3.112,
+            "outputBytes": 72741,
+            "outputDigest": "11735586d2ed28fc",
+            "samples": 7,
+            "setupNanosecondsP50": 546125
+          }
+        },
+        "java": {
+          "shiki": {
+            "latencyNanosecondsP50": 4464669,
+            "latencyNanosecondsP95": 4538096,
+            "megabytesPerSecondP50": 1.328,
+            "outputBytes": 38513,
+            "outputDigest": "97d28157c693148d",
+            "samples": 7,
+            "setupNanosecondsP50": 20617417
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 305418,
+            "latencyNanosecondsP95": 308252,
+            "megabytesPerSecondP50": 19.406,
+            "outputBytes": 103175,
+            "outputDigest": "836549fe45db517b",
+            "samples": 7,
+            "setupNanosecondsP50": 1149167
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2453566,
+            "latencyNanosecondsP95": 2545803,
+            "megabytesPerSecondP50": 2.416,
+            "outputBytes": 37753,
+            "outputDigest": "831bf768759801a2",
+            "samples": 7,
+            "setupNanosecondsP50": 551542
+          }
+        },
+        "json": {
+          "shiki": {
+            "latencyNanosecondsP50": 1504618,
+            "latencyNanosecondsP95": 1579081,
+            "megabytesPerSecondP50": 3.784,
+            "outputBytes": 35541,
+            "outputDigest": "93e892a90bb72b66",
+            "samples": 7,
+            "setupNanosecondsP50": 20233042
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 250478,
+            "latencyNanosecondsP95": 252722,
+            "megabytesPerSecondP50": 22.733,
+            "outputBytes": 105879,
+            "outputDigest": "e7075e0a5275f9da",
+            "samples": 7,
+            "setupNanosecondsP50": 1159792
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 1016195,
+            "latencyNanosecondsP95": 1052833,
+            "megabytesPerSecondP50": 5.603,
+            "outputBytes": 38376,
+            "outputDigest": "41a4ae4161780ac4",
+            "samples": 7,
+            "setupNanosecondsP50": 551959
+          }
+        },
+        "markdown": {
+          "shiki": {
+            "latencyNanosecondsP50": 1216206,
+            "latencyNanosecondsP95": 1222281,
+            "megabytesPerSecondP50": 4.184,
+            "outputBytes": 21465,
+            "outputDigest": "d8e6b7b75512a35d",
+            "samples": 7,
+            "setupNanosecondsP50": 20761250
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 209100,
+            "latencyNanosecondsP95": 211127,
+            "megabytesPerSecondP50": 24.333,
+            "outputBytes": 57641,
+            "outputDigest": "7b9aadf06244c466",
+            "samples": 7,
+            "setupNanosecondsP50": 1173625
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 1490808,
+            "latencyNanosecondsP95": 1503864,
+            "megabytesPerSecondP50": 3.413,
+            "outputBytes": 17692,
+            "outputDigest": "7efd065a4564c5b7",
+            "samples": 7,
+            "setupNanosecondsP50": 541750
+          }
+        },
+        "python": {
+          "shiki": {
+            "latencyNanosecondsP50": 5628911,
+            "latencyNanosecondsP95": 5751298,
+            "megabytesPerSecondP50": 0.957,
+            "outputBytes": 38834,
+            "outputDigest": "241ef4ad14f5372b",
+            "samples": 7,
+            "setupNanosecondsP50": 21370292
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 238558,
+            "latencyNanosecondsP95": 240705,
+            "megabytesPerSecondP50": 22.59,
+            "outputBytes": 108704,
+            "outputDigest": "c5d69dc42741a0dd",
+            "samples": 7,
+            "setupNanosecondsP50": 1174375
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 4466659,
+            "latencyNanosecondsP95": 4483904,
+            "megabytesPerSecondP50": 1.206,
+            "outputBytes": 37217,
+            "outputDigest": "e58e044e4e7fa2e9",
+            "samples": 7,
+            "setupNanosecondsP50": 550875
+          }
+        },
+        "rust": {
+          "shiki": {
+            "latencyNanosecondsP50": 5911682,
+            "latencyNanosecondsP95": 6261792,
+            "megabytesPerSecondP50": 1.007,
+            "outputBytes": 54616,
+            "outputDigest": "b8b3ec96c0c4ff4f",
+            "samples": 7,
+            "setupNanosecondsP50": 20590292
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 207415,
+            "latencyNanosecondsP95": 211085,
+            "megabytesPerSecondP50": 28.691,
+            "outputBytes": 136493,
+            "outputDigest": "05dcb0b33478c329",
+            "samples": 7,
+            "setupNanosecondsP50": 1171083
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2491873,
+            "latencyNanosecondsP95": 2558531,
+            "megabytesPerSecondP50": 2.388,
+            "outputBytes": 32720,
+            "outputDigest": "e3332af507af58be",
+            "samples": 7,
+            "setupNanosecondsP50": 549625
+          }
+        },
+        "yaml": {
+          "shiki": {
+            "latencyNanosecondsP50": 2051251,
+            "latencyNanosecondsP95": 2060073,
+            "megabytesPerSecondP50": 2.139,
+            "outputBytes": 28717,
+            "outputDigest": "849148478e2d7894",
+            "samples": 7,
+            "setupNanosecondsP50": 20148042
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 274301,
+            "latencyNanosecondsP95": 277022,
+            "megabytesPerSecondP50": 15.997,
+            "outputBytes": 68921,
+            "outputDigest": "8fade3ac897a918b",
+            "samples": 7,
+            "setupNanosecondsP50": 1194958
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2258213,
+            "latencyNanosecondsP95": 2284033,
+            "megabytesPerSecondP50": 1.943,
+            "outputBytes": 29125,
+            "outputDigest": "9e47965ed9b5a9bb",
+            "samples": 7,
+            "setupNanosecondsP50": 549875
+          }
+        }
+      },
+      "steady": {
+        "bash": {
+          "shiki": {
+            "latencyNanosecondsP50": 4822003,
+            "latencyNanosecondsP95": 4865579,
+            "megabytesPerSecondP50": 1.218,
+            "outputBytes": 41518,
+            "outputDigest": "941c51b078e460a3",
+            "samples": 7,
+            "setupNanosecondsP50": 20591667
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1500165,
+            "latencyNanosecondsP95": 1523371,
+            "megabytesPerSecondP50": 3.914,
+            "outputBytes": 109083,
+            "outputDigest": "bfa14ffc15c278fd",
+            "samples": 7,
+            "setupNanosecondsP50": 1163792
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2561796,
+            "latencyNanosecondsP95": 2604212,
+            "megabytesPerSecondP50": 2.292,
+            "outputBytes": 42270,
+            "outputDigest": "1e289422b34e6ab0",
+            "samples": 7,
+            "setupNanosecondsP50": 547292
+          }
+        },
+        "cpp": {
+          "shiki": {
+            "latencyNanosecondsP50": 23588000,
+            "latencyNanosecondsP95": 23828182,
+            "megabytesPerSecondP50": 0.501,
+            "outputBytes": 72553,
+            "outputDigest": "7147fe638143f40a",
+            "samples": 7,
+            "setupNanosecondsP50": 27552458
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 4233836,
+            "latencyNanosecondsP95": 4319827,
+            "megabytesPerSecondP50": 2.79,
+            "outputBytes": 177343,
+            "outputDigest": "0a36eba49e5722f8",
+            "samples": 7,
+            "setupNanosecondsP50": 1175291
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 6694479,
+            "latencyNanosecondsP95": 6778716,
+            "megabytesPerSecondP50": 1.765,
+            "outputBytes": 49874,
+            "outputDigest": "ab34937cb2e4b3a4",
+            "samples": 7,
+            "setupNanosecondsP50": 539625
+          }
+        },
+        "html": {
+          "shiki": {
+            "latencyNanosecondsP50": 34325083,
+            "latencyNanosecondsP95": 34681031,
+            "megabytesPerSecondP50": 0.275,
+            "outputBytes": 73982,
+            "outputDigest": "098b2636963c459c",
+            "samples": 7,
+            "setupNanosecondsP50": 23008541
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 3322342,
+            "latencyNanosecondsP95": 3335223,
+            "megabytesPerSecondP50": 2.839,
+            "outputBytes": 178899,
+            "outputDigest": "0359b139218dd1eb",
+            "samples": 7,
+            "setupNanosecondsP50": 1160542
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 3047977,
+            "latencyNanosecondsP95": 3118720,
+            "megabytesPerSecondP50": 3.094,
+            "outputBytes": 72741,
+            "outputDigest": "11735586d2ed28fc",
+            "samples": 7,
+            "setupNanosecondsP50": 551292
+          }
+        },
+        "java": {
+          "shiki": {
+            "latencyNanosecondsP50": 4457721,
+            "latencyNanosecondsP95": 4591685,
+            "megabytesPerSecondP50": 1.33,
+            "outputBytes": 38513,
+            "outputDigest": "97d28157c693148d",
+            "samples": 7,
+            "setupNanosecondsP50": 20653291
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1002934,
+            "latencyNanosecondsP95": 1024226,
+            "megabytesPerSecondP50": 5.91,
+            "outputBytes": 103175,
+            "outputDigest": "836549fe45db517b",
+            "samples": 7,
+            "setupNanosecondsP50": 1181917
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2439277,
+            "latencyNanosecondsP95": 2529209,
+            "megabytesPerSecondP50": 2.43,
+            "outputBytes": 37753,
+            "outputDigest": "831bf768759801a2",
+            "samples": 7,
+            "setupNanosecondsP50": 542416
+          }
+        },
+        "json": {
+          "shiki": {
+            "latencyNanosecondsP50": 1486386,
+            "latencyNanosecondsP95": 1584764,
+            "megabytesPerSecondP50": 3.831,
+            "outputBytes": 35541,
+            "outputDigest": "93e892a90bb72b66",
+            "samples": 7,
+            "setupNanosecondsP50": 19991166
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 498284,
+            "latencyNanosecondsP95": 502985,
+            "megabytesPerSecondP50": 11.427,
+            "outputBytes": 105879,
+            "outputDigest": "e7075e0a5275f9da",
+            "samples": 7,
+            "setupNanosecondsP50": 1167000
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 1019796,
+            "latencyNanosecondsP95": 1053177,
+            "megabytesPerSecondP50": 5.583,
+            "outputBytes": 38376,
+            "outputDigest": "41a4ae4161780ac4",
+            "samples": 7,
+            "setupNanosecondsP50": 546209
+          }
+        },
+        "markdown": {
+          "shiki": {
+            "latencyNanosecondsP50": 1205207,
+            "latencyNanosecondsP95": 1236164,
+            "megabytesPerSecondP50": 4.222,
+            "outputBytes": 21465,
+            "outputDigest": "d8e6b7b75512a35d",
+            "samples": 7,
+            "setupNanosecondsP50": 20668125
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1546534,
+            "latencyNanosecondsP95": 1555145,
+            "megabytesPerSecondP50": 3.29,
+            "outputBytes": 57641,
+            "outputDigest": "7b9aadf06244c466",
+            "samples": 7,
+            "setupNanosecondsP50": 1174625
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 1496685,
+            "latencyNanosecondsP95": 1508631,
+            "megabytesPerSecondP50": 3.4,
+            "outputBytes": 17692,
+            "outputDigest": "7efd065a4564c5b7",
+            "samples": 7,
+            "setupNanosecondsP50": 549041
+          }
+        },
+        "python": {
+          "shiki": {
+            "latencyNanosecondsP50": 5564986,
+            "latencyNanosecondsP95": 5718352,
+            "megabytesPerSecondP50": 0.968,
+            "outputBytes": 38834,
+            "outputDigest": "241ef4ad14f5372b",
+            "samples": 7,
+            "setupNanosecondsP50": 21114208
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 985631,
+            "latencyNanosecondsP95": 990791,
+            "megabytesPerSecondP50": 5.468,
+            "outputBytes": 108704,
+            "outputDigest": "c5d69dc42741a0dd",
+            "samples": 7,
+            "setupNanosecondsP50": 1167417
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 4438432,
+            "latencyNanosecondsP95": 4519806,
+            "megabytesPerSecondP50": 1.214,
+            "outputBytes": 37217,
+            "outputDigest": "e58e044e4e7fa2e9",
+            "samples": 7,
+            "setupNanosecondsP50": 550250
+          }
+        },
+        "rust": {
+          "shiki": {
+            "latencyNanosecondsP50": 5951040,
+            "latencyNanosecondsP95": 6006643,
+            "megabytesPerSecondP50": 1.0,
+            "outputBytes": 54616,
+            "outputDigest": "b8b3ec96c0c4ff4f",
+            "samples": 7,
+            "setupNanosecondsP50": 20302792
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 677859,
+            "latencyNanosecondsP95": 682144,
+            "megabytesPerSecondP50": 8.779,
+            "outputBytes": 136493,
+            "outputDigest": "05dcb0b33478c329",
+            "samples": 7,
+            "setupNanosecondsP50": 1165250
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2471507,
+            "latencyNanosecondsP95": 2534381,
+            "megabytesPerSecondP50": 2.408,
+            "outputBytes": 32720,
+            "outputDigest": "e3332af507af58be",
+            "samples": 7,
+            "setupNanosecondsP50": 550750
+          }
+        },
+        "yaml": {
+          "shiki": {
+            "latencyNanosecondsP50": 2035686,
+            "latencyNanosecondsP95": 2057819,
+            "megabytesPerSecondP50": 2.156,
+            "outputBytes": 28717,
+            "outputDigest": "849148478e2d7894",
+            "samples": 7,
+            "setupNanosecondsP50": 20279917
+          },
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1406384,
+            "latencyNanosecondsP95": 1471538,
+            "megabytesPerSecondP50": 3.12,
+            "outputBytes": 68921,
+            "outputDigest": "8fade3ac897a918b",
+            "samples": 7,
+            "setupNanosecondsP50": 1175333
+          },
+          "syntect": {
+            "latencyNanosecondsP50": 2265419,
+            "latencyNanosecondsP95": 2280730,
+            "megabytesPerSecondP50": 1.937,
+            "outputBytes": 29125,
+            "outputDigest": "9e47965ed9b5a9bb",
+            "samples": 7,
+            "setupNanosecondsP50": 547833
+          }
+        }
+      }
+    },
+    "engine": {
+      "first": {
+        "bash": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 2615208,
+            "latencyNanosecondsP95": 2657875,
+            "megabytesPerSecondP50": 2.245,
+            "samples": 7,
+            "scopeDigest": "b7d9ad721705be42",
+            "setupNanosecondsP50": 23540000,
+            "tokens": 1669
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 24814000,
+            "latencyNanosecondsP95": 24963125,
+            "megabytesPerSecondP50": 0.237,
+            "samples": 7,
+            "scopeDigest": "b7d9ad721705be42",
+            "setupNanosecondsP50": 48899875,
+            "tokens": 1840
+          }
+        },
+        "cpp": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 13765250,
+            "latencyNanosecondsP95": 13922959,
+            "megabytesPerSecondP50": 0.858,
+            "samples": 7,
+            "scopeDigest": "a3b0b5864339f72b",
+            "setupNanosecondsP50": 26921500,
+            "tokens": 2697
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 196333541,
+            "latencyNanosecondsP95": 200155334,
+            "megabytesPerSecondP50": 0.06,
+            "samples": 7,
+            "scopeDigest": "a3b0b5864339f72b",
+            "setupNanosecondsP50": 49820583,
+            "tokens": 2709
+          }
+        },
+        "html": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 11466500,
+            "latencyNanosecondsP95": 11599458,
+            "megabytesPerSecondP50": 0.822,
+            "samples": 7,
+            "scopeDigest": "ef09ab66029d62b1",
+            "setupNanosecondsP50": 24645875,
+            "tokens": 2726
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 175396375,
+            "latencyNanosecondsP95": 177569250,
+            "megabytesPerSecondP50": 0.054,
+            "samples": 7,
+            "scopeDigest": "ef09ab66029d62b1",
+            "setupNanosecondsP50": 49062000,
+            "tokens": 2733
+          }
+        },
+        "java": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 2153667,
+            "latencyNanosecondsP95": 2174417,
+            "megabytesPerSecondP50": 2.752,
+            "samples": 7,
+            "scopeDigest": "0731c50b0edce42a",
+            "setupNanosecondsP50": 23848417,
+            "tokens": 1587
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 33272250,
+            "latencyNanosecondsP95": 34312334,
+            "megabytesPerSecondP50": 0.178,
+            "samples": 7,
+            "scopeDigest": "0731c50b0edce42a",
+            "setupNanosecondsP50": 48881208,
+            "tokens": 1618
+          }
+        },
+        "json": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 520375,
+            "latencyNanosecondsP95": 546625,
+            "megabytesPerSecondP50": 10.942,
+            "samples": 7,
+            "scopeDigest": "34d9ae2bd40cd60d",
+            "setupNanosecondsP50": 23574375,
+            "tokens": 1603
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 8940625,
+            "latencyNanosecondsP95": 9136209,
+            "megabytesPerSecondP50": 0.637,
+            "samples": 7,
+            "scopeDigest": "34d9ae2bd40cd60d",
+            "setupNanosecondsP50": 48477750,
+            "tokens": 1606
+          }
+        },
+        "markdown": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 8617875,
+            "latencyNanosecondsP95": 8743084,
+            "megabytesPerSecondP50": 0.59,
+            "samples": 7,
+            "scopeDigest": "fc676ac210e1f17d",
+            "setupNanosecondsP50": 40491792,
+            "tokens": 831
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 142468458,
+            "latencyNanosecondsP95": 143898042,
+            "megabytesPerSecondP50": 0.036,
+            "samples": 7,
+            "scopeDigest": "fc676ac210e1f17d",
+            "setupNanosecondsP50": 52264542,
+            "tokens": 935
+          }
+        },
+        "python": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 2418625,
+            "latencyNanosecondsP95": 2463958,
+            "megabytesPerSecondP50": 2.228,
+            "samples": 7,
+            "scopeDigest": "010207ca5ca86259",
+            "setupNanosecondsP50": 24526458,
+            "tokens": 1680
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 30682417,
+            "latencyNanosecondsP95": 31334041,
+            "megabytesPerSecondP50": 0.176,
+            "samples": 7,
+            "scopeDigest": "010207ca5ca86259",
+            "setupNanosecondsP50": 48868542,
+            "tokens": 1877
+          }
+        },
+        "rust": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1159458,
+            "latencyNanosecondsP95": 1189875,
+            "megabytesPerSecondP50": 5.133,
+            "samples": 7,
+            "scopeDigest": "dab10ae7c50de76a",
+            "setupNanosecondsP50": 24084000,
+            "tokens": 2125
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 20547584,
+            "latencyNanosecondsP95": 20796333,
+            "megabytesPerSecondP50": 0.29,
+            "samples": 7,
+            "scopeDigest": "dab10ae7c50de76a",
+            "setupNanosecondsP50": 48848125,
+            "tokens": 2183
+          }
+        },
+        "typescript": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 6874834,
+            "latencyNanosecondsP95": 6917917,
+            "megabytesPerSecondP50": 0.859,
+            "samples": 7,
+            "scopeDigest": "e74ab807c7e010fd",
+            "setupNanosecondsP50": 24657167,
+            "tokens": 2092
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 137759958,
+            "latencyNanosecondsP95": 138888750,
+            "megabytesPerSecondP50": 0.043,
+            "samples": 7,
+            "scopeDigest": "e74ab807c7e010fd",
+            "setupNanosecondsP50": 49264542,
+            "tokens": 2150
+          }
+        },
+        "yaml": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 2308667,
+            "latencyNanosecondsP95": 2352792,
+            "megabytesPerSecondP50": 1.901,
+            "samples": 7,
+            "scopeDigest": "c31783601001844b",
+            "setupNanosecondsP50": 24470833,
+            "tokens": 1053
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 24721125,
+            "latencyNanosecondsP95": 25259834,
+            "megabytesPerSecondP50": 0.178,
+            "samples": 7,
+            "scopeDigest": "c31783601001844b",
+            "setupNanosecondsP50": 48866708,
+            "tokens": 1061
+          }
+        }
+      },
+      "replay": {
+        "bash": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 29344,
+            "latencyNanosecondsP95": 29546,
+            "megabytesPerSecondP50": 200.072,
+            "samples": 7,
+            "scopeDigest": "b7d9ad721705be42",
+            "setupNanosecondsP50": 24800875,
+            "tokens": 1669
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 3973350,
+            "latencyNanosecondsP95": 4012172,
+            "megabytesPerSecondP50": 1.478,
+            "samples": 7,
+            "scopeDigest": "b7d9ad721705be42",
+            "setupNanosecondsP50": 48751250,
+            "tokens": 1840
+          }
+        },
+        "cpp": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 49335,
+            "latencyNanosecondsP95": 49854,
+            "megabytesPerSecondP50": 239.466,
+            "samples": 7,
+            "scopeDigest": "a3b0b5864339f72b",
+            "setupNanosecondsP50": 28061584,
+            "tokens": 2697
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 16540641,
+            "latencyNanosecondsP95": 16608838,
+            "megabytesPerSecondP50": 0.714,
+            "samples": 7,
+            "scopeDigest": "a3b0b5864339f72b",
+            "setupNanosecondsP50": 50089500,
+            "tokens": 2709
+          }
+        },
+        "html": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 43790,
+            "latencyNanosecondsP95": 44118,
+            "megabytesPerSecondP50": 215.367,
+            "samples": 7,
+            "scopeDigest": "ef09ab66029d62b1",
+            "setupNanosecondsP50": 25479417,
+            "tokens": 2726
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 32528719,
+            "latencyNanosecondsP95": 32951010,
+            "megabytesPerSecondP50": 0.29,
+            "samples": 7,
+            "scopeDigest": "ef09ab66029d62b1",
+            "setupNanosecondsP50": 48990959,
+            "tokens": 2733
+          }
+        },
+        "java": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 32128,
+            "latencyNanosecondsP95": 32305,
+            "megabytesPerSecondP50": 184.481,
+            "samples": 7,
+            "scopeDigest": "0731c50b0edce42a",
+            "setupNanosecondsP50": 24764625,
+            "tokens": 1587
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 3615921,
+            "latencyNanosecondsP95": 3641577,
+            "megabytesPerSecondP50": 1.639,
+            "samples": 7,
+            "scopeDigest": "0731c50b0edce42a",
+            "setupNanosecondsP50": 49082833,
+            "tokens": 1618
+          }
+        },
+        "json": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 36702,
+            "latencyNanosecondsP95": 37243,
+            "megabytesPerSecondP50": 155.142,
+            "samples": 7,
+            "scopeDigest": "34d9ae2bd40cd60d",
+            "setupNanosecondsP50": 24305500,
+            "tokens": 1603
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 812058,
+            "latencyNanosecondsP95": 821926,
+            "megabytesPerSecondP50": 7.012,
+            "samples": 7,
+            "scopeDigest": "34d9ae2bd40cd60d",
+            "setupNanosecondsP50": 48616833,
+            "tokens": 1606
+          }
+        },
+        "markdown": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 27469,
+            "latencyNanosecondsP95": 27575,
+            "megabytesPerSecondP50": 185.228,
+            "samples": 7,
+            "scopeDigest": "fc676ac210e1f17d",
+            "setupNanosecondsP50": 42214333,
+            "tokens": 831
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 2604277,
+            "latencyNanosecondsP95": 2647562,
+            "megabytesPerSecondP50": 1.954,
+            "samples": 7,
+            "scopeDigest": "fc676ac210e1f17d",
+            "setupNanosecondsP50": 52330875,
+            "tokens": 935
+          }
+        },
+        "python": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 23808,
+            "latencyNanosecondsP95": 24101,
+            "megabytesPerSecondP50": 226.352,
+            "samples": 7,
+            "scopeDigest": "010207ca5ca86259",
+            "setupNanosecondsP50": 24735833,
+            "tokens": 1680
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 4834866,
+            "latencyNanosecondsP95": 5041548,
+            "megabytesPerSecondP50": 1.115,
+            "samples": 7,
+            "scopeDigest": "010207ca5ca86259",
+            "setupNanosecondsP50": 49124750,
+            "tokens": 1877
+          }
+        },
+        "rust": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 25523,
+            "latencyNanosecondsP95": 25614,
+            "megabytesPerSecondP50": 233.162,
+            "samples": 7,
+            "scopeDigest": "dab10ae7c50de76a",
+            "setupNanosecondsP50": 24742459,
+            "tokens": 2125
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 4857405,
+            "latencyNanosecondsP95": 4968267,
+            "megabytesPerSecondP50": 1.225,
+            "samples": 7,
+            "scopeDigest": "dab10ae7c50de76a",
+            "setupNanosecondsP50": 48885708,
+            "tokens": 2183
+          }
+        },
+        "typescript": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 34801,
+            "latencyNanosecondsP95": 35182,
+            "megabytesPerSecondP50": 169.619,
+            "samples": 7,
+            "scopeDigest": "e74ab807c7e010fd",
+            "setupNanosecondsP50": 24990875,
+            "tokens": 2092
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 5626263,
+            "latencyNanosecondsP95": 5701704,
+            "megabytesPerSecondP50": 1.049,
+            "samples": 7,
+            "scopeDigest": "e74ab807c7e010fd",
+            "setupNanosecondsP50": 49345625,
+            "tokens": 2150
+          }
+        },
+        "yaml": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 27544,
+            "latencyNanosecondsP95": 28088,
+            "megabytesPerSecondP50": 159.311,
+            "samples": 7,
+            "scopeDigest": "c31783601001844b",
+            "setupNanosecondsP50": 24957375,
+            "tokens": 1053
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 4364557,
+            "latencyNanosecondsP95": 4383135,
+            "megabytesPerSecondP50": 1.005,
+            "samples": 7,
+            "scopeDigest": "c31783601001844b",
+            "setupNanosecondsP50": 48705542,
+            "tokens": 1061
+          }
+        }
+      },
+      "steady": {
+        "bash": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1136573,
+            "latencyNanosecondsP95": 1142567,
+            "megabytesPerSecondP50": 5.166,
+            "samples": 7,
+            "scopeDigest": "b7d9ad721705be42",
+            "setupNanosecondsP50": 24126625,
+            "tokens": 1669
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 3912572,
+            "latencyNanosecondsP95": 3978807,
+            "megabytesPerSecondP50": 1.501,
+            "samples": 7,
+            "scopeDigest": "b7d9ad721705be42",
+            "setupNanosecondsP50": 48586083,
+            "tokens": 1840
+          }
+        },
+        "cpp": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 3590702,
+            "latencyNanosecondsP95": 3617258,
+            "megabytesPerSecondP50": 3.29,
+            "samples": 7,
+            "scopeDigest": "a3b0b5864339f72b",
+            "setupNanosecondsP50": 27730708,
+            "tokens": 2697
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 16261672,
+            "latencyNanosecondsP95": 16476458,
+            "megabytesPerSecondP50": 0.726,
+            "samples": 7,
+            "scopeDigest": "a3b0b5864339f72b",
+            "setupNanosecondsP50": 50085000,
+            "tokens": 2709
+          }
+        },
+        "html": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 2662305,
+            "latencyNanosecondsP95": 2691006,
+            "megabytesPerSecondP50": 3.542,
+            "samples": 7,
+            "scopeDigest": "ef09ab66029d62b1",
+            "setupNanosecondsP50": 25338208,
+            "tokens": 2726
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 32245521,
+            "latencyNanosecondsP95": 32439802,
+            "megabytesPerSecondP50": 0.292,
+            "samples": 7,
+            "scopeDigest": "ef09ab66029d62b1",
+            "setupNanosecondsP50": 49025666,
+            "tokens": 2733
+          }
+        },
+        "java": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 712189,
+            "latencyNanosecondsP95": 731623,
+            "megabytesPerSecondP50": 8.322,
+            "samples": 7,
+            "scopeDigest": "0731c50b0edce42a",
+            "setupNanosecondsP50": 24196833,
+            "tokens": 1587
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 3568940,
+            "latencyNanosecondsP95": 3603651,
+            "megabytesPerSecondP50": 1.661,
+            "samples": 7,
+            "scopeDigest": "0731c50b0edce42a",
+            "setupNanosecondsP50": 48686291,
+            "tokens": 1618
+          }
+        },
+        "json": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 278967,
+            "latencyNanosecondsP95": 280267,
+            "megabytesPerSecondP50": 20.411,
+            "samples": 7,
+            "scopeDigest": "34d9ae2bd40cd60d",
+            "setupNanosecondsP50": 24086667,
+            "tokens": 1603
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 805328,
+            "latencyNanosecondsP95": 827707,
+            "megabytesPerSecondP50": 7.07,
+            "samples": 7,
+            "scopeDigest": "34d9ae2bd40cd60d",
+            "setupNanosecondsP50": 48589125,
+            "tokens": 1606
+          }
+        },
+        "markdown": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1354232,
+            "latencyNanosecondsP95": 1369995,
+            "megabytesPerSecondP50": 3.757,
+            "samples": 7,
+            "scopeDigest": "fc676ac210e1f17d",
+            "setupNanosecondsP50": 41291292,
+            "tokens": 831
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 2566299,
+            "latencyNanosecondsP95": 2585187,
+            "megabytesPerSecondP50": 1.983,
+            "samples": 7,
+            "scopeDigest": "fc676ac210e1f17d",
+            "setupNanosecondsP50": 52127458,
+            "tokens": 935
+          }
+        },
+        "python": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 751105,
+            "latencyNanosecondsP95": 759910,
+            "megabytesPerSecondP50": 7.175,
+            "samples": 7,
+            "scopeDigest": "010207ca5ca86259",
+            "setupNanosecondsP50": 24659959,
+            "tokens": 1680
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 4757224,
+            "latencyNanosecondsP95": 4973404,
+            "megabytesPerSecondP50": 1.133,
+            "samples": 7,
+            "scopeDigest": "010207ca5ca86259",
+            "setupNanosecondsP50": 49038416,
+            "tokens": 1877
+          }
+        },
+        "rust": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 490727,
+            "latencyNanosecondsP95": 498590,
+            "megabytesPerSecondP50": 12.127,
+            "samples": 7,
+            "scopeDigest": "dab10ae7c50de76a",
+            "setupNanosecondsP50": 24373250,
+            "tokens": 2125
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 4867891,
+            "latencyNanosecondsP95": 4919223,
+            "megabytesPerSecondP50": 1.223,
+            "samples": 7,
+            "scopeDigest": "dab10ae7c50de76a",
+            "setupNanosecondsP50": 48546750,
+            "tokens": 2183
+          }
+        },
+        "typescript": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1790488,
+            "latencyNanosecondsP95": 1804943,
+            "megabytesPerSecondP50": 3.297,
+            "samples": 7,
+            "scopeDigest": "e74ab807c7e010fd",
+            "setupNanosecondsP50": 24961000,
+            "tokens": 2092
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 5531783,
+            "latencyNanosecondsP95": 5653874,
+            "megabytesPerSecondP50": 1.067,
+            "samples": 7,
+            "scopeDigest": "e74ab807c7e010fd",
+            "setupNanosecondsP50": 49402000,
+            "tokens": 2150
+          }
+        },
+        "yaml": {
+          "syntaxmate": {
+            "latencyNanosecondsP50": 1137733,
+            "latencyNanosecondsP95": 1149848,
+            "megabytesPerSecondP50": 3.857,
+            "samples": 7,
+            "scopeDigest": "c31783601001844b",
+            "setupNanosecondsP50": 25016541,
+            "tokens": 1053
+          },
+          "vscode-textmate": {
+            "latencyNanosecondsP50": 4330924,
+            "latencyNanosecondsP95": 4378133,
+            "megabytesPerSecondP50": 1.013,
+            "samples": 7,
+            "scopeDigest": "c31783601001844b",
+            "setupNanosecondsP50": 48684333,
+            "tokens": 1061
+          }
+        }
+      }
+    }
+  },
+  "versions": {
+    "shiki": "4.4.1",
+    "shikiRegex": "@shikijs/engine-oniguruma@4.4.1 (WebAssembly)",
+    "syntaxmate": "0.1.1",
+    "syntect": "5.3.0",
+    "syntectRegex": "onig (default-onig feature)",
+    "vscode-textmate": "9.3.2",
+    "vscode-textmateRegex": "vscode-oniguruma@2.0.1"
+  }
+}

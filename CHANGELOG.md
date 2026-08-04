@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Add reproducible engine and end-to-end competitive benchmarks against current
+  pinned vscode-textmate, Shiki, and Syntect releases.
+
 ## 0.1.1 - 2026-08-04
 
 - Fix participating capture ranges in the optimized Nix expression-end

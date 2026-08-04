@@ -94,6 +94,16 @@ path = "examples/profile-prepared.rs"
 required-features = ["bundled-grammars"]
 
 [[example]]
+name = "profile-engine"
+path = "examples/profile-engine.rs"
+required-features = ["bundled-grammars"]
+
+[[example]]
+name = "profile-product"
+path = "examples/profile-product.rs"
+required-features = ["bundled-grammars", "bundled-themes", "html"]
+
+[[example]]
 name = "regex-parse"
 path = "examples/regex-parse.rs"
 required-features = ["diagnostics"]
