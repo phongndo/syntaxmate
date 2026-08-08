@@ -34,5 +34,5 @@ jobs:
           tool: cargo-fuzz
       - name: Fuzz ${{ matrix.target }}
         run: >-
-          cargo fuzz run ${{ matrix.target }} --
+          cargo +nightly fuzz run ${{ matrix.target }} --
           -max_total_time=300 -timeout=15 -rss_limit_mb=4096
