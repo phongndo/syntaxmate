@@ -1057,8 +1057,9 @@ impl<'a> Parser<'a> {
                     let digit = next.to_digit(10).unwrap_or(0);
                     // Hostile `\1` + long digit runs must not overflow; stop
                     // absorbing digits once the backref index no longer fits.
-                    let Some(next_number) =
-                        number.checked_mul(10).and_then(|value| value.checked_add(digit))
+                    let Some(next_number) = number
+                        .checked_mul(10)
+                        .and_then(|value| value.checked_add(digit))
                     else {
                         break;
                     };
@@ -1509,7 +1510,10 @@ mod tests {
         let parsed = parse(r"\5555555555555555");
         assert!(parsed.features.backreference);
         assert!(
-            matches!(parsed.ast, Ast::Concat(_) | Ast::Backref(Backref::Number(_))),
+            matches!(
+                parsed.ast,
+                Ast::Concat(_) | Ast::Backref(Backref::Number(_))
+            ),
             "oversized digit run must parse without panicking"
         );
         assert!(parse(r"\4294967295").features.backreference);
