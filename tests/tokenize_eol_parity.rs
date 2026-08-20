@@ -58,12 +58,7 @@ fn line_scopes_incremental(
             tokenized
                 .tokens()
                 .iter()
-                .map(|token| {
-                    (
-                        token.range(),
-                        token.scopes().map(str::to_owned).collect(),
-                    )
-                })
+                .map(|token| (token.range(), token.scopes().map(str::to_owned).collect()))
                 .collect()
         })
         .collect()

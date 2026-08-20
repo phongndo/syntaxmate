@@ -38,8 +38,11 @@ jobs:
           tool: cargo-fuzz
       # cargo-binstall ships a musl cargo-fuzz binary that would otherwise default
       # fuzz builds to x86_64-unknown-linux-musl, which is incompatible with ASAN.
+      # PRs smoke-test the GNU target and corpus; schedules keep the long campaign.
       - name: Fuzz ${{ matrix.target }}
+        env:
+          FUZZ_SECONDS: ${{ github.event_name == 'pull_request' && '45' || '300' }}
         run: >-
           cargo +nightly fuzz run --target x86_64-unknown-linux-gnu
           ${{ matrix.target }} --
-          -max_total_time=300 -timeout=15 -rss_limit_mb=4096
+          -max_total_time=${FUZZ_SECONDS} -timeout=15 -rss_limit_mb=4096
