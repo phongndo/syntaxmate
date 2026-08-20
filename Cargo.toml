@@ -73,6 +73,10 @@ name = "custom_theme_session"
 path = "tests/custom_theme_session.rs"
 required-features = ["bundled-grammars"]
 
+[[test]]
+name = "tokenize_eol_parity"
+path = "tests/tokenize_eol_parity.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"
