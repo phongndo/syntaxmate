@@ -47,6 +47,15 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(incremental.tokens(), replay.tokens());
             assert_eq!(state.depth(), replay_state.depth());
 
+            // `tokenize()` leaves the final line without a synthetic newline when
+            // the source has no trailing `\n`, while `tokenize_line()` always
+            // appends one. Skip complete↔incremental parity for that case.
+            let final_line_without_eol =
+                line_index + 1 == source_lines.len() && !source.ends_with('\n');
+            if final_line_without_eol {
+                continue;
+            }
+
             let complete = &document.lines()[line_index];
             let complete_scopes = complete
                 .spans()

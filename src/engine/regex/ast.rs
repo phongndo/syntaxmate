@@ -1054,8 +1054,17 @@ impl<'a> Parser<'a> {
             '1'..='9' => {
                 let mut number = ch.to_digit(10).unwrap_or(0);
                 while let Some(next @ '0'..='9') = self.peek() {
+                    let digit = next.to_digit(10).unwrap_or(0);
+                    // Hostile `\1` + long digit runs must not overflow; stop
+                    // absorbing digits once the backref index no longer fits.
+                    let Some(next_number) = number
+                        .checked_mul(10)
+                        .and_then(|value| value.checked_add(digit))
+                    else {
+                        break;
+                    };
                     self.bump();
-                    number = number * 10 + next.to_digit(10).unwrap_or(0);
+                    number = next_number;
                 }
                 self.features.backreference = true;
                 Ast::Backref(Backref::Number(number))
@@ -1494,6 +1503,21 @@ mod tests {
     fn coalesces_adjacent_literals() {
         let parsed = parse("return");
         assert_eq!(parsed.ast, Ast::Literal("return".to_owned()));
+    }
+
+    #[test]
+    fn oversized_numeric_backref_does_not_overflow() {
+        let parsed = parse(r"\5555555555555555");
+        assert!(parsed.features.backreference);
+        assert!(
+            matches!(
+                parsed.ast,
+                Ast::Concat(_) | Ast::Backref(Backref::Number(_))
+            ),
+            "oversized digit run must parse without panicking"
+        );
+        assert!(parse(r"\4294967295").features.backreference);
+        assert!(matches!(parse(r"(a)\1").ast, Ast::Concat(_)));
     }
 
     #[test]
