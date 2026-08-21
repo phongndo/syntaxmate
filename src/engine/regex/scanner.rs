@@ -475,7 +475,11 @@ fn first_accept(insts: &[Inst], threads: &[Thread]) -> Option<ScanMatch> {
 
 fn char_matches(expected: char, actual: char, flags: RegexFlags) -> bool {
     if flags.case_insensitive {
+        // ASCII stays on the cheap path; non-ASCII literals must fold like
+        // the authoritative engines do, or multi-pattern candidate selection
+        // silently misses matches (e.g. `(?i:café)` vs "CAFÉ").
         expected.eq_ignore_ascii_case(&actual)
+            || super::backtrack::unicode_case_eq(expected, actual)
     } else {
         expected == actual
     }
@@ -765,7 +769,7 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::regex::{FallbackMatcher, ast::parse};
+    use crate::engine::regex::{AnchorContext, FallbackMatcher, Matcher, ast::parse};
 
     fn scanner(patterns: &[&str]) -> Scanner {
         let parsed: Vec<_> = patterns.iter().map(|pattern| parse(pattern)).collect();
@@ -866,6 +870,37 @@ mod tests {
         assert_eq!(find(&["(?:a?)*b"], "aaab").unwrap().end, 4);
         assert_eq!(find(&["^$"], "").unwrap().end, 0);
         assert_eq!(find(&[r"\bword\b"], "a word!").unwrap().start, 2);
+    }
+
+    #[test]
+    fn case_insensitive_literals_fold_non_ascii_scalars() {
+        // Regression: the scanner used ASCII-only folding, so a non-ASCII
+        // `(?i)` literal in a multi-pattern set never selected its candidate
+        // even though the authoritative engines match it.
+        for text in ["CAFÉ x", "café x", "CafÉ x"] {
+            let selected = find(&[r"\b(?:for|while)\b", "(?i:café)"], text)
+                .unwrap_or_else(|| panic!("scanner must select (?i:café) in {text:?}"));
+            assert_eq!(selected.pattern, 1);
+            assert_eq!(selected.start, 0);
+            // "CAFÉ" is five bytes; É encodes as two.
+            assert_eq!(selected.end, 5);
+
+            let reference = FallbackMatcher::new("(?i:café)")
+                .find(text, 0, AnchorContext::line_start())
+                .expect("fallback engine matches");
+            assert_eq!(
+                selected.start..selected.end,
+                reference.start..reference.end,
+                "scanner must agree with the fallback engine on {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn ascii_case_insensitive_literals_still_fold() {
+        let selected = find(&[r"\b(?:for|while)\b", "(?i:cafe)"], "CAFE x").unwrap();
+        assert_eq!(selected.pattern, 1);
+        assert_eq!(selected.start..selected.end, 0..4);
     }
 
     #[test]

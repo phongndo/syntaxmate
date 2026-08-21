@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::ast::{Ast, ParsedRegex, parse};
+use super::ast::{AnchorKind, Ast, ParsedRegex, parse};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
@@ -68,14 +68,24 @@ fn anchor_strategy_and_stripped<'a>(
     pattern: &'a str,
     parsed: &ParsedRegex,
 ) -> (AnchorStrategy, &'a str) {
-    if let Some(rest) = pattern.strip_prefix(r"\A") {
+    // A leading anchor only licenses restricted search positions when every
+    // top-level alternation branch provably starts at that anchor. Mixed
+    // patterns such as `^#|//` or `\Gfoo|bar` have unanchored branches that
+    // must remain searchable from any offset, so they fall back to the VM.
+    if let Some(rest) = pattern.strip_prefix(r"\A")
+        && every_branch_starts_with_anchor(&parsed.ast, AnchorKind::TextStart)
+    {
         return (AnchorStrategy::TextStartGuard, rest);
     }
-    if let Some(rest) = pattern.strip_prefix(r"\G") {
+    if let Some(rest) = pattern.strip_prefix(r"\G")
+        && every_branch_starts_with_anchor(&parsed.ast, AnchorKind::Continuation)
+    {
         // A leading \G can be implemented by an anchored search at ctx.g_pos.
         return (AnchorStrategy::ContinuationGuard, rest);
     }
-    if let Some(rest) = pattern.strip_prefix('^') {
+    if let Some(rest) = pattern.strip_prefix('^')
+        && every_branch_starts_with_anchor(&parsed.ast, AnchorKind::LineStart)
+    {
         return (AnchorStrategy::LineStartGuard, rest);
     }
     if parsed.features.anchor_g || parsed.features.anchor_a || parsed.features.line_anchor {
@@ -84,6 +94,33 @@ fn anchor_strategy_and_stripped<'a>(
         return (AnchorStrategy::Fallback, pattern);
     }
     (AnchorStrategy::None, pattern)
+}
+
+/// Whether the whole expression can only match at the given anchor position:
+/// true when there is a single branch starting with the anchor, or when every
+/// alternation branch does. Groups, inline flag scopes, and zero-width
+/// lookarounds are transparent; anything else (notably empty branches and
+/// leading literals) is conservatively rejected.
+fn every_branch_starts_with_anchor(ast: &Ast, anchor: AnchorKind) -> bool {
+    match ast {
+        Ast::Alternation(branches) => branches
+            .iter()
+            .all(|branch| branch_starts_with_anchor(branch, anchor)),
+        ast => branch_starts_with_anchor(ast, anchor),
+    }
+}
+
+fn branch_starts_with_anchor(node: &Ast, anchor: AnchorKind) -> bool {
+    match node {
+        Ast::Anchor(kind) => *kind == anchor,
+        Ast::Group { child, .. } | Ast::Flags { child, .. } | Ast::Look { child, .. } => {
+            branch_starts_with_anchor(child, anchor)
+        }
+        Ast::Concat(nodes) => nodes
+            .first()
+            .is_some_and(|first| branch_starts_with_anchor(first, anchor)),
+        _ => false,
+    }
 }
 
 pub fn normalize_oniguruma_for_rust_regex(pattern: &str) -> String {
@@ -179,6 +216,93 @@ mod tests {
         assert_eq!(
             translated.anchor_strategy,
             AnchorStrategy::ContinuationGuard
+        );
+    }
+
+    #[test]
+    fn mixed_anchor_alternations_fall_back() {
+        // Unanchored branches must stay searchable from any offset.
+        assert_eq!(
+            translate(r"^#|//").anchor_strategy,
+            AnchorStrategy::Fallback
+        );
+        assert_eq!(
+            translate(r"\Gfoo|bar").anchor_strategy,
+            AnchorStrategy::Fallback
+        );
+        assert_eq!(
+            translate(r"\Afoo|bar").anchor_strategy,
+            AnchorStrategy::Fallback
+        );
+    }
+
+    #[test]
+    fn empty_branch_blocks_anchor_guard() {
+        // `\G|(,)`: the empty branch matches at any position.
+        assert_eq!(
+            translate(r"\G|(,)").anchor_strategy,
+            AnchorStrategy::Fallback
+        );
+    }
+
+    #[test]
+    fn fully_anchored_alternations_keep_guard() {
+        assert_eq!(
+            translate(r"^foo|^bar").anchor_strategy,
+            AnchorStrategy::LineStartGuard
+        );
+        assert_eq!(
+            translate(r"\Gfoo|\Gbar").anchor_strategy,
+            AnchorStrategy::ContinuationGuard
+        );
+    }
+
+    #[test]
+    fn anchored_prefix_with_nullable_tail_keeps_guard() {
+        // The anchor is the first element of the only branch; every match
+        // still starts at the anchored position.
+        assert_eq!(
+            translate(r"^\s*foo").anchor_strategy,
+            AnchorStrategy::LineStartGuard
+        );
+        assert_eq!(
+            translate(r"^(?:foo|bar)").anchor_strategy,
+            AnchorStrategy::LineStartGuard
+        );
+    }
+
+    #[test]
+    fn flag_prefixed_anchor_stays_conservative() {
+        // The source does not start with the anchor, so no prefix stripping
+        // applies; the VM handles the anchor itself.
+        assert_eq!(
+            translate(r"(?i)^foo").anchor_strategy,
+            AnchorStrategy::Fallback
+        );
+    }
+
+    #[test]
+    fn mixed_anchor_pattern_matches_after_resume_offset() {
+        // Regression: `^#|//` used to be locked to line-start searches, so a
+        // scan resumed past an intervening token could never see `//`.
+        use super::super::{AnchorContext, FallbackMatcher, Matcher, RegexMatcher};
+        let pattern = r"^#|//";
+        let line = "  // note";
+        let ctx = AnchorContext {
+            allow_a: true,
+            allow_g: false,
+            g_pos: 0,
+        };
+        let reference = FallbackMatcher::new(pattern)
+            .find(line, 2, ctx)
+            .expect("fallback engine finds the unanchored branch");
+        assert_eq!(reference.start..reference.end, 2..4);
+        let matcher = RegexMatcher::new(pattern);
+        let result = matcher.find(line, 2, ctx);
+        assert_eq!(
+            result.map(|matched| matched.start..matched.end),
+            Some(2..4),
+            "auto-routed engine must agree with the fallback engine"
         );
     }
 }

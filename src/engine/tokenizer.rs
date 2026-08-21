@@ -4303,8 +4303,10 @@ impl TextMateTokenizer {
         let unified_search_active = !suppression_active && !self.counters_enabled;
         let ctx = scan_anchor_context(from, is_first_line, anchor_pos);
         if unified_search_active && let Some(pattern_set) = &candidate_set.pattern_set_search {
-            if let Some((pattern_index, set_result)) =
-                pattern_set.find_with_context_and_scratch(line, from, ctx, &mut self.regex_scratch)
+            let (set_match, set_budget_killed) =
+                pattern_set.find_with_context_and_scratch(line, from, ctx, &mut self.regex_scratch);
+            fallback_budget_killed |= set_budget_killed;
+            if let Some((pattern_index, set_result)) = set_match
                 && pattern_index < candidate_set.candidates.len()
                 && set_result.start >= from
                 && set_result.end <= line.len()

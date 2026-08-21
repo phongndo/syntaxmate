@@ -1783,6 +1783,7 @@ impl PatternSetMatcher {
             ctx,
             &mut super::bytecode::BytecodeScratch::default(),
         )
+        .0
     }
 
     pub(crate) fn find_with_context_and_scratch(
@@ -1791,28 +1792,30 @@ impl PatternSetMatcher {
         from: usize,
         ctx: AnchorContext,
         scratch: &mut super::bytecode::BytecodeScratch,
-    ) -> Option<(usize, MatchResult)> {
+    ) -> (Option<(usize, MatchResult)>, bool) {
         if !line.is_char_boundary(from) {
-            return None;
+            return (None, false);
         }
         if let Some(set) = &self.literal_set {
-            let (idx, start, end) = set.find(line, from)?;
-            return Some((
-                idx,
-                MatchResult {
-                    start,
-                    end,
-                    captures: vec![Some(start..end)],
-                },
-            ));
+            let found = set.find(line, from).map(|(idx, start, end)| {
+                (
+                    idx,
+                    MatchResult {
+                        start,
+                        end,
+                        captures: vec![Some(start..end)],
+                    },
+                )
+            });
+            return (found, false);
         }
         if let Some(frontier) = &self.frontier {
             return self.find_with_frontier(line, from, ctx, scratch, frontier);
         }
         if scanner_candidate_enabled()
-            && let Some(result) = self.find_with_scanner(line, from, ctx, scratch)
+            && let Some((result, budget_killed)) = self.find_with_scanner(line, from, ctx, scratch)
         {
-            return result;
+            return (result, budget_killed);
         }
 
         self.find_reference_with_buckets(
@@ -1838,13 +1841,17 @@ impl PatternSetMatcher {
         start_byte_entries: &StartByteBuckets,
         start_prefilter: Option<&StartBytePrefilter>,
         bound: Option<(usize, usize)>,
-    ) -> Option<(usize, MatchResult)> {
+    ) -> (Option<(usize, MatchResult)>, bool) {
         let ascii_line = scratch.line_is_ascii(line);
         let mut skip_state = super::skip_prefix::SkipGateLineState::default();
         let mut line_has_comment: Option<bool> = None;
-        let mut start = match start_prefilter {
-            Some(prefilter) => prefilter.next_start(line, from)?,
-            None => from,
+        let mut budget_killed = false;
+        let start = match start_prefilter {
+            Some(prefilter) => prefilter.next_start(line, from),
+            None => Some(from),
+        };
+        let Some(mut start) = start else {
+            return (None, false);
         };
         loop {
             if bound.is_some_and(|(bound_start, _)| start > bound_start) {
@@ -1902,9 +1909,10 @@ impl PatternSetMatcher {
                 }) {
                     continue;
                 }
-                let result = self.match_entry_at(idx, line, start, ctx, scratch);
+                let (result, killed) = self.match_entry_at(idx, line, start, ctx, scratch);
+                budget_killed |= killed;
                 if let Some(result) = result {
-                    return Some((idx, result));
+                    return (Some((idx, result)), budget_killed);
                 }
             }
             if start == line.len() {
@@ -1921,11 +1929,12 @@ impl PatternSetMatcher {
                         .len_utf8()
                 };
             start = match start_prefilter {
-                Some(prefilter) => prefilter.next_start(line, next)?,
-                None => next,
-            };
+                Some(prefilter) => prefilter.next_start(line, next),
+                None => Some(next),
+            }
+            .unwrap_or(line.len());
         }
-        None
+        (None, budget_killed)
     }
 
     fn find_with_frontier(
@@ -1935,10 +1944,11 @@ impl PatternSetMatcher {
         ctx: AnchorContext,
         scratch: &mut super::bytecode::BytecodeScratch,
         frontier: &CandidateFrontier,
-    ) -> Option<(usize, MatchResult)> {
+    ) -> (Option<(usize, MatchResult)>, bool) {
         let regular = frontier.scanner.find(line, from, ctx, scratch.scanner());
+        let mut budget_killed = false;
         let opaque = if let Some(selected) = regular {
-            self.find_reference_with_buckets(
+            let (found, killed) = self.find_reference_with_buckets(
                 line,
                 from,
                 ctx,
@@ -1947,9 +1957,11 @@ impl PatternSetMatcher {
                 &frontier.opaque_start_byte_entries,
                 frontier.opaque_start_prefilter.as_ref(),
                 Some((selected.start, selected.pattern)),
-            )
+            );
+            budget_killed |= killed;
+            found
         } else {
-            self.find_reference_with_buckets(
+            let (found, killed) = self.find_reference_with_buckets(
                 line,
                 from,
                 ctx,
@@ -1958,25 +1970,32 @@ impl PatternSetMatcher {
                 &frontier.opaque_start_byte_entries,
                 frontier.opaque_start_prefilter.as_ref(),
                 None,
-            )
+            );
+            budget_killed |= killed;
+            found
         };
         if let Some(opaque) = opaque {
-            return Some(opaque);
+            return (Some(opaque), budget_killed);
         }
 
-        let selected = regular?;
+        let Some(selected) = regular else {
+            return (None, budget_killed);
+        };
         let replay = if selected.pattern < self.entries.len() {
+            let (result, killed) =
+                self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch);
+            budget_killed |= killed;
             #[cfg(test)]
             {
                 if self.force_regular_replay_failure == Some(selected.pattern) {
                     None
                 } else {
-                    self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch)
+                    result
                 }
             }
             #[cfg(not(test))]
             {
-                self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch)
+                result
             }
         } else {
             None
@@ -1987,14 +2006,14 @@ impl PatternSetMatcher {
                     && result.end <= line.len()
                     && line.is_char_boundary(result.end) =>
             {
-                Some((selected.pattern, result))
+                (Some((selected.pattern, result)), budget_killed)
             }
             _ => {
                 // The frontier is a selector only. If exact replay of the
                 // selected regular candidate fails (or a future scanner bug
                 // picks a non-authoritative endpoint), fall back to the known
                 // exact reference traversal instead of reporting no match.
-                self.find_reference_with_buckets(
+                let (found, killed) = self.find_reference_with_buckets(
                     line,
                     from,
                     ctx,
@@ -2003,7 +2022,8 @@ impl PatternSetMatcher {
                     &self.start_byte_entries,
                     self.start_prefilter.as_ref(),
                     None,
-                )
+                );
+                (found, budget_killed | killed)
             }
         }
     }
@@ -2014,15 +2034,22 @@ impl PatternSetMatcher {
         from: usize,
         ctx: AnchorContext,
         scratch: &mut super::bytecode::BytecodeScratch,
-    ) -> Option<Option<(usize, MatchResult)>> {
+    ) -> Option<(Option<(usize, MatchResult)>, bool)> {
         let scanner = self.scanner.as_ref()?;
         let Some(selected) = scanner.find(line, from, ctx, scratch.scanner()) else {
-            return Some(None);
+            return Some((None, false));
         };
-        let result = self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch)?;
-        Some(Some((selected.pattern, result)))
+        let (result, budget_killed) =
+            self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch);
+        Some((
+            result.map(|result| (selected.pattern, result)),
+            budget_killed,
+        ))
     }
 
+    /// Returns the winning entry plus whether any candidate attempt was cut
+    /// short by its execution budget. A budget kill means the scan is not
+    /// exact: callers must treat the result as degraded rather than complete.
     fn match_entry_at(
         &self,
         index: usize,
@@ -2030,22 +2057,32 @@ impl PatternSetMatcher {
         start: usize,
         ctx: AnchorContext,
         scratch: &mut super::bytecode::BytecodeScratch,
-    ) -> Option<MatchResult> {
-        let entry = self.entries.get(index)?;
-        let pattern = self.compiled.get(index)?;
+    ) -> (Option<MatchResult>, bool) {
+        let Some(entry) = self.entries.get(index) else {
+            return (None, false);
+        };
+        let Some(pattern) = self.compiled.get(index) else {
+            return (None, false);
+        };
         match entry {
-            PatternEntry::Literal => match_literal_at(
-                line,
-                start,
-                pattern
-                    .unanchored_literal()
-                    .expect("literal entry retains literal pattern"),
+            PatternEntry::Literal => (
+                match_literal_at(
+                    line,
+                    start,
+                    pattern
+                        .unanchored_literal()
+                        .expect("literal entry retains literal pattern"),
+                ),
+                false,
             ),
-            PatternEntry::Matcher => pattern
+            PatternEntry::Matcher => match pattern
                 .matcher()
                 .find_at_without_captures_with_scratch(line, start, ctx, scratch)
-                .ok()
-                .flatten(),
+            {
+                Ok(result) => (result, false),
+                Err(super::FallbackError::BudgetExceeded { .. }) => (None, true),
+                Err(_) => (None, false),
+            },
         }
     }
 
@@ -2188,6 +2225,11 @@ fn frontier_enabled(
         FrontierBuildPolicy::Force => return true,
         FrontierBuildPolicy::Auto => {}
     }
+    // Measured guardrails: relaxing these to admit opaque-majority sets
+    // (e.g. TypeScript root sets run 22 regular / 63 opaque) regressed
+    // steady-state throughput by 14-48% because the NFA selection pass runs
+    // ahead of an still-unbounded opaque reference scan. Only revisit with a
+    // design that also bounds the opaque traversal.
     total >= frontier_min_total()
         && regular >= frontier_min_regular()
         && opaque <= frontier_max_opaque()
@@ -2625,6 +2667,36 @@ mod tests {
         assert_eq!(result.start..result.end, 6..9);
     }
 
+    #[test]
+    fn pattern_set_reports_budget_kills_instead_of_silently_dropping() {
+        // Regression: a candidate whose VM attempt exhausts its step budget
+        // used to be indistinguishable from a plain no-match, so lines could
+        // report Complete while matches were silently dropped.
+        let patterns = vec!["zzz".into(), r"(a|aa)+b(?=x)".into()];
+        let set = PatternSetMatcher::new(&patterns).unwrap();
+        let adversarial = format!("{}c", "a".repeat(40));
+        let (_, budget_killed) = set.find_with_context_and_scratch(
+            &adversarial,
+            0,
+            AnchorContext::line_start(),
+            &mut super::super::bytecode::BytecodeScratch::default(),
+        );
+        assert!(
+            budget_killed,
+            "exponential candidate must surface its budget kill"
+        );
+
+        // Benign inputs on the same set stay exact and unflagged.
+        let (found, budget_killed) = set.find_with_context_and_scratch(
+            "zzz here",
+            0,
+            AnchorContext::line_start(),
+            &mut super::super::bytecode::BytecodeScratch::default(),
+        );
+        assert!(found.is_some());
+        assert!(!budget_killed);
+    }
+
     fn forced_frontier(patterns: &[&str]) -> PatternSetMatcher {
         let compiled = patterns
             .iter()
@@ -2743,6 +2815,7 @@ mod tests {
                         set.start_prefilter.as_ref(),
                         None,
                     )
+                    .0
                     .map(summarize_match);
                 assert_eq!(actual, expected, "patterns={patterns:?} line={line:?}");
             }

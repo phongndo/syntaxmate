@@ -354,7 +354,14 @@ struct Parser<'a> {
     features: RegexFeatures,
     flags: RegexFlags,
     diagnostics: Vec<String>,
+    depth: usize,
 }
+
+/// Bounds recursive-descent nesting so hostile grammar patterns cannot
+/// overflow the stack. Real grammars stay far below this; exceeding it
+/// degrades the over-deep construct to a never-matching node instead of
+/// aborting the process.
+const MAX_PARSE_DEPTH: usize = 1024;
 
 impl<'a> Parser<'a> {
     fn new(source: &'a str) -> Self {
@@ -367,6 +374,7 @@ impl<'a> Parser<'a> {
             features: RegexFeatures::default(),
             flags: RegexFlags::default(),
             diagnostics: Vec::new(),
+            depth: 0,
         }
     }
 
@@ -572,6 +580,40 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_group(&mut self) -> Ast {
+        if self.depth >= MAX_PARSE_DEPTH {
+            self.skip_balanced('(', ')');
+            self.diagnostics
+                .push("maximum group nesting depth exceeded".to_string());
+            return Ast::Unsupported("nesting too deep".to_string());
+        }
+        self.depth += 1;
+        let parsed = self.parse_group_inner();
+        self.depth -= 1;
+        parsed
+    }
+
+    /// Consumes input up to and including the delimiter matching the opener
+    /// that was already consumed, tracking nesting and escapes. Used only on
+    /// the over-deep degradation path; bracket imprecision inside classes is
+    /// acceptable there.
+    fn skip_balanced(&mut self, opener: char, closer: char) {
+        let mut balance = 1usize;
+        while balance > 0 {
+            let Some(ch) = self.bump() else {
+                break;
+            };
+            match ch {
+                '\\' => {
+                    self.bump();
+                }
+                ch if ch == opener => balance += 1,
+                ch if ch == closer => balance -= 1,
+                _ => {}
+            }
+        }
+    }
+
+    fn parse_group_inner(&mut self) -> Ast {
         if self.peek() != Some('?') {
             let index = self.alloc_capture(None);
             let outer = self.flags;
@@ -801,6 +843,19 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_body(&mut self) -> CharClass {
+        if self.depth >= MAX_PARSE_DEPTH {
+            self.skip_balanced('[', ']');
+            self.diagnostics
+                .push("maximum class nesting depth exceeded".to_string());
+            return CharClass::default();
+        }
+        self.depth += 1;
+        let parsed = self.parse_class_body_inner();
+        self.depth -= 1;
+        parsed
+    }
+
+    fn parse_class_body_inner(&mut self) -> CharClass {
         let mut class = CharClass::default();
         if self.peek() == Some('^') {
             self.bump();
@@ -1376,6 +1431,66 @@ mod tests {
         assert!(parsed.features.anchor_g);
         assert!(parsed.features.requires_fallback());
         assert_eq!(parsed.capture_count, 1);
+    }
+
+    #[test]
+    fn deep_group_nesting_degrades_instead_of_overflowing() {
+        // Regression: unbounded recursion aborted the process around tens of
+        // thousands of nested groups. The parser must degrade gracefully.
+        let depth = 200_000;
+        let pattern = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
+        let parsed = parse(&pattern);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|note| note.contains("nesting depth")),
+            "expected a depth diagnostic"
+        );
+        let contains_unsupported = {
+            let mut found = false;
+            let mut node = &parsed.ast;
+            loop {
+                match node {
+                    Ast::Unsupported(_) => {
+                        found = true;
+                        break;
+                    }
+                    Ast::Group { child, .. } => node = child,
+                    _ => break,
+                }
+            }
+            found
+        };
+        assert!(contains_unsupported, "expected an Unsupported node");
+    }
+
+    #[test]
+    fn deep_class_nesting_degrades_instead_of_overflowing() {
+        let depth = 200_000;
+        let pattern = format!("{}a{}", "[".repeat(depth), "]".repeat(depth));
+        let parsed = parse(&pattern);
+        assert!(
+            parsed
+                .diagnostics
+                .iter()
+                .any(|note| note.contains("nesting depth"))
+        );
+    }
+
+    #[test]
+    fn nesting_below_the_limit_still_parses() {
+        let depth = MAX_PARSE_DEPTH - 2;
+        let pattern = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
+        let parsed = parse(&pattern);
+        assert!(parsed.diagnostics.is_empty());
+        let mut depth_count = 0usize;
+        let mut node = &parsed.ast;
+        while let Ast::Group { child, .. } = node {
+            depth_count += 1;
+            node = child;
+        }
+        assert_eq!(depth_count, depth);
     }
 
     #[test]
