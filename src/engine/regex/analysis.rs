@@ -348,7 +348,11 @@ fn collect_referenced_groups(ast: &Ast, parsed: &ParsedRegex, groups: &mut Vec<u
 
 fn push_backref_group(backref: &Backref, parsed: &ParsedRegex, groups: &mut Vec<u32>) {
     match backref {
-        Backref::Number(group) => groups.push(*group),
+        Backref::Number(group) => {
+            if *group != 0 && *group <= parsed.capture_count {
+                groups.push(*group);
+            }
+        }
         Backref::Name(name) => {
             if let Some(group) = parsed.named_captures.get(name) {
                 groups.push(*group);
@@ -391,6 +395,17 @@ mod tests {
         assert!(std::ptr::eq(first, second));
         assert!(std::ptr::eq(parsed.prefilter(), parsed.prefilter()));
         assert_eq!(parsed, equal, "cache initialization is not regex identity");
+    }
+
+    #[test]
+    fn out_of_range_numeric_backrefs_are_not_collected() {
+        let parsed = parse(r"(?<=:)\3*(?<value>[^,}]+)");
+        assert_eq!(parsed.capture_count, 1);
+        assert!(parsed.analysis().capture().referenced_groups().is_empty());
+
+        let parsed = parse(r"(a)(b)(c)\4(x)(y)\6");
+        assert_eq!(parsed.capture_count, 5);
+        assert_eq!(parsed.analysis().capture().referenced_groups(), &[4]);
     }
 
     #[test]

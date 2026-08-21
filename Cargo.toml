@@ -77,6 +77,10 @@ required-features = ["bundled-grammars"]
 name = "tokenize_eol_parity"
 path = "tests/tokenize_eol_parity.rs"
 
+[[test]]
+name = "backreference_bounds"
+path = "tests/backreference_bounds.rs"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

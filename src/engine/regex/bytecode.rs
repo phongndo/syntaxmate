@@ -2722,4 +2722,12 @@ mod tests {
             assert_eq!(matched.end, expected_end, "{pattern:?} on {line:?}");
         }
     }
+
+    #[test]
+    fn out_of_range_numeric_backrefs_reject_capture_bytecode() {
+        let parsed = parse(r"(?<=:)\3*(?<value>[^,}]+)");
+        let error = Program::compile_captures_with_analysis(&parsed, parsed.analysis(), &[])
+            .expect_err("backrefs to missing groups must not compile to capture bytecode");
+        assert!(matches!(error, CompileError::Backreference));
+    }
 }
