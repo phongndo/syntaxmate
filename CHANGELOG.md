@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 - 2026-08-23
 
 - Add reproducible engine and end-to-end competitive benchmarks against current
   pinned vscode-textmate, Shiki, and Syntect releases.
