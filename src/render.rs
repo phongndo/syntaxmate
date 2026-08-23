@@ -227,18 +227,18 @@ fn write_html_style(style: Style, output: &mut String) {
     }
     output.push_str(" style=\"");
     if let Some(color) = style.foreground {
-        let _ = write!(
-            output,
-            "color:#{:02x}{:02x}{:02x};",
-            color.red, color.green, color.blue
-        );
+        output.push_str("color:#");
+        write_html_hex_byte(color.red, output);
+        write_html_hex_byte(color.green, output);
+        write_html_hex_byte(color.blue, output);
+        output.push(';');
     }
     if let Some(color) = style.background {
-        let _ = write!(
-            output,
-            "background-color:#{:02x}{:02x}{:02x};",
-            color.red, color.green, color.blue
-        );
+        output.push_str("background-color:#");
+        write_html_hex_byte(color.red, output);
+        write_html_hex_byte(color.green, output);
+        write_html_hex_byte(color.blue, output);
+        output.push(';');
     }
     if style.modifiers.contains(SyntaxModifiers::BOLD) {
         output.push_str("font-weight:bold;");
@@ -262,6 +262,13 @@ fn write_html_style(style: Style, output: &mut String) {
         output.push(';');
     }
     output.push('"');
+}
+
+#[cfg(feature = "html")]
+fn write_html_hex_byte(byte: u8, output: &mut String) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    output.push(char::from(HEX[(byte >> 4) as usize]));
+    output.push(char::from(HEX[(byte & 0x0f) as usize]));
 }
 
 #[cfg(feature = "html")]
@@ -484,11 +491,25 @@ fn write_ansi_style(style: Style, output: &mut String) {
 
 #[cfg(feature = "ansi")]
 fn write_ansi_color(prefix: &str, color: RgbColor, output: &mut String) {
-    let _ = write!(
-        output,
-        "{prefix};2;{};{};{}",
-        color.red, color.green, color.blue
-    );
+    output.push_str(prefix);
+    output.push_str(";2;");
+    write_ansi_decimal_byte(color.red, output);
+    output.push(';');
+    write_ansi_decimal_byte(color.green, output);
+    output.push(';');
+    write_ansi_decimal_byte(color.blue, output);
+}
+
+#[cfg(feature = "ansi")]
+fn write_ansi_decimal_byte(mut byte: u8, output: &mut String) {
+    if byte >= 100 {
+        output.push(char::from(b'0' + byte / 100));
+        byte %= 100;
+        output.push(char::from(b'0' + byte / 10));
+    } else if byte >= 10 {
+        output.push(char::from(b'0' + byte / 10));
+    }
+    output.push(char::from(b'0' + byte % 10));
 }
 
 #[cfg(feature = "ansi")]
@@ -604,6 +625,19 @@ mod tests {
         assert!(output.as_str().contains("data-scopes=\""));
         assert!(output.as_str().ends_with("</code></pre>"));
         assert!(output.status().is_complete());
+    }
+
+    #[test]
+    fn direct_color_writers_cover_every_byte_value() {
+        for byte in 0..=u8::MAX {
+            let mut html = String::new();
+            write_html_hex_byte(byte, &mut html);
+            assert_eq!(html, format!("{byte:02x}"));
+
+            let mut ansi = String::new();
+            write_ansi_decimal_byte(byte, &mut ansi);
+            assert_eq!(ansi, byte.to_string());
+        }
     }
 
     #[test]

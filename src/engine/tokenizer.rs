@@ -26,7 +26,7 @@ use super::grammar::{
 };
 use super::hashing::{self, FastMap};
 use super::line::{LineChunks, next_char_boundary};
-use super::regex::captures::{capture_texts, substitute_end_pattern};
+use super::regex::captures::substitute_end_pattern;
 use super::regex::{
     AnchorContext, CompiledPattern, FallbackError, MatchResult, PatternSetMatcher, RegexMatcher,
 };
@@ -58,6 +58,8 @@ const MAX_PREPARED_CANDIDATE_BYTES: usize =
 const MAX_SCOPE_STACK_CACHE_ENTRIES: usize = 8192;
 const MAX_FRAME_NODE_CACHE_ENTRIES: usize = 16384;
 const MAX_OUTPUT_SCOPE_TABLES: usize = 512;
+const MAX_CAPTURE_RESULT_POOL_ENTRIES: usize = 16;
+const MAX_POOLED_CAPTURE_CAPACITY: usize = 1024;
 
 #[derive(Debug, Default)]
 pub struct Tokenizer;
@@ -152,22 +154,25 @@ impl OutputScopeTableBuilder {
         let mut stacks = Vec::with_capacity(self.output_stacks.len());
         let mut atoms = Vec::<Arc<str>>::new();
         let mut atom_ids = hashing::fast_map();
+        let mut resolved_ids = Vec::new();
         for engine_stack in &self.output_stacks {
-            let stack_atoms = scope_stacks
-                .resolve_ids(*engine_stack)
-                .into_iter()
-                .filter_map(|scope| {
+            scope_stacks.resolve_ids_into(*engine_stack, &mut resolved_ids);
+            let stack_atoms = resolved_ids
+                .iter()
+                .map(|&scope| {
                     if let Some(atom) = atom_ids.get(&scope) {
-                        return Some(*atom);
+                        return *atom;
                     }
-                    let name = scope_names.get_arc(scope)?;
+                    let name = scope_names
+                        .get_arc(scope)
+                        .expect("scope-stack IDs come from the scope interner");
                     let atom = ScopeAtomId(atoms.len() as u32);
                     atoms.push(name);
                     atom_ids.insert(scope, atom);
-                    Some(atom)
+                    atom
                 })
-                .collect::<Vec<_>>();
-            stacks.push(Arc::from(stack_atoms));
+                .collect::<Arc<[ScopeAtomId]>>();
+            stacks.push(stack_atoms);
         }
         let table = Arc::new(HighlightScopeTable::from_parts(atoms, stacks));
         if cache.tables.len() >= MAX_OUTPUT_SCOPE_TABLES {
@@ -2254,6 +2259,7 @@ pub struct TextMateTokenizer {
     scope_stacks: ScopeStackInterner,
     current_scope_stack_cache: FastMap<CurrentScopeStackKey, CachedCurrentScopeStackIds>,
     resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<[Arc<str>]>>,
+    scope_resolution_scratch: Vec<ScopeId>,
     output_scope_table_cache: OutputScopeTableCache,
     capture_scope_templates: FastMap<(GrammarId, ScopeId), ScopeTemplateId>,
     state_interner: StateInterner,
@@ -2278,6 +2284,11 @@ pub struct TextMateTokenizer {
     /// constructing and hashing a fresh `Frame`.
     frame_node_cache: FastMap<(InternedFrameStackId, InternedFrameId), Arc<FrameNode>>,
     regex_scratch: super::regex::bytecode::BytecodeScratch,
+    /// Final capture vectors are needed only until the winning rule is
+    /// applied. Recycle a bounded number across matches instead of allocating
+    /// once per captured token; nested capture retokenization naturally uses
+    /// another pool entry while the outer result is live.
+    capture_result_pool: Vec<Vec<Option<Range<usize>>>>,
     pattern_hotspots: HashMap<PatternHotspotKey, PatternHotspot>,
     max_line_bytes: Option<usize>,
     fallback_call_budget_remaining: Option<u64>,
@@ -2348,6 +2359,7 @@ impl TextMateTokenizer {
             scope_stacks: ScopeStackInterner::default(),
             current_scope_stack_cache: hashing::fast_map(),
             resolved_scope_stack_cache: hashing::fast_map(),
+            scope_resolution_scratch: Vec::new(),
             output_scope_table_cache: OutputScopeTableCache::default(),
             capture_scope_templates: hashing::fast_map(),
             state_interner: StateInterner::new(),
@@ -2366,6 +2378,7 @@ impl TextMateTokenizer {
             static_frame_identities: hashing::fast_map(),
             frame_node_cache: hashing::fast_map(),
             regex_scratch: super::regex::bytecode::BytecodeScratch::default(),
+            capture_result_pool: Vec::new(),
             pattern_hotspots: HashMap::new(),
             max_line_bytes: None,
             fallback_call_budget_remaining: None,
@@ -2765,11 +2778,13 @@ impl TextMateTokenizer {
                 candidates.candidates[candidate_index].kind,
                 CandidateKind::Match { .. }
             );
+            let result_start = result.start;
+            let result_end = result.end;
 
-            if result.start > cursor {
+            if result_start > cursor {
                 self.push_token(
                     &mut tokens,
-                    cursor..result.start,
+                    cursor..result_start,
                     candidates.active_stack_id,
                 );
             }
@@ -2777,8 +2792,8 @@ impl TextMateTokenizer {
             let depth_before = state.depth();
             let stack_before = state.frames.interned_id();
             let zero_width_state_before =
-                (result.start == result.end && state_changes).then(|| state.clone());
-            let zero_width_match_rule = result.start == result.end
+                (result_start == result_end && state_changes).then(|| state.clone());
+            let zero_width_match_rule = result_start == result_end
                 && matches!(
                     &candidates.candidates[candidate_index].kind,
                     CandidateKind::Match { .. }
@@ -2789,7 +2804,7 @@ impl TextMateTokenizer {
                 &mut tokens,
                 &candidates.candidates[candidate_index],
                 candidates.blueprint.match_name_template(candidate_index),
-                &result,
+                result,
                 &mut anchor_pos,
                 &mut frame_anchor_positions,
                 line_entry_depth,
@@ -2802,15 +2817,15 @@ impl TextMateTokenizer {
                 // would let lower-priority rules color text that the oracle
                 // leaves in the active scope (and can skip byte zero entirely).
                 let stack = self.current_scope_stack_id(&state, true, None);
-                self.push_token(&mut tokens, result.start..parse_text.len(), stack);
+                self.push_token(&mut tokens, result_start..parse_text.len(), stack);
                 cursor = parse_text.len();
                 break;
             }
             let zero_width_state_change =
-                next_cursor == result.start && state.depth() != depth_before;
+                next_cursor == result_start && state.depth() != depth_before;
             if zero_width_state_change {
-                zero_width_states.insert((result.start, stack_before));
-                if !zero_width_states.insert((result.start, state.frames.interned_id())) {
+                zero_width_states.insert((result_start, stack_before));
+                if !zero_width_states.insert((result_start, state.frames.interned_id())) {
                     // A zero-width begin/end pair can return to an already
                     // visited state without consuming input. vscode-textmate
                     // stops on the state before the operation that completed
@@ -2820,15 +2835,15 @@ impl TextMateTokenizer {
                         state = previous_state;
                     }
                     let stack = self.current_scope_stack_id(&state, true, None);
-                    self.push_token(&mut tokens, result.start..parse_text.len(), stack);
+                    self.push_token(&mut tokens, result_start..parse_text.len(), stack);
                     cursor = parse_text.len();
                     break;
                 }
             }
             cursor = if zero_width_state_change {
                 next_cursor
-            } else if next_cursor <= result.start {
-                next_char_boundary(parse_text, result.start)
+            } else if next_cursor <= result_start {
+                next_char_boundary(parse_text, result_start)
             } else {
                 next_cursor
             };
@@ -4283,6 +4298,21 @@ impl TextMateTokenizer {
         }
     }
 
+    fn take_capture_result_buffer(&mut self) -> Vec<Option<Range<usize>>> {
+        self.capture_result_pool.pop().unwrap_or_default()
+    }
+
+    fn recycle_capture_result_buffer(&mut self, mut captures: Vec<Option<Range<usize>>>) {
+        if captures.capacity() == 0
+            || captures.capacity() > MAX_POOLED_CAPTURE_CAPACITY
+            || self.capture_result_pool.len() >= MAX_CAPTURE_RESULT_POOL_ENTRIES
+        {
+            return;
+        }
+        captures.clear();
+        self.capture_result_pool.push(captures);
+    }
+
     fn find_best_candidate(
         &mut self,
         candidate_set: &CandidateSet,
@@ -4360,7 +4390,7 @@ impl TextMateTokenizer {
         }
         if let Some((index, selection_result)) = &best
             && selection_result.captures.is_empty()
-            && candidate_set.matchers[*index].needs_capture_replay()
+            && candidate_set.matchers[*index].needs_capture_replay_after_selection()
         {
             if let Some(counters) = self.counters_mut() {
                 counters.record_capture_replay();
@@ -4368,12 +4398,15 @@ impl TextMateTokenizer {
             let ctx = scan_anchor_context(from, is_first_line, anchor_pos);
             let compiled = &candidate_set.matchers[*index];
             let mode = super::regex::backtrack::capture_engine_mode();
-            let capture_candidate = compiled.find_live_captures_at(
+            let mut capture_buffer = self.take_capture_result_buffer();
+            let capture_candidate = compiled.find_live_captures_at_into(
                 line,
                 selection_result.start,
                 ctx,
                 &mut self.regex_scratch,
+                &mut capture_buffer,
             );
+            self.recycle_capture_result_buffer(capture_buffer);
             let recursive = || {
                 compiled
                     .matcher()
@@ -4600,14 +4633,16 @@ impl TextMateTokenizer {
         tokens: &mut Vec<CompactScopedToken>,
         candidate: &Candidate,
         match_name_template: Option<ScopeTemplateId>,
-        result: &MatchResult,
+        result: MatchResult,
         anchor_pos: &mut Option<usize>,
         frame_anchor_positions: &mut Vec<Option<usize>>,
         line_entry_depth: usize,
         active_stack: ScopeStackId,
         end_stack: ScopeStackId,
     ) -> usize {
-        match &candidate.kind {
+        let mut result_value = result;
+        let result = &result_value;
+        let consumed_end = match &candidate.kind {
             CandidateKind::Match {
                 grammar_id,
                 name,
@@ -4648,8 +4683,8 @@ impl TextMateTokenizer {
                     && !content_name
                         .as_deref()
                         .is_some_and(|name| name.contains('$'));
-                let name = frame_scope_text(name, line, &result.captures);
-                let content_name = frame_scope_text(content_name, line, &result.captures);
+                let name = frame_scope_text(name, line, result);
+                let content_name = frame_scope_text(content_name, line, result);
                 let mut stack = active_stack;
                 if let Some(prefix) = candidate.scope_prefix.clone() {
                     stack = self.push_scope_prefix_once_id(stack, &prefix);
@@ -4748,8 +4783,8 @@ impl TextMateTokenizer {
                     && !content_name
                         .as_deref()
                         .is_some_and(|name| name.contains('$'));
-                let name = frame_scope_text(name, line, &result.captures);
-                let content_name = frame_scope_text(content_name, line, &result.captures);
+                let name = frame_scope_text(name, line, result);
+                let content_name = frame_scope_text(content_name, line, result);
                 let mut stack = active_stack;
                 if let Some(prefix) = candidate.scope_prefix.clone() {
                     stack = self.push_scope_prefix_once_id(stack, &prefix);
@@ -4886,7 +4921,9 @@ impl TextMateTokenizer {
                 };
                 consumed_end
             }
-        }
+        };
+        self.recycle_capture_result_buffer(std::mem::take(&mut result_value.captures));
+        consumed_end
     }
 
     fn remember_frame_node(
@@ -4914,7 +4951,9 @@ impl TextMateTokenizer {
     ) -> Option<(String, bool)> {
         let grammar = self.grammars.grammar(grammar_id)?;
         let pattern = grammar.pattern(pattern_id)?;
-        let capture_texts = capture_texts(line, &result.captures);
+        let capture_texts = (0..result.capture_count())
+            .map(|group| result.capture(group).and_then(|range| line.get(range)))
+            .collect::<Vec<_>>();
         let substituted =
             substitute_end_pattern(pattern, &capture_texts, MAX_SUBSTITUTED_END_PATTERN_LEN)
                 .unwrap_or_else(|_| pattern.to_owned());
@@ -4942,17 +4981,14 @@ impl TextMateTokenizer {
                 &self.scope_names,
             );
         } else if let Some(name) = name {
-            base_stack = self.push_scope_text_id(
-                base_stack,
-                &substitute_scope_text(name, line, &result.captures),
-            );
+            base_stack =
+                self.push_scope_text_id(base_stack, &substitute_scope_text(name, line, result));
         }
         if captures.entries.is_empty() {
             self.push_token(tokens, result.start..result.end, base_stack);
             return;
         }
         let match_end = result.end;
-        let result_captures = &result.captures;
         let outside = captures
             .entries
             .iter()
@@ -4960,9 +4996,7 @@ impl TextMateTokenizer {
                 if entry.name.is_none() && entry.patterns.is_empty() {
                     return None;
                 }
-                let range = result_captures
-                    .get(*group as usize)
-                    .and_then(Clone::clone)?;
+                let range = result.capture(*group as usize)?;
                 (match_end > result.start && range.start >= match_end && range.end > match_end)
                     .then_some((range, entry.clone()))
             })
@@ -4975,7 +5009,7 @@ impl TextMateTokenizer {
                 grammar_id,
                 base_stack,
                 captures,
-                result_captures,
+                result,
             );
             return;
         }
@@ -4986,14 +5020,14 @@ impl TextMateTokenizer {
             grammar_id,
             base_stack,
             captures,
-            result_captures,
+            result,
         );
         for (range, entry) in outside {
             let range = range.start.max(match_end)..range.end;
             let mut stack = base_stack;
             if let Some(scope_id) = entry.name {
                 let (name, template) =
-                    self.capture_scope_application(grammar_id, scope_id, line, result_captures);
+                    self.capture_scope_application(grammar_id, scope_id, line, result);
                 stack = self.push_scope_application(stack, name.as_deref(), template);
             }
             if entry.patterns.is_empty() {
@@ -5021,7 +5055,7 @@ impl TextMateTokenizer {
         grammar_id: GrammarId,
         base_stack: ScopeStackId,
         capture_spec: &CaptureSpec,
-        captures: &[Option<Range<usize>>],
+        result: &MatchResult,
     ) {
         if range.start >= range.end {
             return;
@@ -5039,7 +5073,7 @@ impl TextMateTokenizer {
         let mut cursor = range.start;
         let mut active = CaptureScopeStack::default();
         for (group, entry) in &capture_spec.entries {
-            let Some(capture_range) = captures.get(*group as usize).and_then(Clone::clone) else {
+            let Some(capture_range) = result.capture(*group as usize) else {
                 continue;
             };
             if capture_range.start >= capture_range.end {
@@ -5071,7 +5105,7 @@ impl TextMateTokenizer {
             }
 
             let (name, name_template) = entry.name.map_or((None, None), |scope_id| {
-                self.capture_scope_application(grammar_id, scope_id, line, captures)
+                self.capture_scope_application(grammar_id, scope_id, line, result)
             });
             if !entry.patterns.is_empty() {
                 let stack = self.push_scope_application(base_stack, name.as_deref(), name_template);
@@ -5231,31 +5265,35 @@ impl TextMateTokenizer {
                 self.push_token(tokens, cursor..range.end, candidate_set.active_stack_id);
                 return;
             }
-            let Some((candidate_index, result)) = search.best else {
+            let Some((candidate_index, mut result)) = search.best else {
                 self.push_token(tokens, cursor..range.end, candidate_set.active_stack_id);
                 return;
             };
-            if result.start >= range.end || result.end > range.end {
+            let result_start = result.start;
+            let result_end = result.end;
+            if result_start >= range.end || result_end > range.end {
+                self.recycle_capture_result_buffer(std::mem::take(&mut result.captures));
                 self.push_token(tokens, cursor..range.end, candidate_set.active_stack_id);
                 return;
             }
-            if cursor < result.start {
-                self.push_token(tokens, cursor..result.start, candidate_set.active_stack_id);
+            if cursor < result_start {
+                self.push_token(tokens, cursor..result_start, candidate_set.active_stack_id);
             }
             let candidate = &candidate_set.candidates[candidate_index];
-            let zero_width_match_rule = result.start == result.end
+            let zero_width_match_rule = result_start == result_end
                 && matches!(&candidate.kind, CandidateKind::Match { .. });
             if !compound_patterns
                 && state.is_initial()
                 && !matches!(candidate.kind, CandidateKind::Match { .. })
             {
-                self.push_token(tokens, result.start..result.end, base_stack_id);
-                cursor = advance_zero_width(scan_line, &(result.start..result.end));
+                self.push_token(tokens, result_start..result_end, base_stack_id);
+                cursor = advance_zero_width(scan_line, &(result_start..result_end));
+                self.recycle_capture_result_buffer(std::mem::take(&mut result.captures));
                 continue;
             }
             let depth_before = state.depth();
             let stack_before = state.frames.interned_id();
-            let zero_width_state_before = (result.start == result.end
+            let zero_width_state_before = (result_start == result_end
                 && !matches!(candidate.kind, CandidateKind::Match { .. }))
             .then(|| state.clone());
             let next_cursor = self.apply_candidate(
@@ -5264,7 +5302,7 @@ impl TextMateTokenizer {
                 tokens,
                 candidate,
                 candidate_set.blueprint.match_name_template(candidate_index),
-                &result,
+                result,
                 &mut anchor_pos,
                 &mut frame_anchor_positions,
                 0,
@@ -5274,28 +5312,28 @@ impl TextMateTokenizer {
             if zero_width_match_rule {
                 self.push_token(
                     tokens,
-                    result.start..range.end,
+                    result_start..range.end,
                     candidate_set.active_stack_id,
                 );
                 return;
             }
             let zero_width_state_change =
-                next_cursor == result.start && state.depth() != depth_before;
+                next_cursor == result_start && state.depth() != depth_before;
             if zero_width_state_change {
-                zero_width_states.insert((result.start, stack_before));
-                if !zero_width_states.insert((result.start, state.frames.interned_id())) {
+                zero_width_states.insert((result_start, stack_before));
+                if !zero_width_states.insert((result_start, state.frames.interned_id())) {
                     if let Some(previous_state) = zero_width_state_before {
                         state = previous_state;
                     }
                     let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
-                    self.push_token(tokens, result.start..range.end, stack);
+                    self.push_token(tokens, result_start..range.end, stack);
                     return;
                 }
             }
             cursor = if zero_width_state_change {
                 next_cursor
-            } else if next_cursor <= result.start {
-                next_char_boundary(scan_line, result.start)
+            } else if next_cursor <= result_start {
+                next_char_boundary(scan_line, result_start)
             } else {
                 next_cursor
             };
@@ -5417,13 +5455,17 @@ impl TextMateTokenizer {
         if self.resolved_scope_stack_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
             self.resolved_scope_stack_cache.clear();
         }
-        let scopes = Arc::from(
-            self.scope_stacks
-                .resolve_ids(stack)
-                .into_iter()
-                .filter_map(|scope| self.scope_names.get_arc(scope))
-                .collect::<Vec<_>>(),
-        );
+        self.scope_stacks
+            .resolve_ids_into(stack, &mut self.scope_resolution_scratch);
+        let scopes = self
+            .scope_resolution_scratch
+            .iter()
+            .map(|scope| {
+                self.scope_names
+                    .get_arc(*scope)
+                    .expect("scope-stack IDs come from the scope interner")
+            })
+            .collect::<Arc<[Arc<str>]>>();
         self.resolved_scope_stack_cache
             .insert(stack, Arc::clone(&scopes));
         scopes
@@ -5455,7 +5497,7 @@ impl TextMateTokenizer {
         grammar_id: GrammarId,
         scope_id: ScopeId,
         line: &str,
-        captures: &[Option<Range<usize>>],
+        result: &MatchResult,
     ) -> (Option<String>, Option<ScopeTemplateId>) {
         let key = (grammar_id, scope_id);
         if let Some(template) = self.capture_scope_templates.get(&key) {
@@ -5470,7 +5512,7 @@ impl TextMateTokenizer {
             return (None, None);
         };
         if text.contains('$') {
-            return (Some(substitute_scope_text(&text, line, captures)), None);
+            return (Some(substitute_scope_text(&text, line, result)), None);
         }
         let template = self
             .scope_templates
@@ -6658,20 +6700,16 @@ fn shared_empty_capture_spec() -> Arc<CaptureSpec> {
 
 /// Resolves a possibly capture-referencing scope text: static names reuse the
 /// candidate's shared allocation, `$n` names substitute per match.
-fn frame_scope_text(
-    name: &Option<Arc<str>>,
-    line: &str,
-    captures: &[Option<Range<usize>>],
-) -> Option<Arc<str>> {
+fn frame_scope_text(name: &Option<Arc<str>>, line: &str, result: &MatchResult) -> Option<Arc<str>> {
     let name = name.as_ref()?;
     if name.contains('$') {
-        Some(Arc::from(substitute_scope_text(name, line, captures)))
+        Some(Arc::from(substitute_scope_text(name, line, result)))
     } else {
         Some(Arc::clone(name))
     }
 }
 
-fn substitute_scope_text(scope: &str, line: &str, captures: &[Option<Range<usize>>]) -> String {
+fn substitute_scope_text(scope: &str, line: &str, result: &MatchResult) -> String {
     if !scope.contains('$') {
         return scope.to_owned();
     }
@@ -6691,7 +6729,7 @@ fn substitute_scope_text(scope: &str, line: &str, captures: &[Option<Range<usize
                 let body_end = body_start + close_offset;
                 let body = &scope[body_start..body_end];
                 if let Some((group, transform)) = parse_scope_placeholder_body(body) {
-                    push_scope_capture(&mut output, line, captures, group, transform);
+                    push_scope_capture(&mut output, line, result, group, transform);
                     index = body_end + 1;
                     continue;
                 }
@@ -6702,7 +6740,7 @@ fn substitute_scope_text(scope: &str, line: &str, captures: &[Option<Range<usize
                 end += 1;
             }
             if let Ok(group) = scope[index + 1..end].parse::<usize>() {
-                push_scope_capture(&mut output, line, captures, group, ScopeTransform::None);
+                push_scope_capture(&mut output, line, result, group, ScopeTransform::None);
                 index = end;
                 continue;
             }
@@ -6803,15 +6841,11 @@ fn parse_scope_placeholder_body(body: &str) -> Option<(usize, ScopeTransform)> {
 fn push_scope_capture(
     output: &mut String,
     line: &str,
-    captures: &[Option<Range<usize>>],
+    result: &MatchResult,
     group: usize,
     transform: ScopeTransform,
 ) {
-    let Some(text) = captures
-        .get(group)
-        .and_then(|range| range.as_ref())
-        .and_then(|range| line.get(range.clone()))
-    else {
+    let Some(text) = result.capture(group).and_then(|range| line.get(range)) else {
         return;
     };
     match transform {
@@ -6839,9 +6873,7 @@ fn specified_outside_capture_end(result: &MatchResult, captures: &CaptureSpec) -
         .filter(|(_, entry)| entry.name.is_some() || !entry.patterns.is_empty())
         .filter_map(|(group, _)| {
             result
-                .captures
-                .get(*group as usize)
-                .and_then(Option::as_ref)
+                .capture(*group as usize)
                 .filter(|range| range.start >= result.end)
                 .map(|range| range.end)
         })
@@ -9239,6 +9271,43 @@ mod tests {
     }
 
     #[test]
+    fn capture_result_buffers_are_reused_and_hard_bounded() {
+        let grammar = r##"{
+            "scopeName": "source.capture-pool",
+            "patterns": [{
+                "match":"(x)",
+                "captures":{"1":{"name":"keyword.capture-pool"}}
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+
+        let first = tokenizer.tokenize_line_scopes("xxx", TokenizerState::default());
+        assert!(line_has_scope(&first, "keyword.capture-pool"));
+        assert_eq!(tokenizer.capture_result_pool.len(), 1);
+        let capacity = tokenizer.capture_result_pool[0].capacity();
+        let allocation = tokenizer.capture_result_pool[0].as_ptr();
+
+        let second = tokenizer.tokenize_line_scopes("xxx", TokenizerState::default());
+        assert!(line_has_scope(&second, "keyword.capture-pool"));
+        assert_eq!(tokenizer.capture_result_pool.len(), 1);
+        assert_eq!(tokenizer.capture_result_pool[0].capacity(), capacity);
+        assert_eq!(tokenizer.capture_result_pool[0].as_ptr(), allocation);
+
+        tokenizer.capture_result_pool.clear();
+        for _ in 0..MAX_CAPTURE_RESULT_POOL_ENTRIES + 4 {
+            tokenizer.recycle_capture_result_buffer(vec![None]);
+        }
+        assert_eq!(
+            tokenizer.capture_result_pool.len(),
+            MAX_CAPTURE_RESULT_POOL_ENTRIES
+        );
+        tokenizer.capture_result_pool.clear();
+        tokenizer
+            .recycle_capture_result_buffer(Vec::with_capacity(MAX_POOLED_CAPTURE_CAPACITY + 1));
+        assert!(tokenizer.capture_result_pool.is_empty());
+    }
+
+    #[test]
     fn capture_reference_scanners_match_substitution_syntax() {
         let mut live = Vec::new();
         add_scope_capture_refs(
@@ -9385,18 +9454,21 @@ mod tests {
     fn applies_capture_zero_scope() {
         let grammar = r##"{
             "scopeName": "source.fixture",
-            "patterns": [{"match":"x", "captures":{"0":{"name":"punctuation.fixture"}}}]
+            "patterns": [{
+                "match":"x",
+                "name":"meta.$0.fixture",
+                "captures":{"0":{"name":"punctuation.$0.fixture"}}
+            }]
         }"##;
         let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
         let line = tokenizer.tokenize_line_scopes("x", TokenizerState::default());
-        assert!(
-            line.tokens[0]
-                .scopes
-                .iter()
-                .any(|scope| scope == "punctuation.fixture"),
-            "{:#?}",
-            line.tokens
-        );
+        for expected in ["meta.x.fixture", "punctuation.x.fixture"] {
+            assert!(
+                line.tokens[0].scopes.iter().any(|scope| scope == expected),
+                "missing {expected:?} in {:#?}",
+                line.tokens
+            );
+        }
     }
 
     #[test]

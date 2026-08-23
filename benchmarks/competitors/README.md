@@ -91,7 +91,9 @@ python3 tools/run-competitive-benchmarks.py \
 
 Use `--include-samples` when raw records are needed for an audit. The runner
 checks source-byte accounting, output determinism, completion status, sample
-counts, and engine scope-digest equality before writing a report.
+counts, and engine scope-digest equality before writing a report. The native
+product driver defaults to HTML; pass `--renderer ansi` directly to
+`profile-product` for an otherwise identical ANSI writer profile.
 
 ## Interpretation limits
 

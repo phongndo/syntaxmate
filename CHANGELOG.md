@@ -4,6 +4,9 @@
 
 - Add reproducible engine and end-to-end competitive benchmarks against current
   pinned vscode-textmate, Shiki, and Syntect releases.
+- Reduce tokenizer capture and scope-output allocations with deferred group-zero
+  synthesis, direct compact-capture output, bounded buffer reuse, and compact
+  candidate indexes; speed up HTML and ANSI color serialization.
 
 ## 0.1.1 - 2026-08-04
 

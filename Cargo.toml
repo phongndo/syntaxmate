@@ -109,7 +109,7 @@ required-features = ["bundled-grammars"]
 [[example]]
 name = "profile-product"
 path = "examples/profile-product.rs"
-required-features = ["bundled-grammars", "bundled-themes", "html"]
+required-features = ["bundled-grammars", "bundled-themes", "html", "ansi"]
 
 [[example]]
 name = "regex-parse"

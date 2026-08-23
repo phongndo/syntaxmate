@@ -270,6 +270,12 @@ impl ScopeStackInterner {
 
     pub fn resolve_ids(&self, id: ScopeStackId) -> Vec<ScopeId> {
         let mut ids = Vec::new();
+        self.resolve_ids_into(id, &mut ids);
+        ids
+    }
+
+    pub(crate) fn resolve_ids_into(&self, id: ScopeStackId, ids: &mut Vec<ScopeId>) {
+        ids.clear();
         let mut cursor = id;
         while cursor != self.empty() {
             let Some(node) = self.nodes.get(cursor.0 as usize) else {
@@ -281,7 +287,6 @@ impl ScopeStackInterner {
             cursor = node.parent;
         }
         ids.reverse();
-        ids
     }
 
     pub fn len(&self) -> usize {

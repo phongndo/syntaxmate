@@ -23,9 +23,9 @@
           "maxPeakRetainedBytes": 13805568
         },
         "highlight-lines-first": {
-          "maxAllocationCalls": 115030,
-          "maxAllocatedBytes": 12418048,
-          "maxPeakRetainedBytes": 5997568
+          "maxAllocationCalls": 114260,
+          "maxAllocatedBytes": 12303360,
+          "maxPeakRetainedBytes": 5986304
         },
         "highlight-lines-warm": {
           "maxAllocationCalls": 230,
@@ -33,9 +33,9 @@
           "maxPeakRetainedBytes": 14336
         },
         "incremental-first": {
-          "maxAllocationCalls": 115020,
-          "maxAllocatedBytes": 12360704,
-          "maxPeakRetainedBytes": 5967872
+          "maxAllocationCalls": 114250,
+          "maxAllocatedBytes": 12244992,
+          "maxPeakRetainedBytes": 5956608
         },
         "incremental-warm": {
           "maxAllocationCalls": 230,
@@ -44,13 +44,13 @@
         },
         "prepare-language": {
           "maxAllocationCalls": 99460,
-          "maxAllocatedBytes": 18902016,
+          "maxAllocatedBytes": 18900992,
           "maxPeakRetainedBytes": 10962944
         },
         "prepared-first": {
-          "maxAllocationCalls": 154550,
-          "maxAllocatedBytes": 17249280,
-          "maxPeakRetainedBytes": 8460288
+          "maxAllocationCalls": 153010,
+          "maxAllocatedBytes": 17083392,
+          "maxPeakRetainedBytes": 8423424
         },
         "prepared-new": {
           "maxAllocationCalls": 110,
@@ -63,18 +63,18 @@
           "maxPeakRetainedBytes": 21504
         },
         "prepared-reuse": {
-          "maxAllocationCalls": 16030,
-          "maxAllocatedBytes": 2063360,
+          "maxAllocationCalls": 14540,
+          "maxAllocatedBytes": 1963008,
           "maxPeakRetainedBytes": 645120
         },
         "tokenize-first": {
-          "maxAllocationCalls": 162070,
-          "maxAllocatedBytes": 18286592,
-          "maxPeakRetainedBytes": 9001984
+          "maxAllocationCalls": 160530,
+          "maxAllocatedBytes": 18104320,
+          "maxPeakRetainedBytes": 8948736
         },
         "tokenize-warm": {
-          "maxAllocationCalls": 1200,
-          "maxAllocatedBytes": 136192,
+          "maxAllocationCalls": 640,
+          "maxAllocatedBytes": 123904,
           "maxPeakRetainedBytes": 92160
         }
       }
@@ -91,9 +91,9 @@
           "maxPeakRetainedBytes": 5751808
         },
         "highlight-lines-first": {
-          "maxAllocationCalls": 252740,
-          "maxAllocatedBytes": 36469760,
-          "maxPeakRetainedBytes": 18304000
+          "maxAllocationCalls": 246570,
+          "maxAllocatedBytes": 35824640,
+          "maxPeakRetainedBytes": 18229248
         },
         "highlight-lines-warm": {
           "maxAllocationCalls": 280,
@@ -101,9 +101,9 @@
           "maxPeakRetainedBytes": 15360
         },
         "incremental-first": {
-          "maxAllocationCalls": 252730,
-          "maxAllocatedBytes": 36368384,
-          "maxPeakRetainedBytes": 18272256
+          "maxAllocationCalls": 246560,
+          "maxAllocatedBytes": 35723264,
+          "maxPeakRetainedBytes": 18197504
         },
         "incremental-warm": {
           "maxAllocationCalls": 280,
@@ -112,13 +112,13 @@
         },
         "prepare-language": {
           "maxAllocationCalls": 51190,
-          "maxAllocatedBytes": 8061952,
-          "maxPeakRetainedBytes": 3432448
+          "maxAllocatedBytes": 8060928,
+          "maxPeakRetainedBytes": 3431424
         },
         "prepared-first": {
-          "maxAllocationCalls": 215450,
-          "maxAllocatedBytes": 30237696,
-          "maxPeakRetainedBytes": 15709184
+          "maxAllocationCalls": 210740,
+          "maxAllocatedBytes": 29780992,
+          "maxPeakRetainedBytes": 15668224
         },
         "prepared-new": {
           "maxAllocationCalls": 90,
@@ -131,18 +131,18 @@
           "maxPeakRetainedBytes": 14336
         },
         "prepared-reuse": {
-          "maxAllocationCalls": 50900,
-          "maxAllocatedBytes": 8098816,
-          "maxPeakRetainedBytes": 4081664
+          "maxAllocationCalls": 46480,
+          "maxAllocatedBytes": 7646208,
+          "maxPeakRetainedBytes": 4056064
         },
         "tokenize-first": {
-          "maxAllocationCalls": 251600,
-          "maxAllocatedBytes": 36206592,
-          "maxPeakRetainedBytes": 18338816
+          "maxAllocationCalls": 246710,
+          "maxAllocatedBytes": 35707904,
+          "maxPeakRetainedBytes": 18265088
         },
         "tokenize-warm": {
-          "maxAllocationCalls": 2780,
-          "maxAllocatedBytes": 270336,
+          "maxAllocationCalls": 1160,
+          "maxAllocatedBytes": 228352,
           "maxPeakRetainedBytes": 192512
         }
       }
@@ -159,9 +159,9 @@
           "maxPeakRetainedBytes": 4086784
         },
         "highlight-lines-first": {
-          "maxAllocationCalls": 11750,
-          "maxAllocatedBytes": 1668096,
-          "maxPeakRetainedBytes": 759808
+          "maxAllocationCalls": 10370,
+          "maxAllocatedBytes": 1581056,
+          "maxPeakRetainedBytes": 748544
         },
         "highlight-lines-warm": {
           "maxAllocationCalls": 230,
@@ -169,9 +169,9 @@
           "maxPeakRetainedBytes": 15360
         },
         "incremental-first": {
-          "maxAllocationCalls": 11740,
-          "maxAllocatedBytes": 1616896,
-          "maxPeakRetainedBytes": 751616
+          "maxAllocationCalls": 10370,
+          "maxAllocatedBytes": 1530880,
+          "maxPeakRetainedBytes": 741376
         },
         "incremental-warm": {
           "maxAllocationCalls": 230,
@@ -180,13 +180,13 @@
         },
         "prepare-language": {
           "maxAllocationCalls": 4990,
-          "maxAllocatedBytes": 672768,
-          "maxPeakRetainedBytes": 288768
+          "maxAllocatedBytes": 670720,
+          "maxPeakRetainedBytes": 286720
         },
         "prepared-first": {
-          "maxAllocationCalls": 7720,
-          "maxAllocatedBytes": 1196032,
-          "maxPeakRetainedBytes": 622592
+          "maxAllocationCalls": 6500,
+          "maxAllocatedBytes": 1121280,
+          "maxPeakRetainedBytes": 614400
         },
         "prepared-new": {
           "maxAllocationCalls": 100,
@@ -199,18 +199,18 @@
           "maxPeakRetainedBytes": 15360
         },
         "prepared-reuse": {
-          "maxAllocationCalls": 4340,
-          "maxAllocatedBytes": 672768,
+          "maxAllocationCalls": 3120,
+          "maxAllocatedBytes": 607232,
           "maxPeakRetainedBytes": 275456
         },
         "tokenize-first": {
-          "maxAllocationCalls": 11640,
-          "maxAllocatedBytes": 1608704,
-          "maxPeakRetainedBytes": 823296
+          "maxAllocationCalls": 10410,
+          "maxAllocatedBytes": 1531904,
+          "maxPeakRetainedBytes": 812032
         },
         "tokenize-warm": {
-          "maxAllocationCalls": 600,
-          "maxAllocatedBytes": 130048,
+          "maxAllocationCalls": 440,
+          "maxAllocatedBytes": 126976,
           "maxPeakRetainedBytes": 104448
         }
       }
@@ -227,9 +227,9 @@
           "maxPeakRetainedBytes": 4880384
         },
         "highlight-lines-first": {
-          "maxAllocationCalls": 181870,
-          "maxAllocatedBytes": 21987328,
-          "maxPeakRetainedBytes": 10911744
+          "maxAllocationCalls": 174650,
+          "maxAllocatedBytes": 21038080,
+          "maxPeakRetainedBytes": 10859520
         },
         "highlight-lines-warm": {
           "maxAllocationCalls": 230,
@@ -237,9 +237,9 @@
           "maxPeakRetainedBytes": 16384
         },
         "incremental-first": {
-          "maxAllocationCalls": 181860,
-          "maxAllocatedBytes": 21866496,
-          "maxPeakRetainedBytes": 10869760
+          "maxAllocationCalls": 174640,
+          "maxAllocatedBytes": 20917248,
+          "maxPeakRetainedBytes": 10817536
         },
         "incremental-warm": {
           "maxAllocationCalls": 230,
@@ -248,13 +248,13 @@
         },
         "prepare-language": {
           "maxAllocationCalls": 28330,
-          "maxAllocatedBytes": 3850240,
-          "maxPeakRetainedBytes": 1767424
+          "maxAllocatedBytes": 3844096,
+          "maxPeakRetainedBytes": 1762304
         },
         "prepared-first": {
-          "maxAllocationCalls": 157770,
-          "maxAllocatedBytes": 18736128,
-          "maxPeakRetainedBytes": 9360384
+          "maxAllocationCalls": 152210,
+          "maxAllocatedBytes": 17951744,
+          "maxPeakRetainedBytes": 9319424
         },
         "prepared-new": {
           "maxAllocationCalls": 60,
@@ -267,18 +267,18 @@
           "maxPeakRetainedBytes": 8192
         },
         "prepared-reuse": {
-          "maxAllocationCalls": 40250,
-          "maxAllocatedBytes": 5376000,
+          "maxAllocationCalls": 34790,
+          "maxAllocatedBytes": 4657152,
           "maxPeakRetainedBytes": 1720320
         },
         "tokenize-first": {
-          "maxAllocationCalls": 179970,
-          "maxAllocatedBytes": 21628928,
-          "maxPeakRetainedBytes": 10903552
+          "maxAllocationCalls": 174410,
+          "maxAllocatedBytes": 20836352,
+          "maxPeakRetainedBytes": 10853376
         },
         "tokenize-warm": {
-          "maxAllocationCalls": 3880,
-          "maxAllocatedBytes": 335872,
+          "maxAllocationCalls": 1760,
+          "maxAllocatedBytes": 291840,
           "maxPeakRetainedBytes": 241664
         }
       }

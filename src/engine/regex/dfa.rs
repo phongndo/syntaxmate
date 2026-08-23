@@ -107,7 +107,7 @@ impl SimpleMatcher {
         })
     }
 
-    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+    fn match_end_at(&self, line: &str, start: usize) -> Option<usize> {
         let literal = match self {
             Self::Literal(literal)
             | Self::LineStartLiteral(literal)
@@ -115,11 +115,21 @@ impl SimpleMatcher {
             | Self::ContinuationLiteral(literal) => literal,
         };
         let end = start.checked_add(literal.len())?;
-        (line.get(start..end)? == literal).then(|| MatchResult {
+        (line.get(start..end)? == literal).then_some(end)
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        let end = self.match_end_at(line, start)?;
+        Some(MatchResult {
             start,
             end,
             captures: vec![Some(start..end)],
         })
+    }
+
+    fn match_at_without_captures(&self, line: &str, start: usize) -> Option<MatchResult> {
+        self.match_end_at(line, start)
+            .map(|end| selection_match(start, end))
     }
 
     fn unanchored_literal(&self) -> Option<&str> {
@@ -323,7 +333,7 @@ impl SymbolSetMatcher {
         })
     }
 
-    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+    fn match_end_at(&self, line: &str, start: usize) -> Option<usize> {
         if !line.is_char_boundary(start)
             || !self.left.matches_before(line, start)
             || (self.leading_word_boundary && !word_boundary_at(line, start))
@@ -348,7 +358,11 @@ impl SymbolSetMatcher {
                 selected = Some((order, end));
             }
         }
-        let (_, end) = selected?;
+        selected.map(|(_, end)| end)
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        let end = self.match_end_at(line, start)?;
         let mut captures = vec![None; self.capture_count];
         captures[0] = Some(start..end);
         if let Some(capture_group) = self.capture_group {
@@ -359,6 +373,11 @@ impl SymbolSetMatcher {
             end,
             captures,
         })
+    }
+
+    fn match_at_without_captures(&self, line: &str, start: usize) -> Option<MatchResult> {
+        self.match_end_at(line, start)
+            .map(|end| selection_match(start, end))
     }
 
     fn find(&self, line: &str, from: usize) -> Option<MatchResult> {
@@ -648,6 +667,19 @@ impl DelimitedFieldsMatcher {
         })
     }
 
+    fn match_at_without_captures(&self, line: &str, start: usize) -> Option<MatchResult> {
+        if !line.is_char_boundary(start) {
+            return None;
+        }
+        let bytes = line.as_bytes();
+        let mut position = start;
+        for _ in 0..self.fields {
+            position += memchr::memchr(self.delimiter, &bytes[position..])
+                .map_or(bytes.len() - position, |offset| offset + 1);
+        }
+        Some(selection_match(start, position))
+    }
+
     fn find(&self, line: &str, from: usize) -> Option<MatchResult> {
         // Every recognized field is nullable, so the leftmost match is always
         // exactly `from`.
@@ -703,7 +735,7 @@ impl NixUriMatcher {
         None
     }
 
-    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+    fn match_end_at(&self, line: &str, start: usize) -> Option<usize> {
         let bytes = line.as_bytes();
         let first = *bytes.get(start)?;
         if !is_ascii_alpha(first) || !line.is_char_boundary(start) {
@@ -721,14 +753,21 @@ impl NixUriMatcher {
         while pos < bytes.len() && is_nix_uri_body_byte(bytes[pos]) {
             pos += 1;
         }
-        if pos == body_start || !line.is_char_boundary(pos) {
-            return None;
-        }
+        (pos != body_start && line.is_char_boundary(pos)).then_some(pos)
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        let end = self.match_end_at(line, start)?;
         Some(MatchResult {
             start,
-            end: pos,
-            captures: vec![Some(start..pos), Some(start..pos)],
+            end,
+            captures: vec![Some(start..end), Some(start..end)],
         })
+    }
+
+    fn match_at_without_captures(&self, line: &str, start: usize) -> Option<MatchResult> {
+        self.match_end_at(line, start)
+            .map(|end| selection_match(start, end))
     }
 }
 
@@ -876,7 +915,7 @@ impl WordSetMatcher {
         None
     }
 
-    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+    fn match_bounds_at(&self, line: &str, start: usize) -> Option<(usize, usize)> {
         if start > line.len() || !line.is_char_boundary(start) {
             return None;
         }
@@ -885,15 +924,25 @@ impl WordSetMatcher {
         if !is_ascii_word_byte(first) || previous_char(line, start).is_some_and(is_word_char) {
             return None;
         }
-        let end = ascii_word_end(bytes, start);
-        if char_at(line, end).is_some_and(|(ch, _)| is_word_char(ch)) {
+        let word_end = ascii_word_end(bytes, start);
+        if char_at(line, word_end).is_some_and(|(ch, _)| is_word_char(ch)) {
             return None;
         }
-        if !self.contains(&bytes[start..end]) {
+        if !self.contains(&bytes[start..word_end]) {
             return None;
         }
-        let match_end = self.suffix_end(line, end)?;
-        Some(self.match_result(start, end, match_end))
+        let match_end = self.suffix_end(line, word_end)?;
+        Some((word_end, match_end))
+    }
+
+    fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
+        let (word_end, match_end) = self.match_bounds_at(line, start)?;
+        Some(self.match_result(start, word_end, match_end))
+    }
+
+    fn match_at_without_captures(&self, line: &str, start: usize) -> Option<MatchResult> {
+        self.match_bounds_at(line, start)
+            .map(|(_, end)| selection_match(start, end))
     }
 
     fn contains(&self, token: &[u8]) -> bool {
@@ -1340,22 +1389,43 @@ impl AutomataMatcher {
         }
     }
 
-    pub(crate) fn find_at_without_captures_with_scratch(
+    pub(crate) fn find_at_for_selection_with_scratch(
         &self,
         line: &str,
         start: usize,
         ctx: AnchorContext,
+        materialize_specialized_captures: bool,
         scratch: &mut super::bytecode::BytecodeScratch,
     ) -> Result<Option<MatchResult>, super::FallbackError> {
         if !anchor_permits_at(self.translation.anchor_strategy, start, ctx, line) {
             return Ok(None);
         }
         match &self.engine {
-            NativeEngine::Simple(matcher) => Ok(matcher.match_at(line, start)),
-            NativeEngine::WordSet(matcher) => Ok(matcher.match_at(line, start)),
-            NativeEngine::SymbolSet(matcher) => Ok(matcher.match_at(line, start)),
-            NativeEngine::DelimitedFields(matcher) => Ok(matcher.match_at(line, start)),
-            NativeEngine::NixUri(matcher) => Ok(matcher.match_at(line, start)),
+            NativeEngine::Simple(matcher) => Ok(if materialize_specialized_captures {
+                matcher.match_at(line, start)
+            } else {
+                matcher.match_at_without_captures(line, start)
+            }),
+            NativeEngine::WordSet(matcher) => Ok(if materialize_specialized_captures {
+                matcher.match_at(line, start)
+            } else {
+                matcher.match_at_without_captures(line, start)
+            }),
+            NativeEngine::SymbolSet(matcher) => Ok(if materialize_specialized_captures {
+                matcher.match_at(line, start)
+            } else {
+                matcher.match_at_without_captures(line, start)
+            }),
+            NativeEngine::DelimitedFields(matcher) => Ok(if materialize_specialized_captures {
+                matcher.match_at(line, start)
+            } else {
+                matcher.match_at_without_captures(line, start)
+            }),
+            NativeEngine::NixUri(matcher) => Ok(if materialize_specialized_captures {
+                matcher.match_at(line, start)
+            } else {
+                matcher.match_at_without_captures(line, start)
+            }),
             NativeEngine::Vm(matcher) => matcher
                 .try_find_at_without_captures_with_scratch(line, start, ctx, scratch)
                 .map(|report| report.result),
@@ -1448,7 +1518,7 @@ enum FrontierBuildPolicy {
 #[derive(Debug, Clone)]
 struct CandidateFrontier {
     scanner: Scanner,
-    opaque_unrestricted_entries: Vec<usize>,
+    opaque_unrestricted_entries: Vec<u32>,
     opaque_start_byte_entries: StartByteBuckets,
     opaque_start_prefilter: Option<StartBytePrefilter>,
 }
@@ -1463,20 +1533,21 @@ struct CandidateFrontier {
 #[derive(Debug, Clone)]
 struct StartByteBuckets {
     offsets: [u32; 257],
-    entries: Box<[usize]>,
+    entries: Box<[u32]>,
 }
 
 impl StartByteBuckets {
     fn retained_heap_bytes(&self) -> usize {
         self.entries
             .len()
-            .saturating_mul(std::mem::size_of::<usize>())
+            .saturating_mul(std::mem::size_of::<u32>())
     }
 
-    fn from_patterns(patterns: &[Arc<super::CompiledPattern>]) -> (Self, Vec<usize>) {
+    fn from_patterns(patterns: &[Arc<super::CompiledPattern>]) -> (Self, Vec<u32>) {
         let mut counts = [0u32; 256];
         let mut unrestricted = Vec::new();
         for (index, pattern) in patterns.iter().enumerate() {
+            let index = u32::try_from(index).expect("candidate index fits in u32");
             if !for_each_pattern_start_byte(pattern, |byte| {
                 counts[byte as usize] = counts[byte as usize]
                     .checked_add(1)
@@ -1495,8 +1566,9 @@ impl StartByteBuckets {
         let mut cursors: [u32; 256] = offsets[..256]
             .try_into()
             .expect("candidate offset prefix has 256 entries");
-        let mut entries = vec![0usize; offsets[256] as usize];
+        let mut entries = vec![0u32; offsets[256] as usize];
         for (index, pattern) in patterns.iter().enumerate() {
+            let index = u32::try_from(index).expect("candidate index fits in u32");
             for_each_pattern_start_byte(pattern, |byte| {
                 let cursor = &mut cursors[byte as usize];
                 entries[*cursor as usize] = index;
@@ -1512,7 +1584,7 @@ impl StartByteBuckets {
         )
     }
 
-    fn from_vecs(buckets: Vec<Vec<usize>>) -> Self {
+    fn from_vecs(buckets: Vec<Vec<u32>>) -> Self {
         debug_assert_eq!(buckets.len(), usize::from(u8::MAX) + 1);
         let mut offsets = [0u32; 257];
         let total = buckets.iter().map(Vec::len).sum();
@@ -1529,7 +1601,7 @@ impl StartByteBuckets {
     }
 
     #[inline]
-    fn get(&self, byte: u8) -> &[usize] {
+    fn get(&self, byte: u8) -> &[u32] {
         let index = byte as usize;
         let start = self.offsets[index] as usize;
         let end = self.offsets[index + 1] as usize;
@@ -1569,7 +1641,7 @@ struct StartBytePrefilter {
 pub struct PatternSetMatcher {
     compiled: Arc<[Arc<super::CompiledPattern>]>,
     entries: Vec<PatternEntry>,
-    unrestricted_entries: Vec<usize>,
+    unrestricted_entries: Vec<u32>,
     start_byte_entries: StartByteBuckets,
     start_prefilter: Option<StartBytePrefilter>,
     /// Per-entry word-context start-class masks (see `start_class`); an
@@ -1601,7 +1673,7 @@ impl PatternSetMatcher {
         let unrestricted_bytes = self
             .unrestricted_entries
             .capacity()
-            .saturating_mul(std::mem::size_of::<usize>());
+            .saturating_mul(std::mem::size_of::<u32>());
         let mask_bytes = self
             .start_class_masks
             .capacity()
@@ -1803,7 +1875,10 @@ impl PatternSetMatcher {
                     MatchResult {
                         start,
                         end,
-                        captures: vec![Some(start..end)],
+                        // Pattern-set matching only selects a winner. The
+                        // tokenizer replays captures for that one pattern, so
+                        // allocating group zero here would be discarded.
+                        captures: Vec::new(),
                     },
                 )
             });
@@ -1837,7 +1912,7 @@ impl PatternSetMatcher {
         from: usize,
         ctx: AnchorContext,
         scratch: &mut super::bytecode::BytecodeScratch,
-        unrestricted_entries: &[usize],
+        unrestricted_entries: &[u32],
         start_byte_entries: &StartByteBuckets,
         start_prefilter: Option<&StartBytePrefilter>,
         bound: Option<(usize, usize)>,
@@ -1867,27 +1942,18 @@ impl PatternSetMatcher {
             while unrestricted_index < unrestricted_entries.len()
                 || restricted_index < restricted.len()
             {
-                let unrestricted = unrestricted_entries.get(unrestricted_index).copied();
-                let restricted = restricted.get(restricted_index).copied();
-                let idx = match (unrestricted, restricted) {
-                    (Some(left), Some(right)) if left < right => {
-                        unrestricted_index += 1;
-                        left
-                    }
-                    (Some(_), Some(right)) => {
-                        restricted_index += 1;
-                        right
-                    }
-                    (Some(left), None) => {
-                        unrestricted_index += 1;
-                        left
-                    }
-                    (None, Some(right)) => {
-                        restricted_index += 1;
-                        right
-                    }
-                    (None, None) => break,
-                };
+                let take_unrestricted = restricted_index == restricted.len()
+                    || (unrestricted_index < unrestricted_entries.len()
+                        && unrestricted_entries[unrestricted_index] < restricted[restricted_index]);
+                let idx = if take_unrestricted {
+                    let idx = unrestricted_entries[unrestricted_index];
+                    unrestricted_index += 1;
+                    idx
+                } else {
+                    let idx = restricted[restricted_index];
+                    restricted_index += 1;
+                    idx
+                } as usize;
                 if self.start_class_masks[idx] & position_class == 0 {
                     continue;
                 }
@@ -2075,10 +2141,13 @@ impl PatternSetMatcher {
                 ),
                 false,
             ),
-            PatternEntry::Matcher => match pattern
-                .matcher()
-                .find_at_without_captures_with_scratch(line, start, ctx, scratch)
-            {
+            PatternEntry::Matcher => match pattern.matcher().find_at_for_selection_with_scratch(
+                line,
+                start,
+                ctx,
+                pattern.needs_capture_replay_after_selection(),
+                scratch,
+            ) {
                 Ok(result) => (result, false),
                 Err(super::FallbackError::BudgetExceeded { .. }) => (None, true),
                 Err(_) => (None, false),
@@ -2109,7 +2178,7 @@ impl CandidateFrontier {
             .saturating_add(
                 self.opaque_unrestricted_entries
                     .capacity()
-                    .saturating_mul(std::mem::size_of::<usize>()),
+                    .saturating_mul(std::mem::size_of::<u32>()),
             )
             .saturating_add(self.opaque_start_byte_entries.retained_heap_bytes());
         if let Some(prefilter) = &self.opaque_start_prefilter {
@@ -2124,15 +2193,15 @@ impl CandidateFrontier {
         patterns: &[Arc<super::CompiledPattern>],
     ) -> Self {
         let mut opaque_unrestricted_entries = Vec::new();
-        let mut opaque_start_byte_entries = (0..=u8::MAX)
-            .map(|_| Vec::<usize>::new())
-            .collect::<Vec<_>>();
+        let mut opaque_start_byte_entries =
+            (0..=u8::MAX).map(|_| Vec::<u32>::new()).collect::<Vec<_>>();
         for &index in opaque_entries {
-            if let Some(bytes) = patterns
+            let start_bytes = patterns
                 .get(index)
                 .and_then(|pattern| pattern.restricted_start_bytes())
-                .filter(|bytes| !bytes.is_empty())
-            {
+                .filter(|bytes| !bytes.is_empty());
+            let index = u32::try_from(index).expect("candidate index fits in u32");
+            if let Some(bytes) = start_bytes {
                 for byte in bytes {
                     opaque_start_byte_entries[*byte as usize].push(index);
                 }
@@ -2168,7 +2237,7 @@ impl StartBytePrefilter {
     }
 
     fn from_buckets(
-        unrestricted_entries: &[usize],
+        unrestricted_entries: &[u32],
         start_byte_entries: &StartByteBuckets,
     ) -> Option<Self> {
         if !unrestricted_entries.is_empty() {
@@ -2283,13 +2352,17 @@ fn scanner_candidate_enabled() -> bool {
     true
 }
 
-fn match_literal_at(line: &str, start: usize, literal: &str) -> Option<MatchResult> {
-    let end = start.checked_add(literal.len())?;
-    (line.as_bytes().get(start..end)? == literal.as_bytes()).then(|| MatchResult {
+fn selection_match(start: usize, end: usize) -> MatchResult {
+    MatchResult {
         start,
         end,
-        captures: vec![Some(start..end)],
-    })
+        captures: Vec::new(),
+    }
+}
+
+fn match_literal_at(line: &str, start: usize, literal: &str) -> Option<MatchResult> {
+    let end = start.checked_add(literal.len())?;
+    (line.as_bytes().get(start..end)? == literal.as_bytes()).then(|| selection_match(start, end))
 }
 
 fn unescape_literal(pattern: &str) -> String {
@@ -2457,9 +2530,7 @@ mod tests {
 
     #[test]
     fn start_byte_prefilter_jumps_to_candidate_bytes() {
-        let mut buckets = (0..=u8::MAX)
-            .map(|_| Vec::<usize>::new())
-            .collect::<Vec<_>>();
+        let mut buckets = (0..=u8::MAX).map(|_| Vec::<u32>::new()).collect::<Vec<_>>();
         buckets[b'x' as usize].push(0);
         buckets["é".as_bytes()[0] as usize].push(1);
         let buckets = StartByteBuckets::from_vecs(buckets);
@@ -2777,6 +2848,28 @@ mod tests {
             result.captures.is_empty(),
             "candidate selection should not eagerly materialize captures"
         );
+    }
+
+    #[test]
+    fn pattern_set_selection_omits_unneeded_group_zero_allocations() {
+        let cases = [
+            ("literal", "xxliteral", 2..9),
+            ("^literal", "literal", 0..7),
+            (r"\b(?:one|two|three|four)\b", "xx four", 3..7),
+        ];
+        for (pattern, line, expected) in cases {
+            let set = PatternSetMatcher::new(&[pattern.to_owned()]).unwrap();
+            let (_, result) = set.find(line, 0).unwrap();
+            assert_eq!(result.start..result.end, expected, "{pattern:?}");
+            assert!(result.captures.is_empty(), "{pattern:?}");
+            assert_eq!(result.capture(0), Some(expected), "{pattern:?}");
+        }
+
+        // A native specialization still materializes a nonzero group when its
+        // caller requested it, rather than forcing a second winner replay.
+        let captured = PatternSetMatcher::new(&[r"\b(one|two|three|four)\b".to_owned()]).unwrap();
+        let (_, result) = captured.find("xx four", 0).unwrap();
+        assert_eq!(result.captures[1], Some(3..7));
     }
 
     #[test]

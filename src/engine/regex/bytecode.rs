@@ -851,10 +851,54 @@ impl Program {
         self.execute_inner(line, start, ctx, budget, scratch)
     }
 
+    /// Execute a capture program while leaving its compact capture slots in
+    /// `scratch`. The caller can then copy them directly into its final output
+    /// layout, avoiding an intermediate winner allocation.
+    pub(crate) fn execute_capture_slots(
+        &self,
+        line: &str,
+        start: usize,
+        ctx: AnchorContext,
+        budget: &mut StepBudget,
+        scratch: &mut BytecodeScratch,
+    ) -> Result<Option<usize>, BudgetExceeded> {
+        assert!(
+            !self.capture_layout.is_empty(),
+            "capture execution requires Program::compile_captures"
+        );
+        self.execute_inner(line, start, ctx, budget, scratch)
+    }
+
+    /// Copies the successful execution still resident in `scratch` into a
+    /// full group-number-indexed result. `output` may be larger than the
+    /// compact live layout; groups the grammar does not consume remain unset.
+    pub(crate) fn copy_capture_slots_into(
+        &self,
+        start: usize,
+        end: usize,
+        scratch: &BytecodeScratch,
+        output: &mut [Option<Range<usize>>],
+    ) {
+        output.fill(None);
+        for (slot, group) in self.capture_layout.iter().copied().enumerate() {
+            let Some(output) = output.get_mut(group as usize) else {
+                continue;
+            };
+            *output = if group == 0 {
+                Some(start..end)
+            } else {
+                match scratch.captures.get(slot) {
+                    Some(CaptureState::Matched(range)) => Some(range.clone()),
+                    Some(CaptureState::Unset | CaptureState::Open(_)) | None => None,
+                }
+            };
+        }
+    }
+
     /// Execute capture replay and return values in the program's compact
-    /// layout. This deliberately owns only the small winner result; all DFS
-    /// and undo allocation remains reusable in `scratch`.
-    #[allow(dead_code)] // Vertical-slice API; backtrack/tokenizer integration follows.
+    /// layout. Retained for the regex API and differential tests; the tokenizer
+    /// writes directly into its final full-group vector instead.
+    #[allow(dead_code)]
     pub(crate) fn execute_captures(
         &self,
         line: &str,
@@ -863,25 +907,20 @@ impl Program {
         budget: &mut StepBudget,
         scratch: &mut BytecodeScratch,
     ) -> Result<Option<CaptureMatch>, BudgetExceeded> {
-        assert!(
-            !self.capture_layout.is_empty(),
-            "execute_captures requires Program::compile_captures"
-        );
-        let Some(end) = self.execute_inner(line, start, ctx, budget, scratch)? else {
+        let Some(end) = self.execute_capture_slots(line, start, ctx, budget, scratch)? else {
             return Ok(None);
         };
-        let mut captures = Vec::with_capacity(self.capture_layout.len());
-        captures.push(Some(start..end));
-        captures.extend(
-            scratch
-                .captures
-                .iter()
-                .skip(1)
-                .map(|capture| match capture {
-                    CaptureState::Matched(range) => Some(range.clone()),
-                    CaptureState::Unset | CaptureState::Open(_) => None,
-                }),
-        );
+        let mut captures = vec![None; self.capture_layout.len()];
+        for (slot, capture) in captures.iter_mut().enumerate() {
+            *capture = if slot == 0 {
+                Some(start..end)
+            } else {
+                match scratch.captures.get(slot) {
+                    Some(CaptureState::Matched(range)) => Some(range.clone()),
+                    Some(CaptureState::Unset | CaptureState::Open(_)) | None => None,
+                }
+            };
+        }
         Ok(Some(CaptureMatch { end, captures }))
     }
 

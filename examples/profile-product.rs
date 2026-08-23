@@ -20,16 +20,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (iterations, elapsed_nanos, output) = match args.phase.as_str() {
         "cold" => {
             let started = Instant::now();
-            let output = highlighter.highlight_html(&args.language, &source, "github-dark")?;
+            let output = render(&mut highlighter, &args, &source)?;
             (1, nanos(started.elapsed()), output)
         }
         "steady" | "replay" => {
-            let warmup = highlighter.highlight_html(&args.language, &source, "github-dark")?;
+            let warmup = render(&mut highlighter, &args, &source)?;
             if !warmup.status().is_complete() {
                 return Err("warmup highlighting degraded".into());
             }
             calibrate(args.minimum_time_ms, || {
-                highlighter.highlight_html(&args.language, &source, "github-dark")
+                render(&mut highlighter, &args, &source)
             })?
         }
         phase => return Err(format!("unsupported phase {phase:?}").into()),
@@ -46,6 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "engine": "syntaxmate",
             "version": env!("CARGO_PKG_VERSION"),
             "phase": args.phase,
+            "renderer": args.renderer,
             "iterations": iterations,
             "sourceBytes": source.len(),
             "processedBytes": source.len().saturating_mul(iterations),
@@ -57,6 +58,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     );
     Ok(())
+}
+
+fn render(
+    highlighter: &mut Highlighter,
+    args: &Args,
+    source: &str,
+) -> syntaxmate::Result<syntaxmate::RenderedOutput> {
+    match args.renderer.as_str() {
+        "html" => highlighter.highlight_html(&args.language, source, "github-dark"),
+        "ansi" => highlighter.highlight_ansi(&args.language, source, "github-dark"),
+        _ => unreachable!("renderer validated while parsing arguments"),
+    }
 }
 
 fn calibrate<F>(
@@ -105,6 +118,7 @@ struct Args {
     language: String,
     file: String,
     phase: String,
+    renderer: String,
     minimum_time_ms: u64,
 }
 
@@ -113,6 +127,7 @@ impl Args {
         let mut language = None;
         let mut file = None;
         let mut phase = None;
+        let mut renderer = "html".to_owned();
         let mut minimum_time_ms = 100;
         let raw = env::args().skip(1).collect::<Vec<_>>();
         let mut index = 0;
@@ -124,6 +139,7 @@ impl Args {
                 "--language" => language = Some(value.clone()),
                 "--file" => file = Some(value.clone()),
                 "--phase" => phase = Some(value.clone()),
+                "--renderer" => renderer = value.clone(),
                 "--minimum-time-ms" => minimum_time_ms = value.parse()?,
                 option => return Err(format!("unknown option {option:?}").into()),
             }
@@ -132,10 +148,14 @@ impl Args {
         if minimum_time_ms == 0 {
             return Err("--minimum-time-ms must be positive".into());
         }
+        if !matches!(renderer.as_str(), "html" | "ansi") {
+            return Err("--renderer must be html or ansi".into());
+        }
         Ok(Self {
             language: language.ok_or("--language is required")?,
             file: file.ok_or("--file is required")?,
             phase: phase.ok_or("--phase is required")?,
+            renderer,
             minimum_time_ms,
         })
     }

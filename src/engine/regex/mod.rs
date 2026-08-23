@@ -107,6 +107,27 @@ pub struct MatchResult {
     pub captures: Vec<Option<Range<usize>>>,
 }
 
+impl MatchResult {
+    /// Group zero is always the whole match. Candidate selection can therefore
+    /// omit its heap-backed capture vector and synthesize group zero from the
+    /// span; only nonzero live groups require capture replay.
+    pub(crate) fn capture(&self, group: usize) -> Option<Range<usize>> {
+        if group == 0 {
+            return self
+                .captures
+                .first()
+                .cloned()
+                .flatten()
+                .or_else(|| Some(self.start..self.end));
+        }
+        self.captures.get(group).cloned().flatten()
+    }
+
+    pub(crate) fn capture_count(&self) -> usize {
+        self.captures.len().max(1)
+    }
+}
+
 pub trait Matcher {
     fn find(&self, line: &str, from: usize, ctx: AnchorContext) -> Option<MatchResult>;
 }
@@ -211,17 +232,22 @@ impl RegexMatcher {
         }
     }
 
-    pub(crate) fn find_at_without_captures_with_scratch(
+    pub(crate) fn find_at_for_selection_with_scratch(
         &self,
         line: &str,
         start: usize,
         ctx: AnchorContext,
+        materialize_specialized_captures: bool,
         scratch: &mut bytecode::BytecodeScratch,
     ) -> Result<Option<MatchResult>, FallbackError> {
         match self {
-            Self::Automata(matcher) => {
-                matcher.find_at_without_captures_with_scratch(line, start, ctx, scratch)
-            }
+            Self::Automata(matcher) => matcher.find_at_for_selection_with_scratch(
+                line,
+                start,
+                ctx,
+                materialize_specialized_captures,
+                scratch,
+            ),
             Self::Fallback(matcher) => matcher
                 .try_find_at_without_captures_with_scratch(line, start, ctx, scratch)
                 .map(|report| report.result),
@@ -339,8 +365,8 @@ impl CompiledPattern {
         self.parsed.analysis()
     }
 
-    pub(crate) fn needs_capture_replay(&self) -> bool {
-        !self.live_captures.is_empty()
+    pub(crate) fn needs_capture_replay_after_selection(&self) -> bool {
+        self.live_captures.iter().any(|group| *group != 0)
     }
 
     pub(crate) fn has_live_captures(&self, requested: Option<&[u32]>) -> bool {
@@ -361,12 +387,13 @@ impl CompiledPattern {
         self.live_captures == other.live_captures
     }
 
-    pub(crate) fn find_live_captures_at(
+    pub(crate) fn find_live_captures_at_into(
         &self,
         line: &str,
         start: usize,
         ctx: AnchorContext,
         scratch: &mut bytecode::BytecodeScratch,
+        capture_buffer: &mut Vec<Option<Range<usize>>>,
     ) -> Option<Result<(Option<MatchResult>, usize), FallbackError>> {
         use backtrack::{PositionEngineMode, StepBudget};
 
@@ -386,7 +413,7 @@ impl CompiledPattern {
             })
             .as_deref()?;
         let mut budget = StepBudget::new(backtrack::DEFAULT_STEP_BUDGET);
-        let capture_match = match program.execute_captures(line, start, ctx, &mut budget, scratch) {
+        let end = match program.execute_capture_slots(line, start, ctx, &mut budget, scratch) {
             Ok(result) => result,
             Err(_) => {
                 return Some(Err(FallbackError::BudgetExceeded {
@@ -394,15 +421,13 @@ impl CompiledPattern {
                 }));
             }
         };
-        let result = capture_match.map(|capture_match| {
-            let mut captures = vec![None; self.parsed.capture_count as usize + 1];
-            for (group, capture) in program.capture_layout().iter().zip(capture_match.captures) {
-                captures[*group as usize] = capture;
-            }
+        let result = end.map(|end| {
+            capture_buffer.resize(self.parsed.capture_count as usize + 1, None);
+            program.copy_capture_slots_into(start, end, scratch, capture_buffer);
             MatchResult {
                 start,
-                end: capture_match.end,
-                captures,
+                end,
+                captures: std::mem::take(capture_buffer),
             }
         });
         Some(Ok((result, budget.used())))

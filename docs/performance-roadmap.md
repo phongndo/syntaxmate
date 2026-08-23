@@ -226,10 +226,55 @@ shared runners. The checked policy is
 to `target/textmate-performance/allocation-report.json`. The initial four-corpus
 CI replay passes every ceiling with exact first/warm token and scope digests.
 
+### 9. Winner-capture and output allocation cleanup
+
+- [x] Let candidate selection synthesize capture group zero from the winning
+      span and replay only live nonzero groups.
+- [x] Copy bytecode capture slots directly into the final group layout and
+      recycle final capture vectors in a hard-bounded tokenizer-owned pool.
+- [x] Compact candidate adjacency indexes to `u32` and reuse scope-stack
+      resolution storage.
+- [x] Replace generic color formatting in hot HTML and ANSI writers with
+      byte-exact direct encoders.
+
+Result: eleven alternating release samples reduced steady engine time by 0.25%
+for Markdown, 1.65% for C++, 4.68% for Rust, and 1.05% for HTML. First-document
+allocation calls fell 0.95% to 10.55% and cumulative bytes fell 1.00% to 4.77%.
+Incremental-first and highlighting-first calls fell 0.67% to 11.72%, with
+0.93% to 5.37% fewer bytes. Prepared reuse showed the largest reductions:
+8.69% to 28.31% fewer calls and 4.89% to 13.40% fewer bytes.
+
+The capture pool retains at most 16 vectors of at most 1,024 slots (384 KiB of
+payload on 64-bit targets). Actual prepared-reuse peak changes ranged from
+-24.1 KiB to +22.7 KiB across the four corpora, while first-document,
+incremental, highlighting, and prepared-first peaks all declined. Scope-stack
+resolution now reuses one ID scratch vector and constructs final `Arc` slices
+directly, removing up to 5.18% of prepared-reuse calls in the scope-output
+phases without changing ownership at the public boundary.
+
+Direct two-digit hexadecimal and decimal-byte color writers improved warm HTML
+end-to-end time by 2.55% to 13.72% and ANSI time by 1.60% to 12.12% across the
+same corpora. Every before/after token, scope, HTML, and ANSI digest matched;
+the strict complete-catalog golden suite remained exact. Seventy-two improved
+allocation ceilings were tightened without weakening any existing ceiling.
+Raw reports are under `target/perf-work/`, including
+`final-engine-comparison.json`, `final-alloc.json`, and
+`final-product-comparison.json`.
+
+The remaining C++ steady-state profile is dominated by regex execution: 55.9%
+of top-of-stack samples were in the bytecode/fallback VM, 8.9% in substring
+prefilters, and 4.1% in allocation. Candidate traversal is the next distinct
+cost center, but its start-class and skip gates reject most expensive attempts;
+changes there must preserve that filtering advantage.
+
 ## Experiments not to repeat unchanged
 
 The engine history already records neutral, slower, or incompatible attempts,
 including independent per-pattern next-match memoization, the linear-only
 bytecode slice, position-only recursive subroutines, larger execution budgets,
-and several start-gate variants. Revisit them only with a materially different
-design and new parity evidence.
+and several start-gate variants. This iteration also rejected a case-folded
+word-set hash (no representative allocation reduction), fixed-count scan and
+repeat-start bytecode fusions (mixed 0.5% to 2.0% regressions), direct-index
+start-class classification (C++ regressed 1.8%), and bulk HTML/ANSI ordinary-run
+scans (up to 3.7% and 2.5% regressions). Revisit them only with a materially
+different design and new parity evidence.
