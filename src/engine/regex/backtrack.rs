@@ -2686,6 +2686,7 @@ fn char_eq(expected: char, actual: char, flags: RegexFlags) -> bool {
     }
 }
 
+#[inline]
 pub(crate) fn match_literal_end(
     line: &str,
     start: usize,
@@ -2698,10 +2699,12 @@ pub(crate) fn match_literal_end(
     }
     if literal.is_ascii() {
         let end = start.checked_add(literal.len())?;
-        return line
-            .get(start..end)?
-            .eq_ignore_ascii_case(literal)
-            .then_some(end);
+        if let Some(candidate) = line.get(start..end)
+            && candidate.is_ascii()
+        {
+            return candidate.eq_ignore_ascii_case(literal).then_some(end);
+        }
+        return match_ascii_literal_with_mixed_width_fold(line, start, literal);
     }
 
     let mut position = start;
@@ -2715,10 +2718,52 @@ pub(crate) fn match_literal_end(
     Some(position)
 }
 
+fn match_ascii_literal_with_mixed_width_fold(
+    line: &str,
+    start: usize,
+    literal: &str,
+) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut position = start;
+    for expected in literal.bytes() {
+        let actual = *bytes.get(position)?;
+        if actual.is_ascii() {
+            if !expected.eq_ignore_ascii_case(&actual) {
+                return None;
+            }
+            position += 1;
+        } else if expected.eq_ignore_ascii_case(&b's')
+            && bytes.get(position..)?.starts_with(&[0xc5, 0xbf])
+        {
+            position += 2; // U+017F LONG S
+        } else if expected.eq_ignore_ascii_case(&b'k')
+            && bytes.get(position..)?.starts_with(&[0xe2, 0x84, 0xaa])
+        {
+            position += 3; // U+212A KELVIN SIGN
+        } else {
+            return None;
+        }
+    }
+    Some(position)
+}
+
+#[inline]
 pub(crate) fn unicode_case_eq(left: char, right: char) -> bool {
-    left == right
-        || left.to_lowercase().eq(right.to_lowercase())
-        || left.to_uppercase().eq(right.to_uppercase())
+    // Case-insensitive regexes are overwhelmingly ASCII. Avoid constructing
+    // Unicode case-mapping iterators for that hot path while retaining the
+    // Unicode fold for mixed/non-ASCII pairs such as `K` and `K`.
+    if left == right {
+        return true;
+    }
+    if left.is_ascii() && right.is_ascii() {
+        return left.eq_ignore_ascii_case(&right);
+    }
+    // Oniguruma uses the default non-Turkic fold: dotless i does not join the
+    // ASCII I/i equivalence class.
+    if left == '\u{131}' || right == '\u{131}' {
+        return false;
+    }
+    left.to_lowercase().eq(right.to_lowercase()) || left.to_uppercase().eq(right.to_uppercase())
 }
 
 pub(crate) fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
@@ -2915,11 +2960,38 @@ mod tests {
 
     #[test]
     fn case_insensitive_literals_fold_non_ascii_scalars() {
-        let matcher = FallbackMatcher::new(r"(?i)Выбрать|Истина|НРег");
-        for sample in ["ВЫБРАТЬ", "истина", "нрег"] {
+        for (pattern, sample) in [
+            (r"(?i)Выбрать|Истина|НРег", "ВЫБРАТЬ"),
+            (r"(?i)Выбрать|Истина|НРег", "истина"),
+            (r"(?i)Выбрать|Истина|НРег", "нрег"),
+            (r"(?i)kelvin", "KELVIN"),
+            (r"(?i)ſtone", "STONE"),
+            (r"(?i)ask", "aſK"),
+            (r"(?i)skate", "sKATE"),
+            (r"(?i)ẞ", "ß"),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
             let matched = matcher.find(sample, 0, ctx()).expect(sample);
             assert_eq!(matched.start..matched.end, 0..sample.len());
         }
+    }
+
+    #[test]
+    fn unicode_case_comparator_keeps_ascii_and_mixed_folds_exact() {
+        for left in '\0'..='\u{7f}' {
+            for right in '\0'..='\u{7f}' {
+                assert_eq!(
+                    unicode_case_eq(left, right),
+                    left.eq_ignore_ascii_case(&right),
+                    "{left:?} vs {right:?}"
+                );
+            }
+        }
+        assert!(unicode_case_eq('K', 'K'));
+        assert!(unicode_case_eq('s', 'ſ'));
+        assert!(unicode_case_eq('ß', 'ẞ'));
+        assert!(!unicode_case_eq('i', 'İ'));
+        assert!(!unicode_case_eq('i', 'ı'));
     }
 
     #[test]

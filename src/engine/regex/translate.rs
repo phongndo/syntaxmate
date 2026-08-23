@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::ast::{AnchorKind, Ast, ParsedRegex, parse};
+use super::ast::{AnchorKind, Ast, LookKind, ParsedRegex, parse};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Route {
@@ -113,9 +113,20 @@ fn every_branch_starts_with_anchor(ast: &Ast, anchor: AnchorKind) -> bool {
 fn branch_starts_with_anchor(node: &Ast, anchor: AnchorKind) -> bool {
     match node {
         Ast::Anchor(kind) => *kind == anchor,
-        Ast::Group { child, .. } | Ast::Flags { child, .. } | Ast::Look { child, .. } => {
+        Ast::Alternation(branches) => branches
+            .iter()
+            .all(|branch| branch_starts_with_anchor(branch, anchor)),
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => {
             branch_starts_with_anchor(child, anchor)
         }
+        // A positive lookahead inherits the current position, so an anchor at
+        // the start of every asserted branch constrains the whole match.
+        // Negative assertions and lookbehinds do not: `(?!^x)y` commonly
+        // matches away from line start, while `(?<=^x)y` starts after `x`.
+        Ast::Look {
+            kind: LookKind::Ahead,
+            child,
+        } => branch_starts_with_anchor(child, anchor),
         Ast::Concat(nodes) => nodes
             .first()
             .is_some_and(|first| branch_starts_with_anchor(first, anchor)),
@@ -255,6 +266,38 @@ mod tests {
             translate(r"\Gfoo|\Gbar").anchor_strategy,
             AnchorStrategy::ContinuationGuard
         );
+        assert_eq!(
+            translate(r"^foo|(?=^bar)bar").anchor_strategy,
+            AnchorStrategy::LineStartGuard
+        );
+        assert_eq!(
+            translate(r"^foo|(?:^bar|^baz)").anchor_strategy,
+            AnchorStrategy::LineStartGuard
+        );
+    }
+
+    #[test]
+    fn negative_assertions_and_lookbehinds_do_not_license_anchor_guards() {
+        for pattern in [
+            r"^foo|(?!^bar)bar",
+            r"^foo|(?<=^bar)baz",
+            r"^foo|(?<!^bar)baz",
+        ] {
+            assert_eq!(
+                translate(pattern).anchor_strategy,
+                AnchorStrategy::Fallback,
+                "{pattern:?}"
+            );
+        }
+
+        // The explicit automata entry point uses the strategy as a search
+        // gate even when its native VM handles a fallback construct.
+        use super::super::{AnchorContext, AutomataMatcher, Matcher};
+        let matcher = AutomataMatcher::new(r"^foo|(?!^foo)bar").unwrap();
+        let matched = matcher
+            .find("xx bar", 3, AnchorContext::line_start())
+            .expect("negative assertion branch remains searchable after resume");
+        assert_eq!(matched.start..matched.end, 3..6);
     }
 
     #[test]

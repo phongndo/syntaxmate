@@ -2073,20 +2073,27 @@ impl LiteralTrie {
         if let Some(order) = self.nodes[0].terminal_order {
             matches.push((order, start));
         }
-        for (offset, &input) in line
-            .as_bytes()
-            .get(start..)
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-        {
+        let bytes = line.as_bytes();
+        let mut position = start;
+        while let Some(&input) = bytes.get(position) {
             // Charge input traversal as useful VM work. This keeps resource
             // limits comparable rather than making a large trie lookup free.
             budget.step()?;
-            let input = if flags.case_insensitive {
-                input.to_ascii_lowercase()
+            let (input, width) = if flags.case_insensitive && !input.is_ascii() {
+                match bytes.get(position..) {
+                    Some([0xc5, 0xbf, ..]) => (b's', 2),       // U+017F LONG S
+                    Some([0xe2, 0x84, 0xaa, ..]) => (b'k', 3), // U+212A KELVIN SIGN
+                    _ => break,
+                }
             } else {
-                input
+                (
+                    if flags.case_insensitive {
+                        input.to_ascii_lowercase()
+                    } else {
+                        input
+                    },
+                    1,
+                )
             };
             let child = self.nodes[node]
                 .edges
@@ -2096,9 +2103,9 @@ impl LiteralTrie {
                 break;
             };
             node = child as usize;
+            position += width;
             if let Some(order) = self.nodes[node].terminal_order {
-                let end = start + offset + 1;
-                matches.push((order, end));
+                matches.push((order, position));
             }
         }
         Ok(())
@@ -2400,6 +2407,7 @@ mod tests {
             (r"(?:foobar|foo|fool|bar)", "foobar", 6),
             (r"(?:foo|foobar|fool|bar)z", "foobarz", 7),
             (r"(?i:alpha|BETA|gamma|delta)", "BeTa!", 4),
+            (r"(?i:ask|foo|bar|baz)", "aſK", "aſK".len()),
             (r"(?:λx|λ|rust|type)", "λx", "λx".len()),
         ] {
             assert_eq!(

@@ -2657,6 +2657,16 @@ mod tests {
     }
 
     #[test]
+    fn pattern_set_preserves_mixed_width_unicode_case_folds() {
+        for (pattern, line) in [(r"(?i:k)", "K"), (r"(?i:ſ)", "S"), (r"(?i:ask)", "aſK")] {
+            let set = PatternSetMatcher::new(&[pattern.into(), "zzz".into()]).unwrap();
+            let (index, matched) = set.find(line, 0).expect(pattern);
+            assert_eq!(index, 0);
+            assert_eq!(matched.start..matched.end, 0..line.len());
+        }
+    }
+
+    #[test]
     fn pattern_set_replays_continuation_anchor_only_at_g_position() {
         let patterns = vec![r"\Gfoo".into(), "nomatch".into()];
         let set = PatternSetMatcher::new(&patterns).unwrap();

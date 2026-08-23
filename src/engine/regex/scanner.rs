@@ -474,14 +474,16 @@ fn first_accept(insts: &[Inst], threads: &[Thread]) -> Option<ScanMatch> {
 }
 
 fn char_matches(expected: char, actual: char, flags: RegexFlags) -> bool {
-    if flags.case_insensitive {
-        // ASCII stays on the cheap path; non-ASCII literals must fold like
-        // the authoritative engines do, or multi-pattern candidate selection
-        // silently misses matches (e.g. `(?i:café)` vs "CAFÉ").
+    if expected == actual {
+        return true;
+    }
+    if !flags.case_insensitive {
+        return false;
+    }
+    if expected.is_ascii() && actual.is_ascii() {
         expected.eq_ignore_ascii_case(&actual)
-            || super::backtrack::unicode_case_eq(expected, actual)
     } else {
-        expected == actual
+        super::backtrack::unicode_case_eq(expected, actual)
     }
 }
 

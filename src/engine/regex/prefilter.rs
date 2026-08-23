@@ -28,6 +28,7 @@ pub enum Prefilter {
     Any {
         literals: Vec<String>,
         ascii_case_insensitive: bool,
+        mixed_width_fold_mask: u8,
         finder: Option<MultiLiteralFinder>,
     },
 }
@@ -55,9 +56,16 @@ impl Prefilter {
             {
                 return Self::None;
             }
+            let mixed_width_fold_mask = literals.iter().fold(0u8, |mask, literal| {
+                literal.bytes().fold(mask, |mask, byte| {
+                    mask | u8::from(byte.eq_ignore_ascii_case(&b's'))
+                        | (u8::from(byte.eq_ignore_ascii_case(&b'k')) << 1)
+                })
+            });
             return Self::Any {
                 literals,
                 ascii_case_insensitive: true,
+                mixed_width_fold_mask,
                 finder: None,
             };
         }
@@ -87,6 +95,7 @@ impl Prefilter {
                 finder: MultiLiteralFinder::for_literals(&literals),
                 literals,
                 ascii_case_insensitive: false,
+                mixed_width_fold_mask: 0,
             },
         }
     }
@@ -109,6 +118,7 @@ impl Prefilter {
                 literals,
                 ascii_case_insensitive: false,
                 finder,
+                ..
             } => finder.as_ref().map_or_else(
                 || {
                     literals
@@ -120,10 +130,14 @@ impl Prefilter {
             Self::Any {
                 literals,
                 ascii_case_insensitive: true,
+                mixed_width_fold_mask,
                 ..
-            } => literals
-                .iter()
-                .any(|literal| contains_ignore_ascii_case(slice, literal)),
+            } => {
+                literals
+                    .iter()
+                    .any(|literal| contains_ignore_ascii_case(slice, literal))
+                    || first_ascii_case_fold_candidate(slice, *mixed_width_fold_mask).is_some()
+            }
         }
     }
 
@@ -146,6 +160,7 @@ impl Prefilter {
                 literals,
                 ascii_case_insensitive: false,
                 finder,
+                ..
             } => finder.as_ref().map_or_else(
                 || {
                     literals
@@ -159,10 +174,15 @@ impl Prefilter {
             Self::Any {
                 literals,
                 ascii_case_insensitive: true,
+                mixed_width_fold_mask,
                 ..
             } => literals
                 .iter()
                 .filter_map(|literal| find_ignore_ascii_case(slice, literal))
+                .chain(first_ascii_case_fold_candidate(
+                    slice,
+                    *mixed_width_fold_mask,
+                ))
                 .min()
                 .map(|pos| from + pos),
         }
@@ -351,6 +371,28 @@ fn find_literal(haystack: &str, needle: &str) -> Option<usize> {
 
 fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
     find_ignore_ascii_case(haystack, needle).is_some()
+}
+
+fn first_ascii_case_fold_candidate(haystack: &str, mask: u8) -> Option<usize> {
+    if mask == 0 {
+        return None;
+    }
+    let bytes = haystack.as_bytes();
+    let mut from = 0usize;
+    loop {
+        let relative = match mask {
+            1 => memchr::memchr(0xc5, bytes.get(from..)?),
+            2 => memchr::memchr(0xe2, bytes.get(from..)?),
+            _ => memchr::memchr2(0xc5, 0xe2, bytes.get(from..)?),
+        }?;
+        let offset = from + relative;
+        if (mask & 1 != 0 && matches!(bytes.get(offset..), Some([0xc5, 0xbf, ..])))
+            || (mask & 2 != 0 && matches!(bytes.get(offset..), Some([0xe2, 0x84, 0xaa, ..])))
+        {
+            return Some(offset);
+        }
+        from = offset + 1;
+    }
 }
 
 fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
@@ -841,6 +883,11 @@ mod tests {
         assert!(prefilter.is_enabled());
         assert!(prefilter.may_match("xxFOO", 0));
         assert!(!prefilter.may_match("xxbar", 0));
+
+        let parsed = parse(r"(?i)k");
+        let prefilter = Prefilter::from_regex(&parsed);
+        assert!(prefilter.may_match("K", 0));
+        assert_eq!(prefilter.next_occurrence("xxK", 0), Some(2));
 
         let parsed = parse(r"(?i)café");
         assert!(!Prefilter::from_regex(&parsed).is_enabled());

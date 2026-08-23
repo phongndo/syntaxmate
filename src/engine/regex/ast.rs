@@ -358,10 +358,12 @@ struct Parser<'a> {
 }
 
 /// Bounds recursive-descent nesting so hostile grammar patterns cannot
-/// overflow the stack. Real grammars stay far below this; exceeding it
-/// degrades the over-deep construct to a never-matching node instead of
-/// aborting the process.
-const MAX_PARSE_DEPTH: usize = 1024;
+/// overflow the stack. One regex nesting level spans several Rust call frames,
+/// and parsed ASTs are also walked recursively, so this must be conservative
+/// for callers using small worker-thread stacks. Bundled grammars stay below
+/// 32 levels; exceeding this limit degrades the over-deep construct to a
+/// never-matching node instead of aborting the process.
+const MAX_PARSE_DEPTH: usize = 128;
 
 impl<'a> Parser<'a> {
     fn new(source: &'a str) -> Self {
@@ -1479,18 +1481,27 @@ mod tests {
     }
 
     #[test]
-    fn nesting_below_the_limit_still_parses() {
-        let depth = MAX_PARSE_DEPTH - 2;
-        let pattern = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
-        let parsed = parse(&pattern);
-        assert!(parsed.diagnostics.is_empty());
-        let mut depth_count = 0usize;
-        let mut node = &parsed.ast;
-        while let Ast::Group { child, .. } = node {
-            depth_count += 1;
-            node = child;
-        }
-        assert_eq!(depth_count, depth);
+    fn nesting_below_the_limit_still_parses_on_a_small_stack() {
+        let parsed_depth = std::thread::Builder::new()
+            .stack_size(1024 * 1024)
+            .spawn(|| {
+                let depth = MAX_PARSE_DEPTH - 2;
+                let pattern = format!("{}\\g<1>{}", "(".repeat(depth), ")".repeat(depth));
+                let parsed = parse(&pattern);
+                assert!(parsed.diagnostics.is_empty());
+                parsed.initialize_analysis();
+                let mut depth_count = 0usize;
+                let mut node = &parsed.ast;
+                while let Ast::Group { child, .. } = node {
+                    depth_count += 1;
+                    node = child;
+                }
+                depth_count
+            })
+            .expect("small-stack parser thread starts")
+            .join()
+            .expect("small-stack parser thread does not overflow");
+        assert_eq!(parsed_depth, MAX_PARSE_DEPTH - 2);
     }
 
     #[test]
