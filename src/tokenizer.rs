@@ -346,20 +346,29 @@ impl Tokenizer {
     }
 
     /// Creates initial continuation state owned by this tokenizer.
+    ///
+    /// The returned state is document start: `\A` may match on the first
+    /// subsequent line. Later continuation states do not rematch `\A`.
     pub fn initial_state(&self) -> TokenizerState {
         TokenizerState {
             owner: self.id,
             inner: EngineTokenizerState::default(),
+            at_document_start: true,
         }
     }
 
     /// Tokenizes one logical line. `line` must not include a newline terminator.
+    ///
+    /// `\A` matches only while `state` is this tokenizer's initial
+    /// document-start state, matching [`Tokenizer::tokenize`]. After a
+    /// successful call, `state` is no longer at document start.
     pub fn tokenize_line(
         &mut self,
         line: &str,
         state: &mut TokenizerState,
     ) -> Result<TokenizedLine> {
         self.validate_line(line, state)?;
+        let line_index = state.anchor_line_index();
         let tokenized = if self
             .inner
             .max_line_bytes()
@@ -368,15 +377,18 @@ impl Tokenizer {
             // The parser adds one synthetic newline, so a line at the byte
             // limit is already too large. Skip it without filling the buffer.
             self.inner
-                .tokenize_line_shared_scopes_skipped(line, state.inner.clone())
+                .tokenize_line_shared_scopes_skipped(line, state.inner.clone(), line_index)
         } else {
             self.parse_line_buffer.clear();
             self.parse_line_buffer.push_str(line);
             self.parse_line_buffer.push('\n');
-            self.inner
-                .tokenize_line_shared_scopes(&self.parse_line_buffer, state.inner.clone())
+            self.inner.tokenize_line_shared_scopes(
+                &self.parse_line_buffer,
+                state.inner.clone(),
+                line_index,
+            )
         };
-        state.inner = tokenized.state;
+        state.finish_line(tokenized.state);
         let tokens = tokenized
             .tokens
             .into_iter()
@@ -461,6 +473,7 @@ impl Tokenizer {
         state: &mut TokenizerState,
         sink: &mut impl SharedScopeSink,
     ) -> HighlightStatus {
+        let line_index = state.anchor_line_index();
         let next_state = if self
             .inner
             .max_line_bytes()
@@ -468,8 +481,12 @@ impl Tokenizer {
         {
             // The parser adds one synthetic newline, so a line at the byte
             // limit is already too large. Skip it without filling the buffer.
-            self.inner
-                .tokenize_line_shared_scopes_skipped_with(line, state.inner.clone(), sink)
+            self.inner.tokenize_line_shared_scopes_skipped_with(
+                line,
+                state.inner.clone(),
+                line_index,
+                sink,
+            )
         } else {
             self.parse_line_buffer.clear();
             self.parse_line_buffer.push_str(line);
@@ -477,10 +494,11 @@ impl Tokenizer {
             self.inner.tokenize_line_shared_scopes_with(
                 &self.parse_line_buffer,
                 state.inner.clone(),
+                line_index,
                 sink,
             )
         };
-        state.inner = next_state;
+        state.finish_line(next_state);
         self.take_status()
     }
 
@@ -566,10 +584,15 @@ impl Tokenizer {
 }
 
 /// Opaque incremental continuation state.
+///
+/// [`Tokenizer::initial_state`] is document start, so `\A` may match on the
+/// next tokenized line. A successful incremental line call clears that
+/// document-start flag even when the rule stack stays empty.
 #[derive(Debug, Clone)]
 pub struct TokenizerState {
     owner: u64,
     inner: EngineTokenizerState,
+    at_document_start: bool,
 }
 
 impl TokenizerState {
@@ -579,6 +602,15 @@ impl TokenizerState {
 
     pub fn depth(&self) -> usize {
         self.inner.depth()
+    }
+
+    fn anchor_line_index(&self) -> usize {
+        usize::from(!self.at_document_start)
+    }
+
+    fn finish_line(&mut self, inner: EngineTokenizerState) {
+        self.inner = inner;
+        self.at_document_start = false;
     }
 }
 
@@ -881,5 +913,106 @@ mod tests {
             assert_eq!(tokenizer.parse_line_buffer.capacity(), initial_capacity);
             assert_eq!(tokenized.tokens()[0].range(), 0..line.len());
         }
+    }
+
+    fn token_scopes(tokens: &[ScopedToken]) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
+        tokens
+            .iter()
+            .map(|token| (token.range(), token.scopes().map(str::to_owned).collect()))
+            .collect()
+    }
+
+    fn document_line_scopes(line: &DocumentLine) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
+        line.spans()
+            .iter()
+            .map(|span| {
+                (
+                    span.range(),
+                    line.scope_names(span.scope_stack())
+                        .map(str::to_owned)
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn incremental_text_start_anchor_matches_only_document_start() {
+        let grammar = r#"{
+            "scopeName": "source.seed",
+            "patterns": [
+                {"match": "\\A(let|fn)\\b", "name": "keyword.anchor"}
+            ]
+        }"#;
+        let mut registry = GrammarRegistry::new();
+        let root = registry.add_json(grammar).unwrap();
+        let options = TokenizerOptions::default();
+
+        let mut complete = Tokenizer::new(&registry, root, options).unwrap();
+        let document = complete.tokenize("fn foo\nfn bar\n");
+        assert!(
+            document_line_scopes(&document.lines()[0])
+                .iter()
+                .any(|(_, scopes)| scopes.iter().any(|scope| scope == "keyword.anchor")),
+            "{:#?}",
+            document_line_scopes(&document.lines()[0])
+        );
+        assert!(
+            document_line_scopes(&document.lines()[1])
+                .iter()
+                .all(|(_, scopes)| scopes.iter().all(|scope| scope != "keyword.anchor")),
+            "{:#?}",
+            document_line_scopes(&document.lines()[1])
+        );
+
+        let mut incremental = Tokenizer::new(&registry, root, options).unwrap();
+        let mut state = incremental.initial_state();
+        let first = incremental.tokenize_line("fn foo", &mut state).unwrap();
+        let second = incremental.tokenize_line("fn bar", &mut state).unwrap();
+        assert_eq!(
+            token_scopes(first.tokens()),
+            document_line_scopes(&document.lines()[0])
+        );
+        assert_eq!(
+            token_scopes(second.tokens()),
+            document_line_scopes(&document.lines()[1])
+        );
+
+        let mut replay = Tokenizer::new(&registry, root, options).unwrap();
+        let mut replay_state = replay.initial_state();
+        assert_eq!(
+            replay
+                .tokenize_line("bad\nline", &mut replay_state)
+                .unwrap_err(),
+            Error::InvalidLine
+        );
+        let after_reject = replay.tokenize_line("fn foo", &mut replay_state).unwrap();
+        assert_eq!(
+            token_scopes(after_reject.tokens()),
+            token_scopes(first.tokens())
+        );
+
+        let mut skipped = Tokenizer::new(
+            &registry,
+            root,
+            TokenizerOptions {
+                max_line_bytes: 8,
+                ..TokenizerOptions::default()
+            },
+        )
+        .unwrap();
+        let mut skipped_state = skipped.initial_state();
+        let long = skipped
+            .tokenize_line("too long!", &mut skipped_state)
+            .unwrap();
+        assert_eq!(long.status(), HighlightStatus::Degraded);
+        let after_skip = skipped.tokenize_line("fn x", &mut skipped_state).unwrap();
+        assert!(
+            token_scopes(after_skip.tokens())
+                .iter()
+                .all(|(_, scopes)| scopes.iter().all(|scope| scope != "keyword.anchor")),
+            "{:#?}",
+            token_scopes(after_skip.tokens())
+        );
     }
 }

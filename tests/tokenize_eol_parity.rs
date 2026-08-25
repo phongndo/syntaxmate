@@ -88,3 +88,29 @@ fn final_line_without_trailing_newline_can_differ_from_tokenize_line() {
         "complete tokenize and tokenize_line intentionally disagree without a trailing newline"
     );
 }
+
+#[test]
+fn incremental_text_start_anchor_matches_complete_on_later_lines() {
+    // Scheduled fuzzing found `tokenize_line` rematching `\A` on every line
+    // because the public incremental API always passed line_index 0.
+    let grammar = r#"{
+        "scopeName": "source.seed",
+        "patterns": [
+            {
+                "match": "\\A(let|fn)\\b",
+                "name": "[port.function.seed"
+            }
+        ]
+    }"#;
+    let source = "BLOCK{\nfn  key: λ,";
+
+    let complete = line_scopes_complete(source, grammar);
+    let incremental = line_scopes_incremental(source, grammar);
+    assert_eq!(complete, incremental);
+    assert!(
+        complete[1]
+            .iter()
+            .all(|(_, scopes)| scopes.iter().all(|scope| scope != "[port.function.seed")),
+        "\\A must not match the second line: {complete:#?}"
+    );
+}
