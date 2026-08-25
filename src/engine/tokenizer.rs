@@ -2567,8 +2567,9 @@ impl TextMateTokenizer {
         &mut self,
         parse_text: &str,
         state: TokenizerState,
+        line_index: usize,
     ) -> SharedTokenizedLine {
-        let compact = self.tokenize_line_compact_at_line(parse_text, state, 0);
+        let compact = self.tokenize_line_compact_at_line(parse_text, state, line_index);
         self.resolve_shared_compact_line(compact)
     }
 
@@ -2576,8 +2577,9 @@ impl TextMateTokenizer {
         &mut self,
         parse_text: &str,
         state: TokenizerState,
+        line_index: usize,
     ) -> SharedTokenizedLine {
-        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, 0, true);
+        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, true);
         self.resolve_shared_compact_line(compact)
     }
 
@@ -2602,9 +2604,10 @@ impl TextMateTokenizer {
         &mut self,
         parse_text: &str,
         state: TokenizerState,
+        line_index: usize,
         sink: &mut impl SharedScopeSink,
     ) -> TokenizerState {
-        let compact = self.tokenize_line_compact_at_line(parse_text, state, 0);
+        let compact = self.tokenize_line_compact_at_line(parse_text, state, line_index);
         self.resolve_shared_compact_line_with(compact, sink)
     }
 
@@ -2612,9 +2615,10 @@ impl TextMateTokenizer {
         &mut self,
         parse_text: &str,
         state: TokenizerState,
+        line_index: usize,
         sink: &mut impl SharedScopeSink,
     ) -> TokenizerState {
-        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, 0, true);
+        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, true);
         self.resolve_shared_compact_line_with(compact, sink)
     }
 
