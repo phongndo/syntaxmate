@@ -612,32 +612,31 @@ impl FallbackMatcher {
                     steps: budget.used(),
                 });
             }
-            for (offset, byte) in line
-                .as_bytes()
-                .get(from..)
-                .unwrap_or_default()
-                .iter()
-                .enumerate()
-            {
-                let start = from + offset;
-                if self.parsed.analysis().start_nullable() && start == from {
-                    continue;
-                }
-                if !start_bytes.contains(*byte) || !line.is_char_boundary(start) {
-                    continue;
-                }
-                if let Some(result) = self.try_match_at_start_with_capture_count(
-                    line,
-                    start,
-                    ctx,
-                    &mut budget,
-                    capture_count,
-                )? {
+            let hay = line.as_bytes();
+            let mut cursor = from;
+            if self.parsed.analysis().start_nullable() {
+                cursor = cursor.saturating_add(1);
+            }
+            while cursor < hay.len() {
+                let Some(relative) = start_bytes.find(&hay[cursor..]) else {
+                    break;
+                };
+                let start = cursor + relative;
+                if line.is_char_boundary(start)
+                    && let Some(result) = self.try_match_at_start_with_capture_count(
+                        line,
+                        start,
+                        ctx,
+                        &mut budget,
+                        capture_count,
+                    )?
+                {
                     return Ok(FallbackReport {
                         result: Some(result),
                         steps: budget.used(),
                     });
                 }
+                cursor = start.saturating_add(1);
             }
             if has_zero_width_line_end_branch(&self.parsed.ast) {
                 let line_end = line.strip_suffix('\n').map_or(line.len(), str::len);
@@ -970,6 +969,10 @@ impl StartByteSet {
 
     pub(crate) fn contains(&self, byte: u8) -> bool {
         self.bits[byte as usize >> 6] & (1u64 << (byte & 63)) != 0
+    }
+
+    pub(crate) fn find(&self, haystack: &[u8]) -> Option<usize> {
+        super::prefilter::find_byte_set_bitmap(haystack, &self.bits)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -2695,14 +2698,22 @@ pub(crate) fn match_literal_end(
 ) -> Option<usize> {
     if !flags.case_insensitive {
         let end = start.checked_add(literal.len())?;
-        return (line.get(start..end)? == literal).then_some(end);
+        // Byte compare avoids `str::get`'s UTF-8 boundary walk on both ends.
+        // Callers feed character boundaries; reject a non-boundary start so
+        // malformed probes keep returning no match.
+        return (line.is_char_boundary(start)
+            && line.as_bytes().get(start..end)? == literal.as_bytes())
+        .then_some(end);
     }
     if literal.is_ascii() {
         let end = start.checked_add(literal.len())?;
-        if let Some(candidate) = line.get(start..end)
+        if let Some(candidate) = line.as_bytes().get(start..end)
             && candidate.is_ascii()
+            && line.is_char_boundary(start)
         {
-            return candidate.eq_ignore_ascii_case(literal).then_some(end);
+            return candidate
+                .eq_ignore_ascii_case(literal.as_bytes())
+                .then_some(end);
         }
         return match_ascii_literal_with_mixed_width_fold(line, start, literal);
     }
@@ -2766,9 +2777,15 @@ pub(crate) fn unicode_case_eq(left: char, right: char) -> bool {
     left.to_lowercase().eq(right.to_lowercase()) || left.to_uppercase().eq(right.to_uppercase())
 }
 
+#[inline]
 pub(crate) fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
-    let ch = line.get(pos..)?.chars().next()?;
-    Some((ch, pos + ch.len_utf8()))
+    let byte = *line.as_bytes().get(pos)?;
+    if byte < 0x80 {
+        Some((byte as char, pos + 1))
+    } else {
+        let ch = line.get(pos..)?.chars().next()?;
+        Some((ch, pos + ch.len_utf8()))
+    }
 }
 
 fn grapheme_end(line: &str, position: usize) -> Option<usize> {
@@ -2814,8 +2831,17 @@ fn is_word_boundary(line: &str, pos: usize) -> bool {
     before != after
 }
 
-fn previous_char(line: &str, pos: usize) -> Option<char> {
-    line.get(..pos)?.chars().next_back()
+#[inline]
+pub(crate) fn previous_char(line: &str, pos: usize) -> Option<char> {
+    if pos == 0 || pos > line.len() {
+        return None;
+    }
+    let prev = line.as_bytes()[pos - 1];
+    if prev < 0x80 {
+        Some(prev as char)
+    } else {
+        line.get(..pos)?.chars().next_back()
+    }
 }
 
 fn is_word_char(ch: char) -> bool {

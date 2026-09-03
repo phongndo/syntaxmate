@@ -298,10 +298,7 @@ impl MultiLiteralFinder {
         let mut state = 0u32;
         let mut best = None;
         for (index, byte) in haystack.iter().copied().enumerate() {
-            while state != 0 && self.transition(state, byte).is_none() {
-                state = self.nodes[state as usize].failure;
-            }
-            state = self.transition(state, byte).unwrap_or(0);
+            state = self.step(state, byte);
             let output_len = self.nodes[state as usize].output_len;
             if output_len != 0 {
                 let start = index + 1 - output_len;
@@ -316,12 +313,16 @@ impl MultiLiteralFinder {
         best
     }
 
-    fn transition(&self, state: u32, byte: u8) -> Option<u32> {
-        if state == 0 {
-            let next = self.root_edges[byte as usize];
-            (next != u32::MAX).then_some(next)
-        } else {
-            edge(&self.nodes[state as usize], byte)
+    fn step(&self, mut state: u32, byte: u8) -> u32 {
+        loop {
+            if state == 0 {
+                let next = self.root_edges[byte as usize];
+                return if next == u32::MAX { 0 } else { next };
+            }
+            if let Some(next) = edge(&self.nodes[state as usize], byte) {
+                return next;
+            }
+            state = self.nodes[state as usize].failure;
         }
     }
 }
@@ -335,9 +336,14 @@ fn multi_literal_min_total_bytes() -> usize {
 }
 
 fn edge(node: &FinderNode, byte: u8) -> Option<u32> {
-    node.edges
-        .iter()
-        .find_map(|(candidate, next)| (*candidate == byte).then_some(*next))
+    let edges = &node.edges;
+    match edges.len() {
+        0 => None,
+        1 => (edges[0].0 == byte).then_some(edges[0].1),
+        _ => edges
+            .iter()
+            .find_map(|(candidate, next)| (*candidate == byte).then_some(*next)),
+    }
 }
 
 fn prefilter_one(literal: String) -> Prefilter {
@@ -353,16 +359,59 @@ fn find_byte(haystack: &[u8], needle: u8) -> Option<usize> {
     memchr::memchr(needle, haystack)
 }
 
-fn find_byte_set(haystack: &[u8], bytes: &[u8], bitmap: &[u64; 4]) -> Option<usize> {
+#[inline]
+pub(crate) fn find_byte_set(haystack: &[u8], bytes: &[u8], bitmap: &[u64; 4]) -> Option<usize> {
     match bytes {
         [] => None,
         [byte] => memchr::memchr(*byte, haystack),
         [a, b] => memchr::memchr2(*a, *b, haystack),
         [a, b, c] => memchr::memchr3(*a, *b, *c, haystack),
-        _ => haystack
-            .iter()
-            .position(|byte| bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0),
+        _ => find_byte_set_bitmap(haystack, bitmap),
     }
+}
+
+#[inline]
+fn byte_in_set(bitmap: &[u64; 4], byte: u8) -> bool {
+    bitmap[byte as usize >> 6] & (1u64 << (byte & 63)) != 0
+}
+
+pub(crate) fn find_byte_set_bitmap(haystack: &[u8], bitmap: &[u64; 4]) -> Option<usize> {
+    let mut index = 0;
+    let len = haystack.len();
+    while index + 8 <= len {
+        if byte_in_set(bitmap, haystack[index]) {
+            return Some(index);
+        }
+        if byte_in_set(bitmap, haystack[index + 1]) {
+            return Some(index + 1);
+        }
+        if byte_in_set(bitmap, haystack[index + 2]) {
+            return Some(index + 2);
+        }
+        if byte_in_set(bitmap, haystack[index + 3]) {
+            return Some(index + 3);
+        }
+        if byte_in_set(bitmap, haystack[index + 4]) {
+            return Some(index + 4);
+        }
+        if byte_in_set(bitmap, haystack[index + 5]) {
+            return Some(index + 5);
+        }
+        if byte_in_set(bitmap, haystack[index + 6]) {
+            return Some(index + 6);
+        }
+        if byte_in_set(bitmap, haystack[index + 7]) {
+            return Some(index + 7);
+        }
+        index += 8;
+    }
+    while index < len {
+        if byte_in_set(bitmap, haystack[index]) {
+            return Some(index);
+        }
+        index += 1;
+    }
+    None
 }
 
 fn find_literal(haystack: &str, needle: &str) -> Option<usize> {
@@ -404,8 +453,26 @@ fn find_ignore_ascii_case(haystack: &str, needle: &str) -> Option<usize> {
     if needle.len() > hay.len() {
         return None;
     }
-    hay.windows(needle.len())
-        .position(|window| window.eq_ignore_ascii_case(needle))
+    let first = needle[0];
+    let lower = first.to_ascii_lowercase();
+    let upper = first.to_ascii_uppercase();
+    let mut from = 0usize;
+    loop {
+        let rest = hay.get(from..)?;
+        let relative = if lower == upper {
+            memchr::memchr(first, rest)?
+        } else {
+            memchr::memchr2(lower, upper, rest)?
+        };
+        let pos = from + relative;
+        if hay
+            .get(pos..pos + needle.len())
+            .is_some_and(|window| window.eq_ignore_ascii_case(needle))
+        {
+            return Some(pos);
+        }
+        from = pos + 1;
+    }
 }
 
 /// Scan-local memo of required-literal occurrences, keyed by compiled-pattern
@@ -902,6 +969,24 @@ mod tests {
         let prefilter = Prefilter::from_pattern(&parsed.ast);
         assert!(prefilter.may_match("abcx", 0));
         assert!(!prefilter.may_match("abc", 0));
+    }
+
+    #[test]
+    fn byte_set_prefilter_finds_first_of_many_bytes() {
+        let parsed = parse("a|e|i|o|u");
+        let prefilter = Prefilter::from_pattern(&parsed.ast);
+        assert_eq!(prefilter.next_occurrence("xxxyz o", 0), Some(6));
+        assert_eq!(prefilter.next_occurrence("xxxyz o", 6), Some(6));
+        assert_eq!(prefilter.next_occurrence("xxxyz o", 7), None);
+        assert!(!prefilter.may_match("bcdfg", 0));
+    }
+
+    #[test]
+    fn ignore_ascii_case_search_finds_first_folded_needle() {
+        assert_eq!(find_ignore_ascii_case("xxSELECT", "select"), Some(2));
+        assert_eq!(find_ignore_ascii_case("Select", "SELECT"), Some(0));
+        assert_eq!(find_ignore_ascii_case("nope", "SELECT"), None);
+        assert_eq!(find_ignore_ascii_case("ssssSELECT", "select"), Some(4));
     }
 
     #[test]

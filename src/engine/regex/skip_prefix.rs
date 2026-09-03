@@ -242,7 +242,7 @@ fn whitespace_run_end(
     }
     let mut end = start;
     while let Some(byte) = bytes.get(end) {
-        if ASCII_WHITESPACE.contains(byte) {
+        if matches!(*byte, b'\t' | b'\n' | 0x0b | 0x0c | b'\r' | b' ') {
             end += 1;
         } else if !byte.is_ascii() {
             return None;

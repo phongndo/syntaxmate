@@ -68,9 +68,55 @@ enum Inst {
 #[derive(Debug, Clone)]
 pub(crate) struct Scanner {
     insts: Vec<Inst>,
-    classes: Vec<CharClass>,
+    classes: Vec<ScannerClass>,
     entries: Vec<usize>,
     starts: ScannerStarts,
+}
+
+#[derive(Debug, Clone)]
+struct ScannerClass {
+    source: CharClass,
+    ascii_sensitive: [u64; 2],
+    ascii_insensitive: [u64; 2],
+}
+
+impl ScannerClass {
+    fn new(source: CharClass) -> Self {
+        let mut ascii_sensitive = [0u64; 2];
+        let mut ascii_insensitive = [0u64; 2];
+        for byte in 0u8..=127 {
+            let ch = byte as char;
+            if class_contains(&source, ch, RegexFlags::default()) {
+                ascii_sensitive[byte as usize / 64] |= 1u64 << (byte % 64);
+            }
+            if class_contains(
+                &source,
+                ch,
+                RegexFlags {
+                    case_insensitive: true,
+                    ..RegexFlags::default()
+                },
+            ) {
+                ascii_insensitive[byte as usize / 64] |= 1u64 << (byte % 64);
+            }
+        }
+        Self {
+            source,
+            ascii_sensitive,
+            ascii_insensitive,
+        }
+    }
+
+    #[inline]
+    fn matches_ascii(&self, byte: u8, case_insensitive: bool) -> bool {
+        debug_assert!(byte < 128);
+        let bitmap = if case_insensitive {
+            &self.ascii_insensitive
+        } else {
+            &self.ascii_sensitive
+        };
+        bitmap[byte as usize / 64] & (1u64 << (byte % 64)) != 0
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -169,10 +215,10 @@ impl Scanner {
             .saturating_add(
                 self.classes
                     .capacity()
-                    .saturating_mul(std::mem::size_of::<CharClass>()),
+                    .saturating_mul(std::mem::size_of::<ScannerClass>()),
             );
         for class in &self.classes {
-            bytes = bytes.saturating_add(char_class_heap_bytes(class));
+            bytes = bytes.saturating_add(char_class_heap_bytes(&class.source));
         }
         bytes
     }
@@ -249,15 +295,26 @@ impl Scanner {
 
             scratch.next.clear();
             scratch.begin_generation();
-            let next_position = char_at(line, position).map(|(_, end)| end);
+            let next_position = match line.as_bytes().get(position).copied() {
+                Some(byte) if byte < 0x80 => Some(position + 1),
+                Some(_) => char_at(line, position).map(|(_, end)| end),
+                None => None,
+            };
             let mut index = 0;
             while index < scratch.current.len() {
                 let thread = scratch.current[index];
                 match &self.insts[thread.pc] {
                     Inst::Char { ch, flags, next } => {
-                        if let Some((input, end)) = char_at(line, position)
-                            && char_matches(*ch, input, *flags)
-                        {
+                        let matched = match line.as_bytes().get(position).copied() {
+                            Some(byte) if byte < 0x80 => {
+                                char_matches(*ch, byte as char, *flags).then_some(position + 1)
+                            }
+                            Some(_) => char_at(line, position).and_then(|(input, end)| {
+                                char_matches(*ch, input, *flags).then_some(end)
+                            }),
+                            None => None,
+                        };
+                        if let Some(end) = matched {
                             add_thread(
                                 &self.insts,
                                 *next,
@@ -271,9 +328,17 @@ impl Scanner {
                         }
                     }
                     Inst::Class { class, flags, next } => {
-                        if let Some((ch, end)) = char_at(line, position)
-                            && class_contains(&self.classes[*class], ch, *flags)
-                        {
+                        let class = &self.classes[*class];
+                        let matched = match line.as_bytes().get(position).copied() {
+                            Some(byte) if byte < 0x80 => class
+                                .matches_ascii(byte, flags.case_insensitive)
+                                .then_some(position + 1),
+                            Some(_) => char_at(line, position).and_then(|(ch, end)| {
+                                class_contains(&class.source, ch, *flags).then_some(end)
+                            }),
+                            None => None,
+                        };
+                        if let Some(end) = matched {
                             add_thread(
                                 &self.insts,
                                 *next,
@@ -287,9 +352,16 @@ impl Scanner {
                         }
                     }
                     Inst::Any { flags, next } => {
-                        if let Some((ch, end)) = char_at(line, position)
-                            && (ch != '\n' || flags.dot_matches_new_line)
-                        {
+                        let matched = match line.as_bytes().get(position).copied() {
+                            Some(byte) if byte < 0x80 => (byte != b'\n'
+                                || flags.dot_matches_new_line)
+                                .then_some(position + 1),
+                            Some(_) => char_at(line, position).and_then(|(ch, end)| {
+                                (ch != '\n' || flags.dot_matches_new_line).then_some(end)
+                            }),
+                            None => None,
+                        };
+                        if let Some(end) = matched {
                             add_thread(
                                 &self.insts,
                                 *next,
@@ -594,7 +666,7 @@ impl ScannerScratch {
 #[derive(Default)]
 struct Compiler {
     insts: Vec<Inst>,
-    classes: Vec<CharClass>,
+    classes: Vec<ScannerClass>,
     entries: Vec<CompilerEntry>,
 }
 
@@ -670,7 +742,7 @@ impl Compiler {
             Ast::Dot => self.push(Inst::Any { flags, next }),
             Ast::Class(class) => {
                 let id = self.classes.len();
-                self.classes.push(class.clone());
+                self.classes.push(ScannerClass::new(class.clone()));
                 self.push(Inst::Class {
                     class: id,
                     flags,
