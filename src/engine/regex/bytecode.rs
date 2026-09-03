@@ -8,7 +8,7 @@ use super::analysis::RegexAnalysis;
 use super::ast::{Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, RegexFlags};
 use super::backtrack::{
     BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
-    is_cpp_space_comment_separator, match_literal_end, unicode_case_eq,
+    is_cpp_space_comment_separator, match_literal_end, previous_char, unicode_case_eq,
 };
 use super::{AnchorContext, is_unicode_word_char};
 use std::ops::Range;
@@ -183,6 +183,28 @@ impl<T: Copy> LiteralTrieEdges<T> {
             Self::Empty => [].iter(),
             Self::One(edge) => std::slice::from_ref(edge).iter(),
             Self::Many(edges) => edges.iter(),
+        }
+    }
+
+    fn get(&self, key: T) -> Option<u32>
+    where
+        T: Ord,
+    {
+        match self {
+            Self::Empty => None,
+            Self::One((edge, child)) => (*edge == key).then_some(*child),
+            Self::Many(edges) => {
+                if edges.len() <= 8 {
+                    edges
+                        .iter()
+                        .find_map(|(edge, child)| (*edge == key).then_some(*child))
+                } else {
+                    edges
+                        .binary_search_by_key(&key, |(edge, _)| *edge)
+                        .ok()
+                        .map(|index| edges[index].1)
+                }
+            }
         }
     }
 
@@ -754,10 +776,6 @@ fn consume_c_block_comment(line: &str, pos: usize) -> Option<usize> {
     Some(pos + 2 + end + 2)
 }
 
-fn previous_char(line: &str, pos: usize) -> Option<char> {
-    line.get(..pos)?.chars().next_back()
-}
-
 fn cpp_is_word_char(ch: char) -> bool {
     is_unicode_word_char(ch)
 }
@@ -957,9 +975,11 @@ impl Program {
                         budget,
                         &mut scratch.literal_matches,
                     )?;
-                    scratch
-                        .literal_matches
-                        .sort_unstable_by_key(|(order, _)| *order);
+                    if scratch.literal_matches.len() > 1 {
+                        scratch
+                            .literal_matches
+                            .sort_unstable_by_key(|(order, _)| *order);
+                    }
                     if !scratch.literal_matches.is_empty() {
                         // Preserve ordered-regex backtracking. A shorter
                         // preferred keyword may match now but fail in the
@@ -2071,7 +2091,16 @@ impl LiteralTrie {
                 *terminal = Some(order);
             }
         }
+        trie.finish_ascii_edges();
         Ok(trie)
+    }
+
+    fn finish_ascii_edges(&mut self) {
+        for node in &mut self.nodes {
+            if let LiteralTrieEdges::Many(edges) = &mut node.edges {
+                edges.sort_unstable_by_key(|(byte, _)| *byte);
+            }
+        }
     }
 
     fn collect_matches(
@@ -2134,11 +2163,7 @@ impl LiteralTrie {
                     1,
                 )
             };
-            let child = self.nodes[node]
-                .edges
-                .iter()
-                .find_map(|(edge, child)| (*edge == input).then_some(*child));
-            let Some(child) = child else {
+            let Some(child) = self.nodes[node].edges.get(input) else {
                 break;
             };
             node = child as usize;

@@ -1,8 +1,8 @@
 use std::{collections::HashSet, fmt, sync::Arc};
 
 use super::ast::{AnchorKind, Ast, ClassAtom, LookKind, PerlClassKind, RegexFlags};
-use super::backtrack::{FallbackMatcher, is_line_end_position};
-use super::prefilter::LiteralSet;
+use super::backtrack::{FallbackMatcher, char_at, is_line_end_position, previous_char};
+use super::prefilter::{LiteralSet, find_byte_set};
 use super::scanner::Scanner;
 use super::translate::{AnchorStrategy, Translation, translate};
 use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
@@ -387,9 +387,7 @@ impl SymbolSetMatcher {
         let bytes = line.as_bytes();
         let mut start = from;
         while start < bytes.len() {
-            let offset = bytes[start..].iter().position(|byte| {
-                self.start_bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0
-            })?;
+            let offset = find_byte_set(&bytes[start..], &self.start_bytes, &self.start_bitmap)?;
             start += offset;
             if let Some(result) = self.match_at(line, start) {
                 return Some(result);
@@ -952,12 +950,21 @@ impl WordSetMatcher {
         else {
             return false;
         };
-        if self.case_insensitive {
+        let words = &self.buckets[index].words;
+        if !self.case_insensitive {
+            return words.contains(token);
+        }
+        const STACK: usize = 64;
+        if token.len() <= STACK {
+            let mut folded = [0u8; STACK];
+            folded[..token.len()].copy_from_slice(token);
+            let folded = &mut folded[..token.len()];
+            folded.make_ascii_lowercase();
+            words.contains(&folded[..])
+        } else {
             let mut folded = token.to_vec();
             folded.make_ascii_lowercase();
-            self.buckets[index].words.contains(&folded)
-        } else {
-            self.buckets[index].words.contains(token)
+            words.contains(folded.as_slice())
         }
     }
 
@@ -1231,15 +1238,6 @@ fn ascii_word_end(bytes: &[u8], start: usize) -> usize {
         end += 1;
     }
     end
-}
-
-fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
-    let ch = line.get(pos..)?.chars().next()?;
-    Some((ch, pos + ch.len_utf8()))
-}
-
-fn previous_char(line: &str, pos: usize) -> Option<char> {
-    line.get(..pos)?.chars().next_back()
 }
 
 fn is_word_char(ch: char) -> bool {
@@ -2272,15 +2270,7 @@ impl StartBytePrefilter {
 }
 
 fn find_start_byte(haystack: &[u8], bytes: &[u8], bitmap: &[u64; 4]) -> Option<usize> {
-    match bytes {
-        [] => None,
-        [byte] => memchr::memchr(*byte, haystack),
-        [a, b] => memchr::memchr2(*a, *b, haystack),
-        [a, b, c] => memchr::memchr3(*a, *b, *c, haystack),
-        _ => haystack
-            .iter()
-            .position(|byte| bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0),
-    }
+    find_byte_set(haystack, bytes, bitmap)
 }
 
 fn frontier_enabled(
