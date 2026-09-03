@@ -9,6 +9,14 @@ Install Rust 1.88 or newer. The checked-in toolchain file selects the normal
 stable toolchain. Node 24 is needed only when regenerating the pinned
 `vscode-textmate` oracle.
 
+On NixOS or macOS with Nix installed, enter the reproducible development shell
+instead. It includes the pinned Rust toolchain, Node 24, Python, Git, and hk on
+both Intel and ARM systems:
+
+```sh
+nix develop
+```
+
 The repository includes an [hk](https://hk.jdx.dev/) configuration for fast
 local consistency checks. With `hk` installed, enable it once with `hk install`
 (or the recommended global `hk install --global`).
