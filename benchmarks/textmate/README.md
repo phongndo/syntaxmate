@@ -1,100 +1,104 @@
-# TextMate engine benchmarks
+# Engine measurement and guardrails
 
-The benchmark modes deliberately separate grammar/parser setup from full-file
-highlighting and never serialize tokens inside the timed interval.
+Run commands from the repository root. Use identical source and grammar inputs
+for engine comparisons. Record commit IDs, toolchain, machine, corpus hashes,
+and timing boundaries. Compare release builds in alternating-order, separate
+processes; report sample distributions rather than a single best run.
 
-## Native Syntaxmate
+Require complete output and matching scope/range or rendered-byte digests before
+calling a change a speedup. Separate construction, first use, warm matching,
+and cached line-result replay. Report regressions and correctness tradeoffs;
+raising a budget or removing a slow corpus does not establish an improvement.
+
+## Engine timing
 
 ```sh
-cargo build --release -p syntaxmate --example profile-cold
+cargo build --release --locked --example profile-cold
 target/release/examples/profile-cold \
-  --mode process-cold \
-  --assets assets/grammars/languages \
-  --scope source.rust \
-  tests/fixtures/textmate/rust/stress.rs 1
+  --mode process-cold --assets assets/grammars/languages \
+  --scope source.rust tests/fixtures/textmate/rust/stress.rs 1
 ```
 
-Run the command in a fresh process for each process-cold sample. The driver
-loads only the requested grammar's transitive external-include closure.
-
-## Allocation and live-memory guardrails
-
-`profile-alloc` exposes a stable JSON protocol for first/warm whole-document,
-incremental replay, incremental highlighting, and prepared-language phases. It
-records allocation calls, cumulative bytes, boundary retention, peak additional
-live bytes, and token/scope-stream digests without serializing output in the
-timed API intervals.
+For an identical-assets comparison with the pinned development oracle:
 
 ```sh
-cargo build --release --example profile-alloc --locked
+npm ci --prefix tools/golden-oracle
+python3 tools/compare-textmate-performance.py \
+  --iterations 5 --out target/textmate-performance/comparison.json
+```
+
+This focused smoke comparison excludes driver setup. The separate-process
+first/steady/replay engine track and end-to-end product comparison are described
+in [competitive benchmarks](../competitors/README.md). Syntect uses different
+grammars and belongs only in the product comparison.
+
+## Allocation and retained memory
+
+```sh
+cargo run --release --locked --example profile-alloc -- \
+  --json --no-line-cache rust tests/fixtures/textmate/rust/stress.rs
+cargo build --release --locked --example profile-alloc
 python3 tools/check-allocation-performance.py \
   --write-report target/textmate-performance/allocation-report.json
 ```
 
-The checker validates the four fixed corpus paths, sizes, and SHA-256 digests in
-`allocation-policy.json`, enforces every phase's allocation-call,
-cumulative-byte, and peak-live-byte ceilings, and reports nearest-rank p50/p95
-values per KiB. Elapsed time is
-reported but not gated on variable shared CI runners.
+[profile-alloc](../../examples/profile-alloc.rs) measures construction,
+whole-document and incremental first/warm phases, styling, and prepared-language
+creation/reuse. It reports allocation/reallocation calls, cumulative bytes,
+boundary retention, peak additional live bytes, completion, and output digests.
+Default warm runs can reuse cached line tokens; `--no-line-cache` forces matching
+again. Digest work stays outside timed API intervals.
 
-## Pinned standalone vscode-textmate
+The counting allocator changes costs. Use uninstrumented engine/product drivers
+for latency claims and report allocation measurements separately.
+[profile-prepared](../../examples/profile-prepared.rs) compares independent
+sessions in `direct`, `prepared-total`, and `prepared-reuse` modes, also with a
+counting allocator.
 
-```sh
-npm install --prefix tools/golden-oracle
-node tools/textmate-bench.mjs \
-  --mode process-cold \
-  --assets assets/grammars/languages \
-  --scope source.rust \
-  --file tests/fixtures/textmate/rust/stress.rs \
-  --iterations 1 --json
-```
+[allocation-policy.json](allocation-policy.json) pins corpora and reviewed
+per-phase memory/call ceilings. The checker rejects stale inputs, degraded
+output, digest drift, and ceiling breaches. Raising a ceiling requires new
+profile evidence and review. Elapsed time is informational on shared runners.
 
-Use `--mode same-driver --iterations 3` for repeated passes after one setup.
-
-## Pinned-oracle engine smoke comparison
-
-Compare Syntaxmate and the compatibility oracle's pinned VS Code implementation
-on identical grammar assets and source fixtures, excluding each driver's setup
-phase:
+## Catalog performance
 
 ```sh
-npm ci --prefix tools/golden-oracle
-RUSTUP_TOOLCHAIN=1.88.0 python3 tools/compare-textmate-performance.py \
-  --iterations 5 \
-  --out target/textmate-performance/comparison.json
+python3 tools/build-textmate-corpora.py --check
+python3 tools/check-textmate-catalog-performance.py
 ```
 
-The committed reference result is `engine-comparison.json`; use a `target/`
-path for ad-hoc runs and replace the reference only after reviewing the complete
-environment and per-language output. This is a focused development smoke test,
-not the publication benchmark.
-
-The separate-process first/steady/replay engine benchmark and the end-to-end
-Syntaxmate/Shiki/Syntect comparison live in
-[`../competitors`](../competitors/README.md). That runner uses current pinned
-competitor versions, seven rotating-order process samples, p50/p95 reporting,
-and normalized scope-stream digest equality for the engine track.
-
-Both runners account for elapsed time, processed bytes, token counts, and the
-runtime environment; the publication runner can retain every raw sample with
-`--include-samples`. Token counts may differ and are never treated as a speed
-score. Syntect uses Sublime syntax definitions rather than the same TextMate
-JSON assets, so it is intentionally excluded from like-for-like engine reports;
-its end-to-end measurement is labeled as a different-grammar product
-comparison.
-
-## Quality oracle
+The default command applies reference-machine floors; `--ci` selects the
+separate shared-runner policy. After an intentional reference measurement:
 
 ```sh
-node tools/golden-dump.mjs \
-  --assets assets/grammars/languages \
-  --scope text.html.markdown \
-  --file benchmarks/textmate/corpora/markdown-embedded-private.md \
-  --out /tmp/oracle.jsonl
-
-SYNTAXMATE_STRICT=1 cargo test --all-features \
-  textmate_golden::manifest_golden_cases_match_or_are_allowlisted
+python3 tools/check-textmate-catalog-performance.py --iterations 3 --write-report
+python3 tools/generate-language-status.py
+python3 tools/check-language-docs.py --write
 ```
 
-Report throughput together with each engine's emitted segment/token count;
-token counts differ between engines and are not directly comparable.
+This replaces [catalog-performance.json](catalog-performance.json); review it
+before committing. Policy and corpus identity are defined in
+[validation-policy.json](validation-policy.json) and [corpora.toml](corpora.toml).
+`core-repeated` and `catalog-repeated` are fixed comparison inputs. Only
+`representative-markdown` deliberately follows current project documentation;
+its generated manifest records the changed input hash.
+
+## Prior experiments
+
+Revisit rejected approaches only with a different design and fresh evidence:
+
+- Independent per-pattern next-match memoization lost the unified scanner's
+  lazy grammar-order search.
+- Position-only recursive subroutines lost observable captures.
+- Fixed-byte case-folded lookbehind bounds missed Unicode folds across UTF-8
+  widths. The correctness repair has a measured SDBL cost; preserve the
+  regression cases while investigating it.
+- Larger execution budgets traded latency for fewer misses without repairing
+  the underlying execution cost.
+
+Historical measurements and additional rejected experiments remain in the
+[0.1.3 performance roadmap](https://github.com/phongndo/syntaxmate/blob/v0.1.3/docs/performance-roadmap.md)
+and [correctness pass report](https://github.com/phongndo/syntaxmate/blob/v0.1.3/docs/correctness-performance-pass.md).
+They describe those revisions, not current performance. Keep exploratory
+profiles and raw logs under `target/`; publish durable evidence with the relevant
+change rather than adding another current-status document.

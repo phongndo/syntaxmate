@@ -14,7 +14,8 @@ ANSI output, and no native Oniguruma dependency.
 [**Examples**](examples) ·
 [**Benchmarks**](benchmarks/competitors/README.md) ·
 [**Languages**](docs/language-status.md) ·
-[**Compatibility**](docs/compatibility.md)
+[**Compatibility**](docs/compatibility.md) ·
+[**Contributing**](CONTRIBUTING.md)
 
 ## Usage
 
@@ -37,6 +38,10 @@ assert!(output.status().is_complete());
 println!("{}", output.as_str());
 # Ok::<(), syntaxmate::Error>(())
 ```
+
+For custom grammars, themes, and incremental use, start with the
+[compiled examples](examples). See [rendering](docs/rendering.md) for output
+options and source/document pairing requirements.
 
 ## License
 

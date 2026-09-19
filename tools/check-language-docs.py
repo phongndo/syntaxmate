@@ -19,10 +19,7 @@ CORPORA = Path("benchmarks/textmate/corpora.toml")
 SCALE_POLICY = Path("tools/textmate-golden-scale-policy.json")
 VALIDATION_POLICY = Path("benchmarks/textmate/validation-policy.json")
 FIXTURE_README = Path("tests/fixtures/textmate/README.md")
-MANAGED_DOCS = (
-    Path("docs/textmate-engine.md"),
-    FIXTURE_README,
-)
+MANAGED_DOCS = (FIXTURE_README,)
 TOP_README = Path("README.md")
 COUNT_START = "<!-- BEGIN GENERATED: language-counts -->"
 COUNT_END = "<!-- END GENERATED: language-counts -->"
@@ -178,44 +175,16 @@ def replace_snippet(text, start, end, replacement, path):
 
 
 def count_snippet(path, counts):
-    if path == Path("docs/configuration.md"):
-        body = (
-            f"The bundled native backend supports **{counts.supported} public language IDs**. "
-            f"**{counts.validated} are validated** by the complete generated contract; "
-            f"**{counts.supported_only} more are supported** by real bundled grammars and "
-            "the catalog-wide smoke/budget gate. See "
-            "[`language-status.md`](language-status.md) for the generated per-language "
-            "ledger, or inspect `Catalog::bundled().languages()` at runtime."
-        )
-    elif path == FIXTURE_README:
-        validated = ", ".join(f"`{language}`" for language in counts.validated_ids) or "none"
-        body = (
-            f"The generated manifest has **{counts.manifest_cases} cases** covering "
-            f"**{counts.oracle} public language IDs** in the "
-            f"**{counts.supported}-ID supported catalog**. **{counts.validated} IDs are "
-            f"validated** by the complete generated contract; **{counts.corpus} IDs** are "
-            f"in `catalog-repeated`. The current validated IDs are {validated}."
-        )
-    elif path == TOP_README:
-        body = (
-            f"Current generated coverage: **{counts.supported} supported public language "
-            f"IDs**, **{counts.validated} validated**, **{counts.oracle} oracle-covered**, "
-            f"and **{counts.corpus} in the catalog stress corpus**. The final quality target "
-            f"is {counts.supported}/{counts.supported} validated; see "
-            "[`docs/language-status.md`](docs/language-status.md) for the generated ledger."
-        )
-    else:
-        body = (
-            f"Completed generated coverage: **{counts.supported} supported public language "
-            f"IDs**, **{counts.validated} validated**, **{counts.oracle} oracle-covered**, "
-            f"and **{counts.corpus} in the catalog stress corpus**. The locked quality "
-            f"contract is {counts.supported}/{counts.supported} validated; the deterministic "
-            "validation policy locks all four counts and the exact catalog identity "
-            "(SHA-256 of the sorted public-ID list), so regeneration cannot make a lost "
-            "public-ID basic/stress contract look complete or swap one language for "
-            "another. See [`language-status.md`](language-status.md) for the generated "
-            "ledger."
-        )
+    ledger = (
+        "../../../docs/language-status.md"
+        if path == FIXTURE_README else "docs/language-status.md"
+    )
+    body = (
+        f"The manifest has **{counts.manifest_cases} cases** covering "
+        f"**{counts.oracle} public language IDs**. Of **{counts.supported} supported IDs**, "
+        f"**{counts.validated} are validated** and **{counts.corpus} are in the stress corpus** "
+        f"(`catalog-repeated`). See the [generated ledger]({ledger}) for individual results."
+    )
     return f"{COUNT_START}\n{body}\n{COUNT_END}"
 
 
@@ -407,7 +376,7 @@ def render_docs(root, counts, policy):
         if has_unmanaged_count_claim(text):
             raise ValueError(f"{path} has an unmanaged language-count claim; add generated markers")
         text = replace_snippet(text, COUNT_START, COUNT_END, count_snippet(path, counts), path)
-        if path == Path("docs/textmate-engine.md"):
+        if path == FIXTURE_README:
             text = replace_snippet(text, SCALE_START, SCALE_END, scale_snippet(policy), path)
         result[path] = text
 

@@ -1,54 +1,41 @@
 # Releasing Syntaxmate
 
-Syntaxmate releases are independent of downstream applications. Published
-artifacts must come from a reviewed, green commit on `main`.
-
-## One-time setup
-
-The first `0.1.0` publication must be performed manually with a narrowly scoped,
-short-lived crates.io token because trusted publishing is configured on an
-existing crate. Immediately afterward:
-
-1. add a crates.io trusted publisher for repository `phongndo/syntaxmate`,
-   workflow `release.yml`, and GitHub environment `crates-io`;
-2. configure the protected `crates-io` environment with required reviewer(s)
-   and tag-only deployment rules;
-3. enable GitHub private vulnerability reporting, branch protection, required
-   CI/security checks, signed commits/tags where practical, and tag protection;
-4. remove the bootstrap crates.io token.
-
-Later releases use OIDC short-lived credentials and do not require a stored
-registry secret.
+Release a reviewed, green commit on `main`. Downstream applications consume
+published versions through the public API and do not control release order.
 
 ## Preparing a release
 
-1. Update `CHANGELOG.md`: replace `Unreleased` with the ISO release date and add
-   migration notes for any public API or intentional output change.
-2. Update the package version and regenerate `Cargo.lock`.
-3. Regenerate and check `assets/grammars.bundle` and generated documentation.
-4. Confirm third-party source pins, checksums, SPDX records, and notices.
-5. Run formatting, Clippy, feature powersets, tests, strict golden shards,
-   oracle checks, docs, MSRV, package consumers, performance, and security
-   policy checks.
-6. Run `cargo publish --dry-run --locked` from a clean checkout.
-7. Merge the release commit to `main` and wait for required checks.
-8. Create and push an annotated `vX.Y.Z` tag pointing at that exact commit.
+1. Add a dated `X.Y.Z` section to [CHANGELOG.md](../CHANGELOG.md), including
+   migration notes and intentional scope/style changes.
+2. Update the version in [Cargo.toml](../Cargo.toml) and regenerate `Cargo.lock`.
+3. Review asset provenance and generated-file freshness using the
+   [asset procedure](assets.md). Require the complete [CI matrix](../.github/workflows/ci.yml)
+   to pass, including packaged consumers and performance policies.
+4. Run `cargo publish --dry-run --locked` from a clean checkout.
+5. Merge to `main`, wait for required checks, then create and push an annotated
+   `vX.Y.Z` tag at that exact commit.
 
-The tag workflow verifies that the tag, manifest, and dated changelog agree. It
-reuses full CI, packages the crate, records a SHA-256 checksum, authenticates to
-crates.io through OIDC, publishes, attests provenance for the crate archive,
-and creates a GitHub release with changelog notes and artifacts.
+The [release workflow](../.github/workflows/release.yml) re-runs CI and verifies
+the tag, package version, and changelog heading. It packages, checksums, publishes,
+attests, and creates the GitHub release. The workflow rejects an `Unreleased`
+heading; maintainers must review the date and release notes themselves.
+
+## Publishing credentials
+
+The workflow uses crates.io OIDC trusted publishing through the `crates-io`
+GitHub environment. The publisher configuration must match the repository,
+workflow, and environment. Protect that environment with reviewers and tag-only
+deployment rules; verify repository protections in GitHub rather than assuming
+this file configures them. Routine releases do not require a stored registry token.
 
 ## Version policy
 
 Patch releases preserve the public API and normally contain engine correctness,
 safety, or documentation fixes. Catalog refreshes and intentional highlighting
-changes use a minor release and include the upstream pin and output impact in
-the changelog. Breaking API changes require a major release after 1.0; during
-0.x they require a minor release and migration notes.
+changes use a minor release with the upstream pin and output impact recorded.
+Breaking API changes require a minor release during 0.x and a major release
+after 1.0, with migration notes.
 
-The MSRV may increase only in a minor release and must be called out in release
-notes. Feature flags remain additive within a release line.
-
-Downstream projects update through ordinary dependency pull requests. No
-project receives an unpublished feature, path override, or friend API.
+MSRV increases require a minor release and release notes. Feature flags remain
+additive within a release line. Diagnostic output, bundle encoding, and private
+engine representations are not stable interfaces.

@@ -1,66 +1,51 @@
-# Architecture
+# Architecture and design boundaries
 
-Syntaxmate is one public crate with layered private internals. The public API
-is intentionally smaller than the engine implementation so parser and regex
-optimizations can evolve without forcing downstream migrations.
+Syntaxmate keeps a small public facade over private engine internals so grammar
+and regex optimizations do not force downstream API migrations. Applications
+consume exact scopes or generic styles; editor configuration, worker queues,
+and UI-framework types belong in downstream adapters.
 
-## Layers
+## Where to look
 
-1. **Catalog and assets** — a deterministic compressed grammar bundle, embedded
-   themes, aliases, path metadata, and third-party provenance.
-2. **Grammar compiler and IR** — compiles vendored JSON into deterministic,
-   versioned immutable grammar records at asset-generation time; the same JSON
-   compiler remains available for caller-supplied custom grammars.
-3. **Regex engine** — routes regular patterns through scanners/automata and
-   advanced Oniguruma constructs through a budgeted native backtracker.
-4. **Tokenizer** — applies TextMate grammar ordering, captures, injections,
-   continuation stacks, line caches, and viewport checkpoints.
-5. **Scope and theme engine** — interns exact scope stacks and resolves TextMate
-   selectors to generic RGB colors and font modifiers.
-6. **Facade and renderers** — provides bundled/custom highlighters plus escaped
-   HTML and terminal-safe ANSI output.
+| Task | Entry point |
+| --- | --- |
+| Public API and feature gates | [crate facade](../src/lib.rs), [Cargo features](../Cargo.toml) |
+| Custom grammars, prepared languages, state and checkpoints | [tokenizer API](../src/tokenizer.rs) |
+| Bundled highlighting, sessions and styling | [highlighter](../src/highlighter.rs) |
+| Detection and provenance | [catalog](../src/catalog.rs), [grammar registry](../src/grammars/registry.rs) |
+| Grammar compilation and bundle encoding | [grammar compiler](../src/engine/grammar.rs), [IR codec](../src/engine/grammar_ir.rs), [bundle builder](../tools/build-bundle.rs) |
+| Matching and continuation | [regex engine](../src/engine/regex/), [tokenizer engine](../src/engine/tokenizer.rs) |
+| Theme selectors and output | [themes](../src/theme/mod.rs), [renderers](../src/render.rs) |
 
-## Ownership and isolation
+## Ownership
 
-Mutable dynamic-matcher, frame, state, candidate-state, and line caches are
-owned by a `Tokenizer` or `Highlighter`. Dropping that owner reclaims the state;
-separate instances do not communicate through hidden mutable global caches.
-A caller may explicitly retain a `PreparedLanguage`; tokenizers derived from it
-share only its immutable grammar closure, repository contexts, compiled static
-patterns, and static candidate descriptors. Static pattern retention is bounded
-by both the closure's exact slot count and a 64 MiB conservative byte charge.
-Reusable candidate descriptors have a 1,024-entry ceiling and share a 12 MiB
-charged ceiling with their scanners and canonical injection outcomes. Oversized
-or over-budget pattern/candidate artifacts remain tokenizer-local rather than
-escaping the bound. A custom dependency graph that exceeds the bounded
-preparation walk is rejected by `PreparedLanguage` and remains available to the
-direct tokenizer API. Process-wide initialization remains limited to immutable
-embedded bundle/theme data. Incremental `HighlightSession` instances retain
-their own dense resolved-style cache for at most 8,192 tokenizer scope-stack
-identities; higher identities bypass that cache.
+Mutable continuation state and source-dependent caches belong to a tokenizer
+or highlighting session. Independent instances must not affect one another's
+output. `TokenizerState` and `CheckpointTable` are tied to their originating
+tokenizer; cloning a state does not make it transferable to another tokenizer.
 
-`TokenizerState` and `CheckpointTable` are opaque and tied to the tokenizer that
-created them. This prevents accidental state reuse across grammar sets while
-allowing callers to clone state within one session.
+`PreparedLanguage` is the explicit sharing boundary for repeated independent
+tokenizers. It retains bounded grammar and static matcher preparation, while
+derived tokenizers keep their own mutable state. Read its rustdoc and statistics
+API for retention semantics; numeric cache ceilings live with the implementation.
+This avoids hidden process-global retention and lets the caller choose the
+lifetime of reusable work.
 
-## Compatibility boundary
+## Public contract
 
-The observable contract is:
+Exact ordered scopes, UTF-8 byte ranges, resolved styles, detection metadata,
+and completion status are observable. Regex bytecode, rule IDs, cache layout,
+bundle encoding, and diagnostics are implementation details. Keep new API
+items tied to a downstream use case, with rustdoc and tests at the public
+boundary. Tokenization must remain independent of themes; custom assets must
+remain usable without bundled assets.
 
-- UTF-8 byte ranges on character boundaries;
-- exact ordered TextMate scope stacks;
-- resolved generic styles;
-- deterministic catalog/detection metadata;
-- explicit complete/degraded status.
+The release library accepts custom assets as strings and performs no filesystem,
+network, or process-environment access. Committed bundled assets keep normal
+builds independent of Node and upstream availability. Development tools own
+asset import, compilation, and oracle regeneration.
 
-Regex bytecode, grammar rule IDs, cache layout, compiled patterns, and coarse
-internal syntax classes are not public API.
-
-## Runtime access
-
-The release library performs no filesystem, network, process-environment, or
-Node access. Custom assets are supplied as strings by the caller. Bundled assets
-are compiled into the crate and their selected compiled-grammar closure is
-decoded lazily without runtime JSON parsing or rule compilation. Development
-tooling owns vendoring, grammar compilation, checksums, oracle generation, and
-corpus production.
+For output limitations see [compatibility](compatibility.md); for changes to
+assets see [asset maintenance](assets.md); for version commitments see
+[release policy](releasing.md#version-policy). The extraction source is recorded
+in [EXTRACTION.md](../EXTRACTION.md).

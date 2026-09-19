@@ -65,8 +65,9 @@ impl Default for HtmlOptions {
 /// Renders highlighted source as escaped HTML.
 ///
 /// Source text, wrapper classes, and optional scope attributes are escaped.
-/// The document must have been produced from `source`; a mismatch returns an
-/// error rather than slicing unchecked byte ranges.
+/// Pass the source that produced `document`. Invalid ranges and mismatched
+/// logical line counts return an error, but different text with compatible
+/// ranges is not detected; the document does not retain the original source.
 #[cfg(feature = "html")]
 pub fn render_html(
     source: &str,
@@ -328,6 +329,9 @@ impl Default for AnsiOptions {
 ///
 /// Control-character sanitization is enabled by default so untrusted source
 /// cannot inject terminal escape sequences. Disable it only for trusted input.
+///
+/// Pass the source that produced `document`. Validation checks ranges and
+/// line counts, not source identity.
 #[cfg(feature = "ansi")]
 pub fn render_ansi(
     source: &str,
@@ -741,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn renderers_reject_a_document_from_different_source() {
+    fn renderers_reject_mismatched_line_counts() {
         let mut highlighter = Highlighter::bundled().unwrap();
         let document = highlighter
             .highlight("rust", "let x = 1;", "github-dark")

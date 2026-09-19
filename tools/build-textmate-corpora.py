@@ -22,8 +22,8 @@ MARKDOWN_SOURCES = [
     "CONTRIBUTING.md",
     "SECURITY.md",
     "docs/compatibility.md",
-    "docs/textmate-engine.md",
-    "docs/textmate-theme-engine.md",
+    "docs/architecture.md",
+    "docs/rendering.md",
 ]
 CASES = ROOT / "tests/fixtures/textmate/cases.toml"
 CATALOG = ROOT / "assets/grammars/coverage.toml"

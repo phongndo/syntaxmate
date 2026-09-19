@@ -4,18 +4,13 @@
 
 ## Compatibility impact
 
-- [ ] No public API or highlighting change
-- [ ] Public API change documented in rustdoc and CHANGELOG.md
-- [ ] Scope/style/detection change reviewed against the pinned oracle
-- [ ] Grammar/theme asset source, revision, checksum, and license updated
+<!-- Describe API, scope/style, detection, feature, or resource-limit changes.
+Link the updated rustdoc/changelog and asset provenance where applicable. -->
 
 ## Validation
 
-- [ ] `cargo fmt --all --check`
-- [ ] `cargo clippy --all-targets --all-features --locked -- -D warnings`
-- [ ] Focused tests added or updated
-- [ ] Default and `default-features = false` paths considered
-- [ ] `HighlightStatus::Degraded` and untrusted-input behavior considered
+<!-- List commands actually run and their results; identify checks not run.
+Use CONTRIBUTING.md to choose checks for the affected code. -->
 
 ## Output evidence
 

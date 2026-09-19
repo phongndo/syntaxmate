@@ -1,21 +1,14 @@
 # Support
 
-Use the repository's GitHub interfaces so questions remain searchable and
-maintainers receive the right context.
+Use the [issue forms](https://github.com/phongndo/syntaxmate/issues/new/choose)
+for bugs, compatibility regressions, grammar/theme issues, and feature requests.
+They request the version, language/theme, minimal input, expected and actual
+output, and completion status needed to investigate. For suspected security
+issues, use [private vulnerability reporting](SECURITY.md) instead.
 
-- **Bug or compatibility regression:** open a bug report with a minimal source,
-  language/theme IDs, Syntaxmate version, bundle version, expected output,
-  actual output, and `HighlightStatus`.
-- **Grammar or theme asset issue:** use the asset issue form and include the
-  upstream project/revision when known.
-- **Feature proposal:** start a feature request describing the general
-  downstream use case rather than one application's private integration.
-- **Security issue:** follow `SECURITY.md`; do not create a public issue.
+Support covers the public API and [compatibility contract](docs/compatibility.md)
+on the current release line. Private modules, serialized tokenizer state,
+undocumented asset paths, and exact cache behavior are not stable interfaces.
 
-The public API, documented compatibility boundary, and current release line are
-supported. Private modules, serialized tokenizer state, undocumented asset
-paths, exact cache behavior, and internal numeric IDs are not compatibility
-contracts.
-
-There is no guaranteed response-time SLA for general support. Well-scoped bug
-reports and pull requests with oracle evidence are prioritized.
+There is no guaranteed response-time SLA for general support. Minimal
+reproductions and oracle evidence make reports easier to resolve.

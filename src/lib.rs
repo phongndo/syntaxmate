@@ -15,6 +15,26 @@
 
 #![forbid(unsafe_code)]
 
+// Compile the actual guide snippets as doctests instead of maintaining copies.
+#[cfg(all(
+    doc,
+    feature = "bundled-grammars",
+    feature = "bundled-themes",
+    feature = "html"
+))]
+#[doc = include_str!("../README.md")]
+mod readme_examples {}
+
+#[cfg(all(
+    doc,
+    feature = "bundled-grammars",
+    feature = "bundled-themes",
+    feature = "html",
+    feature = "ansi"
+))]
+#[doc = include_str!("../docs/rendering.md")]
+mod rendering_examples {}
+
 mod catalog;
 #[allow(dead_code, unused_imports)]
 mod engine;

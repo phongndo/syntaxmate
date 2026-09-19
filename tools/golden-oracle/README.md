@@ -1,90 +1,68 @@
-# Golden oracle dependencies
+# Development oracle
 
-Development-only package used by the golden generators, regex conformance and
-execution-replay tools, theme parity checks, and grammar/theme vendor scripts in
-`tools/`. Versions are pinned exactly (no ranges) so oracle output and vendored
-asset imports stay reproducible.
-
-These dependencies are **not** used by release builds and are intentionally kept
-out of the Rust workspace. Install only when regenerating goldens, running regex
-conformance, or checking the Shiki grammar vendor snapshot.
-
-## Install
+[package.json](package.json) and [package-lock.json](package-lock.json) pin the
+TextMate tokenizer, Oniguruma WASM, and grammar/theme source packages. These are
+development dependencies, excluded from the released crate. Run commands from
+the repository root; use the Node version configured in
+[CI](../../.github/workflows/ci.yml) or enter `nix develop`.
 
 ```sh
-npm install --prefix tools/golden-oracle
+npm ci --prefix tools/golden-oracle
 ```
 
-## Regenerate TextMate goldens
+For bundled scope fixtures, use the
+[fixture workflow](../../tests/fixtures/textmate/README.md). The commands below
+need Cargo as well as the installed oracle.
 
-From the repository root, with the pinned grammar assets under
-`assets/grammars/`:
+## Regex and custom grammars
 
 ```sh
-# all cases in the manifest
-node tools/generate-goldens.mjs
-
-# one language id (matches [[case]].language)
-node tools/generate-goldens.mjs --case rust
-node tools/generate-goldens.mjs --case java
-
-# fail if committed goldens differ (CI-friendly)
-node tools/generate-goldens.mjs --check
+node tools/regex-conformance.mjs --out target/regex-conformance.json
+node tools/regex-execution-parity.mjs --max-executions 512 --out target/regex-execution-parity.json
+node tools/fuzz-regex-conformance.mjs --seed 1 --cases 256 --out target/regex-differential-fuzz.json
+node tools/generate-engine-regressions.mjs --check
+cargo test --all-features --locked engine_regressions
 ```
 
-Ad-hoc single file:
+Conformance checks explicit pattern cases. Execution replay samples real scanner
+calls and compares winners, ranges, and captures; its
+[difference ledger](../../benchmarks/textmate/regex-execution-differences.json)
+rejects new and stale exceptions. Differential mutation expands the proving set
+with a reproducible seed. None of these establishes universal regex equivalence.
+
+[Custom-grammar cases](../../tests/fixtures/engine-regressions/cases.json) isolate
+behavior that final bundled output can hide, including capture interpolation,
+retokenization, dynamic continuation, and Unicode lookbehind. Regenerate their
+scope goldens with `node tools/generate-engine-regressions.mjs` after reviewing
+source-case changes.
+
+## Themes
 
 ```sh
-node tools/golden-dump.mjs \
-  --language rust \
-  --scope source.rust \
-  --grammar assets/grammars/languages/rust.tmLanguage.json \
-  --file tests/fixtures/textmate/rust/basic.rs \
-  --out tests/fixtures/textmate/rust/basic.golden.jsonl
+cargo test --all-features --locked theme_golden::
+tools/check-textmate-parity.sh
 ```
 
-## Regex conformance helper
+The [parity script](../check-textmate-parity.sh) checks provenance, vendored
+assets, style goldens, selector conformance, and catalog scope-stack replay.
+It does not replace the Rust tests. Current report data lives in
+[theme-parity.json](../../benchmarks/textmate/theme-parity.json); avoid copying
+its token counts or pass status into prose.
+
+The focused LaTeX reproduction is
+[hw2-theme.tex](../../tests/fixtures/textmate/latex/hw2-theme.tex). Historical
+extraction mismatches are frozen in
+[latex-baseline-mismatches.json](../../benchmarks/textmate/latex-baseline-mismatches.json),
+not a current exception list. Editor comparisons exclude semantic highlighting
+and decorations; see [compatibility](../../docs/compatibility.md).
+
+Inspect a standalone scope stack with:
 
 ```sh
-node tools/regex-conformance.mjs
-# optional: --out target/regex-conformance-phase2.json
+printf '%s\n' '["source.rust","keyword.control.rust"]' | \
+  cargo run --quiet --example theme-resolve -- github-dark-high-contrast
 ```
 
-This compares a focused set of patterns against `vscode-oniguruma` by driving
-the `syntaxmate` `regex-parse` example. Deterministic mutation expands that
-proving set while retaining a reproducible seed:
-
-```sh
-node tools/fuzz-regex-conformance.mjs --seed 1 --cases 256
-```
-
-Replay a deterministic sample of scanner calls observed during real TextMate
-tokenization:
-
-```sh
-node tools/regex-execution-parity.mjs --max-executions 512
-```
-
-All three commands require a working `cargo` toolchain and are development-only.
-
-## Shiki grammar vendor check
-
-```sh
-node tools/vendor-shiki-grammars.mjs --check
-```
-
-This verifies `assets/grammars/languages/`, `coverage.toml`,
-`coverage.full-shiki.toml`, and `licenses.json` against the pinned
-`@shikijs/langs` package installed here.
-
-## Pins
-
-| Package | Version | Role |
-| --- | --- | --- |
-| `@shikijs/langs` | `3.23.0` | Pinned source for vendored TextMate grammars |
-| `github-vscode-themes` | `6.3.4` | Pinned source for GitHub themes |
-| `vscode-textmate` | `9.2.0` | TextMate line tokenizer reference |
-| `vscode-oniguruma` | `1.7.0` | Oniguruma WASM used by the reference |
-
-Bump source or oracle pins deliberately, reinstall with the lockfile, then
-regenerate the affected assets and goldens and review the diff.
+For changing source pins and regenerating assets, follow
+[asset maintenance](../../docs/assets.md). Review lockfile and scope/style diffs
+together when changing oracle versions.

@@ -1,101 +1,63 @@
 # Contributing
 
-Thank you for improving Syntaxmate. By participating, you agree to the
-[Code of Conduct](CODE_OF_CONDUCT.md).
+Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md). Report security
+issues through [private vulnerability reporting](SECURITY.md).
 
-## Development setup
+## Setup and checks
 
-Install Rust 1.88 or newer. The checked-in toolchain file selects the normal
-stable toolchain. Node 24 is needed only when regenerating the pinned
-`vscode-textmate` oracle.
+Use `nix develop` for the environment defined in [flake.nix](flake.nix), or
+install the toolchain in [rust-toolchain.toml](rust-toolchain.toml). The minimum
+supported Rust version is in [Cargo.toml](Cargo.toml). Node is needed for asset
+and oracle tooling, not normal library builds or tests; see the
+[oracle setup](tools/golden-oracle/README.md).
 
-On NixOS or macOS with Nix installed, enter the reproducible development shell
-instead. It includes the pinned Rust toolchain, Node 24, Python, Git, and hk on
-both Intel and ARM systems:
-
-```sh
-nix develop
-```
-
-The repository includes an [hk](https://hk.jdx.dev/) configuration for fast
-local consistency checks. With `hk` installed, enable it once with `hk install`
-(or the recommended global `hk install --global`).
-
-Start with focused checks while iterating:
-
-```sh
-cargo fmt --all
-cargo test --all-features public_api_tests
-cargo test --all-features render::tests
-```
-
-Before submitting a pull request, run:
+Run from the repository root:
 
 ```sh
 cargo fmt --all --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo check --lib --no-default-features --locked
+cargo test --all-features --locked public_api_tests
+cargo test --all-features --locked render::tests
+cargo test --doc --all-features --locked
+python3 tools/check-docs.py
 python3 tools/check-language-docs.py --check
-python3 tools/test_competitive_benchmarks.py
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
-cargo test --all-features --locked
-cargo run --bin syntaxmate-bundle --features bundle-tools --locked -- --check
-cargo package --locked
 ```
 
-CI additionally checks Rust 1.88, feature powersets, three operating systems,
-downstream package consumers, coverage, generated files, whole-catalog
-performance, and four strict oracle shards.
+Choose additional checks for the affected code. [CI](.github/workflows/ci.yml)
+is the executable definition of the complete matrix, including feature
+combinations, MSRV, golden shards, generated files, performance, and packaged
+consumers. To enable the optional local checks in [hk.pkl](hk.pkl), run
+`hk install` with hk installed.
 
-## Pull requests
+## Finding the right evidence
 
-- Keep changes focused and explain the downstream use case.
-- Add public API documentation, tests, and a changelog entry for user-visible
-  behavior.
-- Preserve `default-features = false` unless the change intentionally requires
-  a documented feature.
-- Prefer conventional commit prefixes such as `feat:`, `fix:`, `perf:`,
-  `docs:`, `test:`, and `chore:`.
-- Do not expose regex bytecode, grammar rule IDs, caches, or other engine
-  internals to solve one application's integration problem.
-- Never add filesystem, network, or process-environment access to the release
-  library.
+- API or ownership changes: start with the [architecture map](docs/architecture.md)
+  and nearby public API tests.
+- Scope changes: add a minimal [oracle fixture](tests/fixtures/textmate/README.md)
+  and review the exact ordered scope change. Generate golden JSONL from the
+  pinned oracle; do not hand-edit it or normalize away a mismatch.
+- Grammar/theme updates: follow [asset maintenance](docs/assets.md).
+- Regex or theme behavior: use the [oracle tools](tools/golden-oracle/README.md).
+- Performance changes: follow the [measurement procedure](benchmarks/textmate/README.md).
+- Releases and compatibility commitments: see [releasing](docs/releasing.md).
 
-## Compatibility changes
+Explain the general downstream use case in a pull request. Document public API
+changes in rustdoc and user-visible behavior changes in the changelog. Keep
+private engine details behind the public boundary and cover relevant feature
+combinations, including custom assets without default features.
 
-TextMate output changes require a fixture demonstrating the behavior and review
-against the pinned oracle. Do not hand-edit `*.golden.jsonl`. Update a source
-fixture or pinned asset, regenerate, and review the exact scope-stack change.
-Unused divergence exceptions fail the suite; new exceptions require explicit
-justification and prevent a language from being considered validated.
+Parsers and renderers accept untrusted input. Include malformed-input and
+injection coverage when changing those boundaries. Fuzz targets and scheduled
+commands live in [fuzz/](fuzz/) and the [fuzz workflow](.github/workflows/fuzz.yml).
 
-Oracle regeneration uses the lockfile exactly:
+## Documentation maintenance
 
-```sh
-npm ci --prefix tools/golden-oracle
-node tools/generate-textmate-cases.mjs --check
-node tools/generate-goldens.mjs --check
-node tools/generate-theme-goldens.mjs --check
-```
+Keep API contracts beside their implementation, runnable examples in doctests
+or `examples/`, and prose for usage, rationale, or procedures that need explanation.
+Link to manifests, policies, reports, and CI instead of copying changing
+versions, counts, cache limits, command matrices, or benchmark tables.
 
-## Grammar and theme assets
-
-Every asset update requires an immutable upstream revision, source URL, license
-record, checksum, and deterministic generated output. Follow
-[`docs/assets.md`](docs/assets.md). Include the affected language/theme IDs and
-the scope/style impact in the pull request.
-
-## Security and fuzzing
-
-Treat all grammar, theme, source, HTML, and terminal input as untrusted. New
-parsers or renderers need malformed-input and injection tests. Run fuzz targets
-with nightly Rust when changing those boundaries:
-
-```sh
-cargo install cargo-fuzz
-cargo +nightly fuzz run grammar_and_source
-cargo +nightly fuzz run theme_json
-```
-
-Report suspected vulnerabilities privately according to
-[`SECURITY.md`](SECURITY.md).
+Update or delete affected guidance in the same change as the code. Completed
+plans and investigation transcripts belong in Git history or linked issues/PRs,
+not among current instructions. Keep generated documents generator-owned.
+The README and rendering-guide Rust examples run as doctests; the documentation
+checks validate local link targets and generated language/scale summaries.

@@ -3,7 +3,6 @@ amends "package://github.com/jdx/hk/releases/download/v1.54.0/hk@1.54.0#/Config.
 local languageDocGlobs = List(
   "README.md",
   "docs/language-status.md",
-  "docs/textmate-engine.md",
   "tests/fixtures/textmate/README.md",
   "assets/grammars/coverage.toml",
   "tests/fixtures/textmate/cases.toml",
@@ -31,6 +30,10 @@ local competitiveBenchmarkGlobs = List(
 
 local checks = new Mapping<String, Step | Group> {
   ...languageDocs
+  ["docs"] {
+    glob = List("**/*.md", "Cargo.toml", "tools/check-docs.py", "tools/test_docs.py")
+    check = "python3 tools/check-docs.py && python3 tools/test_docs.py"
+  }
   ["competitive-benchmarks"] {
     glob = competitiveBenchmarkGlobs
     check = "python3 tools/test_competitive_benchmarks.py"
