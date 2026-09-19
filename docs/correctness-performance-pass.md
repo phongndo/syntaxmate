@@ -3,8 +3,9 @@
 ## Baseline and method
 
 Baseline: `c6db4db7b6873f9da786ff3cb777520cf8763d86`, in a detached worktree.
-The candidate is the accompanying uncommitted patch; no commits or dependency
-changes were made in the user's checkout. Source identities, driver hashes,
+The measured candidate was subsequently committed as
+`8abe394ce6890e3a063d4022b488287912b8b9bd`. Measurements preceded that commit;
+release dependencies were unchanged. Source identities, driver hashes,
 commands, raw samples, profiles, and red/green logs are in
 `target/correctness-pass/` (ignored, machine-local artifacts).
 
@@ -224,9 +225,9 @@ HTML. The original dirty working tree correctly refuses plain packaging;
 `--allow-dirty` was also verified there. The clean snapshot avoids changing or
 committing the user's working tree merely to satisfy Cargo's cleanliness gate.
 
-Not green or not verified:
+Limitations of the original local verification:
 
-- Current-stable **Clippy is not green**: Rust 1.98 emits the same five diagnostics
+- Local **Rust 1.98.0 Clippy was not green**: it emitted the same five diagnostics
   on the untouched baseline and candidate (generic trie `Default`, lazy range
   fallback, and three constant-chunk test loops). These unrelated baseline
   diagnostics were not suppressed. Rust 1.88 Clippy passes.
@@ -238,8 +239,22 @@ Not green or not verified:
   fuzz campaigns were not run locally. The Mark TUI and user-modified Mark
   workloads were not benchmarked.
 
-Thus the correctness and allocation results are verified, but neither a fully
-green current-stable CI matrix nor zero performance regressions is claimed.
+### Hosted CI follow-up (2026-09-19)
+
+The same candidate commit subsequently passed the complete
+[hosted CI run](https://github.com/phongndo/syntaxmate/actions/runs/35414983686),
+including quality/Clippy, MSRV, feature powersets, semver, all four golden shards,
+generated assets, performance, packaged consumers, all three operating systems,
+and coverage. The PR-only dependency-review job was inapplicable and skipped.
+[CodeQL](https://github.com/phongndo/syntaxmate/actions/runs/35414983692) also
+passed. Hosted quality used Rust **1.98.1**, not the local 1.98.0 toolchain.
+No lint suppression or CI gate change was needed.
+
+This establishes a green hosted CI matrix for the measured code; the local
+1.98.0/tool-version diagnostics above remain recorded as historical evidence.
+The longer fuzz campaigns, six frozen differential mismatches, and SDBL
+performance tradeoff remain as documented. Zero performance regressions are
+not claimed.
 
 ## Reproduction and artifact map
 

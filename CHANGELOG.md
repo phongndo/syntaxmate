@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 - 2026-09-19
 
 - Reduce temporary bytecode-compilation allocations by borrowing subroutine AST
   definitions and exact literal inventories, without retaining AST references.
@@ -12,6 +12,12 @@
   strip leading dots only from interpolated capture text, matching TextMate.
 - Add generated custom-grammar oracle regressions and a `profile-alloc
   --no-line-cache` mode that separates warm execution from cached-token replay.
+- Public APIs and the Rust 1.88 MSRV are unchanged. Output changes correct
+  previously non-oracle scope/capture behavior; cached budget failures now
+  consistently report `Degraded` instead of incorrectly reporting `Complete`.
+- Cold-start gains are strongest for C++; this is not a general steady-state
+  speedup. Correct Unicode lookbehind costs approximately 6% on the measured
+  SDBL workload. See the [measurements and known limitations](https://github.com/phongndo/syntaxmate/blob/v0.1.3/docs/correctness-performance-pass.md).
 
 ## 0.1.2 - 2026-08-23
 

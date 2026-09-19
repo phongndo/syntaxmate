@@ -298,7 +298,7 @@ the incorrect fast bounds are not restored. Small prepared-constructor costs
 and cached-replay timing regressions are also reported, not omitted.
 
 The full results, red/green evidence, lifecycle/allocation tables, exact check
-outcomes, current-stable baseline lint failures, and unresolved differential
+outcomes, local toolchain diagnostics, and unresolved differential
 cases are in [the pass report](correctness-performance-pass.md). Raw artifacts
 are under `target/correctness-pass/`. Budgets, allocation policies, grammars,
 oracle pins, and difference ledgers are unchanged.
