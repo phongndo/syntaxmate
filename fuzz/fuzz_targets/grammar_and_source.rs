@@ -41,9 +41,9 @@ fuzz_target!(|data: &[u8]| {
         for (line_index, text) in source_lines.iter().enumerate() {
             let incremental = tokenizer.tokenize_line(text, &mut state).unwrap();
             let replay = tokenizer.tokenize_line(text, &mut replay_state).unwrap();
-            // Degradation reports execution-budget use and can improve after
-            // matcher caches warm up. Semantic tokens and continuation state
-            // must still replay identically.
+            // Cache hits must preserve completion status as well as tokens:
+            // replaying cached partial output does not make it complete.
+            assert_eq!(incremental.status(), replay.status());
             assert_eq!(incremental.tokens(), replay.tokens());
             assert_eq!(state.depth(), replay_state.depth());
 

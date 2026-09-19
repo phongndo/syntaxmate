@@ -2296,6 +2296,10 @@ pub struct TextMateTokenizer {
     counters_enabled: bool,
     hot_counters_enabled: bool,
     degraded_since_last: bool,
+    // Includes failures in while conditions and capture retokenization. Those
+    // paths run inside a logical line and must not lose their status on cache
+    // insertion or at the public boundary.
+    line_degraded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2386,6 +2390,7 @@ impl TextMateTokenizer {
             counters_enabled: false,
             hot_counters_enabled: false,
             degraded_since_last: false,
+            line_degraded: false,
         }
     }
 
@@ -2655,6 +2660,7 @@ impl TextMateTokenizer {
         force_degraded: bool,
     ) -> CompactTokenizedLine {
         let is_first_line = line_index == 0;
+        self.line_degraded = false;
         self.record_line_tokenized();
         // Explicitly invalidate scan-local occurrence cursors even when a
         // caller reuses the same String allocation for different line text.
@@ -2696,6 +2702,9 @@ impl TextMateTokenizer {
                 && let Some(exit_state) = self.state_for_id(cached.exit).cloned()
             {
                 self.record_line_cache_hit();
+                if cached.degraded {
+                    self.record_degraded_line();
+                }
                 return CompactTokenizedLine {
                     tokens: CompactLineTokens::Shared(cached.tokens),
                     state: exit_state,
@@ -2714,7 +2723,6 @@ impl TextMateTokenizer {
 
         let mut steps = 0usize;
         let mut fallback_steps = 0u64;
-        let mut degraded = false;
         let mut anchor_pos = while_anchor_pos.or_else(|| {
             if cursor > 0 {
                 Some(cursor)
@@ -2754,7 +2762,7 @@ impl TextMateTokenizer {
                 anchor_pos,
                 Some(&suppressed_begin_rules),
             );
-            degraded |= search.fallback_budget_killed;
+            self.line_degraded |= search.fallback_budget_killed;
             fallback_steps = fallback_steps.saturating_add(search.fallback_steps);
             if fallback_steps > MAX_FALLBACK_STEPS_PER_LINE
                 || !self.consume_fallback_call_budget(search.fallback_steps)
@@ -2762,7 +2770,7 @@ impl TextMateTokenizer {
                 if let Some(counters) = self.counters_mut() {
                     counters.record_fallback_budget_kill();
                 }
-                degraded = true;
+                self.line_degraded = true;
                 self.push_token(
                     &mut tokens,
                     cursor..parse_text.len(),
@@ -2857,11 +2865,11 @@ impl TextMateTokenizer {
         }
 
         if steps >= MAX_TOKENIZER_STEPS_PER_LINE && cursor < parse_text.len() {
-            degraded = true;
+            self.line_degraded = true;
             let stack = self.current_scope_stack_id(&state, true, None);
             self.push_token(&mut tokens, cursor..parse_text.len(), stack);
         }
-        if degraded {
+        if self.line_degraded {
             self.record_degraded_line();
         }
 
@@ -2874,6 +2882,7 @@ impl TextMateTokenizer {
                     text: Arc::from(parse_text),
                     tokens: Arc::clone(&tokens),
                     exit: exit_state_id,
+                    degraded: self.line_degraded,
                 },
             );
             if evicted {
@@ -4483,8 +4492,9 @@ impl TextMateTokenizer {
         from: usize,
         ctx: AnchorContext,
     ) -> Option<MatchResult> {
-        self.find_pattern_report(pattern, pattern_id, line, from, ctx)
-            .result
+        let report = self.find_pattern_report(pattern, pattern_id, line, from, ctx);
+        self.line_degraded |= report.fallback_budget_killed;
+        report.result
     }
 
     fn find_pattern_report(
@@ -5259,6 +5269,7 @@ impl TextMateTokenizer {
                 anchor_pos,
                 None,
             );
+            self.line_degraded |= search.fallback_budget_killed;
             fallback_steps = fallback_steps.saturating_add(search.fallback_steps);
             if fallback_steps > MAX_FALLBACK_STEPS_PER_LINE
                 || !self.consume_fallback_call_budget(search.fallback_steps)
@@ -5266,6 +5277,7 @@ impl TextMateTokenizer {
                 if let Some(counters) = self.counters_mut() {
                     counters.record_fallback_budget_kill();
                 }
+                self.line_degraded = true;
                 self.push_token(tokens, cursor..range.end, candidate_set.active_stack_id);
                 return;
             }
@@ -5343,6 +5355,7 @@ impl TextMateTokenizer {
             };
         }
         if cursor < range.end {
+            self.line_degraded = true;
             let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
             self.push_token(tokens, cursor..range.end, stack);
         }
@@ -6852,6 +6865,9 @@ fn push_scope_capture(
     let Some(text) = result.capture(group).and_then(|range| line.get(range)) else {
         return;
     };
+    // vscode-textmate strips leading dots from the captured replacement,
+    // not from the surrounding scope template (nor from trailing dots).
+    let text = text.trim_start_matches('.');
     match transform {
         ScopeTransform::None => output.push_str(text),
         ScopeTransform::Downcase => output.push_str(&text.to_lowercase()),

@@ -139,6 +139,12 @@ export const conformanceCases = Object.freeze([
   { name: 'named-subroutine-call', pattern: String.raw`(?<word>ab)\g<word>`, line: 'xxabab', engine: 'fallback', constructs: ['named-group.angle', 'subroutine.angle'] },
   { name: 'absent-group-documented-degradation', pattern: '(?~a)', line: 'bbb', engine: 'fallback', constructs: ['absent-group'], expectedDegradation: 'unsupported-no-match' },
   ...inventoryVariantCases(),
+  { name: 'lookbehind-fold-widens-input', pattern: String.raw`(?<=(?i:k))x`, line: 'Kx', engine: 'fallback', constructs: ['lookbehind.positive', 'inline-flags.scoped-set'] },
+  { name: 'lookbehind-fold-narrows-input', pattern: String.raw`(?<=(?i:K))x`, line: 'kx', engine: 'fallback', constructs: ['lookbehind.positive', 'inline-flags.scoped-set'] },
+  { name: 'lookbehind-fold-inherited-flags', pattern: String.raw`(?i)(?<=s)x`, line: 'ſx', engine: 'fallback', constructs: ['lookbehind.positive', 'inline-flags.global-set'] },
+  { name: 'lookbehind-fold-capture-after-astral', pattern: String.raw`(?<=(?i:(k|s)))x`, line: '🛰Kx', engine: 'fallback', constructs: ['lookbehind.positive', 'inline-flags.scoped-set'] },
+  { name: 'lookbehind-fold-repeat', pattern: String.raw`(?<=(?i:k){2})x`, line: 'kKx', engine: 'fallback', constructs: ['lookbehind.positive', 'inline-flags.scoped-set'] },
+  { name: 'lookbehind-fold-negative', pattern: String.raw`(?<!(?i:k))x`, line: 'Kx', engine: 'fallback', expectMiss: true, constructs: ['lookbehind.negative', 'inline-flags.scoped-set'] },
 ])
 
 // A short alias makes the cases convenient for ad-hoc ESM consumers while the

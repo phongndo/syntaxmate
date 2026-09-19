@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Reduce temporary bytecode-compilation allocations by borrowing subroutine AST
+  definitions and exact literal inventories, without retaining AST references.
+- Preserve degraded status on line-cache replay and report regex-budget
+  exhaustion inside capture retokenization and `while` conditions.
+- Fix case-insensitive lookbehind across different UTF-8 character widths in
+  both bytecode and recursive matchers.
+- Preserve literal scope punctuation and space-separated empty scope atoms;
+  strip leading dots only from interpolated capture text, matching TextMate.
+- Add generated custom-grammar oracle regressions and a `profile-alloc
+  --no-line-cache` mode that separates warm execution from cached-token replay.
+
 ## 0.1.2 - 2026-08-23
 
 - Add reproducible engine and end-to-end competitive benchmarks against current

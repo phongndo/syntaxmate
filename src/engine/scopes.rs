@@ -71,10 +71,13 @@ impl ScopeTemplateInterner {
         if let Some(id) = self.scope_text_ids.get(text) {
             return *id;
         }
+        // TextMate splits a nonempty name on literal spaces, preserving
+        // punctuation and even empty atoms between repeated spaces. Scope
+        // names are observable data, not identifiers to normalize.
         let atoms = text
-            .split_whitespace()
-            .filter_map(normalize_scope_atom)
-            .map(|atom| scopes.intern(&atom))
+            .split(' ')
+            .filter(|_| !text.is_empty())
+            .map(|atom| scopes.intern(atom))
             .collect::<Vec<_>>();
         let id = self.intern_atoms(atoms);
         self.scope_text_ids.insert(text.to_owned(), id);
@@ -90,7 +93,8 @@ impl ScopeTemplateInterner {
             return *id;
         }
         let atoms = text
-            .split_whitespace()
+            .split(' ')
+            .filter(|_| !text.is_empty())
             .map(|atom| scopes.intern(atom))
             .collect::<Vec<_>>();
         let id = self.intern_atoms(atoms);
@@ -120,18 +124,6 @@ impl ScopeTemplateInterner {
         self.ids.insert(atoms, id);
         id
     }
-}
-
-fn normalize_scope_atom(scope: &str) -> Option<String> {
-    if !scope.starts_with('.') && !scope.ends_with('.') && !scope.contains("..") {
-        return Some(scope.to_owned());
-    }
-    let normalized = scope
-        .split('.')
-        .filter(|component| !component.is_empty())
-        .collect::<Vec<_>>()
-        .join(".");
-    (!normalized.is_empty()).then_some(normalized)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -492,7 +484,7 @@ mod tests {
     }
 
     #[test]
-    fn templates_preserve_scope_and_prefix_normalization_rules() {
+    fn templates_preserve_scope_and_prefix_atoms_verbatim() {
         let mut scopes = ScopeInterner::default();
         let mut templates = ScopeTemplateInterner::default();
         let regular =
@@ -511,7 +503,7 @@ mod tests {
             .iter()
             .map(|id| scopes.get(*id).unwrap())
             .collect::<Vec<_>>();
-        assert_eq!(regular_names, ["entity.name", "keyword.control"]);
+        assert_eq!(regular_names, [".entity..name.", "", "keyword.control"]);
         assert_eq!(prefix_names, [".entity..name."]);
     }
 

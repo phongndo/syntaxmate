@@ -80,6 +80,9 @@ pub fn available_languages() -> Vec<String> {
 #[cfg(test)]
 #[path = "../tests/engine_capture_quality.rs"]
 mod engine_capture_quality;
+#[cfg(test)]
+#[path = "../tests/engine_regressions.rs"]
+mod engine_regressions;
 #[cfg(all(test, feature = "bundled-grammars", feature = "bundled-themes"))]
 mod public_api_tests;
 #[cfg(test)]

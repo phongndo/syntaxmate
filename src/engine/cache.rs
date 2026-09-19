@@ -20,6 +20,7 @@ pub(crate) struct CachedLine {
     pub(crate) text: Arc<str>,
     pub(crate) tokens: Arc<[CompactScopedToken]>,
     pub(crate) exit: StateId,
+    pub(crate) degraded: bool,
 }
 
 #[derive(Debug, Clone)]

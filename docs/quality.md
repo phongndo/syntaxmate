@@ -50,6 +50,15 @@ Unicode and surrounding text. Every committed oracle fixture is also replayed
 twice from identical incremental state, ensuring cache history cannot change
 output or continuation state.
 
+Small custom-grammar regressions in `tests/fixtures/engine-regressions/` probe
+Unicode lookbehind, literal scope names, and whether dormant-capture differences
+can affect scope interpolation, capture retokenization, or dynamic end/while
+patterns. Generate their exact public scope streams with
+`node tools/generate-engine-regressions.mjs`; CI runs `--check`. These are
+independent of the bundled-catalog goldens and do not expand the lower-level
+difference ledger. Public API tests separately require budget exhaustion to
+remain `Degraded`, including cached replay and nested matcher calls.
+
 Theme goldens validate scope matching, colors, alpha compositing, and font
 modifiers. Generated catalog documentation locks public, validated, oracle, and
 stress-corpus counts.
@@ -70,13 +79,22 @@ prepared-language creation and reuse on one corpus:
 ```sh
 cargo run --release --example profile-alloc -- rust path/to/source.rs
 cargo run --release --example profile-alloc -- --json rust path/to/source.rs
+cargo run --release --example profile-alloc -- --json --no-line-cache rust path/to/source.rs
 ```
 
 It reports allocation/reallocation calls, cumulative allocated bytes, bytes
 retained at the phase boundary, peak additional live bytes, elapsed API time,
 and allocations per KiB. Output phases include stable token-range and exact
 scope-stream digests; warm replay is rejected if its item count, completeness,
-or either digest changes.
+or either digest changes. Default warm phases can reuse cached line tokens;
+`--no-line-cache` disables that cache for every tokenizer and highlight session
+in the lifecycle, so warm phases execute matching again. The JSON records
+`lineCacheEntries`. Neither mode caches an entire returned document.
+
+The counting allocator changes execution costs. Do not treat its elapsed time
+as uninstrumented product timing: use the engine/product profilers or an
+otherwise identical lifecycle driver without the counting allocator for timing
+claims, and report the allocation measurements separately.
 
 CI runs the four fixed representative corpora in
 `benchmarks/textmate/allocation-policy.json`. Every phase has reviewed

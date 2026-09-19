@@ -4,6 +4,133 @@ use crate::{
 };
 
 #[test]
+fn cached_budget_exhaustion_remains_degraded() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(r#"{"scopeName":"source.budget","patterns":[{"match":"(a|aa)+(?=$)","name":"invalid.budget"},{"match":"!","name":"punctuation.safe"}]}"#)
+        .unwrap();
+    let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let source = format!("{}!", "a".repeat(24));
+    let first = tokenizer.tokenize(&source);
+    assert_eq!(first.status(), HighlightStatus::Degraded);
+    let warm = tokenizer.tokenize(&source);
+    assert_eq!(warm.status(), HighlightStatus::Degraded);
+    assert_eq!(first, warm);
+
+    let mut state = tokenizer.initial_state();
+    let line = tokenizer.tokenize_line(&source, &mut state).unwrap();
+    assert_eq!(line.status(), HighlightStatus::Degraded);
+    let mut state = tokenizer.initial_state();
+    let mut buffer = Vec::new();
+    assert_eq!(
+        tokenizer
+            .tokenize_line_into(&source, &mut state, &mut buffer)
+            .unwrap(),
+        line.status()
+    );
+    assert_eq!(line.tokens(), buffer);
+    let mut state = tokenizer.initial_state();
+    let mut delivered = Vec::new();
+    assert_eq!(
+        tokenizer
+            .tokenize_line_with(&source, &mut state, |token| delivered.push(token))
+            .unwrap(),
+        line.status()
+    );
+    assert_eq!(line.tokens(), delivered);
+
+    let mut checkpoints = tokenizer.checkpoints(1);
+    let viewport = tokenizer
+        .tokenize_viewport(&source, 0..1, &mut checkpoints)
+        .unwrap();
+    assert_eq!(viewport, first);
+    checkpoints.invalidate_from(0);
+    let safe = tokenizer
+        .tokenize_viewport("!", 0..1, &mut checkpoints)
+        .unwrap();
+    assert!(
+        safe.status().is_complete(),
+        "degradation must not leak into later calls"
+    );
+    let prepared = PreparedLanguage::new(&registry, root).unwrap();
+    assert!(
+        prepared
+            .tokenizer(TokenizerOptions::default())
+            .tokenize("!")
+            .status()
+            .is_complete()
+    );
+
+    let theme = Theme::from_json(r#"{"name":"plain","tokenColors":[]}"#).unwrap();
+    let styled = style_document(warm, &theme);
+    assert_eq!(styled.status(), HighlightStatus::Degraded);
+    #[cfg(feature = "html")]
+    assert_eq!(
+        render_html(&source, &styled, &HtmlOptions::default())
+            .unwrap()
+            .status(),
+        HighlightStatus::Degraded
+    );
+    #[cfg(feature = "ansi")]
+    assert_eq!(
+        crate::render_ansi(&source, &styled, &crate::AnsiOptions::default())
+            .unwrap()
+            .status(),
+        HighlightStatus::Degraded
+    );
+}
+
+#[test]
+fn capture_retokenization_budget_exhaustion_is_reported() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(
+            r#"{
+        "scopeName":"source.budget",
+        "patterns":[{"match":"(.+)","captures":{"1":{"patterns":[
+            {"match":"(a|aa)+(?=$)","name":"invalid.budget"},
+            {"match":"!","name":"punctuation.safe"}
+        ]}}}]
+    }"#,
+        )
+        .unwrap();
+    let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    assert_eq!(
+        tokenizer.tokenize(&format!("{}!", "a".repeat(24))).status(),
+        HighlightStatus::Degraded
+    );
+}
+
+#[test]
+fn while_budget_exhaustion_is_reported() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(
+            r#"{
+        "scopeName":"source.budget",
+        "patterns":[{"begin":"^>","while":"(a|aa)+(?=$)","name":"meta.block"}]
+    }"#,
+        )
+        .unwrap();
+    let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let mut state = tokenizer.initial_state();
+    assert!(
+        tokenizer
+            .tokenize_line(">", &mut state)
+            .unwrap()
+            .status()
+            .is_complete()
+    );
+    assert_eq!(
+        tokenizer
+            .tokenize_line(&format!("{}!", "a".repeat(24)), &mut state)
+            .unwrap()
+            .status(),
+        HighlightStatus::Degraded
+    );
+}
+
+#[test]
 fn public_runtime_types_are_send() {
     fn assert_send<T: Send>() {}
     assert_send::<Highlighter>();

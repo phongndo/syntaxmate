@@ -32,6 +32,7 @@ include = [
   "docs/architecture.md",
   "docs/assets.md",
   "docs/compatibility.md",
+  "docs/correctness-performance-pass.md",
   "docs/language-status.md",
   "docs/performance-roadmap.md",
   "docs/quality.md",

@@ -8,10 +8,11 @@ use super::analysis::RegexAnalysis;
 use super::ast::{Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, RegexFlags};
 use super::backtrack::{
     BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
-    is_cpp_space_comment_separator, match_literal_end, previous_char, unicode_case_eq,
+    is_cpp_space_comment_separator, literal_byte_width, match_literal_end, previous_char,
+    unicode_case_eq,
 };
 use super::{AnchorContext, is_unicode_word_char};
-use std::ops::Range;
+use std::{borrow::Cow, ops::Range};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CompileError {
@@ -1432,16 +1433,16 @@ impl Program {
     }
 }
 
-fn collect_group_definitions(
-    ast: &Ast,
+fn collect_group_definitions<'a>(
+    ast: &'a Ast,
     flags: RegexFlags,
-    definitions: &mut std::collections::BTreeMap<u32, (Ast, RegexFlags)>,
+    definitions: &mut std::collections::BTreeMap<u32, (&'a Ast, RegexFlags)>,
 ) {
     if let Ast::Group {
         index: Some(index), ..
     } = ast
     {
-        definitions.insert(*index, (ast.clone(), flags));
+        definitions.insert(*index, (ast, flags));
     }
     match ast {
         Ast::Concat(nodes) | Ast::Alternation(nodes) => {
@@ -1657,7 +1658,7 @@ impl Compiler {
             }
             for (group, (node, flags)) in definitions {
                 let return_pc = self.push(Instruction::Return);
-                let actual = self.compile_node(&node, flags, return_pc)?;
+                let actual = self.compile_node(node, flags, return_pc)?;
                 let placeholder = self.routine_entries[&group];
                 self.instructions[arena_index(placeholder)] = Instruction::Jump { target: actual };
             }
@@ -1855,8 +1856,8 @@ impl Compiler {
                 let (positive, direction) = match kind {
                     LookKind::Ahead => (true, AssertDirection::AHEAD),
                     LookKind::NotAhead => (false, AssertDirection::AHEAD),
-                    LookKind::Behind => (true, lookbehind_direction(child)?),
-                    LookKind::NotBehind => (false, lookbehind_direction(child)?),
+                    LookKind::Behind => (true, lookbehind_direction(child, flags)?),
+                    LookKind::NotBehind => (false, lookbehind_direction(child, flags)?),
                 };
                 self.push(Instruction::Assert {
                     entry,
@@ -2000,7 +2001,7 @@ impl Compiler {
 
     fn intern_literal_trie(
         &mut self,
-        literals: &[String],
+        literals: &[Cow<'_, str>],
         flags: RegexFlags,
     ) -> Result<LiteralTrieId, CompileError> {
         let id =
@@ -2011,7 +2012,7 @@ impl Compiler {
 }
 
 impl LiteralTrie {
-    fn new(literals: &[String], flags: RegexFlags) -> Result<Self, CompileError> {
+    fn new(literals: &[Cow<'_, str>], flags: RegexFlags) -> Result<Self, CompileError> {
         let unicode = flags.case_insensitive && literals.iter().any(|literal| !literal.is_ascii());
         let node_capacity = literals
             .iter()
@@ -2176,7 +2177,7 @@ impl LiteralTrie {
     }
 }
 
-fn exact_literal_branches(branches: &[Ast], flags: RegexFlags) -> Option<Vec<String>> {
+fn exact_literal_branches(branches: &[Ast], flags: RegexFlags) -> Option<Vec<Cow<'_, str>>> {
     // Small alternations do not amortize a second table and already execute
     // cheaply as ordered `Split`s.
     if branches.len() < 4 {
@@ -2225,16 +2226,18 @@ fn ast_contains_live_capture(ast: &Ast, capture_layout: &[u32]) -> bool {
     }
 }
 
-fn exact_literal_ast(ast: &Ast, flags: RegexFlags) -> Option<String> {
+// Borrow the overwhelmingly common literal/group case. Only concatenations
+// need a temporary string; the finished trie retains no AST references.
+fn exact_literal_ast(ast: &Ast, flags: RegexFlags) -> Option<Cow<'_, str>> {
     match ast {
-        Ast::Empty => Some(String::new()),
-        Ast::Literal(literal) => Some(literal.clone()),
+        Ast::Empty => Some(Cow::Borrowed("")),
+        Ast::Literal(literal) => Some(Cow::Borrowed(literal)),
         Ast::Concat(nodes) => {
             let mut literal = String::new();
             for node in nodes {
                 literal.push_str(&exact_literal_ast(node, flags)?);
             }
-            Some(literal)
+            Some(Cow::Owned(literal))
         }
         Ast::Group { child, .. } => exact_literal_ast(child, flags),
         Ast::Flags {
@@ -2269,18 +2272,21 @@ fn instruction_capacity_hint(ast: &Ast) -> usize {
     }
 }
 
-fn lookbehind_direction(ast: &Ast) -> Result<AssertDirection, CompileError> {
-    let (min_width, max_width) = byte_width(ast);
+fn lookbehind_direction(ast: &Ast, flags: RegexFlags) -> Result<AssertDirection, CompileError> {
+    let (min_width, max_width) = byte_width(ast, flags);
     AssertDirection::behind(min_width, max_width)
 }
 
-fn byte_width(ast: &Ast) -> (usize, Option<usize>) {
+fn byte_width(ast: &Ast, flags: RegexFlags) -> (usize, Option<usize>) {
     match ast {
         Ast::Empty | Ast::Anchor(_) | Ast::Look { .. } => (0, Some(0)),
-        Ast::Literal(value) => (value.len(), Some(value.len())),
+        Ast::Literal(value) => {
+            let (min, max) = literal_byte_width(value, flags);
+            (min, Some(max))
+        }
         Ast::Dot | Ast::Class(_) => (1, Some(4)),
         Ast::Concat(nodes) => nodes.iter().fold((0usize, Some(0usize)), |acc, node| {
-            let width = byte_width(node);
+            let width = byte_width(node, flags);
             (
                 acc.0.saturating_add(width.0),
                 acc.1
@@ -2295,7 +2301,7 @@ fn byte_width(ast: &Ast) -> (usize, Option<usize>) {
             let mut min = usize::MAX;
             let mut max = Some(0usize);
             for branch in branches {
-                let width = byte_width(branch);
+                let width = byte_width(branch, flags);
                 min = min.min(width.0);
                 max = max.zip(width.1).map(|(left, right)| left.max(right));
             }
@@ -2304,8 +2310,8 @@ fn byte_width(ast: &Ast) -> (usize, Option<usize>) {
         Ast::Conditional {
             matched, unmatched, ..
         } => {
-            let matched = byte_width(matched);
-            let unmatched = byte_width(unmatched);
+            let matched = byte_width(matched, flags);
+            let unmatched = byte_width(unmatched, flags);
             (
                 matched.0.min(unmatched.0),
                 matched
@@ -2315,13 +2321,14 @@ fn byte_width(ast: &Ast) -> (usize, Option<usize>) {
             )
         }
         Ast::Repeat { node, min, max, .. } => {
-            let width = byte_width(node);
+            let width = byte_width(node, flags);
             (
                 width.0.saturating_mul(*min),
                 max.and_then(|count| width.1.map(|width| width.saturating_mul(count))),
             )
         }
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => byte_width(child),
+        Ast::Group { child, .. } => byte_width(child, flags),
+        Ast::Flags { flags, child } => byte_width(child, *flags),
         Ast::Grapheme => (1, None),
         Ast::Backref(_) | Ast::Subroutine(_) | Ast::Unsupported(_) => (0, None),
     }
@@ -2456,8 +2463,34 @@ mod tests {
     }
 
     #[test]
+    fn literal_inventory_and_subroutine_definitions_borrow_the_parsed_ast() {
+        let parsed = parse(r"(?<word>alpha|beta|gamma|delta)");
+        let mut definitions = std::collections::BTreeMap::new();
+        collect_group_definitions(&parsed.ast, parsed.flags, &mut definitions);
+        let (definition, _) = definitions[&1];
+        let Ast::Group { child, .. } = definition else {
+            panic!("capturing group definition");
+        };
+        let Ast::Alternation(branches) = child.as_ref() else {
+            panic!("literal alternation");
+        };
+        let literals = exact_literal_branches(branches, parsed.flags).unwrap();
+        assert!(
+            literals
+                .iter()
+                .all(|literal| matches!(literal, Cow::Borrowed(_)))
+        );
+        for (branch, literal) in branches.iter().zip(&literals) {
+            let Ast::Literal(source) = branch else {
+                panic!("literal branch");
+            };
+            assert_eq!(source.as_ptr(), literal.as_ptr());
+        }
+    }
+
+    #[test]
     fn literal_trie_bounds_reservation_for_duplicate_branches() {
-        let literals = vec!["a".to_owned(); LITERAL_TRIE_NODE_RESERVE_LIMIT * 2];
+        let literals = vec![Cow::Borrowed("a"); LITERAL_TRIE_NODE_RESERVE_LIMIT * 2];
         let trie = LiteralTrie::new(&literals, RegexFlags::default()).unwrap();
 
         assert_eq!(trie.nodes.len(), 2);
@@ -2758,6 +2791,36 @@ mod tests {
             0,
             &[1, 2, 3, 4],
         );
+    }
+
+    #[test]
+    fn folded_lookbehind_replays_captures_at_utf8_boundaries() {
+        for (pattern, line, start) in [
+            (r"(?<=(?i:(k|s)))x", "🛰Kx", 7),
+            (r"(?<=(?i:(K|ſ)))x", "sx", 1),
+            (r"(?i:(?<=(k))x)", "Kx", 3),
+        ] {
+            let parsed = parse(pattern);
+            let program = Program::compile_captures(&parsed, &[1]).unwrap();
+            let matched = program
+                .execute_captures(
+                    line,
+                    start,
+                    context(),
+                    &mut StepBudget::new(1000),
+                    &mut BytecodeScratch::default(),
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(matched.end, line.len());
+            assert_eq!(
+                matched.captures,
+                vec![
+                    Some(start..line.len()),
+                    Some(if start == 7 { 4..7 } else { 0..start })
+                ]
+            );
+        }
     }
 
     #[test]

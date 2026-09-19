@@ -171,6 +171,7 @@ jobs:
           --seed 1 --cases 256 --out target/regex-differential-fuzz.json
       - run: node tools/generate-textmate-cases.mjs --check
       - run: node tools/generate-goldens.mjs --check
+      - run: node tools/generate-engine-regressions.mjs --check
       - run: node tools/generate-theme-goldens.mjs --check
       - run: node tools/theme-selector-conformance.mjs
       - run: node tools/theme-catalog-parity.mjs --check

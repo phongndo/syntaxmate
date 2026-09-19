@@ -1379,18 +1379,12 @@ fn position_lookbehind_matches(
     budget: &mut StepBudget,
 ) -> Result<bool, BudgetExceeded> {
     if let Some(literal) = ast_exact_literal(child)
-        && (!flags.case_insensitive || literal.is_ascii())
+        && !flags.case_insensitive
     {
         let start = position.saturating_sub(literal.len());
         return Ok(position >= literal.len()
             && line.is_char_boundary(start)
-            && line.get(start..position).is_some_and(|candidate| {
-                if flags.case_insensitive {
-                    candidate.eq_ignore_ascii_case(&literal)
-                } else {
-                    candidate == literal
-                }
-            }));
+            && line.get(start..position) == Some(literal.as_str()));
     }
 
     let mut matches_from = |start| -> Result<bool, BudgetExceeded> {
@@ -1402,7 +1396,7 @@ fn position_lookbehind_matches(
             .any(|end| end == position))
     };
 
-    if let Some((min_width, max_width)) = lookbehind_byte_width_bounds(child) {
+    if let Some((min_width, max_width)) = lookbehind_byte_width_bounds(child, flags) {
         let Some(latest_start) = position.checked_sub(min_width) else {
             return Ok(false);
         };
@@ -2283,30 +2277,30 @@ fn match_look(
         }
         LookKind::Behind | LookKind::NotBehind => {
             let end = state.pos;
-            let matched = if let Some((min_width, max_width)) = lookbehind_byte_width_bounds(child)
-            {
-                if let Some(latest_start) = end.checked_sub(min_width) {
-                    let earliest_start = end.saturating_sub(max_width);
-                    lookbehind_state_in_window(
-                        child,
-                        line,
-                        earliest_start,
-                        latest_start,
-                        end,
-                        &state,
-                        ctx,
-                        flags,
-                        budget,
-                        parsed,
-                    )?
+            let matched =
+                if let Some((min_width, max_width)) = lookbehind_byte_width_bounds(child, flags) {
+                    if let Some(latest_start) = end.checked_sub(min_width) {
+                        let earliest_start = end.saturating_sub(max_width);
+                        lookbehind_state_in_window(
+                            child,
+                            line,
+                            earliest_start,
+                            latest_start,
+                            end,
+                            &state,
+                            ctx,
+                            flags,
+                            budget,
+                            parsed,
+                        )?
+                    } else {
+                        None
+                    }
                 } else {
-                    None
-                }
-            } else {
-                lookbehind_state_in_window(
-                    child, line, 0, end, end, &state, ctx, flags, budget, parsed,
-                )?
-            };
+                    lookbehind_state_in_window(
+                        child, line, 0, end, end, &state, ctx, flags, budget, parsed,
+                    )?
+                };
             match (kind, matched) {
                 (LookKind::Behind, Some(mut matched)) => {
                     matched.pos = end;
@@ -2351,24 +2345,39 @@ fn lookbehind_state_in_window(
     Ok(None)
 }
 
-fn lookbehind_byte_width_bounds(ast: &Ast) -> Option<(usize, usize)> {
+/// Bounds on bytes consumed by this engine's scalar literal comparison.
+/// Case folding need not preserve UTF-8 width (k/K, s/ſ, ß/ẞ). A folded
+/// literal consumes one input scalar per pattern scalar, not its source bytes.
+/// These conservative bounds only select probes; matching remains authoritative.
+pub(crate) fn literal_byte_width(literal: &str, flags: RegexFlags) -> (usize, usize) {
+    if flags.case_insensitive {
+        let scalars = literal.chars().count();
+        (scalars, scalars.saturating_mul(4))
+    } else {
+        (literal.len(), literal.len())
+    }
+}
+
+fn lookbehind_byte_width_bounds(ast: &Ast, flags: RegexFlags) -> Option<(usize, usize)> {
     match ast {
         Ast::Empty | Ast::Anchor(_) | Ast::Look { .. } => Some((0, 0)),
-        Ast::Literal(literal) => Some((literal.len(), literal.len())),
+        Ast::Literal(literal) => Some(literal_byte_width(literal, flags)),
         Ast::Dot | Ast::Class(_) => Some((1, 4)),
         Ast::Grapheme => None,
         Ast::Concat(nodes) => {
             let mut min = 0usize;
             let mut max = 0usize;
             for node in nodes {
-                let (node_min, node_max) = lookbehind_byte_width_bounds(node)?;
+                let (node_min, node_max) = lookbehind_byte_width_bounds(node, flags)?;
                 min = min.saturating_add(node_min);
                 max = max.saturating_add(node_max);
             }
             Some((min, max))
         }
         Ast::Alternation(branches) => {
-            let mut bounds = branches.iter().map(lookbehind_byte_width_bounds);
+            let mut bounds = branches
+                .iter()
+                .map(|branch| lookbehind_byte_width_bounds(branch, flags));
             let (mut min, mut max) = bounds.next().unwrap_or(Some((0, 0)))?;
             for bound in bounds {
                 let (branch_min, branch_max) = bound?;
@@ -2379,10 +2388,11 @@ fn lookbehind_byte_width_bounds(ast: &Ast) -> Option<(usize, usize)> {
         }
         Ast::Repeat { node, min, max, .. } => {
             let max = (*max)?;
-            let (node_min, node_max) = lookbehind_byte_width_bounds(node)?;
+            let (node_min, node_max) = lookbehind_byte_width_bounds(node, flags)?;
             Some((node_min.saturating_mul(*min), node_max.saturating_mul(max)))
         }
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => lookbehind_byte_width_bounds(child),
+        Ast::Group { child, .. } => lookbehind_byte_width_bounds(child, flags),
+        Ast::Flags { flags, child } => lookbehind_byte_width_bounds(child, *flags),
         Ast::Backref(_) | Ast::Conditional { .. } | Ast::Subroutine(_) | Ast::Unsupported(_) => {
             None
         }
@@ -2486,7 +2496,8 @@ fn ast_exact_literal(ast: &Ast) -> Option<String> {
             }
             Some(out)
         }
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => ast_exact_literal(child),
+        Ast::Group { child, .. } => ast_exact_literal(child),
+        Ast::Flags { flags, child } if !flags.case_insensitive => ast_exact_literal(child),
         _ => None,
     }
 }
@@ -3084,6 +3095,30 @@ mod tests {
             .find("FOObar", 0, ctx())
             .unwrap();
         assert_eq!(scoped.start..scoped.end, 3..6);
+    }
+
+    #[test]
+    fn folded_lookbehind_uses_input_byte_widths() {
+        for (pattern, line, start) in [
+            (r"(?<=(?i:k))x", "Kx", 3),
+            (r"(?<=(?i:K))x", "kx", 1),
+            (r"(?i)(?<=s)x", "ſx", 2),
+            (r"(?i)(?<=ſ)x", "sx", 1),
+            (r"(?<=(?i:(k|s)))x", "🛰Kx", 7),
+            (r"(?<=(?i:k){2})x", "kKx", 4),
+        ] {
+            let parsed = parse(pattern);
+            let result = FallbackMatcher::new(pattern).find(line, 0, ctx()).unwrap();
+            assert_eq!(result.start..result.end, start..line.len(), "{pattern}");
+            assert_eq!(
+                recursive_position_span(&parsed, line, start, ctx()),
+                Some(start..line.len()),
+                "{pattern}"
+            );
+        }
+        for (pattern, line) in [(r"(?<!(?i:k))x", "Kx"), (r"(?i)(?<!s)x", "ſx")] {
+            assert!(FallbackMatcher::new(pattern).find(line, 0, ctx()).is_none());
+        }
     }
 
     #[test]

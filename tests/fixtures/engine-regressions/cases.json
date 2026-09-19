@@ -1,0 +1,48 @@
+[
+  {
+    "name": "folded-lookbehind",
+    "grammars": [
+      {
+        "scopeName": "source.folded",
+        "patterns": [
+          {"begin": "(?<=(?i:k))([A-Z])", "end": "\\1", "name": "meta.block.$1", "beginCaptures": {"1": {"name": "punctuation.begin"}}, "endCaptures": {"0": {"name": "punctuation.end"}}},
+          {"begin": "^>([ks])", "while": "^.(?<=(?i:\\1))>", "name": "meta.while", "whileCaptures": {"0": {"name": "punctuation.while"}}},
+          {"include": "#word"},
+          {"include": "source.folded.external#word"},
+          {"match": "(?<=(?i:s))y", "name": "losing.same-position"}
+        ],
+        "repository": {"word": {"match": "(?<=(?i:(k|s)))(x)", "captures": {"2": {"name": "entity.folded"}}}},
+        "injections": {"L:source.folded": {"patterns": [{"match": "(?<=(?i:s))y", "name": "injected.left"}]}}
+      },
+      {"scopeName": "source.folded.external", "patterns": [], "repository": {"word": {"match": "(?<=(?i:K))z", "name": "constant.external"}}}
+    ],
+    "sources": ["🛰Kx ſx kx kz ſy\r\n\nKQ body\n中Q\n>k\nK>tail\nstop\n", "", "\n", "Kx"]
+  },
+  {
+    "name": "literal-scope-punctuation",
+    "grammars": [{"scopeName": "source.punctuation", "patterns": [
+      {"match": "x", "name": ".entity..name.  keyword.control"},
+      {"match": "y", "name": "."},
+      {"match": "(\\.+word\\.+)", "name": "meta.$1"},
+      {"match": "z", "name": "\tmeta"},
+      {"match": "w", "name": ""}
+    ]}],
+    "sources": ["xy ..word.. zw\n"]
+  },
+  {
+    "name": "dormant-capture-observability",
+    "grammars": [{"scopeName": "source.dormant", "patterns": [
+      {"begin": "(?<x>a)?(?(<x>)b|c)d", "end": "\\1;", "name": "meta.$1", "beginCaptures": {"1": {"name": "entity.dormant", "patterns": [{"match": ".", "name": "invalid.dormant"}]}}, "patterns": [{"match": "!", "name": "keyword.inside"}]},
+      {"match": "!", "name": "keyword.outside"}
+    ]}],
+    "sources": ["🛰cd!;!\n", "abd!a;!\r\n", "cd\n!;!\n"]
+  },
+  {
+    "name": "dormant-while-observability",
+    "grammars": [{"scopeName": "source.dormant", "patterns": [
+      {"begin": "^(?<x>a)?(?(<x>)b|c)d", "while": "^\\1>", "name": "meta.$1", "beginCaptures": {"1": {"name": "entity.dormant", "patterns": [{"match": ".", "name": "invalid.dormant"}]}}, "whileCaptures": {"0": {"name": "punctuation.while"}}, "patterns": [{"match": "!", "name": "keyword.inside"}]},
+      {"match": "!", "name": "keyword.outside"}
+    ]}],
+    "sources": ["cd\n>!\nstop\nabd\na>!\nstop\n"]
+  }
+]

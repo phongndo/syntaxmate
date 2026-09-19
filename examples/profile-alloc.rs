@@ -3,7 +3,11 @@
 //! ```text
 //! cargo run --release --example profile-alloc -- rust path/to/source.rs
 //! cargo run --release --example profile-alloc -- --json rust path/to/source.rs
+//! cargo run --release --example profile-alloc -- --json --no-line-cache rust path/to/source.rs
 //! ```
+//!
+//! Default warm phases reuse cached line tokens. `--no-line-cache` measures
+//! warm regex/tokenizer execution instead, retaining only non-line caches.
 
 use std::{
     alloc::{GlobalAlloc, Layout, System},
@@ -370,10 +374,13 @@ fn require_same_output(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut json = false;
+    let mut options = TokenizerOptions::default();
     let mut positional = Vec::new();
     for argument in env::args().skip(1) {
         if argument == "--json" {
             json = true;
+        } else if argument == "--no-line-cache" {
+            options.line_cache_entries = 0;
         } else if argument.starts_with("--") {
             return Err(format!("unexpected option {argument}").into());
         } else {
@@ -381,14 +388,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if positional.len() != 2 {
-        return Err("usage: profile-alloc [--json] LANGUAGE SOURCE".into());
+        return Err("usage: profile-alloc [--json] [--no-line-cache] LANGUAGE SOURCE".into());
     }
     let language = &positional[0];
     let source = fs::read_to_string(&positional[1])?;
     let mut reports = Vec::new();
 
     let (before, started) = Stats::begin_phase();
-    let mut tokenizer = Tokenizer::for_bundled_language(language, TokenizerOptions::default())?;
+    let mut tokenizer = Tokenizer::for_bundled_language(language, options)?;
     reports.push(finish_phase(
         "construct",
         before,
@@ -431,7 +438,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokenize_warm,
     )?;
 
-    let mut tokenizer = Tokenizer::for_bundled_language(language, TokenizerOptions::default())?;
+    let mut tokenizer = Tokenizer::for_bundled_language(language, options)?;
     let initial_state = tokenizer.initial_state();
     let mut state = initial_state.clone();
     let (before, _) = Stats::begin_phase();
@@ -461,7 +468,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         incremental_warm,
     )?;
 
-    let highlighter = Highlighter::bundled()?;
+    let highlighter = Highlighter::with_options(options)?;
     let mut session = highlighter.session(language, "github-dark")?;
     let (before, _) = Stats::begin_phase();
     let (highlight_first, elapsed) = incremental_highlight_pass(&mut session, &source)?;
@@ -501,7 +508,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ));
 
     let (before, started) = Stats::begin_phase();
-    let mut tokenizer = prepared.tokenizer(TokenizerOptions::default());
+    let mut tokenizer = prepared.tokenizer(options);
     reports.push(finish_phase(
         "prepared-new",
         before,
@@ -526,7 +533,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     drop(tokenizer);
 
     let (before, started) = Stats::begin_phase();
-    let mut tokenizer = prepared.tokenizer(TokenizerOptions::default());
+    let mut tokenizer = prepared.tokenizer(options);
     reports.push(finish_phase(
         "prepared-new-warm",
         before,
@@ -555,7 +562,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
 
     if json {
-        print_json_report(language, source.len(), &reports)?;
+        print_json_report(language, source.len(), options.line_cache_entries, &reports)?;
     } else {
         for report in &reports {
             print_human_report(report, source.len());
@@ -597,6 +604,7 @@ fn print_human_report(report: &PhaseReport, source_bytes: usize) {
 fn print_json_report(
     language: &str,
     source_bytes: usize,
+    line_cache_entries: usize,
     reports: &[PhaseReport],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let phases = reports
@@ -632,6 +640,7 @@ fn print_json_report(
             "schemaVersion": 1,
             "language": language,
             "sourceBytes": source_bytes,
+            "lineCacheEntries": line_cache_entries,
             "phases": phases,
         }))?
     );

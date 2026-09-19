@@ -13,7 +13,9 @@ Before marking an item complete:
 2. Report construction plus first and warm whole-document, incremental, and
    incremental-highlighting phases where relevant.
 3. Report allocation calls, cumulative allocated bytes, boundary and peak
-   retained bytes, and elapsed API time with `examples/profile-alloc.rs`.
+   retained bytes with `examples/profile-alloc.rs`. Measure elapsed API time
+   separately without the counting allocator; label cached-token replay versus
+   warm execution with the line cache disabled.
 4. Confirm identical token counts and scope-stream digests on benchmark inputs.
 5. Run formatting, Clippy, all-feature tests, the complete TextMate golden suite,
    generated-asset checks, and package checks.
@@ -206,8 +208,8 @@ The raw median report is `target/profile-item7-comparison.json`.
 - [x] Define reviewed CI allocation ceilings and corpus percentile reporting.
 
 Result: `profile-alloc` now resets incremental continuation state while
-retaining tokenizer and theme caches, then measures true warm tokenization and
-highlighting replays. Its human and versioned JSON outputs report allocation
+retaining tokenizer and theme caches, then measures warm tokenization and
+highlighting state replays (which can reuse cached line tokens). Its human and versioned JSON outputs report allocation
 and reallocation calls, cumulative and boundary-retained bytes, peak additional
 live bytes, API elapsed time, completeness, item counts, and stable token-range
 and exact scope-stream digests. Digest work stays outside the timed API
@@ -267,6 +269,40 @@ prefilters, and 4.1% in allocation. Candidate traversal is the next distinct
 cost center, but its start-class and skip gates reject most expensive attempts;
 changes there must preserve that filtering advantage.
 
+### 10. Borrowed compilation and correctness-first regression work
+
+- [x] Borrow subroutine AST definitions and exact literal inventories during
+      bytecode compilation, without retaining AST references in programs.
+- [x] Reproduce and fix lost degradation status in cached lines, capture
+      retokenization, and `while` conditions.
+- [x] Fix folded lookbehind across different UTF-8 widths and preserve literal
+      rule scope names with oracle-accurate capture interpolation.
+- [x] Add generated custom-grammar oracle regressions and distinguish cached
+      replay from uncached warm execution in the allocation profiler.
+- [ ] Recover the measured SDBL lookbehind cost without restoring incorrect
+      fixed-byte assumptions; this pass does not claim zero regressions.
+
+Against `c6db4db7`, eleven isolated alternating release samples reduce C++
+engine-first time 11.2%, HTML/ANSI cold output 9.2%/10.5%, and first-document
+allocation calls 30.3% (71,092 calls) with 2,908,297 fewer cumulative bytes.
+Median retained and peak bytes are unchanged in every lifecycle phase and both
+line-cache modes. All four corpus output digests match. The isolated Mark
+adapter's C++ first-call median improves 3.6%; no material steady-state VM
+improvement is claimed.
+
+All 264 repeated-catalog inputs remain complete and scope-identical. Their
+summed first-call medians are neutral (−0.43%), but focused SDBL measurements
+regress 6.6% first / 6.2% steady. An isolated ablation attributes this to the
+necessary folded-lookbehind correctness repair rather than compiler borrowing;
+the incorrect fast bounds are not restored. Small prepared-constructor costs
+and cached-replay timing regressions are also reported, not omitted.
+
+The full results, red/green evidence, lifecycle/allocation tables, exact check
+outcomes, current-stable baseline lint failures, and unresolved differential
+cases are in [the pass report](correctness-performance-pass.md). Raw artifacts
+are under `target/correctness-pass/`. Budgets, allocation policies, grammars,
+oracle pins, and difference ledgers are unchanged.
+
 ## Experiments not to repeat unchanged
 
 The engine history already records neutral, slower, or incompatible attempts,
@@ -276,5 +312,8 @@ and several start-gate variants. This iteration also rejected a case-folded
 word-set hash (no representative allocation reduction), fixed-count scan and
 repeat-start bytecode fusions (mixed 0.5% to 2.0% regressions), direct-index
 start-class classification (C++ regressed 1.8%), and bulk HTML/ANSI ordinary-run
-scans (up to 3.7% and 2.5% regressions). Revisit them only with a materially
-different design and new parity evidence.
+scans (up to 3.7% and 2.5% regressions). The correctness-first pass additionally
+rejected an inline empty-backtrack fast exit (C++ +2.9%), omitting repeat undo
+records without suspended work (no convincing gain), and prepared substring
+finders (mixed results). Revisit them only with a materially different design
+and new parity evidence.
