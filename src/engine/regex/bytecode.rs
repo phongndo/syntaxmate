@@ -357,23 +357,65 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             (mask, mask)
         }
         ClassAtom::Nested(class) => ascii_class_masks(class),
-        // Non-ASCII chars and ranges can still fold into ASCII under case
-        // insensitivity (e.g. the Kelvin sign); evaluate the atom directly.
-        ClassAtom::Char(_) | ClassAtom::Range(..) => {
-            let sensitive = ascii_predicate_mask(|ch| {
-                super::backtrack::atom_contains(atom, ch, RegexFlags::default())
-            });
+        // A non-ASCII scalar never equals an ASCII one, and under
+        // `unicode_case_eq` it matches an ASCII probe only through a
+        // single-scalar ASCII lower- or uppercase mapping (e.g. the Kelvin
+        // sign). Derive those few probes from its two case maps instead of
+        // evaluating the Unicode fold against all 128 ASCII scalars.
+        ClassAtom::Char(expected) => {
+            let mut insensitive = [0u64; 2];
+            if *expected != '\u{131}' {
+                if let Some(lower) = single_ascii_mapping(expected.to_lowercase()) {
+                    ascii_mask_set_where(&mut insensitive, |byte| {
+                        byte.to_ascii_lowercase() == lower
+                    });
+                }
+                if let Some(upper) = single_ascii_mapping(expected.to_uppercase()) {
+                    ascii_mask_set_where(&mut insensitive, |byte| {
+                        byte.to_ascii_uppercase() == upper
+                    });
+                }
+            }
+            ([0u64; 2], insensitive)
+        }
+        // Non-ASCII ranges can still fold into ASCII under case
+        // insensitivity. Mirror `atom_contains`' folded-range test with the
+        // bounds' case maps computed once; an ASCII probe's first lower- or
+        // uppercase mapping is its ASCII case map.
+        ClassAtom::Range(start, end) => {
+            let sensitive = ascii_predicate_mask(|ch| *start <= ch && ch <= *end);
+            let first = |mut mapped: std::char::ToLowercase, ch: char| mapped.next().unwrap_or(ch);
+            let first_upper =
+                |mut mapped: std::char::ToUppercase, ch: char| mapped.next().unwrap_or(ch);
+            let (low_lower, high_lower) = (
+                first(start.to_lowercase(), *start),
+                first(end.to_lowercase(), *end),
+            );
+            let (low_upper, high_upper) = (
+                first_upper(start.to_uppercase(), *start),
+                first_upper(end.to_uppercase(), *end),
+            );
             let insensitive = ascii_predicate_mask(|ch| {
-                super::backtrack::atom_contains(
-                    atom,
-                    ch,
-                    RegexFlags {
-                        case_insensitive: true,
-                        ..RegexFlags::default()
-                    },
-                )
+                let lower = ch.to_ascii_lowercase();
+                let upper = ch.to_ascii_uppercase();
+                (low_lower <= lower && lower <= high_lower)
+                    || (low_upper <= upper && upper <= high_upper)
             });
             (sensitive, insensitive)
+        }
+    }
+}
+
+/// The ASCII byte a case mapping yields when it is exactly one ASCII scalar.
+fn single_ascii_mapping(mut mapped: impl Iterator<Item = char>) -> Option<u8> {
+    let first = mapped.next()?;
+    (first.is_ascii() && mapped.next().is_none()).then_some(first as u8)
+}
+
+fn ascii_mask_set_where(mask: &mut AsciiMask, predicate: impl Fn(u8) -> bool) {
+    for byte in 0u8..=127 {
+        if predicate(byte) {
+            ascii_mask_set(mask, byte);
         }
     }
 }
@@ -2334,6 +2376,35 @@ mod tests {
     use super::*;
     use crate::engine::regex::ast::parse;
     use crate::engine::regex::backtrack::{FallbackMatcher, recursive_position_span};
+
+    #[test]
+    fn non_ascii_class_atoms_derive_exact_ascii_masks() {
+        // Scalars and ranges whose Unicode case maps reach ASCII (Kelvin,
+        // long s, dotted/dotless i, Å/ſ spans) and ones that do not.
+        for pattern in [
+            "[\u{212a}]",
+            "[\u{17f}]",
+            "[\u{130}\u{131}]",
+            "[é⍺∇]",
+            "[\u{c0}-\u{17f}]",
+            "[\u{17f}-\u{212a}]",
+            "[\u{100}-\u{130}]",
+            "[\u{131}-\u{2000}]",
+            "[a-\u{212a}]",
+            "[\u{80}-\u{10ffff}]",
+            "[^\u{212a}x]",
+        ] {
+            let parsed = parse(pattern);
+            let Ast::Class(class) = &parsed.ast else {
+                panic!("{pattern:?} should parse as a class");
+            };
+            assert_eq!(
+                ascii_class_masks(class),
+                ascii_masks_by_evaluation(class),
+                "{pattern:?}"
+            );
+        }
+    }
 
     fn context() -> AnchorContext {
         AnchorContext {
