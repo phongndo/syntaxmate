@@ -580,20 +580,32 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
         }
         ClassAtom::Nested(class) => ascii_class_masks(class),
         // Non-ASCII chars and ranges can still fold into ASCII under case
-        // insensitivity (e.g. the Kelvin sign); evaluate the atom directly.
-        ClassAtom::Char(_) | ClassAtom::Range(..) => {
-            let sensitive = ascii_predicate_mask(|ch| {
-                super::backtrack::atom_contains(atom, ch, RegexFlags::default())
-            });
+        // insensitivity (e.g. the Kelvin sign). Mirror `atom_contains` for
+        // ASCII probes, whose case maps are single ASCII characters, while
+        // folding the non-ASCII operands once instead of per probe.
+        ClassAtom::Char(expected) => {
+            let lower = expected.to_lowercase().collect::<Vec<_>>();
+            let upper = expected.to_uppercase().collect::<Vec<_>>();
+            let insensitive = if *expected == '\u{131}' {
+                // Oniguruma's non-Turkic fold keeps dotless i out of I/i.
+                [0; 2]
+            } else {
+                ascii_predicate_mask(|ch| {
+                    lower == [ch.to_ascii_lowercase()] || upper == [ch.to_ascii_uppercase()]
+                })
+            };
+            ([0; 2], insensitive)
+        }
+        ClassAtom::Range(start, end) => {
+            let first_lower = |ch: char| ch.to_lowercase().next().unwrap_or(ch);
+            let first_upper = |ch: char| ch.to_uppercase().next().unwrap_or(ch);
+            let (lower_start, lower_end) = (first_lower(*start), first_lower(*end));
+            let (upper_start, upper_end) = (first_upper(*start), first_upper(*end));
+            let sensitive = ascii_predicate_mask(|ch| *start <= ch && ch <= *end);
             let insensitive = ascii_predicate_mask(|ch| {
-                super::backtrack::atom_contains(
-                    atom,
-                    ch,
-                    RegexFlags {
-                        case_insensitive: true,
-                        ..RegexFlags::default()
-                    },
-                )
+                let (lower, upper) = (ch.to_ascii_lowercase(), ch.to_ascii_uppercase());
+                (lower_start <= lower && lower <= lower_end)
+                    || (upper_start <= upper && upper <= upper_end)
             });
             (sensitive, insensitive)
         }
@@ -1846,6 +1858,7 @@ struct Compiler<'a> {
     /// still a placeholder, so continuation analysis reads the loop's exit
     /// and body from here instead.
     open_repeats: Vec<OpenRepeat<'a>>,
+    literal_ids: crate::engine::hashing::FastMap<&'a str, LiteralId>,
 }
 
 struct OpenRepeat<'a> {
@@ -1874,6 +1887,7 @@ impl<'a> Compiler<'a> {
             named_captures: std::collections::BTreeMap::new(),
             routine_entries: std::collections::BTreeMap::new(),
             open_repeats: Vec::new(),
+            literal_ids: crate::engine::hashing::fast_map(),
         }
     }
 
@@ -2216,7 +2230,7 @@ impl<'a> Compiler<'a> {
     /// Extracts a single-consumer body for `ScanRepeat`, looking through flag
     /// scopes and non-captured groups. Empty literals are rejected because a
     /// scan must always make progress.
-    fn scan_node(&mut self, ast: &Ast, flags: RegexFlags) -> Option<(ScanNode, RegexFlags)> {
+    fn scan_node(&mut self, ast: &'a Ast, flags: RegexFlags) -> Option<(ScanNode, RegexFlags)> {
         match ast {
             Ast::Literal(value) if !value.is_empty() => {
                 let id = self.intern_literal(value).ok()?;
@@ -2386,15 +2400,17 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    fn intern_literal(&mut self, literal: &str) -> Result<LiteralId, CompileError> {
-        if let Some(index) = self.literals.iter().position(|value| value == literal) {
-            return u32::try_from(index)
-                .map(LiteralId)
-                .map_err(|_| CompileError::TableOverflow);
+    fn intern_literal(&mut self, literal: &'a str) -> Result<LiteralId, CompileError> {
+        // Captured keyword alternations intern hundreds of literals; a
+        // linear scan per literal made their compilation quadratic.
+        if let Some(id) = self.literal_ids.get(literal) {
+            return Ok(*id);
         }
-        let id = u32::try_from(self.literals.len()).map_err(|_| CompileError::TableOverflow)?;
+        let id =
+            LiteralId(u32::try_from(self.literals.len()).map_err(|_| CompileError::TableOverflow)?);
         self.literals.push(literal.to_owned());
-        Ok(LiteralId(id))
+        self.literal_ids.insert(literal, id);
+        Ok(id)
     }
 
     fn intern_class(&mut self, class: &CharClass) -> Result<ClassId, CompileError> {
@@ -3128,6 +3144,31 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn non_ascii_atom_ascii_masks_match_class_evaluation() {
+        for pattern in [
+            "[\u{212a}]",
+            "[\u{17f}]",
+            "[\u{131}]",
+            "[\u{130}]",
+            "[\u{e9}\u{c9}]",
+            "[\u{212a}-\u{212b}]",
+            "[\\x{20}-\\x{10ffff}]",
+            "[a-\u{e9}]",
+            "[\u{c0}-\u{17f}]",
+            "[^\u{212a}]",
+        ] {
+            let Ast::Class(class) = parse(pattern).ast else {
+                panic!("{pattern:?} should parse as a class");
+            };
+            assert_eq!(
+                ascii_class_masks(&class),
+                ascii_masks_by_evaluation(&class),
+                "{pattern:?}"
+            );
         }
     }
 
