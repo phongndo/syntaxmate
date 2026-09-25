@@ -5,7 +5,9 @@
 //! caller can reuse its allocations across candidate attempts.
 
 use super::analysis::RegexAnalysis;
-use super::ast::{Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, RegexFlags};
+use super::ast::{
+    Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, PerlClassKind, RegexFlags,
+};
 use super::backtrack::{
     BudgetExceeded, CaseFoldKey, FoldedClass, StepBudget, anchor_matches, char_at, class_contains,
     is_cpp_space_comment_separator, literal_byte_width, match_literal_end, previous_char,
@@ -1799,7 +1801,18 @@ impl Compiler {
                 // back, so only atomic groups and variable-width possessive
                 // repeats commit via an explicit cut. Mirrors the recursive VM.
                 let cut = *possessive && (*atomic || *max != Some(*min));
-                if cut && let Some(scan) = self.scan_node(node, flags) {
+                // A greedy repeat whose continuation provably rejects every
+                // character the body can consume never profits from giving
+                // characters back, so it can run as a possessive scan.
+                let auto_possessive = !*possessive
+                    && *greedy
+                    && *max != Some(0)
+                    && *max != Some(1)
+                    && ascii_consumer_members(node, flags)
+                        .is_some_and(|members| self.continuation_rejects(next, &members));
+                if (cut || auto_possessive)
+                    && let Some(scan) = self.scan_node(node, flags)
+                {
                     let (scan, scan_flags) = scan;
                     return Ok(self.push(Instruction::ScanRepeat {
                         node: scan,
@@ -1943,6 +1956,153 @@ impl Compiler {
             }
             Ast::Grapheme | Ast::Unsupported(_) => return Err(CompileError::Unsupported),
         })
+    }
+
+    /// True when every path from `pc` fails before consuming anything if
+    /// the character at the current position is one of `members` (all
+    /// ASCII). Zero-width instructions are looked through; any instruction
+    /// the walk does not understand, or reaching `Accept`, answers false.
+    ///
+    /// Used to auto-possessify a greedy single-character repeat: giving back
+    /// a character leaves a member at the current position, so every such
+    /// backtracking path fails and dropping it cannot change the result.
+    fn continuation_rejects(&self, pc: ProgramCounter, members: &AsciiMask) -> bool {
+        const WALK_LIMIT: usize = 64;
+        let member_bytes = || (0u8..128).filter(|byte| ascii_mask_contains(members, *byte));
+        let class_rejects = |id: ClassId, flags: InstructionFlags| {
+            let class = &self.classes[id.0 as usize];
+            member_bytes().all(|byte| !class.matches_ascii(byte, flags.case_insensitive()))
+        };
+        let literal_rejects = |id: LiteralId, flags: InstructionFlags| {
+            let first = self.literals[id.0 as usize].chars().next()?;
+            Some(member_bytes().all(|byte| {
+                let byte = byte as char;
+                byte != first && !(flags.case_insensitive() && unicode_case_eq(first, byte))
+            }))
+        };
+        let mut pending = vec![pc];
+        let mut visited = 0usize;
+        while let Some(pc) = pending.pop() {
+            visited += 1;
+            if visited > WALK_LIMIT {
+                return false;
+            }
+            match &self.instructions[arena_index(pc)] {
+                Instruction::SaveStart { next, .. }
+                | Instruction::SaveEnd { next, .. }
+                | Instruction::Anchor { next, .. }
+                | Instruction::CutStart { next }
+                | Instruction::CutEnd { next }
+                | Instruction::RepeatInit { next, .. } => pending.push(*next),
+                Instruction::Jump { target } => pending.push(*target),
+                Instruction::Split {
+                    preferred,
+                    alternate,
+                } => pending.extend([*preferred, *alternate]),
+                Instruction::Conditional {
+                    matched, unmatched, ..
+                } => pending.extend([*matched, *unmatched]),
+                // Reached through `RepeatInit`, so the count is zero.
+                Instruction::Repeat {
+                    bounds, body, next, ..
+                } => {
+                    pending.push(*body);
+                    if bounds.min == 0 {
+                        pending.push(*next);
+                    }
+                }
+                Instruction::Assert {
+                    entry,
+                    positive,
+                    direction,
+                    next,
+                } => {
+                    let guard = direction
+                        .is_ahead()
+                        .then(|| self.single_class_body(*entry))
+                        .flatten();
+                    let rejects = guard.is_some_and(|(id, flags)| {
+                        let class = &self.classes[id.0 as usize];
+                        member_bytes().all(|byte| {
+                            class.matches_ascii(byte, flags.case_insensitive()) != *positive
+                        })
+                    });
+                    if !rejects {
+                        pending.push(*next);
+                    }
+                }
+                Instruction::Class { id, flags, .. } => {
+                    if !class_rejects(*id, *flags) {
+                        return false;
+                    }
+                }
+                Instruction::Literal { id, flags, next } => match literal_rejects(*id, *flags) {
+                    Some(true) => {}
+                    Some(false) => return false,
+                    None => pending.push(*next),
+                },
+                Instruction::LiteralTrie { id, flags, .. } => {
+                    let trie = &self.literal_tries[id.0 as usize];
+                    let Some(root) = trie.nodes.first() else {
+                        return false;
+                    };
+                    if !trie.unicode_nodes.is_empty() || root.terminal_order.is_some() {
+                        return false;
+                    }
+                    let rejects = member_bytes().all(|byte| {
+                        let byte = if flags.case_insensitive() {
+                            byte.to_ascii_lowercase()
+                        } else {
+                            byte
+                        };
+                        root.edges.iter().all(|(edge, _)| *edge != byte)
+                    });
+                    if !rejects {
+                        return false;
+                    }
+                }
+                Instruction::ScanRepeat {
+                    node,
+                    flags,
+                    bounds,
+                    next,
+                } => {
+                    let rejects = match node {
+                        ScanNode::Class(id) => class_rejects(*id, *flags),
+                        ScanNode::Literal(id) => literal_rejects(*id, *flags) == Some(true),
+                        ScanNode::Any => false,
+                    };
+                    if !rejects {
+                        return false;
+                    }
+                    if bounds.min == 0 {
+                        pending.push(*next);
+                    }
+                }
+                Instruction::Any { .. }
+                | Instruction::Accept
+                | Instruction::Fail
+                | Instruction::Call { .. }
+                | Instruction::Return
+                | Instruction::RepeatEnd { .. }
+                | Instruction::Backref { .. }
+                | Instruction::CppSpaceCommentSeparator { .. } => return false,
+            }
+        }
+        true
+    }
+
+    /// `(id, flags)` when an assertion body is exactly one class followed by
+    /// `Accept`.
+    fn single_class_body(&self, entry: ProgramCounter) -> Option<(ClassId, InstructionFlags)> {
+        match &self.instructions[arena_index(entry)] {
+            Instruction::Class { id, flags, next }
+                if matches!(self.instructions[arena_index(*next)], Instruction::Accept) =>
+            {
+                Some((*id, *flags))
+            }
+            _ => None,
+        }
     }
 
     fn push(&mut self, instruction: Instruction) -> ProgramCounter {
@@ -2195,6 +2355,55 @@ impl LiteralTrie {
         }
         Ok(())
     }
+}
+
+/// The ASCII characters a single-character repeat body can consume, when it
+/// provably consumes nothing else: a case-sensitive single ASCII literal or
+/// a case-sensitive class built only from ASCII-only atoms. Case-insensitive
+/// bodies are excluded because ASCII letters fold to non-ASCII scalars such
+/// as the Kelvin sign and dotted capital I.
+fn ascii_consumer_members(ast: &Ast, flags: RegexFlags) -> Option<AsciiMask> {
+    match ast {
+        Ast::Flags {
+            flags: local,
+            child,
+        } => ascii_consumer_members(child, *local),
+        Ast::Group {
+            index: None, child, ..
+        } => ascii_consumer_members(child, flags),
+        _ if flags.case_insensitive => None,
+        Ast::Literal(value) => {
+            let mut chars = value.chars();
+            match (chars.next(), chars.next()) {
+                (Some(ch), None) if ch.is_ascii() => {
+                    let mut mask = [0u64; 2];
+                    ascii_mask_set(&mut mask, ch as u8);
+                    Some(mask)
+                }
+                _ => None,
+            }
+        }
+        Ast::Class(class) if class_is_ascii_only(class) => Some(ascii_class_masks(class).0),
+        _ => None,
+    }
+}
+
+/// True when no non-ASCII scalar can match the class case-sensitively.
+fn class_is_ascii_only(class: &CharClass) -> bool {
+    !class.negated
+        && class.atoms.iter().all(|atom| match atom {
+            ClassAtom::Char(ch) => ch.is_ascii(),
+            ClassAtom::Range(start, end) => start.is_ascii() && end.is_ascii(),
+            ClassAtom::Perl(kind) => {
+                matches!(kind, PerlClassKind::Digit | PerlClassKind::HorizontalSpace)
+            }
+            ClassAtom::Nested(class) => class_is_ascii_only(class),
+            ClassAtom::Posix { .. } | ClassAtom::Unicode { .. } => false,
+        })
+}
+
+fn ascii_mask_contains(mask: &AsciiMask, byte: u8) -> bool {
+    byte < 128 && mask[byte as usize / 64] & (1u64 << (byte % 64)) != 0
 }
 
 fn exact_literal_branches(branches: &[Ast], flags: RegexFlags) -> Option<Vec<Cow<'_, str>>> {
@@ -2707,6 +2916,98 @@ mod tests {
                         recursive,
                         "pattern {pattern:?}, line {line:?}, start {start}"
                     );
+                }
+            }
+        }
+    }
+
+    fn scan_repeat_count(pattern: &str) -> usize {
+        Program::compile(&parse(pattern))
+            .expect("supported bytecode pattern")
+            .instructions
+            .iter()
+            .filter(|instruction| matches!(instruction, Instruction::ScanRepeat { .. }))
+            .count()
+    }
+
+    #[test]
+    fn greedy_repeats_become_possessive_only_when_giving_back_must_fail() {
+        for pattern in [
+            r"[A-Z_a-z][$0-9A-Z_a-z]*(?![$0-9A-Z_a-z])",
+            r"([a-z]+)(::)",
+            r"[a-z]*(?=[0-9])",
+            r"[ \t]*(?:\b(in|out)\b)?[a-z]",
+            r"[a-z]*K",
+            r"x*(?:(y)|z)",
+            r"(?:[a-z]*(?<=b))1",
+        ] {
+            assert_eq!(scan_repeat_count(pattern), 1, "{pattern}");
+        }
+        for pattern in [
+            r"a*a",
+            r"[a-z]*(?!x)",
+            r"[a-z]*(?=[a-z0-9])",
+            r"[a-z]*",
+            r"x[a-z]*",
+            r"(?i)[a-z]*1",
+            r"[a-z]*(?i:K)",
+            r"\w*1",
+            r"[^0-9]*1",
+            r"[a-z]*?1",
+            r"([a-z])*1",
+            r"[a-z]*(?:|one|two|three|four)1",
+            r"[a-z]*(?:x{0}|[0-9])",
+            r"[a-z]*.",
+        ] {
+            assert_eq!(scan_repeat_count(pattern), 0, "{pattern}");
+        }
+    }
+
+    #[test]
+    fn auto_possessive_repeats_match_recursive_engine() {
+        let patterns = [
+            r"([A-Z_a-z][$0-9A-Z_a-z]*)(?![$0-9A-Z_a-z])(\s*)",
+            r"(?:([a-z]+)(::))?([a-z]+)\b",
+            r"([a-z]*)(?=[0-9])",
+            r"[ \t]*(?:\b(in|out)\b[ \t]*)?([a-z]+)",
+            r"([a-z]*)(?:alpha|beta|gamma|delta|[0-9])",
+            r"([a-z]{2,4})K",
+            r"([a-z]*)(?i:K)",
+            r"[a-z]*(?!x)",
+            r"([0-9]*)(?=[a-z])[a-z]",
+            r"(x*)(?:(y)|z)",
+        ];
+        let lines = [
+            "",
+            "abc",
+            "foo::bar baz",
+            "abc123",
+            "  in abc",
+            "abcK",
+            "abcdK",
+            "abc\u{212a}",
+            "abx",
+            "12ab",
+            "xxxz xxy",
+            "foo_bar$1 x",
+            "é1 aé",
+        ];
+        for pattern in patterns {
+            let parsed = parse(pattern);
+            let live = (1..=parsed.capture_count).collect::<Vec<_>>();
+            for line in lines {
+                for start in line
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(line.len()))
+                {
+                    let recursive = recursive_position_span(&parsed, line, start, context());
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive,
+                        "pattern {pattern:?}, line {line:?}, start {start}"
+                    );
+                    assert_capture_replay(pattern, line, start, &live);
                 }
             }
         }
