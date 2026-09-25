@@ -103,36 +103,49 @@ struct ByteTable {
 impl ByteTable {
     /// Returns the table and whether any byte excludes at least one target.
     fn build(items: &[(u32, FirstBytes)]) -> (Self, bool) {
+        // Transpose the per-item byte sets into one item bitset per byte, so
+        // grouping bytes into classes compares a few words instead of
+        // rebuilding every byte's target list.
+        let words = items.len().div_ceil(64).max(1);
+        let mut members = vec![0u64; 256 * words];
+        for (index, (_, first)) in items.iter().enumerate() {
+            let bit = 1u64 << (index % 64);
+            let word = index / 64;
+            for (chunk, bits) in first.bytes.iter().enumerate() {
+                let mut bits = if first.nullable { u64::MAX } else { *bits };
+                while bits != 0 {
+                    let byte = chunk * 64 + bits.trailing_zeros() as usize;
+                    members[byte * words + word] |= bit;
+                    bits &= bits - 1;
+                }
+            }
+        }
         let mut byte_class = Box::new([0u8; 256]);
-        let mut classes: Vec<(u64, usize, usize)> = Vec::new();
+        // (first byte with this membership, target range)
+        let mut classes: Vec<(usize, usize, usize)> = Vec::new();
         let mut targets = Vec::new();
-        let mut list = Vec::with_capacity(items.len());
         let mut pruned = false;
-        for byte in 0u8..=u8::MAX {
-            list.clear();
-            list.extend(
-                items
-                    .iter()
-                    .filter(|(_, first)| first.nullable || first.contains(byte))
-                    .map(|(target, _)| *target),
-            );
-            pruned |= list.len() < items.len();
-            let hash = list.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, target| {
-                (hash ^ u64::from(*target)).wrapping_mul(0x0000_0100_0000_01b3)
-            });
+        for byte in 0..256 {
+            let row = &members[byte * words..(byte + 1) * words];
             let class = classes
                 .iter()
-                .position(|&(existing, start, end)| {
-                    existing == hash && targets[start..end] == list[..]
-                })
+                .position(|&(first, _, _)| members[first * words..(first + 1) * words] == *row)
                 .unwrap_or_else(|| {
                     let start = targets.len();
-                    targets.extend_from_slice(&list);
-                    classes.push((hash, start, targets.len()));
+                    targets.extend(
+                        items
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| row[index / 64] & (1u64 << (index % 64)) != 0)
+                            .map(|(_, (target, _))| *target),
+                    );
+                    classes.push((byte, start, targets.len()));
                     classes.len() - 1
                 });
+            let (_, start, end) = classes[class];
+            pruned |= end - start < items.len();
             // At most 256 distinct classes exist for 256 bytes.
-            byte_class[byte as usize] = class as u8;
+            byte_class[byte] = class as u8;
         }
         let end_start = targets.len();
         targets.extend(
