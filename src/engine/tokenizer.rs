@@ -2367,6 +2367,8 @@ pub struct TextMateTokenizer {
     prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
     prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
     dynamic_matcher_cache: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
+    /// Source-keyed view of `matcher_cache`; see `shared_static_matcher`.
+    static_matcher_sources: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
     scope_names: ScopeInterner,
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
@@ -2473,6 +2475,7 @@ impl TextMateTokenizer {
             prepared_pattern_cache,
             prepared_blueprint_cache,
             dynamic_matcher_cache: hashing::fast_map(),
+            static_matcher_sources: hashing::fast_map(),
             scope_names: ScopeInterner::default(),
             scope_templates: ScopeTemplateInterner::default(),
             scope_stacks: ScopeStackInterner::default(),
@@ -2522,6 +2525,7 @@ impl TextMateTokenizer {
             drop(candidates);
             self.clear_candidate_cache();
             self.matcher_cache.clear();
+            self.static_matcher_sources.clear();
             self.dynamic_matcher_cache.clear();
         }
     }
@@ -4254,11 +4258,8 @@ impl TextMateTokenizer {
         if let Some(matcher) = self.prepared_static_matcher(grammar_id, pattern_id, pattern, None) {
             return matcher;
         }
-        let matcher = Arc::new(CompiledPattern::new(pattern));
+        let matcher = self.shared_static_matcher(grammar_id, pattern_id, pattern, None);
         self.matcher_cache.insert(key, matcher.clone());
-        if let Some(counters) = self.counters_mut() {
-            counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
-        }
         matcher
     }
 
@@ -4287,11 +4288,39 @@ impl TextMateTokenizer {
         {
             return matcher;
         }
-        let matcher = Arc::new(CompiledPattern::new_with_live_captures(
-            pattern,
-            live_captures,
-        ));
+        let matcher =
+            self.shared_static_matcher(grammar_id, pattern_id, pattern, Some(live_captures));
         self.matcher_cache.insert(key, matcher.clone());
+        matcher
+    }
+
+    /// Embedded grammars frequently repeat byte-identical patterns (shared
+    /// HTML/CSS/JS rules pulled in through several hosts, or one repository
+    /// rule copied across grammars). A compiled pattern is a pure function of
+    /// its source and live capture layout, so identical keys share one
+    /// immutable matcher instead of re-parsing and re-compiling it for each
+    /// `(grammar, pattern)` slot. The map is owned by this tokenizer and is
+    /// bounded by the static pattern count of its grammar closure.
+    fn shared_static_matcher(
+        &mut self,
+        grammar_id: GrammarId,
+        pattern_id: PatternId,
+        pattern: &str,
+        live_captures: Option<Vec<u32>>,
+    ) -> Arc<CompiledPattern> {
+        let key = DynamicMatcherKey {
+            pattern: pattern.to_owned(),
+            live_captures: live_captures.clone().unwrap_or_else(|| vec![u32::MAX]),
+        };
+        if let Some(matcher) = self.static_matcher_sources.get(&key) {
+            return Arc::clone(matcher);
+        }
+        let matcher = Arc::new(match live_captures {
+            Some(live_captures) => CompiledPattern::new_with_live_captures(pattern, live_captures),
+            None => CompiledPattern::new(pattern),
+        });
+        self.static_matcher_sources
+            .insert(key, Arc::clone(&matcher));
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
         }
@@ -9575,13 +9604,19 @@ mod tests {
                 .contains(&"string.second.duplicate-pattern-id".to_owned())
         );
 
+        // Both rules keep their own static pattern slot, while byte-identical
+        // text with the same capture layout compiles once and is shared.
+        let mut keys = tokenizer.matcher_cache.keys().copied().collect::<Vec<_>>();
+        keys.sort_by_key(|(grammar_id, pattern_id)| (grammar_id.0, pattern_id.0));
+        assert_eq!(keys.len(), 2);
+        assert_ne!(keys[0], keys[1]);
+        assert!(Arc::ptr_eq(
+            &tokenizer.matcher_cache[&keys[0]],
+            &tokenizer.matcher_cache[&keys[1]]
+        ));
         let counters = tokenizer.counters();
-        assert_eq!(counters.regex_compile_count, 2, "{counters:#?}");
-        assert_eq!(counters.pattern_compile_counts.len(), 2, "{counters:#?}");
-        assert_ne!(
-            counters.pattern_compile_counts[0].pattern_id,
-            counters.pattern_compile_counts[1].pattern_id
-        );
+        assert_eq!(counters.regex_compile_count, 1, "{counters:#?}");
+        assert_eq!(counters.pattern_compile_counts.len(), 1, "{counters:#?}");
     }
 
     #[test]
@@ -9727,6 +9762,66 @@ mod tests {
         let distinct = tokenizer.cached_dynamic_matcher_with_live_captures("(x)", vec![]);
         assert!(Arc::ptr_eq(&first, &reused));
         assert!(!Arc::ptr_eq(&first, &distinct));
+    }
+
+    #[test]
+    fn identical_static_patterns_share_matchers_across_grammars() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{
+                    "scopeName": "source.shared-host",
+                    "patterns": [
+                        {"begin": "<<", "end": ">>", "name": "meta.embedded.shared-host",
+                         "patterns": [{"include": "source.shared-guest"}]},
+                        {"match": "(k)(w)", "captures": {"1": {"name": "keyword.host"}}},
+                        {"match": "(n)(w)", "captures": {"1": {"name": "keyword.host"}}}
+                    ]
+                }"#,
+            )
+            .unwrap();
+        grammars
+            .load_and_add(
+                r#"{
+                    "scopeName": "source.shared-guest",
+                    "patterns": [
+                        {"match": "(k)(w)", "captures": {"1": {"name": "keyword.guest"}}},
+                        {"match": "(n)(w)", "captures": {"2": {"name": "keyword.guest"}}}
+                    ]
+                }"#,
+            )
+            .unwrap();
+        let mut tokenizer = TextMateTokenizer::new(grammars, root);
+        let line = tokenizer.tokenize_line_scopes("kw nw << kw nw >>", TokenizerState::default());
+        let scopes_at = |start: usize| {
+            line.tokens
+                .iter()
+                .find(|token| token.range.start == start)
+                .map(|token| token.scopes.clone())
+                .unwrap()
+        };
+        assert!(scopes_at(0).iter().any(|scope| scope == "keyword.host"));
+        assert!(scopes_at(3).iter().any(|scope| scope == "keyword.host"));
+        assert!(scopes_at(9).iter().any(|scope| scope == "keyword.guest"));
+        assert!(scopes_at(13).iter().any(|scope| scope == "keyword.guest"));
+
+        let matchers = |source: &str| {
+            tokenizer
+                .matcher_cache
+                .values()
+                .filter(|matcher| matcher.source() == source)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // Same source and live capture layout: one compiled matcher.
+        let shared = matchers("(k)(w)");
+        assert_eq!(shared.len(), 2);
+        assert!(Arc::ptr_eq(&shared[0], &shared[1]));
+        // Same source, different live captures: distinct matchers.
+        let distinct = matchers("(n)(w)");
+        assert_eq!(distinct.len(), 2);
+        assert!(!Arc::ptr_eq(&distinct[0], &distinct[1]));
+        assert!(!distinct[0].has_same_live_captures(&distinct[1]));
     }
 
     #[test]
