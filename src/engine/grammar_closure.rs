@@ -6,8 +6,9 @@
 //! model because the builder includes it by path.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
-use super::grammar::{CompiledGrammar, RuleBody, RuleRef};
+use super::grammar::{CaptureSpec, CompiledGrammar, GrammarMetadata, RuleBody, RuleRef};
 use super::state::RuleId;
 
 /// Closure-member traits recorded by the bundle builder.
@@ -184,6 +185,80 @@ pub fn closure_member_traits(
             return traits;
         }
     }
+}
+
+/// The part of `grammar` the repository-context walk reads.
+///
+/// That walk follows rule, repository, capture, and external references and
+/// applies rule-local repositories; it never reads regexes, scope names, or
+/// metadata. The skeleton blanks those while keeping every ID valid (pattern
+/// and scope tables keep their lengths, and scopes named by external includes
+/// keep their text), so it encodes far smaller than the full grammar.
+pub fn repository_walk_skeleton(grammar: &CompiledGrammar) -> CompiledGrammar {
+    let mut external_scopes = BTreeSet::new();
+    for_each_rule_ref(grammar, |rule_ref| {
+        if let RuleRef::External { scope, .. } = rule_ref {
+            external_scopes.insert(scope.0 as usize);
+        }
+    });
+    let empty: Arc<str> = Arc::from("");
+    let captures = |captures: &Arc<CaptureSpec>| {
+        let mut captures = captures.as_ref().clone();
+        captures
+            .entries
+            .retain(|_, entry| !entry.patterns.is_empty());
+        for entry in captures.entries.values_mut() {
+            entry.name = None;
+        }
+        Arc::new(captures)
+    };
+    let mut skeleton = grammar.clone();
+    skeleton.metadata = GrammarMetadata::default();
+    skeleton.string_names.clear();
+    skeleton.patterns.iter_mut().for_each(String::clear);
+    for (index, scope) in skeleton.scope_names.iter_mut().enumerate() {
+        if !external_scopes.contains(&index) {
+            *scope = Arc::clone(&empty);
+        }
+    }
+    for rule in &mut skeleton.rules {
+        match &mut rule.body {
+            RuleBody::Match {
+                captures: match_captures,
+                name,
+                ..
+            } => {
+                *name = None;
+                *match_captures = captures(match_captures);
+            }
+            RuleBody::BeginEnd {
+                begin_captures,
+                end_captures,
+                name,
+                content_name,
+                ..
+            } => {
+                *name = None;
+                *content_name = None;
+                *begin_captures = captures(begin_captures);
+                *end_captures = captures(end_captures);
+            }
+            RuleBody::BeginWhile {
+                begin_captures,
+                while_captures,
+                name,
+                content_name,
+                ..
+            } => {
+                *name = None;
+                *content_name = None;
+                *begin_captures = captures(begin_captures);
+                *while_captures = captures(while_captures);
+            }
+            RuleBody::IncludeOnly { .. } => {}
+        }
+    }
+    skeleton
 }
 
 fn for_each_rule_ref(grammar: &CompiledGrammar, mut visit: impl FnMut(&RuleRef)) {

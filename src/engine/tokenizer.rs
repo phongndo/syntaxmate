@@ -26,6 +26,7 @@ use super::grammar::{
     InjectionPriority, RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
 };
 use super::grammar_closure::{AvailabilityStep, ClosureMemberTraits};
+use super::grammar_ir::decode_compiled_grammar;
 use super::hashing::{self, FastMap};
 use super::line::{LineChunks, next_char_boundary};
 use super::regex::captures::substitute_end_pattern;
@@ -1115,6 +1116,7 @@ pub(crate) struct LazyGrammar {
     pub(crate) blob: &'static GrammarBlob,
     pub(crate) traits: ClosureMemberTraits,
     pub(crate) top_level_availability: Option<&'static [AvailabilityStep]>,
+    pub(crate) repository_walk_skeleton: Option<&'static [u8]>,
 }
 
 #[derive(Debug, Clone)]
@@ -1122,6 +1124,8 @@ struct GrammarSlot {
     // `None` records a lazy member whose compiled IR failed to decode; the
     // tokenizer then treats it like any other unavailable include.
     grammar: OnceLock<Option<Arc<CompiledGrammar>>>,
+    /// Decoded repository-walk skeleton of a lazy member.
+    walk_skeleton: OnceLock<Option<Arc<CompiledGrammar>>>,
     lazy: Option<LazyGrammar>,
 }
 
@@ -1129,6 +1133,7 @@ impl GrammarSlot {
     fn loaded(grammar: Arc<CompiledGrammar>) -> Self {
         Self {
             grammar: OnceLock::from(Some(grammar)),
+            walk_skeleton: OnceLock::new(),
             lazy: None,
         }
     }
@@ -1176,6 +1181,7 @@ impl GrammarSet {
             id,
             GrammarSlot {
                 grammar: OnceLock::new(),
+                walk_skeleton: OnceLock::new(),
                 lazy: Some(lazy),
             },
         )
@@ -1209,6 +1215,26 @@ impl GrammarSet {
             .get(id.0 as usize)
             .and_then(|slot| slot.grammar(id))
             .map(Arc::as_ref)
+    }
+
+    /// Grammar structure for the unbounded repository-context walk.
+    ///
+    /// An undecoded member with a recorded skeleton is walked through it
+    /// instead of being decoded: the skeleton keeps every rule, reference,
+    /// rule-local repository, and external scope name the walk reads (see
+    /// `grammar_closure::repository_walk_skeleton`), and rule IDs are
+    /// unchanged, so the walk binds the same contexts.
+    fn repository_walk_grammar(&self, id: GrammarId) -> Option<&CompiledGrammar> {
+        let slot = self.grammars.get(id.0 as usize)?;
+        if slot.grammar.get().is_none()
+            && let Some(bytes) = slot.lazy.and_then(|lazy| lazy.repository_walk_skeleton)
+            && let Some(skeleton) = slot
+                .walk_skeleton
+                .get_or_init(|| decode_compiled_grammar(id, bytes).ok().map(Arc::new))
+        {
+            return Some(skeleton);
+        }
+        self.grammar(id)
     }
 
     /// Number of grammars, including lazy members not yet decoded.
@@ -6513,6 +6539,14 @@ fn compile_rule_repository_contexts<'a>(
         }
     }
 
+    // Bounded preparation keeps reading complete grammars.
+    let walk_grammar = |id| {
+        if bounded {
+            grammars.grammar(id)
+        } else {
+            grammars.repository_walk_grammar(id)
+        }
+    };
     let empty_context = Arc::clone(empty_repository_context());
     let mut budget = RepositoryContextBudget::new(bounded);
     if !budget.charge_context_table(grammars.len()) {
@@ -6554,7 +6588,7 @@ fn compile_rule_repository_contexts<'a>(
                 if !compiled_top_levels.insert(grammar_id) {
                     continue;
                 }
-                if let Some(grammar) = grammars.grammar(grammar_id) {
+                if let Some(grammar) = walk_grammar(grammar_id) {
                     push_refs(
                         &mut work,
                         grammar_id,
@@ -6586,7 +6620,7 @@ fn compile_rule_repository_contexts<'a>(
                         context: Arc::clone(&context),
                     });
                 }
-                let Some(grammar) = grammars.grammar(grammar_id) else {
+                let Some(grammar) = walk_grammar(grammar_id) else {
                     continue;
                 };
                 match rule_ref {
@@ -6714,7 +6748,7 @@ fn compile_rule_repository_contexts<'a>(
                         {
                             continue;
                         }
-                        let Some(external) = grammars.grammar(external_id) else {
+                        let Some(external) = walk_grammar(external_id) else {
                             continue;
                         };
                         if let Some(repository) = repository {
@@ -10163,6 +10197,7 @@ mod lazy_bundle_tests {
                 top_level_availability: bundle.grammar_graphs[blob]
                     .top_level_availability
                     .as_deref(),
+                repository_walk_skeleton: None,
             });
             (TextMateTokenizer::new(grammars, root), root, external)
         };

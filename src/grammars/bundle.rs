@@ -33,6 +33,7 @@ const CLOSURE_INJECTS: u32 = 1 << 29;
 const CLOSURE_BLOB_MASK: u32 = CLOSURE_INJECTS - 1;
 const NO_AVAILABILITY: u32 = u32::MAX;
 const AVAILABILITY_REPOSITORY: u32 = 1 << 31;
+const NO_SKELETON: u32 = u32::MAX;
 
 const HEADER_LEN: usize = 32;
 const SECTION_ENTRY_LEN: usize = 24;
@@ -72,6 +73,9 @@ pub struct Bundle {
 pub struct GrammarGraph {
     /// External-include closure when this grammar is the root.
     pub closure: Vec<ClosureMember>,
+    /// Compiled IR of `grammar_closure::repository_walk_skeleton`, present
+    /// when some closure's repository-context walk must visit this grammar.
+    pub repository_walk_skeleton: Option<Vec<u8>>,
     /// Proof that the grammar's top level has an available rule; see
     /// `grammar_closure::top_level_availability_chain`.
     pub top_level_availability: Option<Vec<AvailabilityStep>>,
@@ -762,6 +766,16 @@ fn encode_grammar_graphs(graphs: &[GrammarGraph]) -> Vec<u8> {
             }
             write_u32(&mut bytes, value);
         }
+        if let Some(skeleton) = &graph.repository_walk_skeleton {
+            assert!(
+                skeleton.len() < NO_SKELETON as usize,
+                "walk skeleton length fits"
+            );
+            write_u32(&mut bytes, skeleton.len() as u32);
+            bytes.extend_from_slice(skeleton);
+        } else {
+            write_u32(&mut bytes, NO_SKELETON);
+        }
         let Some(steps) = &graph.top_level_availability else {
             write_u32(&mut bytes, NO_AVAILABILITY);
             continue;
@@ -826,6 +840,10 @@ fn decode_grammar_graphs(
         if !closure.iter().any(|member| member.blob as usize == root) {
             return Err(bad());
         }
+        let skeleton_len = cursor.u32()?;
+        let repository_walk_skeleton = (skeleton_len != NO_SKELETON)
+            .then(|| cursor.bytes(skeleton_len as usize).map(<[u8]>::to_vec))
+            .transpose()?;
         let step_count = cursor.u32()?;
         let top_level_availability = if step_count == NO_AVAILABILITY {
             None
@@ -851,6 +869,7 @@ fn decode_grammar_graphs(
         };
         graphs.push(GrammarGraph {
             closure,
+            repository_walk_skeleton,
             top_level_availability,
         });
     }
@@ -1065,6 +1084,7 @@ mod tests {
                     blob: 0,
                     traits: ClosureMemberTraits::default(),
                 }],
+                repository_walk_skeleton: Some(grammar_ir("source.rust", "")),
                 top_level_availability: Some(vec![
                     AvailabilityStep::Repository("entry".to_owned()),
                     AvailabilityStep::Rule(RuleId(0)),

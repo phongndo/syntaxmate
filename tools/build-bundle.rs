@@ -35,6 +35,7 @@ const CLOSURE_BASE_REFERENCE: u32 = 1 << 30;
 const CLOSURE_INJECTS: u32 = 1 << 29;
 const NO_AVAILABILITY: u32 = u32::MAX;
 const AVAILABILITY_REPOSITORY: u32 = 1 << 31;
+const NO_SKELETON: u32 = u32::MAX;
 const HEADER_LEN: usize = 32;
 const SECTION_ENTRY_LEN: usize = 24;
 const NO_STRING: u32 = u32::MAX;
@@ -406,9 +407,10 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
 }
 
 /// Encode each grammar's external-include closure (ascending blob indexes
-/// tagged with member traits) and its top-level availability proof: the facts
-/// the runtime needs before decoding a grammar. `src/grammars/bundle.rs` owns
-/// the reader.
+/// tagged with member traits), its top-level availability proof, and, when
+/// some closure's repository-context walk must visit it, its walk skeleton:
+/// the facts the runtime needs before decoding a grammar.
+/// `src/grammars/bundle.rs` owns the reader.
 fn grammar_graphs(grammars: &[GrammarAsset]) -> Result<Vec<u8>, String> {
     let compiled = grammars
         .iter()
@@ -417,13 +419,22 @@ fn grammar_graphs(grammars: &[GrammarAsset]) -> Result<Vec<u8>, String> {
                 .map_err(|error| format!("{}: {error}", grammar.path))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let closures = (0..compiled.len())
+        .map(|root| {
+            let members = grammar_closure::dependency_closure(&compiled, root);
+            let traits = grammar_closure::closure_member_traits(&compiled, &members);
+            members.into_iter().zip(traits).collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut walked = vec![false; compiled.len()];
+    for (index, traits) in closures.iter().flatten() {
+        walked[*index] |= traits.repository_contexts;
+    }
     let mut bytes = Vec::new();
     write_u32(&mut bytes, compiled.len() as u32);
-    for root in 0..compiled.len() {
-        let members = grammar_closure::dependency_closure(&compiled, root);
-        let traits = grammar_closure::closure_member_traits(&compiled, &members);
+    for (root, members) in closures.into_iter().enumerate() {
         write_u32(&mut bytes, members.len() as u32);
-        for (index, traits) in members.into_iter().zip(traits) {
+        for (index, traits) in members {
             let mut value = u32::try_from(index)
                 .ok()
                 .filter(|index| *index < CLOSURE_INJECTS)
@@ -438,6 +449,19 @@ fn grammar_graphs(grammars: &[GrammarAsset]) -> Result<Vec<u8>, String> {
                 value |= CLOSURE_INJECTS;
             }
             write_u32(&mut bytes, value);
+        }
+        if walked[root] {
+            let skeleton = grammar_closure::repository_walk_skeleton(&compiled[root]);
+            let skeleton = grammar_ir::encode_compiled_grammar(&skeleton)
+                .map_err(|error| format!("{}: {error}", grammars[root].path))?;
+            let len = u32::try_from(skeleton.len())
+                .ok()
+                .filter(|len| *len != NO_SKELETON)
+                .ok_or("walk skeleton is too large")?;
+            write_u32(&mut bytes, len);
+            bytes.extend_from_slice(&skeleton);
+        } else {
+            write_u32(&mut bytes, NO_SKELETON);
         }
         let Some(steps) = grammar_closure::top_level_availability_chain(&compiled[root]) else {
             write_u32(&mut bytes, NO_AVAILABILITY);

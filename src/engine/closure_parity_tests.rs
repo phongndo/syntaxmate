@@ -6,7 +6,10 @@ use std::{
 
 use serde_json::Value;
 
-use super::{compiled_grammar_closure, decode_bundle_grammars, grammar_closure};
+use super::{
+    compiled_grammar_closure, decode_bundle_grammars, grammar_closure,
+    grammar_ir::encode_compiled_grammar,
+};
 use crate::grammars;
 
 #[test]
@@ -37,6 +40,13 @@ fn recorded_bundle_closures_match_the_dependency_walk() {
     let bundle = grammars::embedded_bundle();
     let compiled = decode_bundle_grammars(bundle);
     assert_eq!(bundle.grammar_graphs.len(), compiled.len());
+    let walked = bundle
+        .grammar_graphs
+        .iter()
+        .flat_map(|graph| &graph.closure)
+        .filter(|member| member.traits.repository_contexts)
+        .map(|member| member.blob as usize)
+        .collect::<BTreeSet<_>>();
     for (root, recorded) in bundle.grammar_graphs.iter().enumerate() {
         let members = grammar_closure::dependency_closure(&compiled, root);
         let traits = grammar_closure::closure_member_traits(&compiled, &members);
@@ -49,6 +59,10 @@ fn recorded_bundle_closures_match_the_dependency_walk() {
                     traits,
                 })
                 .collect(),
+            repository_walk_skeleton: walked.contains(&root).then(|| {
+                encode_compiled_grammar(&grammar_closure::repository_walk_skeleton(&compiled[root]))
+                    .unwrap()
+            }),
             top_level_availability: grammar_closure::top_level_availability_chain(&compiled[root]),
         };
         assert_eq!(

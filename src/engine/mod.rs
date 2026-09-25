@@ -43,6 +43,9 @@ pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::Gra
             top_level_availability: bundle.grammar_graphs[member.blob as usize]
                 .top_level_availability
                 .as_deref(),
+            repository_walk_skeleton: bundle.grammar_graphs[member.blob as usize]
+                .repository_walk_skeleton
+                .as_deref(),
         });
         if blob.scope_name == root_blob.scope_name {
             root = Some(grammar_id);
