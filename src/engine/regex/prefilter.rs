@@ -203,11 +203,10 @@ impl Prefilter {
 /// search; the trie is reserved for cases where rebuilding and running one
 /// searcher per alternative dominates (notably C/C++ keyword inventories).
 ///
-/// Nodes are numbered in breadth-first order and each node's outgoing edges
-/// occupy one contiguous, byte-sorted run of the shared edge arrays. Large
-/// keyword inventories produce tens of thousands of trie states; flat storage
-/// keeps construction and teardown to a handful of allocations instead of one
-/// or more per state.
+/// Each node's outgoing edges occupy one contiguous, byte-sorted run of the
+/// shared edge arrays. Large keyword inventories produce tens of thousands of
+/// trie states; flat storage keeps construction and teardown to a handful of
+/// allocations instead of one or more per state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct MultiLiteralFinder {
@@ -231,18 +230,6 @@ struct FinderNode {
     output_len: u32,
 }
 
-/// Construction-time trie state linked through first-child/next-sibling
-/// indices so insertion never allocates per node.
-#[derive(Clone, Copy)]
-struct BuildNode {
-    first_child: u32,
-    next_sibling: u32,
-    byte: u8,
-    output_len: u32,
-}
-
-const NO_NODE: u32 = u32::MAX;
-
 impl MultiLiteralFinder {
     fn for_literals(literals: &[String]) -> Option<Self> {
         let total_bytes = literals.iter().map(String::len).sum::<usize>();
@@ -252,92 +239,74 @@ impl MultiLiteralFinder {
     }
 
     fn new(literals: &[String]) -> Self {
-        let total_bytes = literals.iter().map(String::len).sum::<usize>();
-        let mut build = Vec::with_capacity(total_bytes.saturating_add(1));
-        build.push(BuildNode {
-            first_child: NO_NODE,
-            next_sibling: NO_NODE,
-            byte: 0,
-            output_len: 0,
-        });
-        // Dense root fanout keeps insertion linear in the literal bytes even
-        // when every first byte occurs.
-        let mut build_root = [NO_NODE; 256];
+        // Required-literal sets arrive sorted; sort a borrowed view otherwise.
+        let mut sorted = literals.iter().map(String::as_bytes).collect::<Vec<_>>();
+        if !sorted.is_sorted() {
+            sorted.sort_unstable();
+        }
+        let total_bytes = sorted.iter().map(|literal| literal.len()).sum::<usize>();
+        let capacity = total_bytes.saturating_add(1);
+        let mut nodes = Vec::with_capacity(capacity);
+        let mut parents = Vec::with_capacity(capacity);
+        let mut node_bytes = Vec::with_capacity(capacity);
+        nodes.push(FinderNode::default());
+        parents.push(0u32);
+        node_bytes.push(0u8);
+
+        // In sorted order, a literal shares exactly its longest common prefix
+        // with the previous literal's trie path and every later byte needs a
+        // new state. Insertion is therefore one pass without edge searches,
+        // and each state's children are created in ascending byte order.
+        let mut path = vec![0u32];
+        let mut previous: &[u8] = &[];
         let mut max_literal_len = 0usize;
-        for literal in literals {
+        for literal in sorted {
             debug_assert!(!literal.is_empty());
             max_literal_len = max_literal_len.max(literal.len());
-            let mut state = 0u32;
-            for byte in literal.bytes() {
-                let existing = if state == 0 {
-                    build_root[byte as usize]
-                } else {
-                    let mut child = build[state as usize].first_child;
-                    while child != NO_NODE && build[child as usize].byte != byte {
-                        child = build[child as usize].next_sibling;
-                    }
-                    child
-                };
-                state = if existing != NO_NODE {
-                    existing
-                } else {
-                    let next = u32::try_from(build.len()).expect("prefilter trie exceeds u32");
-                    let parent = &mut build[state as usize];
-                    let next_sibling = parent.first_child;
-                    parent.first_child = next;
-                    build.push(BuildNode {
-                        first_child: NO_NODE,
-                        next_sibling,
-                        byte,
-                        output_len: 0,
-                    });
-                    if state == 0 {
-                        build_root[byte as usize] = next;
-                    }
-                    next
-                };
+            let common = previous
+                .iter()
+                .zip(literal)
+                .take_while(|(left, right)| left == right)
+                .count();
+            path.truncate(common + 1);
+            for &byte in &literal[common..] {
+                let parent = *path.last().expect("trie path keeps the root");
+                let node = u32::try_from(nodes.len()).expect("prefilter trie exceeds u32");
+                nodes[parent as usize].edge_len += 1;
+                nodes.push(FinderNode::default());
+                parents.push(parent);
+                node_bytes.push(byte);
+                path.push(node);
             }
+            let state = *path.last().expect("trie path keeps the root") as usize;
             let output_len = u32::try_from(literal.len()).expect("prefilter literal exceeds u32");
-            let node = &mut build[state as usize];
-            node.output_len = node.output_len.max(output_len);
+            nodes[state].output_len = nodes[state].output_len.max(output_len);
+            previous = literal;
         }
 
-        // Renumber breadth-first so every node's edges are contiguous and a
-        // node's failure target (always shallower) is finalized before it.
-        let node_count = build.len();
-        let mut order = Vec::with_capacity(node_count);
-        let mut nodes = vec![FinderNode::default(); node_count];
-        let mut edge_bytes = Vec::with_capacity(node_count.saturating_sub(1));
-        let mut edge_targets = Vec::with_capacity(node_count.saturating_sub(1));
-        let mut children = Vec::new();
-        order.push(0u32);
-        let mut cursor = 0usize;
-        while cursor < order.len() {
-            let old = order[cursor];
-            let new = cursor;
-            cursor += 1;
-            children.clear();
-            let mut child = build[old as usize].first_child;
-            while child != NO_NODE {
-                children.push((build[child as usize].byte, child));
-                child = build[child as usize].next_sibling;
-            }
-            children.sort_unstable_by_key(|(byte, _)| *byte);
-            let edge_start = u32::try_from(edge_bytes.len()).expect("prefilter trie exceeds u32");
-            for &(byte, child) in &children {
-                let child_new = u32::try_from(order.len()).expect("prefilter trie exceeds u32");
-                order.push(child);
-                edge_bytes.push(byte);
-                edge_targets.push(child_new);
-            }
-            nodes[new] = FinderNode {
-                edge_start,
-                edge_len: u32::try_from(children.len()).expect("prefilter trie exceeds u32"),
-                failure: 0,
-                output_len: build[old as usize].output_len,
-            };
+        // Lay out each state's edges contiguously. Creation order keeps every
+        // run sorted by byte. `failure` is a temporary fill cursor here.
+        let mut edge_start = 0u32;
+        for node in &mut nodes {
+            node.edge_start = edge_start;
+            node.failure = edge_start;
+            edge_start += node.edge_len;
         }
-        drop(build);
+        let edge_count = edge_start as usize;
+        let mut edge_bytes = vec![0u8; edge_count];
+        let mut edge_targets = vec![0u32; edge_count];
+        for child in 1..nodes.len() {
+            let parent = parents[child] as usize;
+            let slot = nodes[parent].failure as usize;
+            nodes[parent].failure += 1;
+            edge_bytes[slot] = node_bytes[child];
+            edge_targets[slot] = child as u32;
+        }
+        drop(parents);
+        drop(node_bytes);
+        for node in &mut nodes {
+            node.failure = 0;
+        }
 
         let mut finder = Self {
             nodes,
@@ -350,24 +319,34 @@ impl MultiLiteralFinder {
         for index in root.edge_start as usize..(root.edge_start + root.edge_len) as usize {
             finder.root_edges[finder.edge_bytes[index] as usize] = finder.edge_targets[index];
         }
-        // Breadth-first order is the node numbering itself.
-        for state in 0..node_count {
-            let node = finder.nodes[state];
+        // Failure targets are strictly shallower, so a breadth-first sweep
+        // finalizes each one before any state that depends on it.
+        let mut queue = Vec::with_capacity(finder.nodes.len());
+        queue.push(0u32);
+        let mut cursor = 0usize;
+        while let Some(&state) = queue.get(cursor) {
+            cursor += 1;
+            let node = finder.nodes[state as usize];
             for index in node.edge_start as usize..(node.edge_start + node.edge_len) as usize {
                 let byte = finder.edge_bytes[index];
                 let child = finder.edge_targets[index];
+                queue.push(child);
+                if state == 0 {
+                    continue;
+                }
                 let mut failure = node.failure;
-                while failure != 0 && finder.edge(failure, byte).is_none() {
+                let target = loop {
+                    if let Some(next) = finder.goto(failure, byte) {
+                        break next;
+                    }
+                    if failure == 0 {
+                        break 0;
+                    }
                     failure = finder.nodes[failure as usize].failure;
-                }
-                if let Some(next) = finder.edge(failure, byte)
-                    && next != child
-                {
-                    failure = next;
-                }
-                let failure_output = finder.nodes[failure as usize].output_len;
+                };
+                let failure_output = finder.nodes[target as usize].output_len;
                 let child = &mut finder.nodes[child as usize];
-                child.failure = failure;
+                child.failure = target;
                 child.output_len = child.output_len.max(failure_output);
             }
         }
@@ -397,19 +376,22 @@ impl MultiLiteralFinder {
 
     fn step(&self, mut state: u32, byte: u8) -> u32 {
         loop {
-            if state == 0 {
-                let next = self.root_edges[byte as usize];
-                return if next == u32::MAX { 0 } else { next };
-            }
-            if let Some(next) = self.edge(state, byte) {
+            if let Some(next) = self.goto(state, byte) {
                 return next;
+            }
+            if state == 0 {
+                return 0;
             }
             state = self.nodes[state as usize].failure;
         }
     }
 
     #[inline]
-    fn edge(&self, state: u32, byte: u8) -> Option<u32> {
+    fn goto(&self, state: u32, byte: u8) -> Option<u32> {
+        if state == 0 {
+            let next = self.root_edges[byte as usize];
+            return (next != u32::MAX).then_some(next);
+        }
         let node = &self.nodes[state as usize];
         let start = node.edge_start as usize;
         let end = start + node.edge_len as usize;
