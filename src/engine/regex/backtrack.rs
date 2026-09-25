@@ -954,11 +954,16 @@ impl StartByteSet {
     }
 
     fn extend(&mut self, other: &Self) {
-        for byte in 0..=u8::MAX {
-            if other.contains(byte) {
-                self.insert(byte);
-            }
+        // Word-wise union: large literal alternations merge one set per
+        // branch, so a per-byte loop dominated start-byte analysis.
+        for (word, other) in self.bits.iter_mut().zip(other.bits) {
+            *word |= other;
         }
+        self.len = self
+            .bits
+            .iter()
+            .map(|word| word.count_ones() as usize)
+            .sum();
     }
 
     pub(crate) fn contains(&self, byte: u8) -> bool {
