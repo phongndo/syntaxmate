@@ -2388,6 +2388,7 @@ pub struct TextMateTokenizer {
     include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
     include_repository_names: RefCell<RepositoryNameInterner>,
     rule_repository_contexts: Arc<DeferredRuleRepositoryContexts>,
+    rule_candidate_templates: RefCell<FastMap<(GrammarId, RuleId), Option<RuleCandidateTemplate>>>,
     /// Owns exact frame identities and stack edges for this tokenizer.
     frame_stack_interner: FrameStackInternTable,
     /// Repeat pushes of a known (parent stack, frame) transition skip interner lookup.
@@ -2495,6 +2496,7 @@ impl TextMateTokenizer {
             include_availability_cache: RefCell::new(HashMap::new()),
             include_repository_names: RefCell::new(RepositoryNameInterner::default()),
             rule_repository_contexts,
+            rule_candidate_templates: RefCell::new(hashing::fast_map()),
             frame_stack_interner: FrameStackInternTable::new(),
             frame_edge_cache: hashing::fast_map(),
             static_frame_identities: hashing::fast_map(),
@@ -3048,6 +3050,7 @@ impl TextMateTokenizer {
         self.include_availability_cache.borrow_mut().clear();
         self.include_repository_names.borrow_mut().clear();
         self.rule_repository_contexts = rule_repository_contexts;
+        self.rule_candidate_templates.borrow_mut().clear();
         self.current_scope_stack_cache.clear();
         self.clear_line_cache();
         self.clear_candidate_cache();
@@ -3457,7 +3460,7 @@ impl TextMateTokenizer {
                 let end = frame.end_pattern.as_ref().map(|pattern| Candidate {
                     order: 0,
                     base_grammar_id: frame.base_grammar_id,
-                    pattern: pattern.to_string(),
+                    pattern: Arc::clone(pattern),
                     pattern_id: frame
                         .end_pattern_id
                         .map(|pattern_id| (frame.grammar_id, pattern_id)),
@@ -3528,6 +3531,146 @@ impl TextMateTokenizer {
         candidates
     }
 
+    /// Candidate data for one static rule depends only on the rule and the
+    /// repository context of its first compilation path, never on the state
+    /// that reaches it. Build it once per tokenizer so flattening a large
+    /// embedded closure clones shared handles instead of re-allocating
+    /// pattern text, scope names, and contextualized child lists for every
+    /// candidate set. Order, base grammar, and scope prefix are per use.
+    fn rule_candidate_template(
+        &self,
+        grammar: &CompiledGrammar,
+        grammar_id: GrammarId,
+        rule_id: RuleId,
+    ) -> Option<RuleCandidateTemplate> {
+        if let Some(template) = self
+            .rule_candidate_templates
+            .borrow()
+            .get(&(grammar_id, rule_id))
+        {
+            return template.clone();
+        }
+        let template = self.build_rule_candidate_template(grammar, grammar_id, rule_id);
+        self.rule_candidate_templates
+            .borrow_mut()
+            .insert((grammar_id, rule_id), template.clone());
+        template
+    }
+
+    fn build_rule_candidate_template(
+        &self,
+        grammar: &CompiledGrammar,
+        grammar_id: GrammarId,
+        rule_id: RuleId,
+    ) -> Option<RuleCandidateTemplate> {
+        let rule = grammar.rule(rule_id)?;
+        let repository_context = self
+            .rule_repository_contexts
+            .get(grammar_id, rule_id)
+            .map(Arc::as_ref);
+        let candidate = |pattern: &str, pattern_id: PatternId, kind: CandidateKind| Candidate {
+            order: 0,
+            base_grammar_id: grammar_id,
+            pattern: Arc::from(pattern),
+            pattern_id: Some((grammar_id, pattern_id)),
+            scope_prefix: None,
+            kind,
+        };
+        match &rule.body {
+            RuleBody::Match {
+                pattern,
+                captures,
+                name,
+            } => {
+                let text = grammar.pattern(*pattern)?;
+                Some(RuleCandidateTemplate::Candidate(candidate(
+                    text,
+                    *pattern,
+                    CandidateKind::Match {
+                        grammar_id,
+                        name: scope_name(grammar, *name).map(Arc::from),
+                        name_template: None,
+                        captures: contextualize_capture_spec(captures, repository_context),
+                    },
+                )))
+            }
+            RuleBody::BeginEnd {
+                begin,
+                end,
+                begin_captures,
+                end_captures,
+                name,
+                content_name,
+                apply_end_pattern_last,
+                patterns,
+            } => {
+                let text = grammar.pattern(*begin)?;
+                let end_static = grammar
+                    .pattern(*end)
+                    .filter(|pattern| !pattern_has_backreference(pattern))
+                    .map(Arc::from);
+                Some(RuleCandidateTemplate::Candidate(candidate(
+                    text,
+                    *begin,
+                    CandidateKind::BeginEnd {
+                        grammar_id,
+                        rule_id: rule.id,
+                        end: *end,
+                        begin_captures: contextualize_capture_spec(
+                            begin_captures,
+                            repository_context,
+                        ),
+                        end_captures: contextualize_capture_spec(end_captures, repository_context),
+                        name: scope_name(grammar, *name).map(Arc::from),
+                        content_name: scope_name(grammar, *content_name).map(Arc::from),
+                        patterns: contextualize_refs(patterns, repository_context).into(),
+                        apply_end_pattern_last: *apply_end_pattern_last,
+                        end_static,
+                    },
+                )))
+            }
+            RuleBody::BeginWhile {
+                begin,
+                while_pattern,
+                begin_captures,
+                while_captures,
+                name,
+                content_name,
+                patterns,
+            } => {
+                let text = grammar.pattern(*begin)?;
+                let while_static = grammar
+                    .pattern(*while_pattern)
+                    .filter(|pattern| !pattern_has_backreference(pattern))
+                    .map(Arc::from);
+                Some(RuleCandidateTemplate::Candidate(candidate(
+                    text,
+                    *begin,
+                    CandidateKind::BeginWhile {
+                        grammar_id,
+                        rule_id: rule.id,
+                        while_pattern: *while_pattern,
+                        begin_captures: contextualize_capture_spec(
+                            begin_captures,
+                            repository_context,
+                        ),
+                        while_captures: contextualize_capture_spec(
+                            while_captures,
+                            repository_context,
+                        ),
+                        name: scope_name(grammar, *name).map(Arc::from),
+                        content_name: scope_name(grammar, *content_name).map(Arc::from),
+                        patterns: contextualize_refs(patterns, repository_context).into(),
+                        while_static,
+                    },
+                )))
+            }
+            RuleBody::IncludeOnly { patterns } => Some(RuleCandidateTemplate::IncludeOnly(
+                contextualize_refs(patterns, repository_context).into(),
+            )),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn flatten_refs(
         &self,
@@ -3548,155 +3691,33 @@ impl TextMateTokenizer {
         for rule_ref in refs {
             match rule_ref {
                 RuleRef::Rule(rule_id) => {
-                    let Some(rule) = grammar.rule(*rule_id) else {
-                        continue;
-                    };
-                    let repository_context = self
-                        .rule_repository_contexts
-                        .get(grammar_id, *rule_id)
-                        .map(Arc::as_ref);
-                    match &rule.body {
-                        RuleBody::Match {
-                            pattern,
-                            captures,
-                            name,
-                        } => {
-                            let pattern_id = *pattern;
-                            if let Some(pattern) = grammar.pattern(*pattern) {
-                                out.push(Candidate {
-                                    order: *order,
+                    match self.rule_candidate_template(grammar, grammar_id, *rule_id) {
+                        None => {}
+                        Some(RuleCandidateTemplate::IncludeOnly(patterns)) => self.flatten_refs(
+                            grammar_id,
+                            base_grammar_id,
+                            &patterns,
+                            scope_prefix.clone(),
+                            out,
+                            order,
+                            depth + 1,
+                        ),
+                        Some(RuleCandidateTemplate::Candidate(mut candidate)) => {
+                            if let CandidateKind::BeginEnd { patterns, .. }
+                            | CandidateKind::BeginWhile { patterns, .. } = &candidate.kind
+                                && self.only_unavailable_includes(
+                                    grammar_id,
                                     base_grammar_id,
-                                    pattern: pattern.to_owned(),
-                                    pattern_id: Some((grammar_id, pattern_id)),
-                                    scope_prefix: scope_prefix.clone(),
-                                    kind: CandidateKind::Match {
-                                        grammar_id,
-                                        name: scope_name(grammar, *name),
-                                        name_template: None,
-                                        captures: contextualize_capture_spec(
-                                            captures,
-                                            repository_context,
-                                        ),
-                                    },
-                                });
-                                *order += 1;
-                            }
-                        }
-                        RuleBody::BeginEnd {
-                            begin,
-                            end,
-                            begin_captures,
-                            end_captures,
-                            name,
-                            content_name,
-                            apply_end_pattern_last,
-                            patterns,
-                        } => {
-                            let patterns = contextualize_refs(patterns, repository_context);
-                            if self.only_unavailable_includes(
-                                grammar_id,
-                                base_grammar_id,
-                                &patterns,
-                            ) {
+                                    patterns,
+                                )
+                            {
                                 continue;
                             }
-                            let begin_pattern_id = *begin;
-                            if let Some(begin) = grammar.pattern(*begin) {
-                                let end_static = grammar
-                                    .pattern(*end)
-                                    .filter(|pattern| !pattern_has_backreference(pattern))
-                                    .map(Arc::from);
-                                out.push(Candidate {
-                                    order: *order,
-                                    base_grammar_id,
-                                    pattern: begin.to_owned(),
-                                    pattern_id: Some((grammar_id, begin_pattern_id)),
-                                    scope_prefix: scope_prefix.clone(),
-                                    kind: CandidateKind::BeginEnd {
-                                        grammar_id,
-                                        rule_id: rule.id,
-                                        end: *end,
-                                        begin_captures: contextualize_capture_spec(
-                                            begin_captures,
-                                            repository_context,
-                                        ),
-                                        end_captures: contextualize_capture_spec(
-                                            end_captures,
-                                            repository_context,
-                                        ),
-                                        name: scope_name(grammar, *name).map(Arc::from),
-                                        content_name: scope_name(grammar, *content_name)
-                                            .map(Arc::from),
-                                        patterns: patterns.into(),
-                                        apply_end_pattern_last: *apply_end_pattern_last,
-                                        end_static,
-                                    },
-                                });
-                                *order += 1;
-                            }
-                        }
-                        RuleBody::BeginWhile {
-                            begin,
-                            while_pattern,
-                            begin_captures,
-                            while_captures,
-                            name,
-                            content_name,
-                            patterns,
-                        } => {
-                            let patterns = contextualize_refs(patterns, repository_context);
-                            if self.only_unavailable_includes(
-                                grammar_id,
-                                base_grammar_id,
-                                &patterns,
-                            ) {
-                                continue;
-                            }
-                            let begin_pattern_id = *begin;
-                            if let Some(begin) = grammar.pattern(*begin) {
-                                let while_static = grammar
-                                    .pattern(*while_pattern)
-                                    .filter(|pattern| !pattern_has_backreference(pattern))
-                                    .map(Arc::from);
-                                out.push(Candidate {
-                                    order: *order,
-                                    base_grammar_id,
-                                    pattern: begin.to_owned(),
-                                    pattern_id: Some((grammar_id, begin_pattern_id)),
-                                    scope_prefix: scope_prefix.clone(),
-                                    kind: CandidateKind::BeginWhile {
-                                        grammar_id,
-                                        rule_id: rule.id,
-                                        while_pattern: *while_pattern,
-                                        begin_captures: contextualize_capture_spec(
-                                            begin_captures,
-                                            repository_context,
-                                        ),
-                                        while_captures: contextualize_capture_spec(
-                                            while_captures,
-                                            repository_context,
-                                        ),
-                                        name: scope_name(grammar, *name).map(Arc::from),
-                                        content_name: scope_name(grammar, *content_name)
-                                            .map(Arc::from),
-                                        patterns: patterns.into(),
-                                        while_static,
-                                    },
-                                });
-                                *order += 1;
-                            }
-                        }
-                        RuleBody::IncludeOnly { patterns } => {
-                            let patterns = contextualize_refs(patterns, repository_context);
-                            self.flatten_refs(
-                                grammar_id,
-                                base_grammar_id,
-                                &patterns,
-                                scope_prefix.clone(),
-                                out,
-                                order,
-                                depth + 1,
-                            )
+                            candidate.order = *order;
+                            candidate.base_grammar_id = base_grammar_id;
+                            candidate.scope_prefix = scope_prefix.clone();
+                            out.push(candidate);
+                            *order += 1;
                         }
                     }
                 }
@@ -6089,17 +6110,25 @@ struct PatternHotspotKey {
 struct Candidate {
     order: usize,
     base_grammar_id: GrammarId,
-    pattern: String,
+    pattern: Arc<str>,
     pattern_id: Option<(GrammarId, PatternId)>,
     scope_prefix: Option<Arc<str>>,
     kind: CandidateKind,
+}
+
+/// Per-tokenizer flattened form of one static rule; see
+/// `TextMateTokenizer::rule_candidate_template`.
+#[derive(Debug, Clone)]
+enum RuleCandidateTemplate {
+    Candidate(Candidate),
+    IncludeOnly(Arc<[RuleRef]>),
 }
 
 #[derive(Debug, Clone)]
 enum CandidateKind {
     Match {
         grammar_id: GrammarId,
-        name: Option<String>,
+        name: Option<Arc<str>>,
         name_template: Option<ScopeTemplateId>,
         captures: Arc<CaptureSpec>,
     },
@@ -8021,7 +8050,7 @@ mod tests {
             candidates: vec![Candidate {
                 order: 0,
                 base_grammar_id: GrammarId(0),
-                pattern: "x".repeat(MAX_PREPARED_BLUEPRINT_BYTES),
+                pattern: "x".repeat(MAX_PREPARED_BLUEPRINT_BYTES).into(),
                 pattern_id: None,
                 scope_prefix: None,
                 kind: CandidateKind::Match {
@@ -8706,8 +8735,8 @@ mod tests {
             foo_set.blueprint.blueprint_arc(),
             bar_set.blueprint.blueprint_arc()
         ));
-        assert_eq!(foo_set.candidates[0].pattern, "^FOO$");
-        assert_eq!(bar_set.candidates[0].pattern, "^BAR$");
+        assert_eq!(&*foo_set.candidates[0].pattern, "^FOO$");
+        assert_eq!(&*bar_set.candidates[0].pattern, "^BAR$");
     }
 
     #[test]
@@ -9682,12 +9711,12 @@ mod tests {
         let candidate = |name: &str| Candidate {
             order: 0,
             base_grammar_id: GrammarId(0),
-            pattern: "pattern".to_owned(),
+            pattern: Arc::from("pattern"),
             pattern_id: None,
             scope_prefix: None,
             kind: CandidateKind::Match {
                 grammar_id: GrammarId(0),
-                name: Some(name.to_owned()),
+                name: Some(Arc::from(name)),
                 name_template: None,
                 captures: Arc::new(CaptureSpec::default()),
             },
