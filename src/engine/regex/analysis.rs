@@ -9,7 +9,7 @@
 
 use super::ast::{Ast, Backref, ParsedRegex, RegexFlags};
 use super::backtrack::{StartByteSet, expand_case_insensitive_start_bytes, first_start_bytes};
-use super::prefilter::{Prefilter, required_literals};
+use super::prefilter::{Prefilter, required_factor, required_literals};
 use super::skip_prefix::SkipGate;
 use std::sync::OnceLock;
 
@@ -121,7 +121,20 @@ impl RegexAnalysis {
             let Some(case_fold) = self.prefilter_case_insensitive else {
                 return Prefilter::None;
             };
-            Prefilter::from_required(required_literals(&parsed.ast), case_fold)
+            let literals = required_literals(&parsed.ast);
+            // Byte-class runs are only derived for wholly case-sensitive
+            // patterns; case folding can map ASCII to non-ASCII characters.
+            if !case_fold
+                && !self.has_case_insensitive_scope
+                && !parsed.flags.case_insensitive
+                && let Some(factor) = required_factor(&parsed.ast)
+            {
+                return Prefilter::Factor {
+                    factor,
+                    literals: Box::new(Prefilter::from_required(literals, false)),
+                };
+            }
+            Prefilter::from_required(literals, case_fold)
         })
     }
 
