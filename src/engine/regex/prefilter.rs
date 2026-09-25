@@ -1,13 +1,17 @@
+use std::borrow::Cow;
+
 use super::ast::{Ast, CharClass, ClassAtom, LookKind, ParsedRegex};
 
+/// Literals one of which every match must contain. Literals borrow from the
+/// AST where possible; only the ones a prefilter retains are copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequiredLiterals {
+pub enum RequiredLiterals<'a> {
     None,
-    One(String),
-    Any(Vec<String>),
+    One(Cow<'a, str>),
+    Any(Vec<Cow<'a, str>>),
 }
 
-impl RequiredLiterals {
+impl RequiredLiterals<'_> {
     fn is_empty(&self) -> bool {
         matches!(self, Self::None)
     }
@@ -24,6 +28,8 @@ pub enum Prefilter {
     },
     Literal(String),
     Any {
+        /// Retained for searches without a compiled `finder`; a finder
+        /// answers every query itself, so its literals are not kept.
         literals: Vec<String>,
         ascii_case_insensitive: bool,
         mixed_width_fold_mask: u8,
@@ -40,12 +46,17 @@ impl Prefilter {
         Self::from_required(required_literals(ast), false)
     }
 
-    pub(crate) fn from_required(required: RequiredLiterals, ascii_case_insensitive: bool) -> Self {
+    pub(crate) fn from_required(
+        required: RequiredLiterals<'_>,
+        ascii_case_insensitive: bool,
+    ) -> Self {
         if ascii_case_insensitive {
             let literals = match required {
                 RequiredLiterals::None => return Self::None,
-                RequiredLiterals::One(literal) => vec![literal],
-                RequiredLiterals::Any(literals) => literals,
+                RequiredLiterals::One(literal) => vec![literal.into_owned()],
+                RequiredLiterals::Any(literals) => {
+                    literals.into_iter().map(Cow::into_owned).collect()
+                }
             };
             if literals.is_empty()
                 || literals
@@ -69,11 +80,15 @@ impl Prefilter {
         }
         match required {
             RequiredLiterals::None => Self::None,
-            RequiredLiterals::One(literal) => prefilter_one(literal),
+            RequiredLiterals::One(literal) => prefilter_one(literal.into_owned()),
             RequiredLiterals::Any(literals) if literals.is_empty() => Self::None,
-            RequiredLiterals::Any(literals) if literals.len() == 1 => {
-                prefilter_one(literals.into_iter().next().expect("one literal"))
-            }
+            RequiredLiterals::Any(literals) if literals.len() == 1 => prefilter_one(
+                literals
+                    .into_iter()
+                    .next()
+                    .expect("one literal")
+                    .into_owned(),
+            ),
             RequiredLiterals::Any(literals)
                 if literals
                     .iter()
@@ -89,12 +104,20 @@ impl Prefilter {
                 }
                 Self::ByteSet { bytes, bitmap }
             }
-            RequiredLiterals::Any(literals) => Self::Any {
-                finder: MultiLiteralFinder::for_literals(&literals),
-                literals,
-                ascii_case_insensitive: false,
-                mixed_width_fold_mask: 0,
-            },
+            RequiredLiterals::Any(literals) => {
+                let finder = MultiLiteralFinder::for_literals(&literals);
+                let literals = if finder.is_some() {
+                    Vec::new()
+                } else {
+                    literals.into_iter().map(Cow::into_owned).collect()
+                };
+                Self::Any {
+                    finder,
+                    literals,
+                    ascii_case_insensitive: false,
+                    mixed_width_fold_mask: 0,
+                }
+            }
         }
     }
 
@@ -231,16 +254,22 @@ struct FinderNode {
 }
 
 impl MultiLiteralFinder {
-    fn for_literals(literals: &[String]) -> Option<Self> {
-        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+    fn for_literals<S: AsRef<str>>(literals: &[S]) -> Option<Self> {
+        let total_bytes = literals
+            .iter()
+            .map(|literal| literal.as_ref().len())
+            .sum::<usize>();
         (literals.len() >= multi_literal_min_literals()
             && total_bytes >= multi_literal_min_total_bytes())
         .then(|| Self::new(literals))
     }
 
-    fn new(literals: &[String]) -> Self {
+    fn new<S: AsRef<str>>(literals: &[S]) -> Self {
         // Required-literal sets arrive sorted; sort a borrowed view otherwise.
-        let mut sorted = literals.iter().map(String::as_bytes).collect::<Vec<_>>();
+        let mut sorted = literals
+            .iter()
+            .map(|literal| literal.as_ref().as_bytes())
+            .collect::<Vec<_>>();
         if !sorted.is_sorted() {
             sorted.sort_unstable();
         }
@@ -682,18 +711,20 @@ fn cached_next_occurrence(
 pub fn required_literal(pattern: &str) -> Option<String> {
     let parsed = super::ast::parse(pattern);
     match required_literals(&parsed.ast) {
-        RequiredLiterals::One(literal) => Some(literal),
-        RequiredLiterals::Any(literals) => literals.into_iter().max_by_key(|literal| literal.len()),
+        RequiredLiterals::One(literal) => Some(literal.into_owned()),
+        RequiredLiterals::Any(literals) => literals
+            .into_iter()
+            .max_by_key(|literal| literal.len())
+            .map(Cow::into_owned),
         RequiredLiterals::None => literal_prefix(pattern),
     }
 }
 
-pub fn required_literals(ast: &Ast) -> RequiredLiterals {
+pub fn required_literals(ast: &Ast) -> RequiredLiterals<'_> {
     if let Some(literal) = exact_literal(ast).filter(|literal| !literal.is_empty()) {
         return RequiredLiterals::One(literal);
     }
     match ast {
-        Ast::Literal(literal) if !literal.is_empty() => RequiredLiterals::One(literal.clone()),
         Ast::Concat(nodes) => sequence_required_literals(nodes),
         Ast::Alternation(branches) => alternation_required_literals(branches),
         Ast::Group { child, .. } | Ast::Flags { child, .. } => required_literals(child),
@@ -707,43 +738,76 @@ pub fn required_literals(ast: &Ast) -> RequiredLiterals {
     }
 }
 
-fn sequence_required_literals(nodes: &[Ast]) -> RequiredLiterals {
+fn sequence_required_literals(nodes: &[Ast]) -> RequiredLiterals<'_> {
     let mut best = RequiredLiterals::None;
     let mut run = String::new();
     for node in nodes {
-        if let Some(literal) = exact_literal(node) {
-            run.push_str(&literal);
+        let run_len = run.len();
+        if append_exact_literal(node, &mut run) {
             continue;
         }
+        run.truncate(run_len);
         if !run.is_empty() {
-            best = choose_more_selective(best, RequiredLiterals::One(std::mem::take(&mut run)));
+            best = choose_more_selective(
+                best,
+                RequiredLiterals::One(Cow::Owned(std::mem::take(&mut run))),
+            );
         }
         let candidate = required_literals(node);
         best = choose_more_selective(best, candidate);
     }
     if !run.is_empty() {
-        best = choose_more_selective(best, RequiredLiterals::One(run));
+        best = choose_more_selective(best, RequiredLiterals::One(Cow::Owned(run)));
     }
     best
 }
 
-fn exact_literal(ast: &Ast) -> Option<String> {
+/// The exact string `ast` matches, if it is one. A single literal (possibly
+/// grouped) is borrowed; only concatenations build a new string.
+fn exact_literal(ast: &Ast) -> Option<Cow<'_, str>> {
     match ast {
-        Ast::Empty => Some(String::new()),
-        Ast::Literal(literal) => Some(literal.clone()),
+        Ast::Empty => Some(Cow::Borrowed("")),
+        Ast::Literal(literal) => Some(Cow::Borrowed(literal)),
         Ast::Concat(nodes) => {
+            if !nodes.iter().all(is_exact_literal) {
+                return None;
+            }
             let mut out = String::new();
             for node in nodes {
-                out.push_str(&exact_literal(node)?);
+                append_exact_literal(node, &mut out);
             }
-            Some(out)
+            Some(Cow::Owned(out))
         }
         Ast::Group { child, .. } | Ast::Flags { child, .. } => exact_literal(child),
         _ => None,
     }
 }
 
-fn alternation_required_literals(branches: &[Ast]) -> RequiredLiterals {
+fn is_exact_literal(ast: &Ast) -> bool {
+    match ast {
+        Ast::Empty | Ast::Literal(_) => true,
+        Ast::Concat(nodes) => nodes.iter().all(is_exact_literal),
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => is_exact_literal(child),
+        _ => false,
+    }
+}
+
+/// Appends the exact string `ast` matches; on `false` the caller discards
+/// whatever was appended.
+fn append_exact_literal(ast: &Ast, out: &mut String) -> bool {
+    match ast {
+        Ast::Empty => true,
+        Ast::Literal(literal) => {
+            out.push_str(literal);
+            true
+        }
+        Ast::Concat(nodes) => nodes.iter().all(|node| append_exact_literal(node, out)),
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => append_exact_literal(child, out),
+        _ => false,
+    }
+}
+
+fn alternation_required_literals(branches: &[Ast]) -> RequiredLiterals<'_> {
     let mut literals = Vec::new();
     for branch in branches {
         match required_literals(branch) {
@@ -757,7 +821,10 @@ fn alternation_required_literals(branches: &[Ast]) -> RequiredLiterals {
     RequiredLiterals::Any(literals)
 }
 
-fn choose_more_selective(left: RequiredLiterals, right: RequiredLiterals) -> RequiredLiterals {
+fn choose_more_selective<'a>(
+    left: RequiredLiterals<'a>,
+    right: RequiredLiterals<'a>,
+) -> RequiredLiterals<'a> {
     if left.is_empty() {
         return right;
     }
@@ -783,7 +850,11 @@ fn max_literal_len(literals: &RequiredLiterals) -> usize {
     match literals {
         RequiredLiterals::None => 0,
         RequiredLiterals::One(literal) => literal.len(),
-        RequiredLiterals::Any(literals) => literals.iter().map(String::len).max().unwrap_or(0),
+        RequiredLiterals::Any(literals) => literals
+            .iter()
+            .map(|literal| literal.len())
+            .max()
+            .unwrap_or(0),
     }
 }
 
@@ -795,7 +866,7 @@ fn literal_cardinality(literals: &RequiredLiterals) -> usize {
     }
 }
 
-fn class_required_literals(class: &CharClass) -> RequiredLiterals {
+fn class_required_literals(class: &CharClass) -> RequiredLiterals<'_> {
     if class.negated || class.atoms.is_empty() {
         return RequiredLiterals::None;
     }
@@ -804,7 +875,7 @@ fn class_required_literals(class: &CharClass) -> RequiredLiterals {
     let mut literals = Vec::new();
     for atom in &class.atoms {
         match atom {
-            ClassAtom::Char(ch) => literals.push(ch.to_string()),
+            ClassAtom::Char(ch) => literals.push(Cow::Owned(ch.to_string())),
             ClassAtom::Range(..)
             | ClassAtom::Perl(_)
             | ClassAtom::Posix { .. }
@@ -976,7 +1047,7 @@ mod tests {
         let parsed = parse("foo|bar");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::Any(vec!["bar".to_owned(), "foo".to_owned()])
+            RequiredLiterals::Any(vec!["bar".into(), "foo".into()])
         );
     }
 
@@ -985,13 +1056,13 @@ mod tests {
         let parsed = parse(r"(?<=return)\s*(?=(<)\s*([A-Za-z]+))");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::One("<".to_owned())
+            RequiredLiterals::One("<".into())
         );
 
         let parsed = parse(r"(?<!\\)(?=;)");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::One(";".to_owned())
+            RequiredLiterals::One(";".into())
         );
 
         let parsed = parse(r"(?<=return)");
@@ -1003,7 +1074,7 @@ mod tests {
         let parsed = parse(r"(?=[;)])(?<!\\)");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::Any(vec![")".to_owned(), ";".to_owned()])
+            RequiredLiterals::Any(vec![")".into(), ";".into()])
         );
 
         let parsed = parse(r"(?=[A-Z])");
