@@ -135,6 +135,11 @@ fn branch_starts_with_anchor(node: &Ast, anchor: AnchorKind) -> bool {
 }
 
 pub fn normalize_oniguruma_for_rust_regex(pattern: &str) -> String {
+    // Most patterns contain none of the rewritten escapes; copy those
+    // verbatim instead of re-encoding them scalar by scalar.
+    if !has_rewritten_escape(pattern) {
+        return pattern.to_owned();
+    }
     let mut out = String::with_capacity(pattern.len());
     let mut chars = pattern.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -164,6 +169,26 @@ pub fn normalize_oniguruma_for_rust_regex(pattern: &str) -> String {
         }
     }
     out
+}
+
+/// Whether an escape introducer is followed by one of the scalars
+/// `normalize_oniguruma_for_rust_regex` rewrites. Escapes are consumed in
+/// pairs, so `\\h` (an escaped backslash, then `h`) does not qualify. A
+/// backslash is ASCII, so it never occurs inside a multi-byte scalar.
+fn has_rewritten_escape(pattern: &str) -> bool {
+    let bytes = pattern.as_bytes();
+    let mut from = 0;
+    while let Some(offset) = bytes
+        .get(from..)
+        .and_then(|rest| memchr::memchr(b'\\', rest))
+    {
+        let escape = from + offset;
+        if matches!(bytes.get(escape + 1), Some(b'h' | b'H' | b'R' | b'Z')) {
+            return true;
+        }
+        from = escape + 2;
+    }
+    false
 }
 
 pub fn is_ast_translatable(ast: &Ast) -> bool {
@@ -202,6 +227,19 @@ mod tests {
     #[test]
     fn lowers_hex_digit_class() {
         assert_eq!(normalize_oniguruma_for_rust_regex(r"\h+"), r"[0-9A-Fa-f]+");
+        // Escapes pair up: an escaped backslash does not introduce `\h`.
+        for unchanged in [r"\\h", r"a\", r"é\.x", r"\\\\H", r"\d\s\w", ""] {
+            assert_eq!(normalize_oniguruma_for_rust_regex(unchanged), unchanged);
+        }
+        assert_eq!(
+            normalize_oniguruma_for_rust_regex(r"\\\h"),
+            r"\\[0-9A-Fa-f]"
+        );
+        assert_eq!(normalize_oniguruma_for_rust_regex(r"é\Z"), r"é\z");
+        assert_eq!(
+            normalize_oniguruma_for_rust_regex(r"x\\\\\H"),
+            r"x\\\\[^0-9A-Fa-f]"
+        );
     }
 
     #[test]
