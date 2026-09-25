@@ -6,7 +6,7 @@
 //! external-include closure is recorded at build time, so a tokenizer can
 //! decode closure members only when it reaches them.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{borrow::Cow, collections::BTreeMap, path::Path};
 
 use crate::engine::{
     grammar::CompiledGrammar,
@@ -212,22 +212,27 @@ impl GrammarBlob {
         })
     }
 
-    pub fn decoded_bytes(&self) -> Result<Vec<u8>, BundleError> {
+    pub fn decoded_bytes(&self) -> Result<Cow<'_, [u8]>, BundleError> {
         match self.codec {
-            CODEC_NONE => Ok(self.bytes.clone()),
+            CODEC_NONE => Ok(Cow::Borrowed(&self.bytes)),
             CODEC_DEFLATE_ZLIB => {
-                let bytes =
-                    miniz_oxide::inflate::decompress_to_vec_zlib(&self.bytes).map_err(|_| {
-                        BundleError::Inflate {
-                            language: self.language.clone(),
-                        }
-                    })?;
-                if bytes.len() != self.raw_len as usize {
-                    return Err(BundleError::Inflate {
-                        language: self.language.clone(),
-                    });
+                // The recorded length sizes the output exactly: no growth
+                // copies, and a longer stream fails as `HasMoreOutput`.
+                let inflate_error = || BundleError::Inflate {
+                    language: self.language.clone(),
+                };
+                let mut bytes = vec![0; self.raw_len as usize];
+                let len = miniz_oxide::inflate::decompress_slice_iter_to_slice(
+                    &mut bytes,
+                    std::iter::once(self.bytes.as_slice()),
+                    true,
+                    false,
+                )
+                .map_err(|_| inflate_error())?;
+                if len != bytes.len() {
+                    return Err(inflate_error());
                 }
-                Ok(bytes)
+                Ok(Cow::Owned(bytes))
             }
             other => Err(BundleError::BadCodec(other)),
         }
@@ -1171,6 +1176,26 @@ mod tests {
             Bundle::parse(&bundle.to_bytes()),
             Err(BundleError::BadGrammarGraph(0))
         );
+    }
+
+    #[test]
+    fn inflates_compressed_blobs_to_their_recorded_length() {
+        let mut blob = sample_bundle().grammar_blobs.remove(0);
+        let raw = blob.bytes.clone();
+        blob.codec = CODEC_DEFLATE_ZLIB;
+        blob.bytes = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6);
+        assert_eq!(blob.decoded_bytes().unwrap().as_ref(), raw.as_slice());
+        assert_eq!(
+            blob.compiled_grammar(GrammarId(0)).unwrap().scope_name,
+            "source.rust"
+        );
+        for raw_len in [raw.len() - 1, raw.len() + 1] {
+            blob.raw_len = raw_len as u32;
+            assert!(matches!(
+                blob.decoded_bytes(),
+                Err(BundleError::Inflate { .. })
+            ));
+        }
     }
 
     #[test]
