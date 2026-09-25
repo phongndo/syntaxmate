@@ -44,6 +44,7 @@ const resolvePackage = name => require.resolve(name, { paths: resolvePaths })
 const importPackage = async name => import(pathToFileURL(resolvePackage(name)).href)
 const vsctmModule = await importPackage('vscode-textmate')
 const vsctm = vsctmModule.default ?? vsctmModule
+const oraclePins = JSON.parse(await fs.readFile(path.join(root, 'tools/golden-oracle/package.json'), 'utf8')).dependencies
 const onigModule = await importPackage('vscode-oniguruma')
 const onig = onigModule.default ?? onigModule
 const onigMain = resolvePackage('vscode-oniguruma')
@@ -114,7 +115,7 @@ for (const language of languages) {
 const report = {
   schemaVersion: 2,
   vscodeCommit: expectedRevision,
-  oracle: { vscodeTextmate: '9.2.0', vscodeOniguruma: '1.7.0' },
+  oracle: { vscodeTextmate: oraclePins['vscode-textmate'], vscodeOniguruma: oraclePins['vscode-oniguruma'] },
   sharedRootGrammars: entries.length,
   scopeEquivalent: entries.filter(entry => entry.scopeEquivalent).length,
   scopeDivergent: entries.filter(entry => !entry.scopeEquivalent).length,

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Raise the MSRV from Rust 1.88 to 1.98; this requires a minor release.
+- Refresh bundled grammars from `@shikijs/langs` 3.23.0 to 4.4.3. Highlighting
+  changes for 52 upstream-updated grammars, including a rewritten C++ grammar
+  whose declarations, calls, and attributes scope differently, and `coq` now
+  uses the upstream `source.rocq` root scope. Seven new Shiki grammars (`ahk`,
+  `ahk2`, `chapel`, `nsis`, `org`, `rbs`, `smithy`) are vendored as private
+  assets pending promotion; the public catalog is unchanged at 264 languages.
+- Update the reference oracle to `vscode-textmate` 9.3.2, matching current
+  VS Code; `vscode-oniguruma` stays at 1.7.0 because VS Code still ships it.
+- Support Oniguruma `\p{XIDS}`/`\p{XIDC}` (XID_Start/XID_Continue, with loose
+  property-name matching), used by the updated Typst grammar.
+- Fix fallback regex search skipping matches of nullable patterns whose empty
+  branch is guarded by a lookbehind, such as `x|(?<=T)`. Patterns whose every
+  branch starts with `^`, `\A`, or `\G` (for example `(^|\G)`) are now tried
+  only at those anchors, and each search reuses one matcher scratch.
+- Match vscode-textmate for captures outside a match: skip empty captures, stop
+  at the first capture that starts after the match, and resume scanning at the
+  match end instead of after lookahead captures.
+
 ## 0.1.3 - 2026-09-19
 
 - Reduce temporary bytecode-compilation allocations by borrowing subroutine AST

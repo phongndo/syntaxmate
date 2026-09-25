@@ -118,7 +118,7 @@ impl MatchResult {
                 .first()
                 .cloned()
                 .flatten()
-                .or_else(|| Some(self.start..self.end));
+                .or(Some(self.start..self.end));
         }
         self.captures.get(group).cloned().flatten()
     }

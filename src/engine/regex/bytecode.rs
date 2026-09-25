@@ -165,17 +165,12 @@ struct LiteralTrie {
     unicode_nodes: Vec<UnicodeLiteralTrieNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 enum LiteralTrieEdges<T> {
+    #[default]
     Empty,
     One((T, u32)),
     Many(Vec<(T, u32)>),
-}
-
-impl<T> Default for LiteralTrieEdges<T> {
-    fn default() -> Self {
-        Self::Empty
-    }
 }
 
 impl<T: Copy> LiteralTrieEdges<T> {

@@ -6,9 +6,9 @@ name = "Shiki tm-grammars"
 package = "@shikijs/langs"
 repository = "https://github.com/shikijs/shiki"
 license = "MIT"
-package_version = "3.23.0"
-source_revision = "package:@shikijs/langs@3.23.0"
-source_commit = "1850697815131b3e4ab6a5ac794c58af10bc1c4b"
+package_version = "4.4.3"
+source_revision = "package:@shikijs/langs@4.4.3"
+source_commit = "48cd2cc695ed2e3357c3f9c370578ea843d6d9a3"
 
 [import]
 source_path = "tools/golden-oracle/node_modules/@shikijs/langs"

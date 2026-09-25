@@ -21,8 +21,8 @@ use super::cache::{CachedLine, LineCache, LineCacheKey};
 use super::checkpoint::CheckpointTable;
 use super::counters::{EngineCounters, PatternHotspot};
 use super::grammar::{
-    CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError, InjectionPriority,
-    RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
+    CaptureEntry, CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError,
+    InjectionPriority, RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
 };
 use super::hashing::{self, FastMap};
 use super::line::{LineChunks, next_char_boundary};
@@ -4663,7 +4663,7 @@ impl TextMateTokenizer {
                 captures,
                 ..
             } => {
-                let consumed_end = specified_outside_capture_end(result, captures);
+                let consumed_end = result.end;
                 let mut stack = active_stack;
                 if let Some(prefix) = &candidate.scope_prefix {
                     stack = self.push_scope_prefix_once_id(stack, prefix);
@@ -4692,7 +4692,7 @@ impl TextMateTokenizer {
                 apply_end_pattern_last,
                 end_static,
             } => {
-                let consumed_end = specified_outside_capture_end(result, begin_captures);
+                let consumed_end = result.end;
                 let names_static = !name.as_deref().is_some_and(|name| name.contains('$'))
                     && !content_name
                         .as_deref()
@@ -4792,7 +4792,7 @@ impl TextMateTokenizer {
                 patterns,
                 while_static,
             } => {
-                let consumed_end = specified_outside_capture_end(result, begin_captures);
+                let consumed_end = result.end;
                 let names_static = !name.as_deref().is_some_and(|name| name.contains('$'))
                     && !content_name
                         .as_deref()
@@ -4911,7 +4911,7 @@ impl TextMateTokenizer {
                 grammar_id,
                 captures,
             } => {
-                let consumed_end = specified_outside_capture_end(result, captures);
+                let consumed_end = result.end;
                 self.emit_match(
                     tokens,
                     line,
@@ -5003,17 +5003,8 @@ impl TextMateTokenizer {
             return;
         }
         let match_end = result.end;
-        let outside = captures
-            .entries
-            .iter()
-            .filter_map(|(group, entry)| {
-                if entry.name.is_none() && entry.patterns.is_empty() {
-                    return None;
-                }
-                let range = result.capture(*group as usize)?;
-                (match_end > result.start && range.start >= match_end && range.end > match_end)
-                    .then_some((range, entry.clone()))
-            })
+        let outside = outside_captures(result, captures)
+            .map(|(range, entry)| (range, entry.clone()))
             .collect::<Vec<_>>();
         if outside.is_empty() {
             self.emit_capture_range(
@@ -6883,21 +6874,30 @@ fn fallback_call_budget(source_bytes: usize) -> u64 {
     )
 }
 
-fn specified_outside_capture_end(result: &MatchResult, captures: &CaptureSpec) -> usize {
-    if result.start == result.end {
-        return result.end;
-    }
+/// Specified captures that emit tokens after a nonempty match. vscode-textmate
+/// skips empty captures and stops at the first capture that starts after the
+/// match, so only lookahead captures beginning exactly at the match end count.
+/// Scanning still resumes at the match end; monotone token production drops
+/// any later token prefix those captures already covered.
+fn outside_captures<'a>(
+    result: &'a MatchResult,
+    captures: &'a CaptureSpec,
+) -> impl Iterator<Item = (Range<usize>, &'a CaptureEntry)> {
+    let match_end = result.end;
     captures
         .entries
         .iter()
-        .filter(|(_, entry)| entry.name.is_some() || !entry.patterns.is_empty())
-        .filter_map(|(group, _)| {
+        .filter(move |_| result.start < match_end)
+        .filter_map(|(group, entry)| {
             result
                 .capture(*group as usize)
-                .filter(|range| range.start >= result.end)
-                .map(|range| range.end)
+                .filter(|range| range.start < range.end)
+                .map(|range| (range, entry))
         })
-        .fold(result.end, usize::max)
+        .take_while(move |(range, _)| range.start <= match_end)
+        .filter(move |(range, entry)| {
+            range.start == match_end && (entry.name.is_some() || !entry.patterns.is_empty())
+        })
 }
 
 fn plain_compact_tokens(parse_text: &str, stack: ScopeStackId) -> Vec<CompactScopedToken> {

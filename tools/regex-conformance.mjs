@@ -24,6 +24,7 @@ const unicodePositiveVariants = {
   Ll: 'a', Lm: 'ʰ', Lo: '文', lower: 'a', Lt: 'ǅ', Lu: 'A', M: '\u0301',
   Mc: 'ा', Mn: '\u0301', Nl: 'Ⅻ', P: '!', Pc: '_', print: 'A', S: '+',
   Sc: '$', Sm: '+', So: '🚀', upper: 'A', word: 'λ_7',
+  Han: '東京', Hangul: '한국', Hiragana: 'ひら', Katakana: 'カタ', XIDC: 'a1_λ', XIDS: 'λ',
 }
 const unicodeNegativeVariants = ['Mc', 'Me', 'Mn', 'No', 'Pc', 'Sc', 'Sk', 'So', 'word']
 const posixPositiveVariants = {

@@ -87,13 +87,13 @@
       "ceilings": {
         "construct": {
           "maxAllocationCalls": 54150,
-          "maxAllocatedBytes": 6996992,
-          "maxPeakRetainedBytes": 5751808
+          "maxAllocatedBytes": 7392256,
+          "maxPeakRetainedBytes": 6100992
         },
         "highlight-lines-first": {
           "maxAllocationCalls": 246570,
-          "maxAllocatedBytes": 35824640,
-          "maxPeakRetainedBytes": 18229248
+          "maxAllocatedBytes": 47100928,
+          "maxPeakRetainedBytes": 26478592
         },
         "highlight-lines-warm": {
           "maxAllocationCalls": 280,
@@ -102,8 +102,8 @@
         },
         "incremental-first": {
           "maxAllocationCalls": 246560,
-          "maxAllocatedBytes": 35723264,
-          "maxPeakRetainedBytes": 18197504
+          "maxAllocatedBytes": 46967808,
+          "maxPeakRetainedBytes": 26433536
         },
         "incremental-warm": {
           "maxAllocationCalls": 280,
@@ -111,14 +111,14 @@
           "maxPeakRetainedBytes": 15360
         },
         "prepare-language": {
-          "maxAllocationCalls": 51190,
-          "maxAllocatedBytes": 8060928,
-          "maxPeakRetainedBytes": 3431424
+          "maxAllocationCalls": 59300,
+          "maxAllocatedBytes": 9374720,
+          "maxPeakRetainedBytes": 3960832
         },
         "prepared-first": {
           "maxAllocationCalls": 210740,
-          "maxAllocatedBytes": 29780992,
-          "maxPeakRetainedBytes": 15668224
+          "maxAllocatedBytes": 39241728,
+          "maxPeakRetainedBytes": 23029760
         },
         "prepared-new": {
           "maxAllocationCalls": 90,
@@ -131,19 +131,19 @@
           "maxPeakRetainedBytes": 14336
         },
         "prepared-reuse": {
-          "maxAllocationCalls": 46480,
-          "maxAllocatedBytes": 7646208,
+          "maxAllocationCalls": 56280,
+          "maxAllocatedBytes": 10452992,
           "maxPeakRetainedBytes": 4056064
         },
         "tokenize-first": {
           "maxAllocationCalls": 246710,
-          "maxAllocatedBytes": 35707904,
-          "maxPeakRetainedBytes": 18265088
+          "maxAllocatedBytes": 46906368,
+          "maxPeakRetainedBytes": 26475520
         },
         "tokenize-warm": {
-          "maxAllocationCalls": 1160,
-          "maxAllocatedBytes": 228352,
-          "maxPeakRetainedBytes": 192512
+          "maxAllocationCalls": 1410,
+          "maxAllocatedBytes": 279552,
+          "maxPeakRetainedBytes": 229376
         }
       }
     },

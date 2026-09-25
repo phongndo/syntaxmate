@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": {
     "package": "@shikijs/langs",
-    "version": "3.23.0",
+    "version": "4.4.3",
     "repository": "git+https://github.com/shikijs/shiki.git",
     "license": "MIT",
     "sourcePath": "tools/golden-oracle/node_modules/@shikijs/langs"
@@ -16,7 +16,7 @@
       "path": "assets/grammars/languages/abap.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -27,7 +27,7 @@
       "path": "assets/grammars/languages/actionscript-3.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -38,8 +38,32 @@
       "path": "assets/grammars/languages/ada.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
+    },
+    {
+      "language": "ahk",
+      "grammarName": "ahk",
+      "scopeName": "source.ahk",
+      "module": "ahk.mjs",
+      "path": "assets/grammars/languages/ahk.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "4.4.3",
+      "license": "MIT",
+      "privateDependency": true
+    },
+    {
+      "language": "ahk2",
+      "grammarName": "ahk2",
+      "scopeName": "source.ahk2",
+      "module": "ahk2.mjs",
+      "path": "assets/grammars/languages/ahk2.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "4.4.3",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "angular-expression",
@@ -49,7 +73,7 @@
       "path": "assets/grammars/languages/angular-expression.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -60,7 +84,7 @@
       "path": "assets/grammars/languages/angular-html.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -71,7 +95,7 @@
       "path": "assets/grammars/languages/angular-inline-style.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -82,7 +106,7 @@
       "path": "assets/grammars/languages/angular-inline-template.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -93,7 +117,7 @@
       "path": "assets/grammars/languages/angular-let-declaration.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -104,7 +128,7 @@
       "path": "assets/grammars/languages/angular-template.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -115,7 +139,7 @@
       "path": "assets/grammars/languages/angular-template-blocks.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -126,7 +150,7 @@
       "path": "assets/grammars/languages/angular-ts.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -137,7 +161,7 @@
       "path": "assets/grammars/languages/apache.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -148,7 +172,7 @@
       "path": "assets/grammars/languages/apex.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -159,7 +183,7 @@
       "path": "assets/grammars/languages/apl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -170,7 +194,7 @@
       "path": "assets/grammars/languages/applescript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -181,7 +205,7 @@
       "path": "assets/grammars/languages/ara.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -192,7 +216,7 @@
       "path": "assets/grammars/languages/asciidoc.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -203,7 +227,7 @@
       "path": "assets/grammars/languages/asm.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -226,7 +250,7 @@
       "path": "assets/grammars/languages/astro.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -237,7 +261,7 @@
       "path": "assets/grammars/languages/awk.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -248,7 +272,7 @@
       "path": "assets/grammars/languages/ballerina.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -259,7 +283,7 @@
       "path": "assets/grammars/languages/bat.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -270,7 +294,7 @@
       "path": "assets/grammars/languages/beancount.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -281,7 +305,7 @@
       "path": "assets/grammars/languages/berry.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -292,7 +316,7 @@
       "path": "assets/grammars/languages/bibtex.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -303,7 +327,7 @@
       "path": "assets/grammars/languages/bicep.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -314,7 +338,7 @@
       "path": "assets/grammars/languages/bird2.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -325,7 +349,7 @@
       "path": "assets/grammars/languages/blade.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -336,7 +360,7 @@
       "path": "assets/grammars/languages/bsl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -347,7 +371,7 @@
       "path": "assets/grammars/languages/c.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -358,7 +382,7 @@
       "path": "assets/grammars/languages/c3.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -369,7 +393,7 @@
       "path": "assets/grammars/languages/cadence.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -380,8 +404,20 @@
       "path": "assets/grammars/languages/cairo.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
+    },
+    {
+      "language": "chapel",
+      "grammarName": "chapel",
+      "scopeName": "source.chapel",
+      "module": "chapel.mjs",
+      "path": "assets/grammars/languages/chapel.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "4.4.3",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "clarity",
@@ -391,7 +427,7 @@
       "path": "assets/grammars/languages/clarity.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -402,7 +438,7 @@
       "path": "assets/grammars/languages/clojure.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -413,7 +449,7 @@
       "path": "assets/grammars/languages/cmake.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -424,7 +460,7 @@
       "path": "assets/grammars/languages/cobol.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -435,7 +471,7 @@
       "path": "assets/grammars/languages/codeowners.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -446,7 +482,7 @@
       "path": "assets/grammars/languages/codeql.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -457,7 +493,7 @@
       "path": "assets/grammars/languages/coffee.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -468,18 +504,18 @@
       "path": "assets/grammars/languages/common-lisp.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
       "language": "coq",
       "grammarName": "coq",
-      "scopeName": "source.coq",
+      "scopeName": "source.rocq",
       "module": "coq.mjs",
       "path": "assets/grammars/languages/coq.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -490,7 +526,7 @@
       "path": "assets/grammars/languages/cpp.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -501,7 +537,7 @@
       "path": "assets/grammars/languages/cpp-macro.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -512,7 +548,7 @@
       "path": "assets/grammars/languages/crystal.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -523,7 +559,7 @@
       "path": "assets/grammars/languages/csharp.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -534,7 +570,7 @@
       "path": "assets/grammars/languages/css.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -545,7 +581,7 @@
       "path": "assets/grammars/languages/csv.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -568,7 +604,7 @@
       "path": "assets/grammars/languages/cue.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -579,7 +615,7 @@
       "path": "assets/grammars/languages/cypher.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -590,7 +626,7 @@
       "path": "assets/grammars/languages/d.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -613,7 +649,7 @@
       "path": "assets/grammars/languages/dax.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -624,7 +660,7 @@
       "path": "assets/grammars/languages/desktop.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -635,7 +671,7 @@
       "path": "assets/grammars/languages/diff.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -646,7 +682,7 @@
       "path": "assets/grammars/languages/docker.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -657,7 +693,7 @@
       "path": "assets/grammars/languages/dotenv.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -668,7 +704,7 @@
       "path": "assets/grammars/languages/dream-maker.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -679,7 +715,7 @@
       "path": "assets/grammars/languages/edge.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -690,7 +726,7 @@
       "path": "assets/grammars/languages/elixir.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -701,7 +737,7 @@
       "path": "assets/grammars/languages/elm.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -712,7 +748,7 @@
       "path": "assets/grammars/languages/emacs-lisp.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -723,7 +759,7 @@
       "path": "assets/grammars/languages/erb.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -734,7 +770,7 @@
       "path": "assets/grammars/languages/erlang.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -745,7 +781,7 @@
       "path": "assets/grammars/languages/es-tag-css.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -756,7 +792,7 @@
       "path": "assets/grammars/languages/es-tag-glsl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -767,18 +803,18 @@
       "path": "assets/grammars/languages/es-tag-html.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
       "language": "es-tag-sql",
       "grammarName": "es-tag-sql",
-      "scopeName": "inline.es6-sql",
+      "scopeName": "inline.tagged-template-sql",
       "module": "es-tag-sql.mjs",
       "path": "assets/grammars/languages/es-tag-sql.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -789,7 +825,7 @@
       "path": "assets/grammars/languages/es-tag-xml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -800,7 +836,7 @@
       "path": "assets/grammars/languages/fennel.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -811,7 +847,7 @@
       "path": "assets/grammars/languages/fish.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -822,7 +858,7 @@
       "path": "assets/grammars/languages/fluent.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -833,7 +869,7 @@
       "path": "assets/grammars/languages/fortran-fixed-form.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -844,7 +880,7 @@
       "path": "assets/grammars/languages/fortran-free-form.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -855,7 +891,7 @@
       "path": "assets/grammars/languages/fsharp.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -866,7 +902,7 @@
       "path": "assets/grammars/languages/gdresource.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -877,7 +913,7 @@
       "path": "assets/grammars/languages/gdscript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -888,7 +924,7 @@
       "path": "assets/grammars/languages/gdshader.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -899,7 +935,7 @@
       "path": "assets/grammars/languages/genie.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -910,7 +946,7 @@
       "path": "assets/grammars/languages/gherkin.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -921,7 +957,7 @@
       "path": "assets/grammars/languages/git-commit.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -932,7 +968,7 @@
       "path": "assets/grammars/languages/git-rebase.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -943,7 +979,7 @@
       "path": "assets/grammars/languages/gleam.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -954,7 +990,7 @@
       "path": "assets/grammars/languages/glimmer-js.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -965,7 +1001,7 @@
       "path": "assets/grammars/languages/glimmer-ts.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -976,7 +1012,7 @@
       "path": "assets/grammars/languages/glsl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -987,7 +1023,7 @@
       "path": "assets/grammars/languages/gn.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -998,7 +1034,7 @@
       "path": "assets/grammars/languages/gnuplot.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1009,7 +1045,7 @@
       "path": "assets/grammars/languages/go.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1020,7 +1056,7 @@
       "path": "assets/grammars/languages/graphql.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1031,7 +1067,7 @@
       "path": "assets/grammars/languages/groovy.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1042,7 +1078,7 @@
       "path": "assets/grammars/languages/hack.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1053,7 +1089,7 @@
       "path": "assets/grammars/languages/haml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1076,7 +1112,7 @@
       "path": "assets/grammars/languages/haskell.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1087,7 +1123,7 @@
       "path": "assets/grammars/languages/haxe.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1098,7 +1134,7 @@
       "path": "assets/grammars/languages/hcl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1109,7 +1145,7 @@
       "path": "assets/grammars/languages/hjson.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1120,7 +1156,7 @@
       "path": "assets/grammars/languages/hlsl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1131,7 +1167,7 @@
       "path": "assets/grammars/languages/html.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1142,7 +1178,7 @@
       "path": "assets/grammars/languages/html-derivative.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1153,7 +1189,7 @@
       "path": "assets/grammars/languages/http.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1164,7 +1200,7 @@
       "path": "assets/grammars/languages/hurl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1175,7 +1211,7 @@
       "path": "assets/grammars/languages/hxml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1186,7 +1222,7 @@
       "path": "assets/grammars/languages/hy.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1209,7 +1245,7 @@
       "path": "assets/grammars/languages/imba.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1220,7 +1256,7 @@
       "path": "assets/grammars/languages/ini.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1231,7 +1267,7 @@
       "path": "assets/grammars/languages/java.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1242,7 +1278,7 @@
       "path": "assets/grammars/languages/javascript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1253,7 +1289,7 @@
       "path": "assets/grammars/languages/jinja.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1264,7 +1300,7 @@
       "path": "assets/grammars/languages/jinja-html.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1275,7 +1311,7 @@
       "path": "assets/grammars/languages/jison.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1299,7 +1335,7 @@
       "path": "assets/grammars/languages/json.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1310,7 +1346,7 @@
       "path": "assets/grammars/languages/json5.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1321,7 +1357,7 @@
       "path": "assets/grammars/languages/jsonc.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1332,7 +1368,7 @@
       "path": "assets/grammars/languages/jsonl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1343,7 +1379,7 @@
       "path": "assets/grammars/languages/jsonnet.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1354,7 +1390,7 @@
       "path": "assets/grammars/languages/jssm.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1365,7 +1401,7 @@
       "path": "assets/grammars/languages/jsx.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1376,7 +1412,7 @@
       "path": "assets/grammars/languages/julia.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1387,7 +1423,7 @@
       "path": "assets/grammars/languages/just.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1398,7 +1434,7 @@
       "path": "assets/grammars/languages/kdl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1409,7 +1445,7 @@
       "path": "assets/grammars/languages/kotlin.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1420,7 +1456,7 @@
       "path": "assets/grammars/languages/kusto.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1431,7 +1467,7 @@
       "path": "assets/grammars/languages/latex.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1442,7 +1478,7 @@
       "path": "assets/grammars/languages/lean.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1453,7 +1489,7 @@
       "path": "assets/grammars/languages/less.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1464,7 +1500,7 @@
       "path": "assets/grammars/languages/liquid.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1475,7 +1511,7 @@
       "path": "assets/grammars/languages/llvm.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1486,7 +1522,7 @@
       "path": "assets/grammars/languages/log.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1497,7 +1533,7 @@
       "path": "assets/grammars/languages/logo.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1508,7 +1544,7 @@
       "path": "assets/grammars/languages/lua.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1519,7 +1555,7 @@
       "path": "assets/grammars/languages/luau.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1530,7 +1566,7 @@
       "path": "assets/grammars/languages/make.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1541,7 +1577,7 @@
       "path": "assets/grammars/languages/markdown.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1552,7 +1588,7 @@
       "path": "assets/grammars/languages/markdown-nix.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1563,7 +1599,7 @@
       "path": "assets/grammars/languages/markdown-vue.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1574,7 +1610,7 @@
       "path": "assets/grammars/languages/marko.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1585,7 +1621,7 @@
       "path": "assets/grammars/languages/matlab.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1596,7 +1632,7 @@
       "path": "assets/grammars/languages/mdc.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1607,7 +1643,7 @@
       "path": "assets/grammars/languages/mdx.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1618,7 +1654,7 @@
       "path": "assets/grammars/languages/mermaid.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1641,7 +1677,7 @@
       "path": "assets/grammars/languages/mipsasm.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1663,7 +1699,7 @@
       "path": "assets/grammars/languages/mojo.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1674,7 +1710,7 @@
       "path": "assets/grammars/languages/moonbit.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1685,7 +1721,7 @@
       "path": "assets/grammars/languages/move.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1696,7 +1732,7 @@
       "path": "assets/grammars/languages/narrat.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1707,7 +1743,7 @@
       "path": "assets/grammars/languages/nextflow.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1718,7 +1754,7 @@
       "path": "assets/grammars/languages/nextflow-groovy.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1729,7 +1765,7 @@
       "path": "assets/grammars/languages/nginx.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1740,7 +1776,7 @@
       "path": "assets/grammars/languages/nim.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1751,8 +1787,20 @@
       "path": "assets/grammars/languages/nix.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
+    },
+    {
+      "language": "nsis",
+      "grammarName": "nsis",
+      "scopeName": "source.nsis",
+      "module": "nsis.mjs",
+      "path": "assets/grammars/languages/nsis.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "4.4.3",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "nushell",
@@ -1762,7 +1810,7 @@
       "path": "assets/grammars/languages/nushell.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1773,7 +1821,7 @@
       "path": "assets/grammars/languages/objective-c.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1784,7 +1832,7 @@
       "path": "assets/grammars/languages/objective-cpp.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1795,7 +1843,7 @@
       "path": "assets/grammars/languages/ocaml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1806,7 +1854,7 @@
       "path": "assets/grammars/languages/odin.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1829,8 +1877,20 @@
       "path": "assets/grammars/languages/openscad.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
+    },
+    {
+      "language": "org",
+      "grammarName": "org",
+      "scopeName": "source.org",
+      "module": "org.mjs",
+      "path": "assets/grammars/languages/org.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "4.4.3",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "pascal",
@@ -1840,7 +1900,7 @@
       "path": "assets/grammars/languages/pascal.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1851,7 +1911,7 @@
       "path": "assets/grammars/languages/perl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1874,7 +1934,7 @@
       "path": "assets/grammars/languages/pkl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1885,7 +1945,7 @@
       "path": "assets/grammars/languages/plsql.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1896,7 +1956,7 @@
       "path": "assets/grammars/languages/po.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1907,7 +1967,7 @@
       "path": "assets/grammars/languages/polar.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1918,7 +1978,7 @@
       "path": "assets/grammars/languages/postcss.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1929,7 +1989,7 @@
       "path": "assets/grammars/languages/powerquery.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1940,7 +2000,7 @@
       "path": "assets/grammars/languages/powershell.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1951,7 +2011,7 @@
       "path": "assets/grammars/languages/prisma.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1962,7 +2022,7 @@
       "path": "assets/grammars/languages/prolog.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1973,7 +2033,7 @@
       "path": "assets/grammars/languages/proto.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -1997,7 +2057,7 @@
       "path": "assets/grammars/languages/puppet.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2008,7 +2068,7 @@
       "path": "assets/grammars/languages/purescript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2019,7 +2079,7 @@
       "path": "assets/grammars/languages/python.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2030,7 +2090,7 @@
       "path": "assets/grammars/languages/qml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2041,7 +2101,7 @@
       "path": "assets/grammars/languages/qmldir.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2052,7 +2112,7 @@
       "path": "assets/grammars/languages/qss.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2075,7 +2135,7 @@
       "path": "assets/grammars/languages/racket.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2086,7 +2146,7 @@
       "path": "assets/grammars/languages/raku.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2097,8 +2157,20 @@
       "path": "assets/grammars/languages/razor.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
+    },
+    {
+      "language": "rbs",
+      "grammarName": "rbs",
+      "scopeName": "source.rbs",
+      "module": "rbs.mjs",
+      "path": "assets/grammars/languages/rbs.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "4.4.3",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "reg",
@@ -2108,7 +2180,7 @@
       "path": "assets/grammars/languages/reg.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2119,7 +2191,7 @@
       "path": "assets/grammars/languages/regexp.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2142,7 +2214,7 @@
       "path": "assets/grammars/languages/rel.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2153,7 +2225,7 @@
       "path": "assets/grammars/languages/riscv.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2164,7 +2236,7 @@
       "path": "assets/grammars/languages/ron.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2175,7 +2247,7 @@
       "path": "assets/grammars/languages/rosmsg.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2199,7 +2271,7 @@
       "path": "assets/grammars/languages/ruby.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2210,7 +2282,7 @@
       "path": "assets/grammars/languages/rust.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2221,7 +2293,7 @@
       "path": "assets/grammars/languages/sas.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2232,7 +2304,7 @@
       "path": "assets/grammars/languages/sass.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2243,7 +2315,7 @@
       "path": "assets/grammars/languages/scala.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2254,7 +2326,7 @@
       "path": "assets/grammars/languages/scheme.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2265,7 +2337,7 @@
       "path": "assets/grammars/languages/scss.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2276,7 +2348,7 @@
       "path": "assets/grammars/languages/sdbl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2287,7 +2359,7 @@
       "path": "assets/grammars/languages/shaderlab.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2298,7 +2370,7 @@
       "path": "assets/grammars/languages/shellscript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2309,19 +2381,31 @@
       "path": "assets/grammars/languages/shellsession.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
       "language": "smalltalk",
       "grammarName": "smalltalk",
-      "scopeName": "source.smalltalk",
+      "scopeName": "source.smalltalk.gnu",
       "module": "smalltalk.mjs",
       "path": "assets/grammars/languages/smalltalk.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
+    },
+    {
+      "language": "smithy",
+      "grammarName": "smithy",
+      "scopeName": "source.smithy",
+      "module": "smithy.mjs",
+      "path": "assets/grammars/languages/smithy.tmLanguage.json",
+      "source": "@shikijs/langs dist",
+      "package": "@shikijs/langs",
+      "version": "4.4.3",
+      "license": "MIT",
+      "privateDependency": true
     },
     {
       "language": "solidity",
@@ -2331,7 +2415,7 @@
       "path": "assets/grammars/languages/solidity.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2342,7 +2426,7 @@
       "path": "assets/grammars/languages/soy.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2353,7 +2437,7 @@
       "path": "assets/grammars/languages/sparql.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2376,7 +2460,7 @@
       "path": "assets/grammars/languages/splunk.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2387,7 +2471,7 @@
       "path": "assets/grammars/languages/sql.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2398,7 +2482,7 @@
       "path": "assets/grammars/languages/ssh-config.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2421,7 +2505,7 @@
       "path": "assets/grammars/languages/stata.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2432,7 +2516,7 @@
       "path": "assets/grammars/languages/stylus.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2443,7 +2527,7 @@
       "path": "assets/grammars/languages/surrealql.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2454,7 +2538,7 @@
       "path": "assets/grammars/languages/svelte.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2465,7 +2549,7 @@
       "path": "assets/grammars/languages/swift.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2476,7 +2560,7 @@
       "path": "assets/grammars/languages/system-verilog.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2487,7 +2571,7 @@
       "path": "assets/grammars/languages/systemd.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2498,7 +2582,7 @@
       "path": "assets/grammars/languages/talonscript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2509,7 +2593,7 @@
       "path": "assets/grammars/languages/tasl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2520,7 +2604,7 @@
       "path": "assets/grammars/languages/tcl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2531,7 +2615,7 @@
       "path": "assets/grammars/languages/templ.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2542,7 +2626,7 @@
       "path": "assets/grammars/languages/terraform.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2553,7 +2637,7 @@
       "path": "assets/grammars/languages/tex.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2564,7 +2648,7 @@
       "path": "assets/grammars/languages/toml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2575,7 +2659,7 @@
       "path": "assets/grammars/languages/ts-tags.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2586,7 +2670,7 @@
       "path": "assets/grammars/languages/tsv.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2597,7 +2681,7 @@
       "path": "assets/grammars/languages/tsx.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2608,7 +2692,7 @@
       "path": "assets/grammars/languages/turtle.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2619,7 +2703,7 @@
       "path": "assets/grammars/languages/twig.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2630,7 +2714,7 @@
       "path": "assets/grammars/languages/twig-source.tmLanguage.json",
       "source": "@shikijs/langs dist (root-scope alias)",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT",
       "privateDependency": true
     },
@@ -2642,7 +2726,7 @@
       "path": "assets/grammars/languages/typescript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2653,7 +2737,7 @@
       "path": "assets/grammars/languages/typespec.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2664,7 +2748,7 @@
       "path": "assets/grammars/languages/typst.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2675,7 +2759,7 @@
       "path": "assets/grammars/languages/v.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2686,7 +2770,7 @@
       "path": "assets/grammars/languages/vala.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2697,7 +2781,7 @@
       "path": "assets/grammars/languages/vb.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2708,7 +2792,7 @@
       "path": "assets/grammars/languages/verilog.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2719,7 +2803,7 @@
       "path": "assets/grammars/languages/vhdl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2730,7 +2814,7 @@
       "path": "assets/grammars/languages/viml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2741,7 +2825,7 @@
       "path": "assets/grammars/languages/vue.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2752,7 +2836,7 @@
       "path": "assets/grammars/languages/vue-directives.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2763,7 +2847,7 @@
       "path": "assets/grammars/languages/vue-html.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2774,7 +2858,7 @@
       "path": "assets/grammars/languages/vue-interpolations.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2785,7 +2869,7 @@
       "path": "assets/grammars/languages/vue-sfc-style-variable-injection.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2796,7 +2880,7 @@
       "path": "assets/grammars/languages/vue-vine.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2807,7 +2891,7 @@
       "path": "assets/grammars/languages/vyper.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2818,7 +2902,7 @@
       "path": "assets/grammars/languages/wasm.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2841,7 +2925,7 @@
       "path": "assets/grammars/languages/wenyan.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2852,7 +2936,7 @@
       "path": "assets/grammars/languages/wgsl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2863,7 +2947,7 @@
       "path": "assets/grammars/languages/wikitext.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2874,7 +2958,7 @@
       "path": "assets/grammars/languages/wit.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2885,7 +2969,7 @@
       "path": "assets/grammars/languages/wolfram.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2896,7 +2980,7 @@
       "path": "assets/grammars/languages/xml.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2907,7 +2991,7 @@
       "path": "assets/grammars/languages/xsl.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2968,7 +3052,7 @@
       "path": "assets/grammars/languages/zenscript.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     },
     {
@@ -2979,7 +3063,7 @@
       "path": "assets/grammars/languages/zig.tmLanguage.json",
       "source": "@shikijs/langs dist",
       "package": "@shikijs/langs",
-      "version": "3.23.0",
+      "version": "4.4.3",
       "license": "MIT"
     }
   ]

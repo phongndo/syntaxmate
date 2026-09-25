@@ -1246,10 +1246,10 @@ fn sha256(input: &[u8]) -> [u8; 32] {
     }
     padded.extend_from_slice(&bit_len.to_be_bytes());
 
-    for chunk in padded.chunks_exact(64) {
+    for chunk in padded.as_chunks::<64>().0 {
         let mut words = [0u32; 64];
-        for (word, bytes) in words.iter_mut().zip(chunk.chunks_exact(4)) {
-            *word = u32::from_be_bytes(bytes.try_into().expect("four-byte SHA-256 word"));
+        for (word, bytes) in words.iter_mut().zip(chunk.as_chunks::<4>().0) {
+            *word = u32::from_be_bytes(*bytes);
         }
         for index in 16..64 {
             let s0 = words[index - 15].rotate_right(7)
@@ -1291,7 +1291,7 @@ fn sha256(input: &[u8]) -> [u8; 32] {
     }
 
     let mut digest = [0u8; 32];
-    for (bytes, word) in digest.chunks_exact_mut(4).zip(state) {
+    for (bytes, word) in digest.as_chunks_mut::<4>().0.iter_mut().zip(state) {
         bytes.copy_from_slice(&word.to_be_bytes());
     }
     digest

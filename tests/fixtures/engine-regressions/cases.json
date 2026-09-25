@@ -44,5 +44,106 @@
       {"match": "!", "name": "keyword.outside"}
     ]}],
     "sources": ["cd\n>!\nstop\nabd\na>!\nstop\n"]
+  },
+  {
+    "name": "lookahead-capture-outside-match",
+    "grammars": [
+      {
+        "scopeName": "source.outside",
+        "patterns": [
+          {
+            "match": "T\\b(?=\\s*+(\\w+)(?=(x?)\\())",
+            "name": "storage.type",
+            "captures": {
+              "1": {
+                "name": "entity.skipped"
+              },
+              "2": {
+                "patterns": [
+                  {
+                    "match": "x",
+                    "name": "invalid.never"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "match": "U(?=(-)(x?))",
+            "name": "storage.type",
+            "captures": {
+              "1": {
+                "name": "punctuation.dash"
+              },
+              "2": {
+                "patterns": [
+                  {
+                    "match": "x",
+                    "name": "invalid.never"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "match": "(\\w+)(\\()",
+            "captures": {
+              "1": {
+                "name": "entity.call"
+              },
+              "2": {
+                "name": "punctuation.open"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "T f(v)\nU-g(v)\n"
+    ]
+  },
+  {
+    "name": "outside-capture-resumes-at-match-end",
+    "grammars": [
+      {
+        "scopeName": "source.resume",
+        "patterns": [
+          {
+            "match": "int(?=( ))",
+            "name": "storage.type",
+            "captures": {
+              "1": {
+                "patterns": [
+                  {
+                    "match": "x",
+                    "name": "invalid.never"
+                  }
+                ],
+                "name": "punctuation.space"
+              }
+            }
+          },
+          {
+            "match": "__a\\(",
+            "name": "support.attribute"
+          },
+          {
+            "match": "\\s*+(\\w+)(\\()",
+            "captures": {
+              "1": {
+                "name": "entity.call"
+              },
+              "2": {
+                "name": "punctuation.open"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "int __a(v)\n"
+    ]
   }
 ]

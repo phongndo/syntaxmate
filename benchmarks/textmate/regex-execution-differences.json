@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "oracle": "vscode-textmate@9.2.0 + vscode-oniguruma@1.7.0",
+  "oracle": "vscode-textmate@9.3.2 + vscode-oniguruma@1.7.0",
   "sampleSize": 512,
   "differences": {
     "001fbe5c7f675cc214e0ce92dab4cd8e8ec962e608fd28eddfc46fbc6ff8e93a": {
@@ -36,11 +36,6 @@
     "00bf50d710ab3ef4203811abbbc3063e5ad499f537cce54c0a396c95cc59cdc2": {
       "kind": "dormant-capture-end-sentinel",
       "fingerprint": "ce99a1a3d65c57e389a05e6abe080a43117affe4e49139cdbb3c9fe1076cab29",
-      "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
-    },
-    "00f8e472e205b13cddf75e9d3b7a2cc5e46751ebf03234281d7819422885a0bb": {
-      "kind": "dormant-capture-end-sentinel",
-      "fingerprint": "606dadc1238d4074b7af93f35f6606db23fedfc56152df56c96a53d6fc2892a9",
       "rationale": "vscode-oniguruma retains dormant failed-alternative captures as empty ranges at end-of-line; winner and full-match range agree"
     },
     "013f3926fc067a2d4118728a824e242fe96143a451c593119cc347bc8ff8f5a0": {

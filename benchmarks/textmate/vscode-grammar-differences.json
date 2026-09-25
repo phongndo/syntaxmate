@@ -2,16 +2,16 @@
   "schemaVersion": 2,
   "vscodeCommit": "fc3def6774c76082adf699d366f31a557ce5573f",
   "vscodeGrammarScopes": 84,
-  "matchingRootScopes": 65,
+  "matchingRootScopes": 66,
   "canonicalEqual": 9,
-  "canonicalDifferent": 56,
+  "canonicalDifferent": 57,
   "entries": [
     {
       "language": "vb",
       "scopeName": "source.asp.vb.net",
       "syntaxmatePath": "assets/grammars/languages/vb.tmLanguage.json",
       "vscodePath": "extensions/vb/syntaxes/asp-vb-net.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "e0d943c8259b0916f87ca47f9338fa5596ddf5e7e2ce42dd1b90e76197decdce",
+      "syntaxmateCanonicalSha256": "b38624a5d85e06ea6781d56905cea074d303ecc00a294b462fd66fe53894b19a",
       "vscodeCanonicalSha256": "1e9b2a7017b23d2ff52a04cff8097daf71969749d4157527aeae9ed87bf5d0af",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -21,7 +21,7 @@
       "scopeName": "source.batchfile",
       "syntaxmatePath": "assets/grammars/languages/bat.tmLanguage.json",
       "vscodePath": "extensions/bat/syntaxes/batchfile.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "3bff060838b9bf5f86d36af9351340b5129facc3fa857807e534b30171d60b79",
+      "syntaxmateCanonicalSha256": "b792b52f2b37e81e585a7b4635892813c321e0014e07a0116ee1407e22910392",
       "vscodeCanonicalSha256": "7a1cc7c49a7fa6a1e9fa116e175e583b184cd975c6d62105a8662d49cd9c5d90",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -61,7 +61,7 @@
       "scopeName": "source.cpp",
       "syntaxmatePath": "assets/grammars/languages/cpp.tmLanguage.json",
       "vscodePath": "extensions/cpp/syntaxes/cpp.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "f5c7ad398940e53b6ebf789a6d123197e9d48aaf46cac5533502754da6ae7298",
+      "syntaxmateCanonicalSha256": "3d6c133d5a43bdf2335798e701cfaa7f2ad1e3b5f1e875fc66c68bc10d00cf95",
       "vscodeCanonicalSha256": "247462ed033ac636040a4bfea5f1a60b480165f6f0d641f8ac890f1ff955c2bd",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -71,7 +71,7 @@
       "scopeName": "source.cpp.embedded.macro",
       "syntaxmatePath": "assets/grammars/languages/cpp-macro.tmLanguage.json",
       "vscodePath": "extensions/cpp/syntaxes/cpp.embedded.macro.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "88e7542d40c7ecd67a8adfddcf2f14138d722906b553458795a8d8b894133fac",
+      "syntaxmateCanonicalSha256": "79705f4ed8b7d55abfc0ef29d447cbbb33e98315de70cfec3ee0e613883e553a",
       "vscodeCanonicalSha256": "36bbd6d2603339bd5d0eb5ef729e13dfe32b7f671ec1f3d94de71e4611604610",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -81,7 +81,7 @@
       "scopeName": "source.cs",
       "syntaxmatePath": "assets/grammars/languages/csharp.tmLanguage.json",
       "vscodePath": "extensions/csharp/syntaxes/csharp.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "e4d1ebaeab8970b1b60e628e1ea9f2ffc25b188bb4195f9568810f9875537ba0",
+      "syntaxmateCanonicalSha256": "48685acbb9e2bedb973dc90266907d29d4f2be70bd4ae8396c9ee0320a4a7def",
       "vscodeCanonicalSha256": "59f134bbbd05f8122e335a23152a46971637a2f18fd0e0ca5c1a9f59fb26b131",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -91,7 +91,7 @@
       "scopeName": "source.css",
       "syntaxmatePath": "assets/grammars/languages/css.tmLanguage.json",
       "vscodePath": "extensions/css/syntaxes/css.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "8941f8087cadea88ca37ba4efe54f50077c5858e878fc1829efea4d30f2cbb48",
+      "syntaxmateCanonicalSha256": "1fc05256b7851097ec5389fe4241b8c870fe41def4b1fa320c69f80dd875dda6",
       "vscodeCanonicalSha256": "f088fe7a43e79fa1336f2bb7f8e1032b462ae4b6e1a32f1311eb227a069bac58",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -113,6 +113,16 @@
       "vscodePath": "extensions/scss/syntaxes/scss.tmLanguage.json",
       "syntaxmateCanonicalSha256": "9ef3e80d6940ba93ddf9c65c312091c731567a0c2df87dbe579a05045214cbb2",
       "vscodeCanonicalSha256": "de15d51a66c413d530f82432d78a3a79d1bba2208e04ddcc3d81b0d20413de0d",
+      "canonicalEqual": false,
+      "referencePolicy": "source-differs-behavior-audit-required"
+    },
+    {
+      "language": "cuda",
+      "scopeName": "source.cuda-cpp",
+      "syntaxmatePath": "assets/grammars/languages/cuda.tmLanguage.json",
+      "vscodePath": "extensions/cpp/syntaxes/cuda-cpp.tmLanguage.json",
+      "syntaxmateCanonicalSha256": "eab06b207ec7dfbff650602abbb52e55c33f355bbcc7c2c080e502dde7baca2f",
+      "vscodeCanonicalSha256": "6f49f7145a71e6430dd56e11de0945469a689d24dc5238740bb9fd763921593e",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
     },
@@ -171,7 +181,7 @@
       "scopeName": "source.go",
       "syntaxmatePath": "assets/grammars/languages/go.tmLanguage.json",
       "vscodePath": "extensions/go/syntaxes/go.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "3dc0c29d97b57bcd714c29773fc7d4e73512cb18dd1d4e1ceb1eed87a301ab6b",
+      "syntaxmateCanonicalSha256": "b1e48ebdfae4d32615146de2e1799d331d1fc6a63966cdb6e6bd6ff07e209689",
       "vscodeCanonicalSha256": "4545e22030afcb706a587fb546c4c210fc616da73bc8067f1b320d1633b8f7ea",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -291,7 +301,7 @@
       "scopeName": "source.julia",
       "syntaxmatePath": "assets/grammars/languages/julia.tmLanguage.json",
       "vscodePath": "extensions/julia/syntaxes/julia.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "3f8f7c03f825f45f66ba2c1c2acf8eeef9f5edc75bb50a2a18e5a198e1751e22",
+      "syntaxmateCanonicalSha256": "b7ac796c5c269384b348b94af82dc0ec9313e4170608b1783166ac07f62ed4e7",
       "vscodeCanonicalSha256": "9caa2d6705d303d95d7202a41900bb01d58a63f92b88f11824bef0ee09fbd32f",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -371,7 +381,7 @@
       "scopeName": "source.powershell",
       "syntaxmatePath": "assets/grammars/languages/powershell.tmLanguage.json",
       "vscodePath": "extensions/powershell/syntaxes/powershell.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "c38f930e86f6377520a2760f14e957717e3e0aaafb44a634aacf55d708270fda",
+      "syntaxmateCanonicalSha256": "7689b7d5ae4046e16f55e7e6519e6dd0616a7ceb040aada036b0c553700df751",
       "vscodeCanonicalSha256": "c355555aa1a8995b6f2eaed842c669a8f0819d0f0410ef1ecd097b7b4d74ae04",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -421,7 +431,7 @@
       "scopeName": "source.ruby",
       "syntaxmatePath": "assets/grammars/languages/ruby.tmLanguage.json",
       "vscodePath": "extensions/ruby/syntaxes/ruby.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "53e6a9bd5878465e2d14889abfc4b3050380d1e8b751163a78486f1729030aca",
+      "syntaxmateCanonicalSha256": "1a565295a9c460603e465afd223b9f73f79a94533fe2c97496f431be494babea",
       "vscodeCanonicalSha256": "1269c00f4c7d0384f688f329cf35a23721311b2f7d277fa61b52e678709b6d4a",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -461,7 +471,7 @@
       "scopeName": "source.sql",
       "syntaxmatePath": "assets/grammars/languages/sql.tmLanguage.json",
       "vscodePath": "extensions/sql/syntaxes/sql.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "ba2f88f9ac0291bf277230adb737baa52da4317e71099d0fa3060b539268d671",
+      "syntaxmateCanonicalSha256": "6dc6f083487fef683008068b5f5016437e3913af452c7fb221603d45db9901bc",
       "vscodeCanonicalSha256": "1e98d901d43e8884d58671438ec86ff2fda765d91581000d5a00e6b2f75f0e71",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -471,7 +481,7 @@
       "scopeName": "source.swift",
       "syntaxmatePath": "assets/grammars/languages/swift.tmLanguage.json",
       "vscodePath": "extensions/swift/syntaxes/swift.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "b7bf1e167e939539c796c7b4da5695ee16c4607320ffbd7a83ce35354c6fcc6f",
+      "syntaxmateCanonicalSha256": "543d104cb3cd36eb0e37c6a8b217185cdeb5bb3fb627a8dbfd40a020a8de2f11",
       "vscodeCanonicalSha256": "8fad8213ed8e11dbd00f4c905bacbe4d5f59fce55a9930b465c352113c1dcd33",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"
@@ -631,7 +641,7 @@
       "scopeName": "text.tex.latex",
       "syntaxmatePath": "assets/grammars/languages/latex.tmLanguage.json",
       "vscodePath": "extensions/latex/syntaxes/LaTeX.tmLanguage.json",
-      "syntaxmateCanonicalSha256": "95419d1cbd434af00c6e786664739028b9dd71419bc6a97b8b6c659403093be4",
+      "syntaxmateCanonicalSha256": "d31109548d571c0cf4fd07da5bc2daebe534e6ec9bbbb59c99a757a16c147d41",
       "vscodeCanonicalSha256": "7a65ec9e0d6ce8bff625ff321dfdfa72656a236c74471a44df6f44c246bd8c52",
       "canonicalEqual": false,
       "referencePolicy": "source-differs-behavior-audit-required"

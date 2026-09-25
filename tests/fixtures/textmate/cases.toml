@@ -1598,14 +1598,14 @@ golden = "tests/fixtures/textmate/common-lisp/stress.golden.jsonl"
 
 [[case]]
 language = "coq"
-scope = "source.coq"
+scope = "source.rocq"
 grammar = "assets/grammars/languages/coq.tmLanguage.json"
 fixture = "tests/fixtures/textmate/coq/basic.v"
 golden = "tests/fixtures/textmate/coq/basic.golden.jsonl"
 
 [[case]]
 language = "coq"
-scope = "source.coq"
+scope = "source.rocq"
 grammar = "assets/grammars/languages/coq.tmLanguage.json"
 fixture = "tests/fixtures/textmate/coq/stress.v"
 golden = "tests/fixtures/textmate/coq/stress.golden.jsonl"
@@ -1633,10 +1633,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
 
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
-
 [[case]]
 language = "cpp"
 scope = "source.cpp"
@@ -1659,10 +1655,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 [[case.embedded]]
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
 
 [[case]]
 language = "cpp"
@@ -1687,10 +1679,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
 
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
-
 [[case]]
 language = "cpp-macro"
 scope = "source.cpp.embedded.macro"
@@ -1714,10 +1702,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
 
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
-
 [[case]]
 language = "cpp-macro"
 scope = "source.cpp.embedded.macro"
@@ -1740,10 +1724,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 [[case.embedded]]
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
 
 [[case]]
 language = "crystal"
@@ -1883,10 +1863,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
 
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
-
 [[case]]
 language = "cuda"
 scope = "source.cuda-cpp"
@@ -1913,10 +1889,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 [[case.embedded]]
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
 
 [[case]]
 language = "cue"
@@ -3489,7 +3461,7 @@ grammar = "assets/grammars/languages/html.tmLanguage.json"
 
 [[case]]
 language = "es-tag-sql"
-scope = "inline.es6-sql"
+scope = "inline.tagged-template-sql"
 grammar = "assets/grammars/languages/es-tag-sql.tmLanguage.json"
 fixture = "tests/fixtures/textmate/es-tag-sql/basic.js"
 golden = "tests/fixtures/textmate/es-tag-sql/basic.golden.jsonl"
@@ -3504,7 +3476,7 @@ grammar = "assets/grammars/languages/typescript.tmLanguage.json"
 
 [[case]]
 language = "es-tag-sql"
-scope = "inline.es6-sql"
+scope = "inline.tagged-template-sql"
 grammar = "assets/grammars/languages/es-tag-sql.tmLanguage.json"
 fixture = "tests/fixtures/textmate/es-tag-sql/stress.js"
 golden = "tests/fixtures/textmate/es-tag-sql/stress.golden.jsonl"
@@ -10606,10 +10578,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
 
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
-
 [[case]]
 language = "opencl"
 scope = "source.opencl"
@@ -10636,10 +10604,6 @@ grammar = "assets/grammars/languages/glsl.tmLanguage.json"
 [[case.embedded]]
 scope = "source.regexp.python"
 grammar = "assets/grammars/languages/regexp.tmLanguage.json"
-
-[[case.embedded]]
-scope = "source.sql"
-grammar = "assets/grammars/languages/sql.tmLanguage.json"
 
 [[case]]
 language = "openscad"
@@ -12921,14 +12885,14 @@ golden = "tests/fixtures/textmate/shellsession/stress.golden.jsonl"
 
 [[case]]
 language = "smalltalk"
-scope = "source.smalltalk"
+scope = "source.smalltalk.gnu"
 grammar = "assets/grammars/languages/smalltalk.tmLanguage.json"
 fixture = "tests/fixtures/textmate/smalltalk/basic.st"
 golden = "tests/fixtures/textmate/smalltalk/basic.golden.jsonl"
 
 [[case]]
 language = "smalltalk"
-scope = "source.smalltalk"
+scope = "source.smalltalk.gnu"
 grammar = "assets/grammars/languages/smalltalk.tmLanguage.json"
 fixture = "tests/fixtures/textmate/smalltalk/stress.st"
 golden = "tests/fixtures/textmate/smalltalk/stress.golden.jsonl"
@@ -14607,12 +14571,604 @@ grammar = "assets/grammars/languages/typst.tmLanguage.json"
 fixture = "tests/fixtures/textmate/typst/basic.typ"
 golden = "tests/fixtures/textmate/typst/basic.golden.jsonl"
 
+[[case.embedded]]
+scope = "source.abap"
+grammar = "assets/grammars/languages/abap.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.asp.vb.net"
+grammar = "assets/grammars/languages/vb.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.batchfile"
+grammar = "assets/grammars/languages/bat.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.c"
+grammar = "assets/grammars/languages/c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.clojure"
+grammar = "assets/grammars/languages/clojure.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.coffee"
+grammar = "assets/grammars/languages/coffee.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp"
+grammar = "assets/grammars/languages/cpp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/grammars/languages/cpp-macro.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cs"
+grammar = "assets/grammars/languages/csharp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css"
+grammar = "assets/grammars/languages/css.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css.less"
+grammar = "assets/grammars/languages/less.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css.scss"
+grammar = "assets/grammars/languages/scss.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.dart"
+grammar = "assets/grammars/languages/dart.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.diff"
+grammar = "assets/grammars/languages/diff.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.dockerfile"
+grammar = "assets/grammars/languages/docker.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.elixir"
+grammar = "assets/grammars/languages/elixir.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.erlang"
+grammar = "assets/grammars/languages/erlang.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.fsharp"
+grammar = "assets/grammars/languages/fsharp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.glsl"
+grammar = "assets/grammars/languages/glsl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.gnuplot"
+grammar = "assets/grammars/languages/gnuplot.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.go"
+grammar = "assets/grammars/languages/go.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.graphql"
+grammar = "assets/grammars/languages/graphql.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.groovy"
+grammar = "assets/grammars/languages/groovy.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.haskell"
+grammar = "assets/grammars/languages/haskell.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ignore"
+grammar = "assets/grammars/languages/ignore.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ini"
+grammar = "assets/grammars/languages/ini.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.java"
+grammar = "assets/grammars/languages/java.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js"
+grammar = "assets/grammars/languages/javascript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js.jsx"
+grammar = "assets/grammars/languages/jsx.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js.regexp"
+grammar = "assets/grammars/languages/js-regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.json"
+grammar = "assets/grammars/languages/json.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.json.comments"
+grammar = "assets/grammars/languages/jsonc.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.json.lines"
+grammar = "assets/grammars/languages/jsonl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.julia"
+grammar = "assets/grammars/languages/julia.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.lua"
+grammar = "assets/grammars/languages/lua.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.makefile"
+grammar = "assets/grammars/languages/make.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.objc"
+grammar = "assets/grammars/languages/objective-c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.perl"
+grammar = "assets/grammars/languages/perl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.perl.6"
+grammar = "assets/grammars/languages/raku.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.php"
+grammar = "assets/grammars/languages/php.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.powershell"
+grammar = "assets/grammars/languages/powershell.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.python"
+grammar = "assets/grammars/languages/python.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.r"
+grammar = "assets/grammars/languages/r.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.regexp.python"
+grammar = "assets/grammars/languages/regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.rst"
+grammar = "assets/grammars/languages/rst.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ruby"
+grammar = "assets/grammars/languages/ruby.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.rust"
+grammar = "assets/grammars/languages/rust.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sass"
+grammar = "assets/grammars/languages/sass.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.scala"
+grammar = "assets/grammars/languages/scala.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.shell"
+grammar = "assets/grammars/languages/shellscript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sql"
+grammar = "assets/grammars/languages/sql.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.swift"
+grammar = "assets/grammars/languages/swift.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.systemverilog"
+grammar = "assets/grammars/languages/system-verilog.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ts"
+grammar = "assets/grammars/languages/typescript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.tsx"
+grammar = "assets/grammars/languages/tsx.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.twig"
+grammar = "assets/grammars/languages/twig-source.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.verilog"
+grammar = "assets/grammars/languages/verilog.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.yaml"
+grammar = "assets/grammars/languages/yaml.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.yang"
+grammar = "assets/grammars/languages/yang.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.bibtex"
+grammar = "assets/grammars/languages/bibtex.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.git-commit"
+grammar = "assets/grammars/languages/git-commit.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.git-rebase"
+grammar = "assets/grammars/languages/git-rebase.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.haml"
+grammar = "assets/grammars/languages/haml.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.basic"
+grammar = "assets/grammars/languages/html.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.derivative"
+grammar = "assets/grammars/languages/html-derivative.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.handlebars"
+grammar = "assets/grammars/languages/handlebars.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.markdown"
+grammar = "assets/grammars/languages/markdown.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.twig"
+grammar = "assets/grammars/languages/twig.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.log"
+grammar = "assets/grammars/languages/log.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.pug"
+grammar = "assets/grammars/languages/pug.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.tex"
+grammar = "assets/grammars/languages/tex.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.tex.latex"
+grammar = "assets/grammars/languages/latex.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.xml"
+grammar = "assets/grammars/languages/xml.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.xml.xsl"
+grammar = "assets/grammars/languages/xsl.tmLanguage.json"
+
 [[case]]
 language = "typst"
 scope = "source.typst"
 grammar = "assets/grammars/languages/typst.tmLanguage.json"
 fixture = "tests/fixtures/textmate/typst/stress.typ"
 golden = "tests/fixtures/textmate/typst/stress.golden.jsonl"
+
+[[case.embedded]]
+scope = "source.abap"
+grammar = "assets/grammars/languages/abap.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.asp.vb.net"
+grammar = "assets/grammars/languages/vb.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.batchfile"
+grammar = "assets/grammars/languages/bat.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.c"
+grammar = "assets/grammars/languages/c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.clojure"
+grammar = "assets/grammars/languages/clojure.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.coffee"
+grammar = "assets/grammars/languages/coffee.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp"
+grammar = "assets/grammars/languages/cpp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cpp.embedded.macro"
+grammar = "assets/grammars/languages/cpp-macro.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.cs"
+grammar = "assets/grammars/languages/csharp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css"
+grammar = "assets/grammars/languages/css.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css.less"
+grammar = "assets/grammars/languages/less.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.css.scss"
+grammar = "assets/grammars/languages/scss.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.dart"
+grammar = "assets/grammars/languages/dart.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.diff"
+grammar = "assets/grammars/languages/diff.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.dockerfile"
+grammar = "assets/grammars/languages/docker.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.elixir"
+grammar = "assets/grammars/languages/elixir.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.erlang"
+grammar = "assets/grammars/languages/erlang.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.fsharp"
+grammar = "assets/grammars/languages/fsharp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.glsl"
+grammar = "assets/grammars/languages/glsl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.gnuplot"
+grammar = "assets/grammars/languages/gnuplot.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.go"
+grammar = "assets/grammars/languages/go.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.graphql"
+grammar = "assets/grammars/languages/graphql.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.groovy"
+grammar = "assets/grammars/languages/groovy.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.haskell"
+grammar = "assets/grammars/languages/haskell.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ignore"
+grammar = "assets/grammars/languages/ignore.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ini"
+grammar = "assets/grammars/languages/ini.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.java"
+grammar = "assets/grammars/languages/java.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js"
+grammar = "assets/grammars/languages/javascript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js.jsx"
+grammar = "assets/grammars/languages/jsx.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.js.regexp"
+grammar = "assets/grammars/languages/js-regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.json"
+grammar = "assets/grammars/languages/json.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.json.comments"
+grammar = "assets/grammars/languages/jsonc.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.json.lines"
+grammar = "assets/grammars/languages/jsonl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.julia"
+grammar = "assets/grammars/languages/julia.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.lua"
+grammar = "assets/grammars/languages/lua.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.makefile"
+grammar = "assets/grammars/languages/make.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.objc"
+grammar = "assets/grammars/languages/objective-c.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.perl"
+grammar = "assets/grammars/languages/perl.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.perl.6"
+grammar = "assets/grammars/languages/raku.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.php"
+grammar = "assets/grammars/languages/php.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.powershell"
+grammar = "assets/grammars/languages/powershell.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.python"
+grammar = "assets/grammars/languages/python.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.r"
+grammar = "assets/grammars/languages/r.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.regexp.python"
+grammar = "assets/grammars/languages/regexp.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.rst"
+grammar = "assets/grammars/languages/rst.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ruby"
+grammar = "assets/grammars/languages/ruby.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.rust"
+grammar = "assets/grammars/languages/rust.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sass"
+grammar = "assets/grammars/languages/sass.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.scala"
+grammar = "assets/grammars/languages/scala.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.shell"
+grammar = "assets/grammars/languages/shellscript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.sql"
+grammar = "assets/grammars/languages/sql.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.swift"
+grammar = "assets/grammars/languages/swift.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.systemverilog"
+grammar = "assets/grammars/languages/system-verilog.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.ts"
+grammar = "assets/grammars/languages/typescript.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.tsx"
+grammar = "assets/grammars/languages/tsx.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.twig"
+grammar = "assets/grammars/languages/twig-source.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.verilog"
+grammar = "assets/grammars/languages/verilog.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.yaml"
+grammar = "assets/grammars/languages/yaml.tmLanguage.json"
+
+[[case.embedded]]
+scope = "source.yang"
+grammar = "assets/grammars/languages/yang.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.bibtex"
+grammar = "assets/grammars/languages/bibtex.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.git-commit"
+grammar = "assets/grammars/languages/git-commit.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.git-rebase"
+grammar = "assets/grammars/languages/git-rebase.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.haml"
+grammar = "assets/grammars/languages/haml.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.basic"
+grammar = "assets/grammars/languages/html.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.derivative"
+grammar = "assets/grammars/languages/html-derivative.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.handlebars"
+grammar = "assets/grammars/languages/handlebars.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.markdown"
+grammar = "assets/grammars/languages/markdown.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.html.twig"
+grammar = "assets/grammars/languages/twig.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.log"
+grammar = "assets/grammars/languages/log.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.pug"
+grammar = "assets/grammars/languages/pug.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.tex"
+grammar = "assets/grammars/languages/tex.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.tex.latex"
+grammar = "assets/grammars/languages/latex.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.xml"
+grammar = "assets/grammars/languages/xml.tmLanguage.json"
+
+[[case.embedded]]
+scope = "text.xml.xsl"
+grammar = "assets/grammars/languages/xsl.tmLanguage.json"
 
 [[case]]
 language = "v"

@@ -1,4 +1,4 @@
-amends "package://github.com/jdx/hk/releases/download/v1.54.0/hk@1.54.0#/Config.pkl"
+amends "package://github.com/jdx/hk/releases/download/v2.2.0/hk@2.2.0#/Config.pkl"
 
 local languageDocGlobs = List(
   "README.md",
@@ -40,12 +40,8 @@ local checks = new Mapping<String, Step | Group> {
   }
 }
 
-hooks {
-  ["pre-commit"] {
-    stash = "git"
-    steps = checks
-  }
+steps = checks
 
+hooks {
   ["pre-push"] { steps = checks }
-  ["check"] { steps = checks }
 }

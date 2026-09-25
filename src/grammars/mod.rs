@@ -208,7 +208,7 @@ mod tests {
         // Full public catalog plus private dependency blobs. `coverage.toml`
         // decides which embedded blobs are public catalog entries.
         assert_eq!(bundle.languages.len(), 264);
-        assert_eq!(bundle.grammar_blobs.len(), 268);
+        assert_eq!(bundle.grammar_blobs.len(), 275);
         assert!(
             bundle
                 .grammar_blob_for_scope("source.cpp.embedded.macro")
