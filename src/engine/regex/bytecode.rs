@@ -5,7 +5,9 @@
 //! caller can reuse its allocations across candidate attempts.
 
 use super::analysis::RegexAnalysis;
-use super::ast::{Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, RegexFlags};
+use super::ast::{
+    Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, PerlClassKind, RegexFlags,
+};
 use super::backtrack::{
     BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
     is_cpp_space_comment_separator, literal_byte_width, match_literal_end, previous_char,
@@ -261,6 +263,227 @@ impl CompiledClass {
         };
         bitmap[byte as usize / 64] & (1u64 << (byte % 64)) != 0
     }
+}
+
+/// Conservative set of characters that can start a match, used to prove
+/// that a greedy repeat never needs to give characters back. ASCII is exact
+/// per byte; non-ASCII is tracked only as whitespace versus everything else,
+/// which is enough to separate identifier and number classes from spacing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FirstChars {
+    ascii: AsciiMask,
+    non_ascii: u8,
+}
+
+impl FirstChars {
+    const NON_ASCII_SPACE: u8 = 1 << 0;
+    const NON_ASCII_OTHER: u8 = 1 << 1;
+    const NON_ASCII_ANY: u8 = Self::NON_ASCII_SPACE | Self::NON_ASCII_OTHER;
+    const NONE: Self = Self {
+        ascii: [0; 2],
+        non_ascii: 0,
+    };
+    const ALL: Self = Self {
+        ascii: [u64::MAX; 2],
+        non_ascii: Self::NON_ASCII_ANY,
+    };
+
+    fn union(&mut self, other: &Self) {
+        self.ascii[0] |= other.ascii[0];
+        self.ascii[1] |= other.ascii[1];
+        self.non_ascii |= other.non_ascii;
+    }
+
+    fn intersect(&mut self, other: &Self) {
+        self.ascii[0] &= other.ascii[0];
+        self.ascii[1] &= other.ascii[1];
+        self.non_ascii &= other.non_ascii;
+    }
+
+    fn is_disjoint(&self, other: &Self) -> bool {
+        self.ascii[0] & other.ascii[0] == 0
+            && self.ascii[1] & other.ascii[1] == 0
+            && self.non_ascii & other.non_ascii == 0
+    }
+
+    fn non_ascii_kind(ch: char) -> u8 {
+        debug_assert!(!ch.is_ascii());
+        if ch.is_whitespace() {
+            Self::NON_ASCII_SPACE
+        } else {
+            Self::NON_ASCII_OTHER
+        }
+    }
+
+    fn of_literal(literal: &str, case_insensitive: bool) -> Self {
+        let Some(first) = literal.chars().next() else {
+            return Self::NONE;
+        };
+        let mut chars = Self::NONE;
+        if !first.is_ascii() {
+            if case_insensitive {
+                // Full case folding can match multi-character ASCII text.
+                return Self::ALL;
+            }
+            chars.non_ascii = Self::non_ascii_kind(first);
+            return chars;
+        }
+        let byte = first as u8;
+        ascii_mask_set(&mut chars.ascii, byte);
+        if case_insensitive {
+            ascii_mask_set(&mut chars.ascii, byte.to_ascii_lowercase());
+            ascii_mask_set(&mut chars.ascii, byte.to_ascii_uppercase());
+            // Letters such as the Kelvin sign and long s fold to ASCII.
+            chars.non_ascii = Self::NON_ASCII_OTHER;
+        }
+        chars
+    }
+
+    fn of_class(class: &CompiledClass, case_insensitive: bool) -> Self {
+        Self {
+            ascii: if case_insensitive {
+                class.ascii_insensitive
+            } else {
+                class.ascii_sensitive
+            },
+            non_ascii: class_non_ascii_kinds(&class.source, case_insensitive),
+        }
+    }
+
+    /// First characters of an AST node and whether it can match empty.
+    fn of_ast(ast: &Ast, flags: RegexFlags) -> (Self, bool) {
+        match ast {
+            Ast::Empty | Ast::Anchor(_) | Ast::Look { .. } => (Self::NONE, true),
+            Ast::Literal(literal) => (
+                Self::of_literal(literal, flags.case_insensitive),
+                literal.is_empty(),
+            ),
+            Ast::Dot | Ast::Grapheme => (Self::ALL, false),
+            Ast::Class(class) => {
+                let (sensitive, insensitive) = ascii_class_masks(class);
+                let chars = Self {
+                    ascii: if flags.case_insensitive {
+                        insensitive
+                    } else {
+                        sensitive
+                    },
+                    non_ascii: class_non_ascii_kinds(class, flags.case_insensitive),
+                };
+                (chars, false)
+            }
+            Ast::Concat(nodes) => {
+                let mut chars = Self::NONE;
+                for node in nodes {
+                    let (first, nullable) = Self::of_ast(node, flags);
+                    chars.union(&first);
+                    if !nullable {
+                        return (chars, false);
+                    }
+                }
+                (chars, true)
+            }
+            Ast::Alternation(branches) => {
+                let mut chars = Self::NONE;
+                let mut nullable = false;
+                for branch in branches {
+                    let (first, branch_nullable) = Self::of_ast(branch, flags);
+                    chars.union(&first);
+                    nullable |= branch_nullable;
+                }
+                (chars, nullable)
+            }
+            Ast::Repeat { node, min, max, .. } => {
+                if *max == Some(0) {
+                    return (Self::NONE, true);
+                }
+                let (chars, nullable) = Self::of_ast(node, flags);
+                (chars, nullable || *min == 0)
+            }
+            Ast::Group { child, .. } => Self::of_ast(child, flags),
+            Ast::Flags {
+                flags: local,
+                child,
+            } => Self::of_ast(child, *local),
+            Ast::Backref(_)
+            | Ast::Subroutine(_)
+            | Ast::Conditional { .. }
+            | Ast::Unsupported(_) => (Self::ALL, true),
+        }
+    }
+}
+
+/// Non-ASCII kinds a class can match. Intersections only narrow the first
+/// union, so ignoring them stays conservative.
+fn class_non_ascii_kinds(class: &CharClass, case_insensitive: bool) -> u8 {
+    if class.negated {
+        return FirstChars::NON_ASCII_ANY;
+    }
+    class.atoms.iter().fold(0, |kinds, atom| {
+        kinds | atom_non_ascii_kinds(atom, case_insensitive)
+    })
+}
+
+fn atom_non_ascii_kinds(atom: &ClassAtom, case_insensitive: bool) -> u8 {
+    // Case-insensitive ASCII atoms can match non-ASCII letters that fold to
+    // them; whitespace has no case mapping.
+    let folded = if case_insensitive {
+        FirstChars::NON_ASCII_OTHER
+    } else {
+        0
+    };
+    match atom {
+        ClassAtom::Char(ch) if ch.is_ascii() => folded,
+        ClassAtom::Char(ch) if !case_insensitive => FirstChars::non_ascii_kind(*ch),
+        ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => folded,
+        ClassAtom::Char(_) | ClassAtom::Range(..) => FirstChars::NON_ASCII_ANY,
+        ClassAtom::Perl(kind) => match kind {
+            PerlClassKind::Digit
+            | PerlClassKind::HorizontalSpace
+            | PerlClassKind::VerticalSpace => 0,
+            PerlClassKind::Space => FirstChars::NON_ASCII_SPACE,
+            PerlClassKind::NotSpace | PerlClassKind::Word => FirstChars::NON_ASCII_OTHER,
+            PerlClassKind::NotDigit
+            | PerlClassKind::NotWord
+            | PerlClassKind::NotHorizontalSpace
+            | PerlClassKind::NotVerticalSpace
+            | PerlClassKind::NotNewline => FirstChars::NON_ASCII_ANY,
+        },
+        ClassAtom::Posix {
+            name,
+            negated: false,
+        } => posix_non_ascii_kinds(name),
+        ClassAtom::Posix { negated: true, .. } | ClassAtom::Unicode { .. } => {
+            FirstChars::NON_ASCII_ANY
+        }
+        ClassAtom::Nested(class) => class_non_ascii_kinds(class, case_insensitive),
+    }
+}
+
+/// Non-ASCII kinds matched by a POSIX class, mirroring
+/// `backtrack::posix_class_predicate` (unknown names match nothing).
+fn posix_non_ascii_kinds(name: &str) -> u8 {
+    const SPACE: u8 = FirstChars::NON_ASCII_SPACE;
+    const OTHER: u8 = FirstChars::NON_ASCII_OTHER;
+    const KINDS: [(&str, u8); 14] = [
+        ("alnum", OTHER),
+        ("alpha", OTHER),
+        ("ascii", 0),
+        ("blank", 0),
+        ("cntrl", SPACE | OTHER),
+        ("digit", 0),
+        ("graph", OTHER),
+        ("lower", OTHER),
+        ("print", SPACE | OTHER),
+        ("punct", 0),
+        ("space", SPACE),
+        ("upper", OTHER),
+        ("word", OTHER),
+        ("xdigit", 0),
+    ];
+    KINDS
+        .iter()
+        .find(|(class, _)| class.eq_ignore_ascii_case(name))
+        .map_or(0, |(_, kinds)| *kinds)
 }
 
 type AsciiMask = [u64; 2];
@@ -1610,7 +1833,7 @@ fn boundary_at_or_before(line: &str, mut position: usize, earliest: usize) -> Op
     }
 }
 
-struct Compiler {
+struct Compiler<'a> {
     instructions: Vec<Instruction>,
     literals: Vec<String>,
     literal_tries: Vec<LiteralTrie>,
@@ -1619,9 +1842,27 @@ struct Compiler {
     capture_layout: Vec<u32>,
     named_captures: std::collections::BTreeMap<String, u32>,
     routine_entries: std::collections::BTreeMap<u32, ProgramCounter>,
+    /// Loops whose body is being compiled. Their `Repeat` instruction is
+    /// still a placeholder, so continuation analysis reads the loop's exit
+    /// and body from here instead.
+    open_repeats: Vec<OpenRepeat<'a>>,
 }
 
-impl Compiler {
+struct OpenRepeat<'a> {
+    placeholder: ProgramCounter,
+    exit: ProgramCounter,
+    body: &'a Ast,
+    flags: RegexFlags,
+    /// `Some(1)` loops exit after their only iteration.
+    max: Option<usize>,
+}
+
+/// Bounds the bytecode walked when proving a repeat can be made possessive.
+/// Continuations almost always reveal their first consumer within a few
+/// instructions; giving up early only forgoes the optimization.
+const POSSESSIVE_CONTINUATION_STEPS: u32 = 64;
+
+impl<'a> Compiler<'a> {
     fn new() -> Self {
         Self {
             instructions: Vec::new(),
@@ -1632,6 +1873,7 @@ impl Compiler {
             capture_layout: Vec::new(),
             named_captures: std::collections::BTreeMap::new(),
             routine_entries: std::collections::BTreeMap::new(),
+            open_repeats: Vec::new(),
         }
     }
 
@@ -1642,7 +1884,7 @@ impl Compiler {
         }
     }
 
-    fn compile(mut self, parsed: &ParsedRegex) -> Result<Program, CompileError> {
+    fn compile(mut self, parsed: &'a ParsedRegex) -> Result<Program, CompileError> {
         self.named_captures.clone_from(&parsed.named_captures);
         self.instructions
             .reserve(parsed.analysis().instruction_capacity_hint());
@@ -1675,7 +1917,7 @@ impl Compiler {
 
     fn compile_node(
         &mut self,
-        ast: &Ast,
+        ast: &'a Ast,
         flags: RegexFlags,
         next: ProgramCounter,
     ) -> Result<ProgramCounter, CompileError> {
@@ -1796,6 +2038,28 @@ impl Compiler {
                         next,
                     }));
                 }
+                // Automatic possessification (as Oniguruma does): when no
+                // character the repeated node can start with can begin a
+                // successful continuation, giving characters back can never
+                // succeed, so the greedy repeat is equivalent to its
+                // possessive form and needs no backtrack frame per iteration.
+                if !*possessive
+                    && *greedy
+                    && *max != Some(*min)
+                    && *max != Some(0)
+                    && let Some((scan, scan_flags)) = self.scan_node(node, flags)
+                    && let Some(continuation) = self.continuation_first_chars(next)
+                    && self
+                        .scan_first_chars(scan, scan_flags)
+                        .is_disjoint(&continuation)
+                {
+                    return Ok(self.push(Instruction::ScanRepeat {
+                        node: scan,
+                        flags: scan_flags.into(),
+                        bounds: RepeatBounds::new(*min, *max)?,
+                        next,
+                    }));
+                }
                 let exit = if cut {
                     self.push(Instruction::CutEnd { next })
                 } else {
@@ -1813,7 +2077,16 @@ impl Compiler {
                         .ok_or(CompileError::TableOverflow)?;
                     let repeat = self.push(Instruction::Fail);
                     let end = self.push(Instruction::RepeatEnd { slot, repeat });
-                    let body = self.compile_node(node, flags, end)?;
+                    self.open_repeats.push(OpenRepeat {
+                        placeholder: repeat,
+                        exit,
+                        body: node,
+                        flags,
+                        max: *max,
+                    });
+                    let body = self.compile_node(node, flags, end);
+                    self.open_repeats.pop();
+                    let body = body?;
                     self.instructions[arena_index(repeat)] = Instruction::Repeat {
                         slot,
                         bounds: RepeatBounds::new(*min, *max)?,
@@ -1971,6 +2244,145 @@ impl Compiler {
                 }
             }
             _ => None,
+        }
+    }
+
+    fn scan_first_chars(&self, node: ScanNode, flags: RegexFlags) -> FirstChars {
+        match node {
+            ScanNode::Literal(id) => {
+                FirstChars::of_literal(&self.literals[id.0 as usize], flags.case_insensitive)
+            }
+            ScanNode::Class(id) => {
+                FirstChars::of_class(&self.classes[id.0 as usize], flags.case_insensitive)
+            }
+            ScanNode::Any => FirstChars::ALL,
+        }
+    }
+
+    /// Superset of the characters a successful match can consume first when
+    /// execution resumes at `pc`. `None` means a match may succeed without
+    /// that first character being constrained (for example by accepting
+    /// immediately) or that the continuation could not be analyzed.
+    fn continuation_first_chars(&self, pc: ProgramCounter) -> Option<FirstChars> {
+        let mut steps = POSSESSIVE_CONTINUATION_STEPS;
+        self.first_chars_from(pc, &mut steps, &mut Vec::new())
+    }
+
+    fn first_chars_from(
+        &self,
+        pc: ProgramCounter,
+        steps: &mut u32,
+        visited: &mut Vec<ProgramCounter>,
+    ) -> Option<FirstChars> {
+        // A revisited instruction adds no new first consumer to the union
+        // already being accumulated for it.
+        if visited.contains(&pc) {
+            return Some(FirstChars::NONE);
+        }
+        *steps = steps.checked_sub(1)?;
+        visited.push(pc);
+        match &self.instructions[arena_index(pc)] {
+            Instruction::Literal { id, flags, next } => {
+                let literal = &self.literals[id.0 as usize];
+                if literal.is_empty() {
+                    self.first_chars_from(*next, steps, visited)
+                } else {
+                    Some(FirstChars::of_literal(literal, flags.case_insensitive()))
+                }
+            }
+            Instruction::Class { id, flags, .. } => Some(FirstChars::of_class(
+                &self.classes[id.0 as usize],
+                flags.case_insensitive(),
+            )),
+            Instruction::Any { .. } => Some(FirstChars::ALL),
+            Instruction::ScanRepeat {
+                node,
+                flags,
+                bounds,
+                next,
+            } => {
+                let mut first = self.scan_first_chars(*node, flags.regex());
+                if bounds.min == 0 {
+                    first.union(&self.first_chars_from(*next, steps, visited)?);
+                }
+                Some(first)
+            }
+            Instruction::Anchor { next, .. }
+            | Instruction::RepeatInit { next, .. }
+            | Instruction::SaveStart { next, .. }
+            | Instruction::SaveEnd { next, .. }
+            | Instruction::CutStart { next }
+            | Instruction::CutEnd { next } => self.first_chars_from(*next, steps, visited),
+            Instruction::Jump { target } => self.first_chars_from(*target, steps, visited),
+            Instruction::Split {
+                preferred,
+                alternate,
+            } => {
+                let mut first = self.first_chars_from(*preferred, steps, visited)?;
+                first.union(&self.first_chars_from(*alternate, steps, visited)?);
+                Some(first)
+            }
+            Instruction::Repeat { body, next, .. } => {
+                let mut first = self.first_chars_from(*body, steps, visited)?;
+                first.union(&self.first_chars_from(*next, steps, visited)?);
+                Some(first)
+            }
+            Instruction::RepeatEnd { repeat, .. } => {
+                if matches!(
+                    self.instructions[arena_index(*repeat)],
+                    Instruction::Repeat { .. }
+                ) {
+                    return self.first_chars_from(*repeat, steps, visited);
+                }
+                let open = self
+                    .open_repeats
+                    .iter()
+                    .rev()
+                    .find(|open| open.placeholder == *repeat)?;
+                let mut first = self.first_chars_from(open.exit, steps, visited)?;
+                if open.max != Some(1) {
+                    first.union(&FirstChars::of_ast(open.body, open.flags).0);
+                }
+                Some(first)
+            }
+            Instruction::Assert {
+                entry,
+                positive,
+                direction,
+                next,
+            } => {
+                if !*positive || !direction.is_ahead() {
+                    // Negative and behind assertions only narrow the paths
+                    // through `next`.
+                    return self.first_chars_from(*next, steps, visited);
+                }
+                // A positive lookahead must match at the same position as
+                // the continuation, so both constraints hold for that
+                // character. Instructions reached under this intersection
+                // contribute only narrowed sets, so they must not be marked
+                // as fully accounted for outside it. The lookahead body is
+                // separate code ending in its own `Accept`.
+                let rest = self.first_chars_from(*next, steps, &mut visited.clone());
+                let ahead = self.first_chars_from(*entry, steps, &mut Vec::new());
+                match (ahead, rest) {
+                    (Some(mut ahead), Some(rest)) => {
+                        ahead.intersect(&rest);
+                        Some(ahead)
+                    }
+                    (Some(first), None) | (None, Some(first)) => Some(first),
+                    (None, None) => None,
+                }
+            }
+            // Accepting, calls, backreferences, conditionals, tries, the
+            // specialized separator, and placeholders are not analyzed.
+            Instruction::Accept
+            | Instruction::Fail
+            | Instruction::Call { .. }
+            | Instruction::Return
+            | Instruction::Backref { .. }
+            | Instruction::Conditional { .. }
+            | Instruction::LiteralTrie { .. }
+            | Instruction::CppSpaceCommentSeparator { .. } => None,
         }
     }
 
@@ -2715,6 +3127,170 @@ mod tests {
                         "pattern {pattern:?}, line {line:?}, start {start}"
                     );
                 }
+            }
+        }
+    }
+
+    fn scan_repeat_count(pattern: &str) -> usize {
+        let parsed = parse(pattern);
+        Program::compile(&parsed)
+            .or_else(|_| Program::compile_captures(&parsed, &[]))
+            .expect("supported bytecode pattern")
+            .instructions
+            .iter()
+            .filter(|instruction| matches!(instruction, Instruction::ScanRepeat { .. }))
+            .count()
+    }
+
+    #[test]
+    fn greedy_repeats_become_possessive_only_before_exclusive_continuations() {
+        // Nothing the repeat consumes can start what follows.
+        for pattern in [
+            r"[a-z]*\d",
+            r"\w+\s*=",
+            r"([$_[:alpha:]][$_[:alnum:]]*)?\s*(?=<)",
+            r"(#?[$_[:alpha:]][$_[:alnum:]]*)(?:(\?)|(!))?(?=\s*=)",
+            r"\d*(?=a)[a-z]",
+            r"(?i)\d*x",
+            r"(?:[a-z]+,)*;",
+        ] {
+            assert!(scan_repeat_count(pattern) > 0, "{pattern:?}");
+        }
+        // Giving characters back can still succeed, or the continuation is
+        // not provably exclusive.
+        for pattern in [
+            r"[a-z]*c",
+            r"[a-z]*",
+            r"[a-z]*$",
+            r"[[:alnum:]]*\S",
+            r"\w*[^a]",
+            r"(?i)[a-z]*K",
+            r"[a-z]*(?=x|1)[a-z0-9]",
+            r"(?:[a-z]+)*[a-z]x",
+            r"([a-z]*)\1",
+            r"[a-z]*?\d",
+            r"\s*\x{2003}",
+            r"[a-zé]*\x{e9}",
+        ] {
+            assert_eq!(scan_repeat_count(pattern), 0, "{pattern:?}");
+        }
+    }
+
+    #[test]
+    fn automatic_possessification_preserves_backtracking_results() {
+        let patterns = [
+            r"[a-z]*\d",
+            r"[a-z]*c",
+            r"\w+\s*=",
+            r"\w*\s",
+            r"[[:alnum:]]*\S",
+            r"([$_[:alpha:]][$_[:alnum:]]*)?\s*(?=<)",
+            r"(#?[$_[:alpha:]][$_[:alnum:]]*)(?:(\?)|(!))?(?=\s*\s*=)",
+            r"\d*(?=a)[a-z]",
+            r"(?i)\d*x",
+            r"(?i)[a-z]*K",
+            r"(?:[a-z]+,)*[a-z]+;",
+            r"(?:[a-z]+\s?)*[a-z]x",
+            r"[a-z]{2,4}\d",
+            r"[a-z]{2,4}[a-e]",
+            r"\s*(?!\s)\w+",
+        ];
+        let lines = [
+            "",
+            "abc1",
+            "abc",
+            "ab = 1",
+            "ab\u{a0}x",
+            "foo <T>",
+            "foo<",
+            "#bar? = 1",
+            "bar! =",
+            "12a",
+            "12X",
+            "abK",
+            "ab\u{212a}",
+            "ab,cd;",
+            "ab cdx",
+            "ñandú\u{2003}=",
+            "abcde",
+        ];
+        for pattern in patterns {
+            let parsed = parse(pattern);
+            for line in lines {
+                for start in line
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(line.len()))
+                {
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive_position_span(&parsed, line, start, context()),
+                        "pattern {pattern:?}, line {line:?}, start {start}"
+                    );
+                }
+            }
+        }
+        assert_capture_replay(r"([a-z]+)(\d)", "abc1", 0, &[1, 2]);
+        assert_capture_replay(r"(\w+)\s*(=)", "ab = 1", 0, &[1, 2]);
+    }
+
+    #[test]
+    fn non_ascii_first_char_kinds_cover_every_scalar() {
+        use crate::engine::regex::backtrack::{
+            perl_class_contains, posix_class_predicate, unicode_case_eq,
+        };
+        let spaces = (0x80..=0x10_ffff)
+            .filter_map(char::from_u32)
+            .filter(|ch| ch.is_whitespace())
+            .collect::<Vec<_>>();
+        let mut predicates: Vec<(String, u8, Box<dyn Fn(char) -> bool>)> = Vec::new();
+        for name in [
+            "alnum", "alpha", "ascii", "blank", "cntrl", "digit", "graph", "lower", "print",
+            "punct", "space", "upper", "word", "xdigit",
+        ] {
+            let contains = posix_class_predicate(name);
+            predicates.push((
+                format!("[:{name}:]"),
+                posix_non_ascii_kinds(name),
+                Box::new(contains),
+            ));
+        }
+        for kind in [
+            PerlClassKind::Digit,
+            PerlClassKind::HorizontalSpace,
+            PerlClassKind::VerticalSpace,
+            PerlClassKind::Space,
+            PerlClassKind::NotSpace,
+            PerlClassKind::Word,
+        ] {
+            predicates.push((
+                format!("{kind:?}"),
+                atom_non_ascii_kinds(&ClassAtom::Perl(kind), false),
+                Box::new(move |ch| perl_class_contains(kind, ch)),
+            ));
+        }
+        // Case-insensitive ASCII atoms reach only non-space scalars.
+        predicates.push((
+            "ASCII case fold".to_owned(),
+            FirstChars::NON_ASCII_OTHER,
+            Box::new(|ch| ('\0'..='\x7f').any(|ascii| unicode_case_eq(ascii, ch))),
+        ));
+
+        for (label, claimed, contains) in &predicates {
+            if claimed & FirstChars::NON_ASCII_SPACE == 0 {
+                assert!(!spaces.iter().any(|ch| contains(*ch)), "{label} space");
+            }
+        }
+        let others = predicates
+            .iter()
+            .filter(|(_, claimed, _)| claimed & FirstChars::NON_ASCII_OTHER == 0)
+            .collect::<Vec<_>>();
+        for ch in (0x80..=0x10_ffff)
+            .filter_map(char::from_u32)
+            .filter(|ch| !ch.is_whitespace())
+        {
+            for (label, _, contains) in &others {
+                assert!(!contains(ch), "{label} {ch:?}");
             }
         }
     }
