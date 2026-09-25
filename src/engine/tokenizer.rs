@@ -12,6 +12,7 @@ use std::{
     time::Instant,
 };
 
+use crate::grammars::bundle::GrammarBlob;
 use crate::{
     EngineHighlightedLine as HighlightedLine, HighlightScopeTable, HighlightedText,
     LineTextFingerprint, ScopeAtomId, ScopeStackRef, SyntaxClass, SyntaxSegment,
@@ -24,6 +25,7 @@ use super::grammar::{
     CaptureEntry, CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError,
     InjectionPriority, RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
 };
+use super::grammar_closure::{AvailabilityStep, ClosureMemberTraits};
 use super::hashing::{self, FastMap};
 use super::line::{LineChunks, next_char_boundary};
 use super::regex::captures::substitute_end_pattern;
@@ -1107,12 +1109,48 @@ impl RepositoryNameInterner {
     }
 }
 
+/// A bundled closure member decoded on first access.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LazyGrammar {
+    pub(crate) blob: &'static GrammarBlob,
+    pub(crate) traits: ClosureMemberTraits,
+    pub(crate) top_level_availability: Option<&'static [AvailabilityStep]>,
+}
+
+#[derive(Debug, Clone)]
+struct GrammarSlot {
+    // `None` records a lazy member whose compiled IR failed to decode; the
+    // tokenizer then treats it like any other unavailable include.
+    grammar: OnceLock<Option<Arc<CompiledGrammar>>>,
+    lazy: Option<LazyGrammar>,
+}
+
+impl GrammarSlot {
+    fn loaded(grammar: Arc<CompiledGrammar>) -> Self {
+        Self {
+            grammar: OnceLock::from(Some(grammar)),
+            lazy: None,
+        }
+    }
+
+    #[inline]
+    fn grammar(&self, id: GrammarId) -> Option<&Arc<CompiledGrammar>> {
+        self.grammar
+            .get_or_init(|| {
+                self.lazy
+                    .and_then(|lazy| lazy.blob.compiled_grammar(id).ok())
+                    .map(Arc::new)
+            })
+            .as_ref()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GrammarSet {
     // Arc-shared so cloning a set (one clone per tokenizer instance) shares
     // immutable compiled grammars and live root-specific repository walks.
     // Weak values let those walks be reclaimed with their tokenizers.
-    grammars: Arc<Vec<Arc<CompiledGrammar>>>,
+    grammars: Arc<Vec<GrammarSlot>>,
     scope_to_id: Arc<HashMap<String, GrammarId>>,
     rule_repository_context_cache: Arc<Mutex<FastMap<GrammarId, Weak<RuleRepositoryContexts>>>>,
 }
@@ -1125,15 +1163,34 @@ impl GrammarSet {
     pub fn add(&mut self, grammar: CompiledGrammar) -> GrammarId {
         let id = grammar.id;
         Arc::make_mut(&mut self.scope_to_id).insert(grammar.scope_name.clone(), id);
+        self.insert_slot(id, GrammarSlot::loaded(Arc::new(grammar)))
+    }
+
+    /// Adds a bundled member that is decoded when first accessed.
+    pub(crate) fn add_lazy(&mut self, lazy: LazyGrammar) -> GrammarId {
+        let id = GrammarId(
+            u16::try_from(self.grammars.len()).expect("grammar closure fits in GrammarId"),
+        );
+        Arc::make_mut(&mut self.scope_to_id).insert(lazy.blob.scope_name.clone(), id);
+        self.insert_slot(
+            id,
+            GrammarSlot {
+                grammar: OnceLock::new(),
+                lazy: Some(lazy),
+            },
+        )
+    }
+
+    fn insert_slot(&mut self, id: GrammarId, slot: GrammarSlot) -> GrammarId {
         // A mutated set must not share root compilations produced from an
         // older grammar graph. Existing clones retain their valid cache.
         self.rule_repository_context_cache = Arc::new(Mutex::new(hashing::fast_map()));
         let index = id.0 as usize;
         let grammars = Arc::make_mut(&mut self.grammars);
         if index == grammars.len() {
-            grammars.push(Arc::new(grammar));
+            grammars.push(slot);
         } else if index < grammars.len() {
-            grammars[index] = Arc::new(grammar);
+            grammars[index] = slot;
         } else {
             panic!("grammar ids must be dense and insertion ordered");
         }
@@ -1146,8 +1203,77 @@ impl GrammarSet {
         Ok(self.add(grammar))
     }
 
+    #[inline]
     pub fn grammar(&self, id: GrammarId) -> Option<&CompiledGrammar> {
-        self.grammars.get(id.0 as usize).map(Arc::as_ref)
+        self.grammars
+            .get(id.0 as usize)
+            .and_then(|slot| slot.grammar(id))
+            .map(Arc::as_ref)
+    }
+
+    /// Number of grammars, including lazy members not yet decoded.
+    pub fn len(&self) -> usize {
+        self.grammars.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.grammars.is_empty()
+    }
+
+    /// Every available grammar in ID order, decoding lazy members.
+    pub fn iter(&self) -> impl Iterator<Item = &CompiledGrammar> {
+        (0..self.grammars.len()).filter_map(|index| self.grammar(GrammarId(index as u16)))
+    }
+
+    #[cfg(test)]
+    fn decoded_count(&self) -> usize {
+        self.grammars
+            .iter()
+            .filter(|slot| slot.grammar.get().is_some())
+            .count()
+    }
+
+    /// Whether `id` may register standalone injections through `injectTo`.
+    /// Only recorded bundle traits can rule this out without decoding.
+    fn may_inject(&self, id: GrammarId) -> bool {
+        self.grammars
+            .get(id.0 as usize)
+            .and_then(|slot| slot.lazy)
+            .is_none_or(|lazy| lazy.traits.injects)
+    }
+
+    /// Recorded top-level availability proof for a member not decoded yet.
+    ///
+    /// Evaluating any other availability node of a grammar decodes it, so the
+    /// only cached nodes of such a member are `true` entries from this proof.
+    fn undecoded_top_level_availability(
+        &self,
+        id: GrammarId,
+    ) -> Option<&'static [AvailabilityStep]> {
+        let slot = self.grammars.get(id.0 as usize)?;
+        if slot.grammar.get().is_some() {
+            return None;
+        }
+        slot.lazy?.top_level_availability
+    }
+
+    /// Whether the unbounded repository-context walk may skip an external
+    /// entry into `id` under the current `$base`.
+    ///
+    /// A skipped grammar must neither bind a non-empty context nor reach a
+    /// grammar that can: repository contexts only accumulate from rule-local
+    /// repositories and reset at every grammar boundary, so all of its rules
+    /// keep the empty context (equivalent to no entry). Its subtree must also
+    /// not change the first-visit order of walked grammars. `$base` is the only
+    /// edge out of that subtree besides external includes; under the root base
+    /// it targets the root top level, which the walk visits first.
+    fn skips_repository_context_walk(&self, id: GrammarId, base_is_root: bool) -> bool {
+        self.grammars
+            .get(id.0 as usize)
+            .and_then(|slot| slot.lazy)
+            .is_some_and(|lazy| {
+                !lazy.traits.repository_contexts && (base_is_root || !lazy.traits.base_reference)
+            })
     }
 
     pub fn grammar_by_scope(&self, scope: &str) -> Option<&CompiledGrammar> {
@@ -1159,10 +1285,6 @@ impl GrammarSet {
         self.scope_to_id.get(scope).copied()
     }
 
-    pub fn grammars(&self) -> &[Arc<CompiledGrammar>] {
-        self.grammars.as_slice()
-    }
-
     fn into_prepared_closure(
         self,
         root: GrammarId,
@@ -1171,13 +1293,9 @@ impl GrammarSet {
         let selected = self
             .grammars
             .iter()
-            .filter(|grammar| {
-                grammar_closure
-                    .get(grammar.id.0 as usize)
-                    .copied()
-                    .unwrap_or(false)
-            })
-            .cloned()
+            .enumerate()
+            .filter(|(index, _)| grammar_closure.get(*index).copied().unwrap_or(false))
+            .filter_map(|(index, slot)| slot.grammar(GrammarId(index as u16)).cloned())
             .collect::<Vec<_>>();
         if selected.len() == self.grammars.len() {
             return (self, root, false);
@@ -1198,7 +1316,7 @@ impl GrammarSet {
                 .collect();
             return (
                 Self {
-                    grammars: Arc::new(selected),
+                    grammars: Arc::new(selected.into_iter().map(GrammarSlot::loaded).collect()),
                     scope_to_id: Arc::new(scope_to_id),
                     rule_repository_context_cache: Arc::new(Mutex::new(hashing::fast_map())),
                 },
@@ -1262,7 +1380,7 @@ impl GrammarSet {
     }
 
     pub fn validate_include_graph(&self) -> Result<(), GrammarValidationError> {
-        for grammar in self.grammars.iter() {
+        for grammar in self.iter() {
             grammar.validate_local_refs()?;
             self.validate_refs_for_grammar(grammar, &grammar.top_level, "patterns")?;
             for (name, rule_ref) in &grammar.repository {
@@ -1856,7 +1974,7 @@ fn prepared_grammar_closure(
         grammars,
         injections,
         rule_repository_contexts,
-        reachable: vec![false; grammars.grammars().len()],
+        reachable: vec![false; grammars.len()],
         pending: Vec::new(),
         visited_rules: HashSet::new(),
         visited_repositories: HashSet::new(),
@@ -1888,20 +2006,16 @@ impl PreparedPatternCache {
         let outer_slot_bytes = std::mem::size_of::<Option<PreparedGrammarPatternSlots>>();
         let pattern_slot_bytes = std::mem::size_of::<PreparedPatternSlot>();
         let outer_capacity = grammars
-            .grammars()
             .len()
             .min(MAX_PREPARED_PATTERN_SLOT_BYTES / outer_slot_bytes);
         let mut slot_bytes = outer_capacity.saturating_mul(outer_slot_bytes);
         let mut capacity = 0usize;
-        let slots = grammars
-            .grammars()
-            .iter()
-            .take(outer_capacity)
-            .enumerate()
-            .map(|(index, grammar)| {
+        let slots = (0..outer_capacity)
+            .map(|index| {
                 if !grammar_closure.get(index).copied().unwrap_or(false) {
                     return None;
                 }
+                let grammar = grammars.grammar(GrammarId(index as u16))?;
                 let remaining_bytes = MAX_PREPARED_PATTERN_SLOT_BYTES.saturating_sub(slot_bytes);
                 let slot_capacity = grammar
                     .patterns
@@ -3743,11 +3857,23 @@ impl TextMateTokenizer {
                 visiting,
                 depth + 1,
             ),
-            RuleRef::External { scope, repository } => grammar
-                .scope(*scope)
-                .and_then(|scope| self.grammars.grammar_id_by_scope(scope))
-                .and_then(|external_id| self.grammars.grammar(external_id).map(|_| external_id))
-                .is_some_and(|external_id| match repository {
+            RuleRef::External { scope, repository } => {
+                let Some(external_id) = grammar
+                    .scope(*scope)
+                    .and_then(|scope| self.grammars.grammar_id_by_scope(scope))
+                else {
+                    return false;
+                };
+                if repository.is_none()
+                    && let Some(available) =
+                        self.undecoded_top_level_available(external_id, base_grammar_id, depth + 1)
+                {
+                    return available;
+                }
+                if self.grammars.grammar(external_id).is_none() {
+                    return false;
+                }
+                match repository {
                     Some(repository) => self.repository_has_available_rule(
                         external_id,
                         base_grammar_id,
@@ -3761,8 +3887,47 @@ impl TextMateTokenizer {
                         visiting,
                         depth + 1,
                     ),
-                }),
+                }
+            }
         })
+    }
+
+    /// Answers `top_level_has_available_rule` for a member not decoded yet
+    /// from its recorded proof, recording the same cache entries.
+    ///
+    /// Each proof step is the first reference at its level and resolves to
+    /// `true`, so the full search would visit exactly these nodes. Its depth
+    /// checks run at `depth` through `depth + steps - 1`; deeper searches keep
+    /// the full path so the depth cutoff stays identical.
+    fn undecoded_top_level_available(
+        &self,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        depth: usize,
+    ) -> Option<bool> {
+        let steps = self.grammars.undecoded_top_level_availability(grammar_id)?;
+        if depth.saturating_add(steps.len()) >= MAX_INCLUDE_DEPTH {
+            return None;
+        }
+        let mut cache = self.include_availability_cache.borrow_mut();
+        cache.insert(
+            IncludeAvailabilityNode::TopLevel(grammar_id, base_grammar_id),
+            true,
+        );
+        for step in steps {
+            let node = match step {
+                AvailabilityStep::Rule(rule_id) => {
+                    IncludeAvailabilityNode::Rule(grammar_id, base_grammar_id, *rule_id)
+                }
+                AvailabilityStep::Repository(name) => IncludeAvailabilityNode::Repository(
+                    grammar_id,
+                    base_grammar_id,
+                    self.include_repository_names.borrow_mut().intern(name).0,
+                ),
+            };
+            cache.insert(node, true);
+        }
+        Some(true)
     }
 
     fn repository_has_available_rule(
@@ -6350,10 +6515,10 @@ fn compile_rule_repository_contexts<'a>(
 
     let empty_context = Arc::clone(empty_repository_context());
     let mut budget = RepositoryContextBudget::new(bounded);
-    if !budget.charge_context_table(grammars.grammars().len()) {
+    if !budget.charge_context_table(grammars.len()) {
         return (RuleRepositoryContexts::empty(), false);
     }
-    let mut compiled = RuleRepositoryContexts::new(grammars.grammars().len());
+    let mut compiled = RuleRepositoryContexts::new(grammars.len());
     let mut compiled_top_levels = hashing::fast_set();
     let mut repository_names = RepositoryNameInterner::default();
     let mut visiting_repositories = HashSet::new();
@@ -6542,6 +6707,13 @@ fn compile_rule_repository_contexts<'a>(
                         else {
                             continue;
                         };
+                        // Bounded preparation keeps its exact budget accounting.
+                        if !bounded
+                            && grammars
+                                .skips_repository_context_walk(external_id, base_grammar_id == root)
+                        {
+                            continue;
+                        }
                         let Some(external) = grammars.grammar(external_id) else {
                             continue;
                         };
@@ -6963,13 +7135,19 @@ fn compile_injection_selectors(
         })
         .collect::<Vec<_>>();
 
-    for grammar in grammars.grammars() {
-        if grammar.id == root
-            || !grammar
-                .metadata
-                .inject_to
-                .iter()
-                .any(|scope| scope == &root_grammar.scope_name)
+    for index in 0..grammars.len() {
+        let id = GrammarId(index as u16);
+        if id == root || !grammars.may_inject(id) {
+            continue;
+        }
+        let Some(grammar) = grammars.grammar(id) else {
+            continue;
+        };
+        if !grammar
+            .metadata
+            .inject_to
+            .iter()
+            .any(|scope| scope == &root_grammar.scope_name)
         {
             continue;
         }
@@ -9901,5 +10079,236 @@ mod tests {
         line.tokens
             .iter()
             .any(|token| token.scopes.iter().any(|scope| scope == expected))
+    }
+}
+
+#[cfg(all(test, feature = "bundled-grammars"))]
+mod lazy_bundle_tests {
+    use super::*;
+    use crate::engine::{compiled_grammar_closure, load_grammar_set};
+
+    fn bindings(context: Option<&Arc<RepositoryBindings>>) -> BTreeMap<String, String> {
+        let mut flattened = BTreeMap::new();
+        let mut current = context.map(Arc::as_ref);
+        while let Some(bindings) = current {
+            for (name, binding) in &bindings.local {
+                flattened
+                    .entry(name.clone())
+                    .or_insert_with(|| binding.clone());
+            }
+            current = bindings.parent.as_deref();
+        }
+        flattened
+    }
+
+    fn is_decoded(grammars: &GrammarSet, id: GrammarId) -> bool {
+        grammars.grammars[id.0 as usize].grammar.get().is_some()
+    }
+
+    #[test]
+    fn lazy_bundled_sets_match_eager_closure_walks() {
+        let bundle = crate::grammars::embedded_bundle();
+        for language in &bundle.languages {
+            let name = &language.canonical;
+            let (lazy, root) = load_grammar_set(name).unwrap();
+            let mut eager = GrammarSet::new();
+            for grammar in compiled_grammar_closure(bundle, &language.scope_name).unwrap() {
+                eager.add(grammar);
+            }
+            assert_eq!(lazy.len(), eager.len(), "{name}");
+            assert_eq!(
+                Some(root),
+                eager.grammar_id_by_scope(&language.scope_name),
+                "{name}"
+            );
+
+            let lazy_injections = compile_injection_selectors(&lazy, root);
+            let eager_injections = compile_injection_selectors(&eager, root);
+            assert_eq!(
+                format!("{lazy_injections:?}"),
+                format!("{eager_injections:?}"),
+                "{name}"
+            );
+            let (lazy_contexts, _) =
+                compile_rule_repository_contexts(&lazy, root, &lazy_injections, false);
+            let (eager_contexts, _) =
+                compile_rule_repository_contexts(&eager, root, &eager_injections, false);
+            for grammar in eager.iter() {
+                for rule in &grammar.rules {
+                    assert_eq!(
+                        bindings(lazy_contexts.get(grammar.id, rule.id)),
+                        bindings(eager_contexts.get(grammar.id, rule.id)),
+                        "{name}: {} rule {}",
+                        grammar.scope_name,
+                        rule.id.0
+                    );
+                }
+            }
+            for grammar in lazy.iter() {
+                assert_eq!(Some(grammar), eager.grammar(grammar.id), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn recorded_availability_proofs_match_the_include_search() {
+        let bundle = crate::grammars::embedded_bundle();
+        let host = r#"{"scopeName":"source.availability-host","patterns":[]}"#;
+        let tokenizer_with = |blob: usize| {
+            let mut grammars = GrammarSet::new();
+            let root = grammars.load_and_add(host).unwrap();
+            let external = grammars.add_lazy(LazyGrammar {
+                blob: &bundle.grammar_blobs[blob],
+                traits: ClosureMemberTraits::default(),
+                top_level_availability: bundle.grammar_graphs[blob]
+                    .top_level_availability
+                    .as_deref(),
+            });
+            (TextMateTokenizer::new(grammars, root), root, external)
+        };
+        let cache = |tokenizer: &TextMateTokenizer| {
+            let mut entries = tokenizer
+                .include_availability_cache
+                .borrow()
+                .iter()
+                .map(|(node, available)| (format!("{node:?}"), *available))
+                .collect::<Vec<_>>();
+            entries.sort();
+            entries
+        };
+        let mut proven = 0;
+        for (blob, graph) in bundle.grammar_graphs.iter().enumerate() {
+            if graph.top_level_availability.is_none() {
+                continue;
+            }
+            let (recorded, root, external) = tokenizer_with(blob);
+            let shortcut = recorded.undecoded_top_level_available(external, root, 1);
+            assert!(!is_decoded(recorded.grammars(), external));
+
+            let (searched, root, external) = tokenizer_with(blob);
+            assert!(searched.grammars().grammar(external).is_some());
+            let available =
+                searched.top_level_has_available_rule(external, root, &mut HashSet::new(), 1);
+            let language = &bundle.grammar_blobs[blob].language;
+            assert_eq!(shortcut, Some(available), "{language}");
+            assert_eq!(cache(&recorded), cache(&searched), "{language}");
+            proven += 1;
+        }
+        assert!(proven > 0);
+
+        // Near the include-depth cutoff the tokenizer keeps the full search.
+        let (blob, _) = bundle
+            .grammar_graphs
+            .iter()
+            .enumerate()
+            .find(|(_, graph)| {
+                graph
+                    .top_level_availability
+                    .as_ref()
+                    .is_some_and(|steps| !steps.is_empty())
+            })
+            .unwrap();
+        let (tokenizer, root, external) = tokenizer_with(blob);
+        assert_eq!(
+            tokenizer.undecoded_top_level_available(external, root, MAX_INCLUDE_DEPTH - 1),
+            None
+        );
+    }
+
+    /// Construction as it was before bundles recorded closures: decode every
+    /// member, then walk the whole closure.
+    fn eager_bundled_tokenizer(language: &str) -> TextMateTokenizer {
+        let bundle = crate::grammars::embedded_bundle();
+        let scope = &bundle
+            .grammar_blob_for_language(language)
+            .unwrap()
+            .scope_name;
+        let mut grammars = GrammarSet::new();
+        for grammar in compiled_grammar_closure(bundle, scope).unwrap() {
+            grammars.add(grammar);
+        }
+        let root = grammars.grammar_id_by_scope(scope).unwrap();
+        TextMateTokenizer::new(grammars, root)
+    }
+
+    #[test]
+    fn lazy_bundled_tokenizers_match_eager_output_on_fixtures() {
+        let manifest = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/textmate/cases.toml"),
+        )
+        .unwrap();
+        let manifest = manifest.parse::<toml::Table>().unwrap();
+        let bundle = crate::grammars::embedded_bundle();
+        let mut compared = 0;
+        for case in manifest["case"].as_array().unwrap() {
+            let language = case["language"].as_str().unwrap();
+            // Single-grammar closures take no lazy path beyond the root.
+            let Some(root) = bundle.grammar_blob_index_for_language(language) else {
+                continue;
+            };
+            if bundle.grammar_graphs[root].closure.len() < 2 {
+                continue;
+            }
+            let fixture = case["fixture"].as_str().unwrap();
+            let source = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(fixture),
+            )
+            .unwrap();
+            let (grammars, root) = load_grammar_set(language).unwrap();
+            let mut lazy = TextMateTokenizer::new(grammars, root);
+            let mut eager = eager_bundled_tokenizer(language);
+            let mut lazy_state = TokenizerState::default();
+            let mut eager_state = TokenizerState::default();
+            for (index, line) in source.lines().enumerate() {
+                let line = format!("{line}\n");
+                let lazy_line = lazy.tokenize_line_scopes_at_line(&line, lazy_state, index);
+                let eager_line = eager.tokenize_line_scopes_at_line(&line, eager_state, index);
+                assert_eq!(
+                    lazy_line.tokens,
+                    eager_line.tokens,
+                    "{fixture} line {}",
+                    index + 1
+                );
+                lazy_state = lazy_line.state;
+                eager_state = eager_line.state;
+            }
+            compared += 1;
+        }
+        assert!(compared > 0);
+    }
+
+    #[test]
+    fn bundled_tokenizer_decodes_embedded_grammars_on_first_use() {
+        let (grammars, root) = load_grammar_set("markdown").unwrap();
+        let rust = grammars.grammar_id_by_scope("source.rust").unwrap();
+        let mut tokenizer = TextMateTokenizer::new(grammars, root);
+        let total = tokenizer.grammars().len();
+        let decoded = tokenizer.grammars().decoded_count();
+        assert!(
+            decoded * 2 < total,
+            "construction decoded {decoded} of {total} closure grammars"
+        );
+        assert!(!is_decoded(tokenizer.grammars(), rust));
+
+        let mut state = TokenizerState::default();
+        for line in ["# Title", "", "plain *text*"] {
+            state = tokenizer
+                .tokenize_line_scopes(&format!("{line}\n"), state)
+                .state;
+        }
+        assert!(!is_decoded(tokenizer.grammars(), rust));
+
+        state = tokenizer.tokenize_line_scopes("```rust\n", state).state;
+        let line = tokenizer.tokenize_line_scopes("fn main() {}\n", state);
+        assert!(is_decoded(tokenizer.grammars(), rust));
+        assert!(
+            line.tokens.iter().any(|token| token
+                .scopes
+                .iter()
+                .any(|scope| scope == "keyword.other.fn.rust")),
+            "{:?}",
+            line.tokens
+        );
     }
 }

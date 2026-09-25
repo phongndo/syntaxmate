@@ -16,10 +16,13 @@ so updates remain reviewable and reproducible.
 - Runtime bundle: [assets/grammars.bundle](../assets/grammars.bundle), generated
   by the [bundle builder](../tools/build-bundle.rs).
 
-The bundle uses independently compressed compiled grammars so a caller loads
-only the selected language's dependency closure. Its format is private; version
-and validation rules live in the [container decoder](../src/grammars/bundle.rs)
-and [grammar IR codec](../src/engine/grammar_ir.rs). Custom grammars use the JSON
+The bundle uses independently compressed compiled grammars and records each
+grammar's dependency closure, so a tokenizer decodes a closure member only when
+it needs that grammar. Its format is private; version and validation rules live
+in the [container decoder](../src/grammars/bundle.rs), the
+[closure analysis](../src/engine/grammar_closure.rs), and the
+[grammar IR codec](../src/engine/grammar_ir.rs). Changing any of them requires
+regenerating the bundle. Custom grammars use the JSON
 compiler. Release builds consume committed assets without running Node or
 fetching upstream sources.
 

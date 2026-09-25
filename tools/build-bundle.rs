@@ -10,6 +10,9 @@ mod catalog;
 #[path = "../src/engine/grammar.rs"]
 mod grammar;
 #[allow(dead_code)]
+#[path = "../src/engine/grammar_closure.rs"]
+mod grammar_closure;
+#[allow(dead_code)]
 #[path = "../src/engine/grammar_ir.rs"]
 mod grammar_ir;
 #[allow(dead_code)]
@@ -17,7 +20,7 @@ mod grammar_ir;
 mod state;
 
 const MAGIC: &[u8; 4] = b"MRKB";
-const FORMAT_VERSION: u16 = 2;
+const FORMAT_VERSION: u16 = 3;
 const CODEC_NONE: u32 = 0;
 const CODEC_DEFLATE_ZLIB: u32 = 1;
 const GRAMMAR_BLOB_COMPILED_IR: u32 = 1;
@@ -26,6 +29,12 @@ const SECTION_SCOPES: u32 = 4;
 const SECTION_LANGUAGES: u32 = 5;
 const SECTION_GRAMMAR_BLOBS: u32 = 6;
 const SECTION_LICENSES: u32 = 7;
+const SECTION_GRAMMAR_GRAPHS: u32 = 8;
+const CLOSURE_REPOSITORY_CONTEXTS: u32 = 1 << 31;
+const CLOSURE_BASE_REFERENCE: u32 = 1 << 30;
+const CLOSURE_INJECTS: u32 = 1 << 29;
+const NO_AVAILABILITY: u32 = u32::MAX;
+const AVAILABILITY_REPOSITORY: u32 = 1 << 31;
 const HEADER_LEN: usize = 32;
 const SECTION_ENTRY_LEN: usize = 24;
 const NO_STRING: u32 = u32::MAX;
@@ -144,6 +153,7 @@ fn run() -> Result<(), String> {
     );
     for path in [
         "src/engine/grammar.rs",
+        "src/engine/grammar_closure.rs",
         "src/engine/grammar_ir.rs",
         "src/engine/state.rs",
     ] {
@@ -338,6 +348,8 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
         })
         .collect::<Vec<_>>();
 
+    let grammar_graphs = grammar_graphs(&grammars)?;
+
     let mut language_entries = Vec::new();
     let mut seen = BTreeSet::new();
     for language in string_array(&coverage, "kept") {
@@ -388,8 +400,70 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
         scopes.into_iter().collect(),
         language_entries,
         grammar_blobs,
+        &grammar_graphs,
         licenses_out,
     ))
+}
+
+/// Encode each grammar's external-include closure (ascending blob indexes
+/// tagged with member traits) and its top-level availability proof: the facts
+/// the runtime needs before decoding a grammar. `src/grammars/bundle.rs` owns
+/// the reader.
+fn grammar_graphs(grammars: &[GrammarAsset]) -> Result<Vec<u8>, String> {
+    let compiled = grammars
+        .iter()
+        .map(|grammar| {
+            grammar_ir::decode_compiled_grammar(state::GrammarId(0), &grammar.bytes)
+                .map_err(|error| format!("{}: {error}", grammar.path))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut bytes = Vec::new();
+    write_u32(&mut bytes, compiled.len() as u32);
+    for root in 0..compiled.len() {
+        let members = grammar_closure::dependency_closure(&compiled, root);
+        let traits = grammar_closure::closure_member_traits(&compiled, &members);
+        write_u32(&mut bytes, members.len() as u32);
+        for (index, traits) in members.into_iter().zip(traits) {
+            let mut value = u32::try_from(index)
+                .ok()
+                .filter(|index| *index < CLOSURE_INJECTS)
+                .ok_or("too many grammar blobs for closure encoding")?;
+            if traits.repository_contexts {
+                value |= CLOSURE_REPOSITORY_CONTEXTS;
+            }
+            if traits.base_reference {
+                value |= CLOSURE_BASE_REFERENCE;
+            }
+            if traits.injects {
+                value |= CLOSURE_INJECTS;
+            }
+            write_u32(&mut bytes, value);
+        }
+        let Some(steps) = grammar_closure::top_level_availability_chain(&compiled[root]) else {
+            write_u32(&mut bytes, NO_AVAILABILITY);
+            continue;
+        };
+        write_u32(&mut bytes, steps.len() as u32);
+        for step in steps {
+            match step {
+                grammar_closure::AvailabilityStep::Rule(rule_id) => {
+                    if rule_id.0 >= AVAILABILITY_REPOSITORY {
+                        return Err("rule id collides with the availability step tag".to_owned());
+                    }
+                    write_u32(&mut bytes, rule_id.0);
+                }
+                grammar_closure::AvailabilityStep::Repository(name) => {
+                    let len = u32::try_from(name.len())
+                        .ok()
+                        .filter(|len| *len < AVAILABILITY_REPOSITORY)
+                        .ok_or("repository name is too long")?;
+                    write_u32(&mut bytes, AVAILABILITY_REPOSITORY | len);
+                    bytes.extend_from_slice(name.as_bytes());
+                }
+            }
+        }
+    }
+    Ok(bytes)
 }
 
 fn collect_grammars(assets: &Path) -> Result<Vec<GrammarAsset>, String> {
@@ -583,6 +657,7 @@ fn bundle_to_bytes(
     scopes: Vec<String>,
     languages: Vec<LanguageEntry>,
     grammar_blobs: Vec<GrammarBlob>,
+    grammar_graphs: &[u8],
     licenses: Vec<LicenseEntry>,
 ) -> Vec<u8> {
     let strings = interned_strings(&scopes, &languages, &grammar_blobs, &licenses);
@@ -598,6 +673,7 @@ fn bundle_to_bytes(
             encode_grammar_blobs(&grammar_blobs, &strings),
         ),
         (SECTION_LICENSES, encode_license_table(&licenses, &strings)),
+        (SECTION_GRAMMAR_GRAPHS, grammar_graphs.to_vec()),
     ];
     let bundle_hash = hash_sections(&sections);
     write_container(source_hash, bundle_hash, sections)
