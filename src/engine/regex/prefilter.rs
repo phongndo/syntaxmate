@@ -233,7 +233,7 @@ pub struct MultiLiteralFinder {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct FinderNode {
-    edges: Vec<(u8, u32)>,
+    edges: FinderEdges,
     failure: u32,
     /// Longest literal ending in this state or one of its failure states.
     /// The longest output has the earliest start for a fixed end position.
@@ -242,66 +242,72 @@ struct FinderNode {
 
 impl MultiLiteralFinder {
     fn for_literals(literals: &[String]) -> Option<Self> {
-        let total_bytes = literals.iter().map(String::len).sum::<usize>();
-        (literals.len() >= multi_literal_min_literals()
-            && total_bytes >= multi_literal_min_total_bytes())
-        .then(|| Self::new(literals))
+        Self::worthwhile(literals).then(|| Self::new(literals, false))
     }
 
     fn for_literals_ignore_ascii_case(literals: &[String]) -> Option<Self> {
-        let total_bytes = literals.iter().map(String::len).sum::<usize>();
-        (literals.len() >= multi_literal_min_literals()
-            && total_bytes >= multi_literal_min_total_bytes())
-        .then(|| {
-            let lowered = literals
-                .iter()
-                .map(|literal| literal.to_ascii_lowercase())
-                .collect::<Vec<_>>();
-            Self {
-                fold_ascii_case: true,
-                ..Self::new(&lowered)
-            }
-        })
+        Self::worthwhile(literals).then(|| Self::new(literals, true))
     }
 
-    fn new(literals: &[String]) -> Self {
-        let mut nodes = vec![FinderNode::default()];
+    fn worthwhile(literals: &[String]) -> bool {
+        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+        literals.len() >= multi_literal_min_literals()
+            && total_bytes >= multi_literal_min_total_bytes()
+    }
+
+    fn new(literals: &[String], fold_ascii_case: bool) -> Self {
+        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+        let mut nodes = Vec::with_capacity(total_bytes.saturating_add(1));
+        nodes.push(FinderNode::default());
+        // Root transitions are dense from the start: keyword inventories give
+        // the root a wide fanout that every insertion and failure walk probes.
+        let mut root_edges = Box::new([u32::MAX; 256]);
         let mut max_literal_len = 0usize;
         for literal in literals {
             debug_assert!(!literal.is_empty());
             max_literal_len = max_literal_len.max(literal.len());
             let mut state = 0usize;
-            for byte in literal.bytes() {
-                let next = edge(&nodes[state], byte);
+            for mut byte in literal.bytes() {
+                if fold_ascii_case {
+                    byte.make_ascii_lowercase();
+                }
+                let next = if state == 0 {
+                    Some(root_edges[byte as usize]).filter(|next| *next != u32::MAX)
+                } else {
+                    nodes[state].edges.get(byte)
+                };
                 state = if let Some(next) = next {
                     next as usize
                 } else {
                     let next = u32::try_from(nodes.len()).expect("prefilter trie exceeds u32");
                     nodes.push(FinderNode::default());
                     nodes[state].edges.push((byte, next));
+                    if state == 0 {
+                        root_edges[byte as usize] = next;
+                    }
                     next as usize
                 };
             }
             nodes[state].output_len = nodes[state].output_len.max(literal.len());
         }
 
-        let mut queue = VecDeque::new();
-        let root_children = nodes[0]
-            .edges
-            .iter()
-            .map(|(_, child)| *child)
-            .collect::<Vec<_>>();
-        for child in root_children {
-            queue.push_back(child);
-        }
+        let goto = |nodes: &[FinderNode], state: u32, byte: u8| {
+            if state == 0 {
+                Some(root_edges[byte as usize]).filter(|next| *next != u32::MAX)
+            } else {
+                nodes[state as usize].edges.get(byte)
+            }
+        };
+        let mut queue = VecDeque::with_capacity(nodes.len());
+        queue.extend(nodes[0].edges.iter().map(|(_, child)| child));
         while let Some(state) = queue.pop_front() {
-            let transitions = nodes[state as usize].edges.clone();
-            for (byte, child) in transitions {
+            for index in 0..nodes[state as usize].edges.len() {
+                let (byte, child) = nodes[state as usize].edges.nth(index);
                 let mut failure = nodes[state as usize].failure;
-                while failure != 0 && edge(&nodes[failure as usize], byte).is_none() {
+                while failure != 0 && goto(&nodes, failure, byte).is_none() {
                     failure = nodes[failure as usize].failure;
                 }
-                if let Some(next) = edge(&nodes[failure as usize], byte)
+                if let Some(next) = goto(&nodes, failure, byte)
                     && next != child
                 {
                     failure = next;
@@ -313,15 +319,11 @@ impl MultiLiteralFinder {
                 queue.push_back(child);
             }
         }
-        let mut root_edges = Box::new([u32::MAX; 256]);
-        for (byte, child) in &nodes[0].edges {
-            root_edges[*byte as usize] = *child;
-        }
         Self {
             nodes,
             root_edges,
             max_literal_len,
-            fold_ascii_case: false,
+            fold_ascii_case,
         }
     }
 
@@ -357,7 +359,7 @@ impl MultiLiteralFinder {
                 let next = self.root_edges[byte as usize];
                 return if next == u32::MAX { 0 } else { next };
             }
-            if let Some(next) = edge(&self.nodes[state as usize], byte) {
+            if let Some(next) = self.nodes[state as usize].edges.get(byte) {
                 return next;
             }
             state = self.nodes[state as usize].failure;
@@ -373,14 +375,53 @@ fn multi_literal_min_total_bytes() -> usize {
     32
 }
 
-fn edge(node: &FinderNode, byte: u8) -> Option<u32> {
-    let edges = &node.edges;
-    match edges.len() {
-        0 => None,
-        1 => (edges[0].0 == byte).then_some(edges[0].1),
-        _ => edges
-            .iter()
-            .find_map(|(candidate, next)| (*candidate == byte).then_some(*next)),
+/// Finder transitions. Most trie nodes have exactly one child, so that edge
+/// stays inline and only branching nodes allocate.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum FinderEdges {
+    #[default]
+    Empty,
+    One(u8, u32),
+    Many(Vec<(u8, u32)>),
+}
+
+impl FinderEdges {
+    fn get(&self, byte: u8) -> Option<u32> {
+        match self {
+            Self::Empty => None,
+            Self::One(edge, next) => (*edge == byte).then_some(*next),
+            Self::Many(edges) => edges
+                .iter()
+                .find_map(|(candidate, next)| (*candidate == byte).then_some(*next)),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::One(..) => 1,
+            Self::Many(edges) => edges.len(),
+        }
+    }
+
+    fn nth(&self, index: usize) -> (u8, u32) {
+        match self {
+            Self::One(byte, next) if index == 0 => (*byte, *next),
+            Self::Many(edges) => edges[index],
+            _ => unreachable!("finder edge index out of range"),
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
+        (0..self.len()).map(|index| self.nth(index))
+    }
+
+    fn push(&mut self, edge: (u8, u32)) {
+        match self {
+            Self::Empty => *self = Self::One(edge.0, edge.1),
+            Self::One(byte, next) => *self = Self::Many(vec![(*byte, *next), edge]),
+            Self::Many(edges) => edges.push(edge),
+        }
     }
 }
 
@@ -1035,7 +1076,7 @@ mod tests {
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-        let finder = MultiLiteralFinder::new(&literals);
+        let finder = MultiLiteralFinder::new(&literals, false);
         // `bc` ends before `abcd`, but the longer literal starts earlier.
         assert_eq!(finder.find(b"zabcd"), Some(1));
         // `he` is reached through the failure link after scanning `she`.
