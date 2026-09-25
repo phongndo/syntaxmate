@@ -63,10 +63,10 @@ impl Prefilter {
                 })
             });
             return Self::Any {
+                finder: MultiLiteralFinder::for_literals_ignore_ascii_case(&literals),
                 literals,
                 ascii_case_insensitive: true,
                 mixed_width_fold_mask,
-                finder: None,
             };
         }
         match required {
@@ -131,12 +131,16 @@ impl Prefilter {
                 literals,
                 ascii_case_insensitive: true,
                 mixed_width_fold_mask,
-                ..
+                finder,
             } => {
-                literals
-                    .iter()
-                    .any(|literal| contains_ignore_ascii_case(slice, literal))
-                    || first_ascii_case_fold_candidate(slice, *mixed_width_fold_mask).is_some()
+                finder.as_ref().map_or_else(
+                    || {
+                        literals
+                            .iter()
+                            .any(|literal| contains_ignore_ascii_case(slice, literal))
+                    },
+                    |finder| finder.find(slice.as_bytes()).is_some(),
+                ) || first_ascii_case_fold_candidate(slice, *mixed_width_fold_mask).is_some()
             }
         }
     }
@@ -175,16 +179,24 @@ impl Prefilter {
                 literals,
                 ascii_case_insensitive: true,
                 mixed_width_fold_mask,
-                ..
-            } => literals
-                .iter()
-                .filter_map(|literal| find_ignore_ascii_case(slice, literal))
-                .chain(first_ascii_case_fold_candidate(
-                    slice,
-                    *mixed_width_fold_mask,
-                ))
-                .min()
-                .map(|pos| from + pos),
+                finder,
+            } => {
+                let literal = match finder {
+                    Some(finder) => finder.find(slice.as_bytes()),
+                    None => literals
+                        .iter()
+                        .filter_map(|literal| find_ignore_ascii_case(slice, literal))
+                        .min(),
+                };
+                literal
+                    .into_iter()
+                    .chain(first_ascii_case_fold_candidate(
+                        slice,
+                        *mixed_width_fold_mask,
+                    ))
+                    .min()
+                    .map(|pos| from + pos)
+            }
         }
     }
 
@@ -200,10 +212,13 @@ impl Prefilter {
     }
 }
 
-/// Compact failure-linked trie for large case-sensitive required-literal
-/// sets. Small sets retain the standard library's highly tuned two-way
-/// search; the trie is reserved for cases where rebuilding and running one
-/// searcher per alternative dominates (notably C/C++ keyword inventories).
+/// Compact failure-linked trie for large required-literal sets. Small sets
+/// retain the standard library's highly tuned two-way search; the trie is
+/// reserved for cases where rebuilding and running one searcher per
+/// alternative dominates (notably C/C++ keyword inventories and
+/// case-insensitive keyword lists such as ABAP's). An ASCII case-insensitive
+/// finder stores lowercased literals and lowercases each input byte, which
+/// matches `eq_ignore_ascii_case` windows exactly for ASCII literals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct MultiLiteralFinder {
@@ -213,6 +228,7 @@ pub struct MultiLiteralFinder {
     /// deeper, usually tiny transition sets compact.
     root_edges: Box<[u32; 256]>,
     max_literal_len: usize,
+    fold_ascii_case: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -230,6 +246,22 @@ impl MultiLiteralFinder {
         (literals.len() >= multi_literal_min_literals()
             && total_bytes >= multi_literal_min_total_bytes())
         .then(|| Self::new(literals))
+    }
+
+    fn for_literals_ignore_ascii_case(literals: &[String]) -> Option<Self> {
+        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+        (literals.len() >= multi_literal_min_literals()
+            && total_bytes >= multi_literal_min_total_bytes())
+        .then(|| {
+            let lowered = literals
+                .iter()
+                .map(|literal| literal.to_ascii_lowercase())
+                .collect::<Vec<_>>();
+            Self {
+                fold_ascii_case: true,
+                ..Self::new(&lowered)
+            }
+        })
     }
 
     fn new(literals: &[String]) -> Self {
@@ -289,6 +321,7 @@ impl MultiLiteralFinder {
             nodes,
             root_edges,
             max_literal_len,
+            fold_ascii_case: false,
         }
     }
 
@@ -298,6 +331,11 @@ impl MultiLiteralFinder {
         let mut state = 0u32;
         let mut best = None;
         for (index, byte) in haystack.iter().copied().enumerate() {
+            let byte = if self.fold_ascii_case {
+                byte.to_ascii_lowercase()
+            } else {
+                byte
+            };
             state = self.step(state, byte);
             let output_len = self.nodes[state as usize].output_len;
             if output_len != 0 {
@@ -1058,6 +1096,74 @@ mod tests {
         assert!(prefilter.may_match("xx keyword_long alpha", 3));
         assert!(!prefilter.may_match("xx keyword_long alpha", 4));
         assert!(!prefilter.may_match("unrelated", 0));
+    }
+
+    #[test]
+    fn case_insensitive_finder_matches_per_literal_search() {
+        let literals: Vec<String> = [
+            "abstract",
+            "accept",
+            "accepting",
+            "add",
+            "add-corresponding",
+            "Alias",
+            "SELECT",
+            "sKip",
+            "kind",
+            "he",
+            "she",
+            "hers",
+            "Z_9",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let prefilter = Prefilter::from_required(RequiredLiterals::Any(literals.clone()), true);
+        let Prefilter::Any {
+            finder,
+            mixed_width_fold_mask,
+            ..
+        } = &prefilter
+        else {
+            panic!("expected Any prefilter");
+        };
+        assert!(finder.is_some());
+        let reference = |slice: &str| {
+            literals
+                .iter()
+                .filter_map(|literal| find_ignore_ascii_case(slice, literal))
+                .chain(first_ascii_case_fold_candidate(
+                    slice,
+                    *mixed_width_fold_mask,
+                ))
+                .min()
+        };
+        for text in [
+            "",
+            "nothing here",
+            "  ADD-CORRESPONDING x",
+            "xaccEPTing",
+            "uSHErs",
+            "ſkip and \u{212a}ind",
+            "Ä add é SELECT",
+            "z_9 Z_9",
+            "ACCEPT",
+            "aDd",
+        ] {
+            for from in (0..=text.len()).filter(|from| text.is_char_boundary(*from)) {
+                let expected = reference(&text[from..]).map(|pos| from + pos);
+                assert_eq!(
+                    prefilter.next_occurrence(text, from),
+                    expected,
+                    "{text:?} from {from}"
+                );
+                assert_eq!(
+                    prefilter.may_match(text, from),
+                    expected.is_some(),
+                    "{text:?} from {from}"
+                );
+            }
+        }
     }
 
     #[test]
