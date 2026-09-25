@@ -74,6 +74,14 @@ pub struct FallbackMatcher {
     prefilter_slot: u32,
 }
 
+/// Capture layout requested for one anchored attempt. Selection defers the
+/// choice until the attempt survives its cheap rejections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureCount {
+    Exact(usize),
+    Selection,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartHint {
     Unanchored,
@@ -519,7 +527,20 @@ impl FallbackMatcher {
                         // bytecode path lets hot C/C++ declaration patterns
                         // use the deterministic separator and literal-trie
                         // specializations before replaying winner captures.
-                        Program::compile(&self.parsed)
+                        // The position-only layout has no capture slots,
+                        // so these features can never compile there. Skip
+                        // the doomed attempt instead of discarding a partial
+                        // compile of a large pattern.
+                        let features = &self.parsed.features;
+                        let position = if features.backreference
+                            || features.subroutine
+                            || features.conditional
+                        {
+                            Err(CompileError::Subroutine)
+                        } else {
+                            Program::compile(&self.parsed)
+                        };
+                        position
                             .or_else(|error| match error {
                                 CompileError::Backreference
                                 | CompileError::Subroutine
@@ -580,18 +601,13 @@ impl FallbackMatcher {
         from: usize,
         ctx: AnchorContext,
     ) -> Result<FallbackReport, FallbackError> {
-        let capture_count = if self.active_bytecode().is_some() {
-            0
-        } else if self
-            .parsed
-            .analysis()
-            .capture()
-            .selection_requires_captures()
-        {
-            self.parsed.capture_count as usize + 1
-        } else {
-            0
-        };
+        if line.is_char_boundary(from) && !self.parsed.prefilter().may_match(line, from) {
+            return Ok(FallbackReport {
+                result: None,
+                steps: 0,
+            });
+        }
+        let capture_count = self.selection_capture_count();
         let mut report = self.try_find_with_capture_count(line, from, ctx, capture_count)?;
         if let Some(result) = &mut report.result {
             result.captures.clear();
@@ -685,7 +701,20 @@ impl FallbackMatcher {
         ctx: AnchorContext,
         scratch: &mut BytecodeScratch,
     ) -> Result<FallbackReport, FallbackError> {
-        let capture_count = if self.active_bytecode().is_some() {
+        // Resolve the selection layout only after the cheap per-start
+        // rejections: deciding it may compile bytecode, which is wasted for a
+        // candidate whose prefilter or start bytes never admit an attempt.
+        self.try_find_at_with_capture_count_and_scratch(
+            line,
+            start,
+            ctx,
+            CaptureCount::Selection,
+            Some(scratch),
+        )
+    }
+
+    fn selection_capture_count(&self) -> usize {
+        if self.active_bytecode().is_some() {
             0
         } else if self
             .parsed
@@ -696,14 +725,7 @@ impl FallbackMatcher {
             self.parsed.capture_count as usize + 1
         } else {
             0
-        };
-        self.try_find_at_with_capture_count_and_scratch(
-            line,
-            start,
-            ctx,
-            capture_count,
-            Some(scratch),
-        )
+        }
     }
 
     pub(crate) fn try_find_at(
@@ -716,7 +738,7 @@ impl FallbackMatcher {
             line,
             start,
             ctx,
-            self.parsed.capture_count as usize + 1,
+            CaptureCount::Exact(self.parsed.capture_count as usize + 1),
             None,
         )
     }
@@ -726,7 +748,7 @@ impl FallbackMatcher {
         line: &str,
         start: usize,
         ctx: AnchorContext,
-        capture_count: usize,
+        capture_count: CaptureCount,
         scratch: Option<&mut BytecodeScratch>,
     ) -> Result<FallbackReport, FallbackError> {
         if !line.is_char_boundary(start) {
@@ -768,6 +790,10 @@ impl FallbackMatcher {
                 steps: 0,
             });
         }
+        let capture_count = match capture_count {
+            CaptureCount::Exact(count) => count,
+            CaptureCount::Selection => self.selection_capture_count(),
+        };
         if let Some(special) = self.special {
             return Ok(FallbackReport {
                 result: special.match_at(line, start, capture_count),
@@ -3053,6 +3079,50 @@ mod tests {
             allow_a: true,
             allow_g: false,
             g_pos: 0,
+        }
+    }
+
+    #[test]
+    fn selection_rejected_by_prefilter_does_not_compile_bytecode() {
+        let matcher = FallbackMatcher::new(r"(?=\w)(?:alpha|beta)+ *keyword");
+        let mut scratch = BytecodeScratch::default();
+        let report = matcher
+            .try_find_at_without_captures_with_scratch("alpha beta", 0, ctx(), &mut scratch)
+            .unwrap();
+        assert_eq!(report.result, None);
+        assert!(matcher.bytecode.get().is_none());
+
+        let report = matcher
+            .try_find_at_without_captures_with_scratch("alpha keyword", 0, ctx(), &mut scratch)
+            .unwrap();
+        let result = report.result.expect("selection match");
+        assert_eq!(result.start..result.end, 0..13);
+        assert!(matcher.bytecode.get().is_some());
+    }
+
+    #[test]
+    fn backreference_and_subroutine_selection_use_capture_layout_bytecode() {
+        for (pattern, line, span) in [
+            (r"(?=\w)(\w)x\1", "zaxa", 1..4),
+            (r"(?=\w)(a|b)\g<1>c", "zabc", 1..4),
+            (r"(?=\w)(a)?(?(1)b|c)", "zc", 1..2),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let mut scratch = BytecodeScratch::default();
+            let found = (0..=line.len()).find_map(|start| {
+                matcher
+                    .try_find_at_without_captures_with_scratch(line, start, ctx(), &mut scratch)
+                    .unwrap()
+                    .result
+            });
+            let found = found.unwrap_or_else(|| panic!("{pattern} should match {line:?}"));
+            assert_eq!(found.start..found.end, span, "{pattern}");
+            if matcher.parsed.analysis().bytecode_beneficial() {
+                assert!(
+                    matcher.bytecode.get().is_some_and(Option::is_some),
+                    "{pattern}"
+                );
+            }
         }
     }
 
