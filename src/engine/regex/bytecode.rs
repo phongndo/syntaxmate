@@ -7,7 +7,7 @@
 use super::analysis::RegexAnalysis;
 use super::ast::{Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, RegexFlags};
 use super::backtrack::{
-    BudgetExceeded, StepBudget, anchor_matches, char_at, class_contains,
+    BudgetExceeded, CaseFoldKey, FoldedClass, StepBudget, anchor_matches, char_at, class_contains,
     is_cpp_space_comment_separator, literal_byte_width, match_literal_end, previous_char,
     unicode_case_eq,
 };
@@ -223,7 +223,9 @@ struct LiteralTrieNode {
 
 #[derive(Debug, Clone, Default)]
 struct UnicodeLiteralTrieNode {
-    edges: LiteralTrieEdges<char>,
+    // Edge scalars carry their case mappings so a lookup maps the input
+    // scalar once instead of once per edge comparison.
+    edges: LiteralTrieEdges<CaseFoldKey>,
     terminal_order: Option<u32>,
 }
 
@@ -232,6 +234,9 @@ struct CompiledClass {
     source: CharClass,
     ascii_sensitive: [u64; 2],
     ascii_insensitive: [u64; 2],
+    /// Case-insensitive evaluator for non-ASCII probes, prepared only when a
+    /// case-insensitive instruction uses the class.
+    folded: Option<FoldedClass>,
 }
 
 impl CompiledClass {
@@ -250,6 +255,16 @@ impl CompiledClass {
             source,
             ascii_sensitive,
             ascii_insensitive,
+            folded: None,
+        }
+    }
+
+    /// Membership of a non-ASCII scalar under `flags`.
+    #[inline]
+    fn matches_char(&self, ch: char, flags: RegexFlags) -> bool {
+        match &self.folded {
+            Some(folded) if flags.case_insensitive => folded.contains(ch),
+            _ => class_contains(&self.source, ch, flags),
         }
     }
 
@@ -1003,7 +1018,7 @@ impl Program {
                             .matches_ascii(byte, flags.case_insensitive())
                             .then_some(position + 1),
                         Some(_) => char_at(line, position)
-                            .filter(|(ch, _)| class_contains(&class.source, *ch, flags.regex()))
+                            .filter(|(ch, _)| class.matches_char(*ch, flags.regex()))
                             .map(|(_, end)| end),
                         None => None,
                     };
@@ -1281,8 +1296,7 @@ impl Program {
                                         .matches_ascii(byte, flags.case_insensitive())
                                         .then_some(cursor + 1),
                                     Some(_) => char_at(line, cursor).and_then(|(ch, end)| {
-                                        class_contains(&class.source, ch, flags.regex())
-                                            .then_some(end)
+                                        class.matches_char(ch, flags.regex()).then_some(end)
                                     }),
                                     None => None,
                                 }
@@ -1692,7 +1706,7 @@ impl Compiler {
                 next,
             }),
             Ast::Class(class) => {
-                let id = self.intern_class(class)?;
+                let id = self.intern_class(class, flags)?;
                 self.push(Instruction::Class {
                     id,
                     flags: flags.into(),
@@ -1948,7 +1962,7 @@ impl Compiler {
                 Some((ScanNode::Literal(id), flags))
             }
             Ast::Class(class) => {
-                let id = self.intern_class(class).ok()?;
+                let id = self.intern_class(class, flags).ok()?;
                 Some((ScanNode::Class(id), flags))
             }
             Ast::Dot => Some((ScanNode::Any, flags)),
@@ -1983,15 +1997,24 @@ impl Compiler {
         Ok(LiteralId(id))
     }
 
-    fn intern_class(&mut self, class: &CharClass) -> Result<ClassId, CompileError> {
-        if let Some(index) = self.classes.iter().position(|value| value.source == *class) {
-            return u32::try_from(index)
-                .map(ClassId)
-                .map_err(|_| CompileError::TableOverflow);
+    fn intern_class(
+        &mut self,
+        class: &CharClass,
+        flags: RegexFlags,
+    ) -> Result<ClassId, CompileError> {
+        let index = match self.classes.iter().position(|value| value.source == *class) {
+            Some(index) => index,
+            None => {
+                self.classes.push(CompiledClass::new(class.clone()));
+                self.classes.len() - 1
+            }
+        };
+        if flags.case_insensitive && self.classes[index].folded.is_none() {
+            self.classes[index].folded = Some(FoldedClass::new(class));
         }
-        let id = u32::try_from(self.classes.len()).map_err(|_| CompileError::TableOverflow)?;
-        self.classes.push(CompiledClass::new(class.clone()));
-        Ok(ClassId(id))
+        u32::try_from(index)
+            .map(ClassId)
+            .map_err(|_| CompileError::TableOverflow)
     }
 
     fn intern_literal_trie(
@@ -2037,10 +2060,11 @@ impl LiteralTrie {
                 let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
                 let mut node = 0usize;
                 for ch in literal.chars() {
+                    let ch = CaseFoldKey::new(ch);
                     let edge = trie.unicode_nodes[node]
                         .edges
                         .iter()
-                        .find(|(edge, _)| unicode_case_eq(*edge, ch))
+                        .find(|(edge, _)| edge.case_eq(&ch))
                         .map(|(_, child)| *child);
                     node = if let Some(child) = edge {
                         child as usize
@@ -2119,10 +2143,11 @@ impl LiteralTrie {
                 // size. The scalar path is necessary for Oniguruma-compatible
                 // Unicode case-insensitive literal sets such as BSL keywords.
                 budget.step()?;
+                let input_key = CaseFoldKey::new(input);
                 let child = self.unicode_nodes[node]
                     .edges
                     .iter()
-                    .find_map(|(edge, child)| unicode_case_eq(*edge, input).then_some(*child));
+                    .find_map(|(edge, child)| edge.case_eq(&input_key).then_some(*child));
                 let Some(child) = child else {
                     break;
                 };

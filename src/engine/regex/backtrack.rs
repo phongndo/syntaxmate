@@ -2797,6 +2797,153 @@ pub(crate) fn unicode_case_eq(left: char, right: char) -> bool {
     left.to_lowercase().eq(right.to_lowercase()) || left.to_uppercase().eq(right.to_uppercase())
 }
 
+/// Full Unicode lowercase and uppercase mappings of one scalar, NUL-padded.
+///
+/// `unicode_case_eq` and case-insensitive class ranges re-derive these
+/// mappings (a binary search each) for every comparison. Keying the
+/// comparison lets hot loops map each input scalar once and compare it
+/// against pattern-side keys prepared at compile time. NUL padding is
+/// unambiguous: only U+0000 maps to a sequence containing NUL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CaseFoldKey {
+    ch: char,
+    lower: [char; 3],
+    upper: [char; 3],
+}
+
+impl CaseFoldKey {
+    #[inline]
+    pub(crate) fn new(ch: char) -> Self {
+        if ch.is_ascii() {
+            return Self {
+                ch,
+                lower: [ch.to_ascii_lowercase(), '\0', '\0'],
+                upper: [ch.to_ascii_uppercase(), '\0', '\0'],
+            };
+        }
+        let mut lower = ['\0'; 3];
+        for (slot, mapped) in lower.iter_mut().zip(ch.to_lowercase()) {
+            *slot = mapped;
+        }
+        let mut upper = ['\0'; 3];
+        for (slot, mapped) in upper.iter_mut().zip(ch.to_uppercase()) {
+            *slot = mapped;
+        }
+        Self { ch, lower, upper }
+    }
+
+    /// First scalar of the lowercase mapping (`to_lowercase().next()`).
+    #[inline]
+    pub(crate) fn lower_first(&self) -> char {
+        self.lower[0]
+    }
+
+    /// First scalar of the uppercase mapping (`to_uppercase().next()`).
+    #[inline]
+    pub(crate) fn upper_first(&self) -> char {
+        self.upper[0]
+    }
+
+    /// Exactly `unicode_case_eq(self.ch, other.ch)`.
+    #[inline]
+    pub(crate) fn case_eq(&self, other: &Self) -> bool {
+        if self.ch == other.ch {
+            return true;
+        }
+        if self.ch == '\u{131}' || other.ch == '\u{131}' {
+            return false;
+        }
+        self.lower == other.lower || self.upper == other.upper
+    }
+}
+
+/// Case-insensitive class membership with pattern-side case mappings
+/// prepared once. Mirrors `class_contains(.., case_insensitive: true)`
+/// exactly; the input scalar's mappings are computed at most once per probe.
+#[derive(Debug, Clone)]
+pub(crate) struct FoldedClass {
+    negated: bool,
+    atoms: Box<[FoldedAtom]>,
+    intersections: Box<[Box<[FoldedAtom]>]>,
+}
+
+#[derive(Debug, Clone)]
+enum FoldedAtom {
+    Char(CaseFoldKey),
+    /// Folded bounds `(lower_start, lower_end, upper_start, upper_end)`.
+    Range(char, char, char, char),
+    /// Atoms whose membership ignores the case flag.
+    Plain(ClassAtom),
+    Nested(FoldedClass),
+}
+
+impl FoldedClass {
+    pub(crate) fn new(class: &CharClass) -> Self {
+        Self {
+            negated: class.negated,
+            atoms: Self::fold_atoms(&class.atoms),
+            intersections: class
+                .intersections
+                .iter()
+                .map(|atoms| Self::fold_atoms(atoms))
+                .collect(),
+        }
+    }
+
+    fn fold_atoms(atoms: &[ClassAtom]) -> Box<[FoldedAtom]> {
+        atoms
+            .iter()
+            .map(|atom| match atom {
+                ClassAtom::Char(ch) => FoldedAtom::Char(CaseFoldKey::new(*ch)),
+                ClassAtom::Range(start, end) => {
+                    let (start, end) = (CaseFoldKey::new(*start), CaseFoldKey::new(*end));
+                    FoldedAtom::Range(
+                        start.lower_first(),
+                        end.lower_first(),
+                        start.upper_first(),
+                        end.upper_first(),
+                    )
+                }
+                ClassAtom::Nested(class) => FoldedAtom::Nested(Self::new(class)),
+                ClassAtom::Perl(_) | ClassAtom::Posix { .. } | ClassAtom::Unicode { .. } => {
+                    FoldedAtom::Plain(atom.clone())
+                }
+            })
+            .collect()
+    }
+
+    #[inline]
+    pub(crate) fn contains(&self, ch: char) -> bool {
+        let mut key = None;
+        self.contains_with(ch, &mut key)
+    }
+
+    fn contains_with(&self, ch: char, key: &mut Option<CaseFoldKey>) -> bool {
+        let matched = Self::union_contains(&self.atoms, ch, key)
+            && self
+                .intersections
+                .iter()
+                .all(|atoms| Self::union_contains(atoms, ch, key));
+        matched != self.negated
+    }
+
+    fn union_contains(atoms: &[FoldedAtom], ch: char, key: &mut Option<CaseFoldKey>) -> bool {
+        atoms.iter().any(|atom| match atom {
+            FoldedAtom::Char(expected) => {
+                expected.ch == ch
+                    || expected.case_eq(key.get_or_insert_with(|| CaseFoldKey::new(ch)))
+            }
+            FoldedAtom::Range(lower_start, lower_end, upper_start, upper_end) => {
+                let key = key.get_or_insert_with(|| CaseFoldKey::new(ch));
+                (*lower_start <= key.lower_first() && key.lower_first() <= *lower_end)
+                    || (*upper_start <= key.upper_first() && key.upper_first() <= *upper_end)
+            }
+            FoldedAtom::Plain(atom) => atom_contains(atom, ch, RegexFlags::default()),
+            FoldedAtom::Nested(class) => class.contains_with(ch, key),
+        })
+    }
+}
+
 #[inline]
 pub(crate) fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
     let byte = *line.as_bytes().get(pos)?;
@@ -3114,6 +3261,85 @@ mod tests {
         assert!(unicode_case_eq('ß', 'ẞ'));
         assert!(!unicode_case_eq('i', 'İ'));
         assert!(!unicode_case_eq('i', 'ı'));
+    }
+
+    /// Scalars that exercise ASCII, Latin-1, Cyrillic, Greek final sigma,
+    /// multi-scalar mappings, dotless/dotted i, Kelvin/long s folds, and
+    /// mismatched Unicode table versions.
+    fn case_probe_scalars() -> Vec<char> {
+        let mut scalars: Vec<char> = ('\0'..='\u{24f}')
+            .chain('\u{370}'..='\u{3ff}')
+            .chain('\u{400}'..='\u{52f}')
+            .chain('\u{1e00}'..='\u{1fff}')
+            .chain('\u{2100}'..='\u{218f}')
+            .chain('\u{24b6}'..='\u{24e9}')
+            .chain('\u{a640}'..='\u{a7ff}')
+            .chain('\u{ff21}'..='\u{ff5a}')
+            .chain(['\u{10400}', '\u{10428}', '\u{1e900}', '\u{1e922}'])
+            .collect();
+        scalars.sort_unstable();
+        scalars.dedup();
+        scalars
+    }
+
+    #[test]
+    fn case_fold_keys_agree_with_unicode_case_comparator() {
+        let scalars = case_probe_scalars();
+        let keys: Vec<CaseFoldKey> = scalars.iter().copied().map(CaseFoldKey::new).collect();
+        for (left, left_key) in scalars.iter().zip(&keys) {
+            assert_eq!(
+                left_key.lower_first(),
+                left.to_lowercase().next().unwrap_or(*left)
+            );
+            assert_eq!(
+                left_key.upper_first(),
+                left.to_uppercase().next().unwrap_or(*left)
+            );
+            for (right, right_key) in scalars.iter().zip(&keys) {
+                assert_eq!(
+                    left_key.case_eq(right_key),
+                    unicode_case_eq(*left, *right),
+                    "{left:?} vs {right:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn folded_classes_agree_with_case_insensitive_class_evaluation() {
+        let insensitive = RegexFlags {
+            case_insensitive: true,
+            ..RegexFlags::default()
+        };
+        for pattern in [
+            r"[^.а-яё\w]",
+            r"[а-яА-ЯёЁ]",
+            r"[A-Z]",
+            r"[a-z0-9_]",
+            r"[^a-z]",
+            r"[ſK]",
+            r"[ßẞ]",
+            r"[ıİi]",
+            r"[σςΣ]",
+            r"[\x{100}-\x{17f}]",
+            r"[À-ÿ&&[^×÷]]",
+            r"[[:upper:][:digit:]]",
+            r"[\p{Greek}[x-z]]",
+            r"[^[^a-f]\d]",
+        ] {
+            let parsed = parse(pattern);
+            let Ast::Class(class) = &parsed.ast else {
+                panic!("{pattern} did not parse as one class: {:?}", parsed.ast);
+            };
+            let folded = FoldedClass::new(class);
+            for ch in case_probe_scalars() {
+                assert_eq!(
+                    folded.contains(ch),
+                    class_contains(class, ch, insensitive),
+                    "{pattern} with {ch:?}"
+                );
+            }
+        }
     }
 
     #[test]
