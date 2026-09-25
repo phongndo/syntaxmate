@@ -954,11 +954,14 @@ impl StartByteSet {
     }
 
     fn extend(&mut self, other: &Self) {
-        for byte in 0..=u8::MAX {
-            if other.contains(byte) {
-                self.insert(byte);
-            }
+        for (word, other) in self.bits.iter_mut().zip(other.bits) {
+            *word |= other;
         }
+        self.len = self
+            .bits
+            .iter()
+            .map(|word| word.count_ones() as usize)
+            .sum();
     }
 
     pub(crate) fn contains(&self, byte: u8) -> bool {
@@ -2555,37 +2558,40 @@ pub(crate) fn perl_class_contains(kind: PerlClassKind, ch: char) -> bool {
 }
 
 pub(crate) fn posix_class_contains(name: &str, ch: char) -> bool {
-    if name.eq_ignore_ascii_case("alnum") {
-        ch.is_alphanumeric()
-    } else if name.eq_ignore_ascii_case("alpha") {
-        ch.is_alphabetic()
-    } else if name.eq_ignore_ascii_case("ascii") {
-        ch.is_ascii()
-    } else if name.eq_ignore_ascii_case("blank") {
-        matches!(ch, '\t' | ' ')
-    } else if name.eq_ignore_ascii_case("cntrl") {
-        ch.is_control()
-    } else if name.eq_ignore_ascii_case("digit") {
-        ch.is_ascii_digit()
-    } else if name.eq_ignore_ascii_case("graph") {
-        !ch.is_whitespace() && !ch.is_control()
-    } else if name.eq_ignore_ascii_case("lower") {
-        ch.is_lowercase()
-    } else if name.eq_ignore_ascii_case("print") {
-        !ch.is_control()
-    } else if name.eq_ignore_ascii_case("punct") {
-        ch.is_ascii_punctuation()
-    } else if name.eq_ignore_ascii_case("space") {
-        ch.is_whitespace()
-    } else if name.eq_ignore_ascii_case("upper") {
-        ch.is_uppercase()
-    } else if name.eq_ignore_ascii_case("word") {
-        is_word_char(ch)
-    } else if name.eq_ignore_ascii_case("xdigit") {
-        ch.is_ascii_hexdigit()
-    } else {
-        false
-    }
+    posix_class_predicate(name)(ch)
+}
+
+pub(crate) type CharPredicate = fn(char) -> bool;
+
+/// Resolves a POSIX bracket class name (ASCII case-insensitive) once, so
+/// callers probing many characters do not repeat the name comparison.
+/// Unknown names match nothing.
+pub(crate) fn posix_class_predicate(name: &str) -> CharPredicate {
+    const CLASSES: [(&str, CharPredicate); 14] = [
+        ("alnum", |ch| ch.is_alphanumeric()),
+        ("alpha", |ch| ch.is_alphabetic()),
+        ("ascii", |ch| ch.is_ascii()),
+        ("blank", |ch| matches!(ch, '\t' | ' ')),
+        ("cntrl", |ch| ch.is_control()),
+        ("digit", |ch| ch.is_ascii_digit()),
+        ("graph", |ch| !ch.is_whitespace() && !ch.is_control()),
+        ("lower", |ch| ch.is_lowercase()),
+        ("print", |ch| !ch.is_control()),
+        ("punct", |ch| ch.is_ascii_punctuation()),
+        ("space", |ch| ch.is_whitespace()),
+        ("upper", |ch| ch.is_uppercase()),
+        ("word", is_word_char),
+        ("xdigit", |ch| ch.is_ascii_hexdigit()),
+    ];
+    CLASSES
+        .iter()
+        .find(|(class, _)| *class == name)
+        .or_else(|| {
+            CLASSES
+                .iter()
+                .find(|(class, _)| class.eq_ignore_ascii_case(name))
+        })
+        .map_or(|_| false, |(_, predicate)| *predicate)
 }
 
 pub(crate) fn unicode_class_contains(name: &str, ch: char) -> bool {

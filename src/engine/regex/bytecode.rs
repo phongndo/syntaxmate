@@ -345,9 +345,8 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             (mask, mask)
         }
         ClassAtom::Posix { name, negated } => {
-            let mask = ascii_predicate_mask(|ch| {
-                super::backtrack::posix_class_contains(name, ch) != *negated
-            });
+            let contains = super::backtrack::posix_class_predicate(name);
+            let mask = ascii_predicate_mask(|ch| contains(ch) != *negated);
             (mask, mask)
         }
         ClassAtom::Unicode { name, negated } => {
@@ -844,8 +843,10 @@ impl Program {
         &self.capture_layout
     }
 
-    pub(crate) fn is_beneficial(parsed: &ParsedRegex) -> bool {
-        ordered_fanout_score(&parsed.ast) >= beneficial_fanout_threshold()
+    /// Bytecode pays off once the pattern has an ordered choice point; the
+    /// fanout score is computed by [`RegexAnalysis`]'s structural walk.
+    pub(crate) fn is_beneficial_fanout(ordered_fanout: usize) -> bool {
+        ordered_fanout >= beneficial_fanout_threshold()
     }
 }
 
@@ -1472,6 +1473,7 @@ fn collect_group_definitions<'a>(
     }
 }
 
+#[cfg(test)]
 fn ordered_fanout_score(ast: &Ast) -> usize {
     match ast {
         Ast::Alternation(branches) => {
@@ -1643,7 +1645,7 @@ impl Compiler {
     fn compile(mut self, parsed: &ParsedRegex) -> Result<Program, CompileError> {
         self.named_captures.clone_from(&parsed.named_captures);
         self.instructions
-            .reserve(instruction_capacity_hint(&parsed.ast));
+            .reserve(parsed.analysis().instruction_capacity_hint());
         if !self.capture_layout.is_empty() && parsed.features.subroutine {
             let mut definitions = std::collections::BTreeMap::new();
             collect_group_definitions(&parsed.ast, parsed.flags, &mut definitions);
@@ -2243,6 +2245,7 @@ fn exact_literal_ast(ast: &Ast, flags: RegexFlags) -> Option<Cow<'_, str>> {
     }
 }
 
+#[cfg(test)]
 fn instruction_capacity_hint(ast: &Ast) -> usize {
     match ast {
         Ast::Empty => 0,
@@ -2340,6 +2343,35 @@ mod tests {
             allow_a: true,
             allow_g: true,
             g_pos: 0,
+        }
+    }
+
+    #[test]
+    fn analysis_walk_matches_standalone_fanout_and_capacity_walks() {
+        for pattern in [
+            "",
+            "a",
+            "abc|d",
+            r"(?:a|b|c)*x+[yz]?",
+            r"(?=(<\s*(keyof|infer)\s+)|\{[^{}]*})",
+            r"(a)(?(1)b|c)\X",
+            r"(?i:foo|bar)(?-i)baz",
+            r"(?<n>x)\k<n>\g<n>",
+            r"(?<=\.\.\.)(?!\$)\b(async)?\s*(?:(\*)\s*)?",
+            r"a{2,5}?|(?>b+)|c*+",
+        ] {
+            let parsed = parse(pattern);
+            let analysis = parsed.analysis();
+            assert_eq!(
+                analysis.instruction_capacity_hint(),
+                instruction_capacity_hint(&parsed.ast),
+                "{pattern:?}"
+            );
+            assert_eq!(
+                analysis.bytecode_beneficial(),
+                ordered_fanout_score(&parsed.ast) >= beneficial_fanout_threshold(),
+                "{pattern:?}"
+            );
         }
     }
 

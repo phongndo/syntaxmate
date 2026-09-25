@@ -1270,6 +1270,17 @@ impl<'a> Parser<'a> {
 }
 
 fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
+    // Most branches contain no bare option change. They are already in the
+    // shape the rewrite below would rebuild, so skip taking them apart.
+    let needs_rewrite = |branch: &Ast| match branch {
+        Ast::Concat(nodes) => {
+            nodes.len() < 2 || nodes.iter().any(|node| flag_change_flags(node).is_some())
+        }
+        node => flag_change_flags(node).is_some(),
+    };
+    if !branches.iter().any(needs_rewrite) {
+        return alternation_ast(branches);
+    }
     for branch_index in 0..branches.len() {
         let branch = std::mem::replace(&mut branches[branch_index], Ast::Empty);
         let mut nodes = match branch {
