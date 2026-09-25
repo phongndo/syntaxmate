@@ -697,7 +697,11 @@ impl NixUriMatcher {
     const PATTERN: &'static str = "([A-Za-z][-+.0-9A-Za-z]*:[!$-'*-:=?-Z_a-z~]+)";
 
     fn try_from_translation(translation: &Translation) -> Option<Self> {
-        (translation.pattern == Self::PATTERN).then_some(Self)
+        // Spelling normalization never shortens a pattern, so longer sources
+        // cannot normalize to this one; skip building their spelling.
+        (translation.stripped_source().len() <= Self::PATTERN.len()
+            && translation.pattern() == Self::PATTERN)
+            .then_some(Self)
     }
 
     fn find(&self, line: &str, from: usize) -> Option<MatchResult> {
@@ -2153,12 +2157,6 @@ impl PatternSetMatcher {
         }
     }
 
-    pub fn patterns(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.compiled
-            .iter()
-            .map(|pattern| pattern.translated_pattern())
-    }
-
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -2918,6 +2916,7 @@ mod tests {
     #[test]
     fn nix_uri_specialization_matches_ascii_uri_shape() {
         let matcher = AutomataMatcher::new(NixUriMatcher::PATTERN).unwrap();
+        assert!(matches!(matcher.engine, NativeEngine::NixUri(_)));
         let result = matcher
             .find(
                 "xx 1abc:def <nixpkgs> mailto:user",

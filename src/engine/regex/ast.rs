@@ -355,6 +355,10 @@ struct Parser<'a> {
     flags: RegexFlags,
     diagnostics: Vec<String>,
     depth: usize,
+    /// Nodes of the concatenations currently being parsed, innermost last.
+    /// Sharing one stack avoids a growing vector per (often single-node)
+    /// concatenation; each `parse_concat` owns the entries above its base.
+    concat_nodes: Vec<Ast>,
 }
 
 /// Bounds recursive-descent nesting so hostile grammar patterns cannot
@@ -367,9 +371,12 @@ const MAX_PARSE_DEPTH: usize = 128;
 
 impl<'a> Parser<'a> {
     fn new(source: &'a str) -> Self {
+        let chars = source.chars().collect::<Vec<_>>();
         Self {
             source,
-            chars: source.chars().collect(),
+            // Every node consumes input, so short patterns never regrow this.
+            concat_nodes: Vec::with_capacity(chars.len().min(16)),
+            chars,
             pos: 0,
             next_capture: 1,
             named_captures: BTreeMap::new(),
@@ -408,20 +415,27 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_alternation(&mut self, terminator: Option<char>) -> Ast {
-        let mut branches = Vec::new();
-        loop {
+        let first = self.parse_concat(terminator);
+        if self.peek() != Some('|') {
+            // Most groups have one branch; skip the branch vector unless an
+            // inline option change needs restructuring.
+            return if branch_has_flag_change(&first) {
+                normalize_flag_changes(vec![first])
+            } else {
+                first
+            };
+        }
+        let mut branches = Vec::with_capacity(4);
+        branches.push(first);
+        while self.peek() == Some('|') {
+            self.bump();
             branches.push(self.parse_concat(terminator));
-            if self.peek() == Some('|') {
-                self.bump();
-                continue;
-            }
-            break;
         }
         normalize_flag_changes(branches)
     }
 
     fn parse_concat(&mut self, terminator: Option<char>) -> Ast {
-        let mut nodes = Vec::new();
+        let base = self.concat_nodes.len();
         while let Some(ch) = self.peek() {
             if Some(ch) == terminator || ch == '|' {
                 break;
@@ -436,12 +450,13 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            push_concat_node(&mut nodes, self.parse_repeat());
+            let node = self.parse_repeat();
+            push_concat_node(&mut self.concat_nodes, base, node);
         }
-        match nodes.len() {
+        match self.concat_nodes.len() - base {
             0 => Ast::Empty,
-            1 => nodes.pop().expect("one node"),
-            _ => Ast::Concat(nodes),
+            1 => self.concat_nodes.pop().expect("one node"),
+            _ => Ast::Concat(self.concat_nodes.drain(base..).collect()),
         }
     }
 
@@ -561,9 +576,8 @@ impl<'a> Parser<'a> {
                 ));
                 Ast::Unsupported("unmatched ')'".to_owned())
             }
-            ch => {
-                let mut literal = String::new();
-                literal.push(ch);
+            _ => {
+                let start = self.pos - 1;
                 while let Some(next) = self.peek() {
                     if is_regex_syntax(next)
                         || (self.flags.ignore_whitespace && (next.is_whitespace() || next == '#'))
@@ -574,8 +588,14 @@ impl<'a> Parser<'a> {
                     {
                         break;
                     }
-                    literal.push(self.bump().expect("peeked literal character"));
+                    self.pos += 1;
                 }
+                let run = &self.chars[start..self.pos];
+                // Adjacent escaped literals merge into this run. Keep the
+                // allocator-minimum capacity so short runs grow in place.
+                let len = run.iter().map(|ch| ch.len_utf8()).sum::<usize>();
+                let mut literal = String::with_capacity(len.max(8));
+                literal.extend(run);
                 Ast::Literal(literal)
             }
         }
@@ -1271,18 +1291,18 @@ impl<'a> Parser<'a> {
 
 fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
     for branch_index in 0..branches.len() {
+        if !branch_has_flag_change(&branches[branch_index]) {
+            continue;
+        }
         let branch = std::mem::replace(&mut branches[branch_index], Ast::Empty);
         let mut nodes = match branch {
             Ast::Concat(nodes) => nodes,
             node => vec![node],
         };
-        let Some(change_index) = nodes
+        let change_index = nodes
             .iter()
             .position(|node| flag_change_flags(node).is_some())
-        else {
-            branches[branch_index] = concat_ast(nodes);
-            continue;
-        };
+            .expect("branch contains a flag change");
         let flags = flag_change_flags(&nodes.remove(change_index)).expect("flag marker");
         let prefix = nodes.drain(..change_index).collect::<Vec<_>>();
         let mut remainder = vec![concat_ast(nodes)];
@@ -1297,6 +1317,13 @@ fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
         break;
     }
     alternation_ast(branches)
+}
+
+fn branch_has_flag_change(branch: &Ast) -> bool {
+    match branch {
+        Ast::Concat(nodes) => nodes.iter().any(|node| flag_change_flags(node).is_some()),
+        node => flag_change_flags(node).is_some(),
+    }
 }
 
 fn flag_change_marker(flags: RegexFlags) -> Ast {
@@ -1339,9 +1366,16 @@ fn alternation_ast(mut branches: Vec<Ast>) -> Ast {
     }
 }
 
-fn push_concat_node(nodes: &mut Vec<Ast>, node: Ast) {
+/// Appends `node` to the concatenation stored in `nodes[base..]`, merging
+/// adjacent literals (and adjacent literals under the same option snapshot).
+fn push_concat_node(nodes: &mut Vec<Ast>, base: usize, node: Ast) {
+    let last = if nodes.len() > base {
+        nodes.last_mut()
+    } else {
+        None
+    };
     if let Ast::Literal(literal) = node {
-        if let Some(Ast::Literal(previous)) = nodes.last_mut() {
+        if let Some(Ast::Literal(previous)) = last {
             previous.push_str(&literal);
         } else {
             nodes.push(Ast::Literal(literal));
@@ -1354,7 +1388,7 @@ fn push_concat_node(nodes: &mut Vec<Ast>, node: Ast) {
                 if let Some(Ast::Flags {
                     flags: previous_flags,
                     child: previous_child,
-                }) = nodes.last_mut()
+                }) = last
                     && *previous_flags == flags
                     && let Ast::Literal(previous) = previous_child.as_mut()
                 {

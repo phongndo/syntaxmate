@@ -15,7 +15,10 @@ pub mod tokenizer;
 #[cfg(test)]
 mod closure_parity_tests;
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::{Error, Result, grammars};
 use grammar::{CompiledGrammar, RuleBody, RuleRef};
@@ -61,15 +64,19 @@ fn compiled_grammar_closure(
         .enumerate()
         .map(|(index, blob)| (blob.scope_name.as_str(), index))
         .collect::<HashMap<_, _>>();
-    let mut pending = vec![(root_scope.to_owned(), None::<String>)];
+    let Some(&root_index) = scope_indexes.get(root_scope) else {
+        return Ok(Vec::new());
+    };
+    let mut walk = DependencyWalk {
+        scope_indexes: &scope_indexes,
+        root_index,
+        pending: vec![(root_index, None)],
+    };
     let mut selected = vec![false; bundle.grammar_blobs.len()];
     let mut inspected = HashSet::new();
     let mut compiled = vec![None::<CompiledGrammar>; bundle.grammar_blobs.len()];
 
-    while let Some((scope, repository)) = pending.pop() {
-        let Some(&index) = scope_indexes.get(scope.as_str()) else {
-            continue;
-        };
+    while let Some((index, repository)) = walk.pending.pop() {
         selected[index] = true;
         if !inspected.insert((index, repository.clone())) {
             continue;
@@ -88,7 +95,7 @@ fn compiled_grammar_closure(
         let grammar = compiled[index]
             .as_ref()
             .expect("selected grammar compiled before dependency inspection");
-        collect_compiled_dependencies(grammar, root_scope, repository.as_deref(), &mut pending);
+        walk.collect_dependencies(grammar, index, repository.as_deref());
     }
 
     let mut closure = Vec::new();
@@ -107,132 +114,127 @@ fn compiled_grammar_closure(
     Ok(closure)
 }
 
-fn collect_compiled_dependencies(
-    grammar: &CompiledGrammar,
-    root_scope: &str,
-    repository_rule: Option<&str>,
-    pending: &mut Vec<(String, Option<String>)>,
-) {
-    let mut visited_rules = BTreeSet::new();
-    let mut visited_repositories = BTreeSet::new();
-    if let Some(name) = repository_rule {
-        collect_compiled_rule_ref(
-            grammar,
-            &RuleRef::Repository(name.to_owned()),
-            root_scope,
-            pending,
-            &mut visited_rules,
-            &mut visited_repositories,
-        );
-        return;
-    }
-
-    collect_compiled_rule_refs(
-        grammar,
-        &grammar.top_level,
-        root_scope,
-        pending,
-        &mut visited_rules,
-        &mut visited_repositories,
-    );
-    // Inline injections belong only to the root. Dependencies can themselves
-    // define injections, but loading those grammars as includes must not
-    // activate or expand the unrelated injection rules.
-    if grammar.scope_name == root_scope {
-        for injection in &grammar.injections {
-            collect_compiled_rule_refs(
-                grammar,
-                &injection.patterns,
-                root_scope,
-                pending,
-                &mut visited_rules,
-                &mut visited_repositories,
-            );
-        }
-    }
+/// Pending `(bundle grammar index, repository)` inclusions for one closure.
+/// Unknown external scopes are optional host-provided includes and are
+/// skipped when they are discovered.
+struct DependencyWalk<'a> {
+    scope_indexes: &'a HashMap<&'a str, usize>,
+    root_index: usize,
+    pending: Vec<(usize, Option<Arc<str>>)>,
 }
 
-fn collect_compiled_rule_refs(
-    grammar: &CompiledGrammar,
-    refs: &[RuleRef],
-    root_scope: &str,
-    pending: &mut Vec<(String, Option<String>)>,
-    visited_rules: &mut BTreeSet<state::RuleId>,
-    visited_repositories: &mut BTreeSet<String>,
-) {
-    for rule_ref in refs {
-        collect_compiled_rule_ref(
-            grammar,
-            rule_ref,
-            root_scope,
-            pending,
-            visited_rules,
-            visited_repositories,
-        );
-    }
+/// Rules and repository entries already visited while inspecting one grammar.
+struct VisitedRules<'g> {
+    rules: Vec<bool>,
+    repositories: HashSet<&'g str>,
 }
 
-fn collect_compiled_rule_ref(
-    grammar: &CompiledGrammar,
-    rule_ref: &RuleRef,
-    root_scope: &str,
-    pending: &mut Vec<(String, Option<String>)>,
-    visited_rules: &mut BTreeSet<state::RuleId>,
-    visited_repositories: &mut BTreeSet<String>,
-) {
-    match rule_ref {
-        RuleRef::Rule(rule_id) => {
-            if !visited_rules.insert(*rule_id) {
-                return;
-            }
-            let Some(rule) = grammar.rule(*rule_id) else {
-                return;
-            };
-            let patterns = match &rule.body {
-                RuleBody::BeginEnd { patterns, .. }
-                | RuleBody::BeginWhile { patterns, .. }
-                | RuleBody::IncludeOnly { patterns } => patterns,
-                // Match captures are retokenization rules. vscode-textmate's
-                // dependency processor does not follow capture-only includes.
-                RuleBody::Match { .. } => return,
-            };
-            collect_compiled_rule_refs(
-                grammar,
-                patterns,
-                root_scope,
-                pending,
-                visited_rules,
-                visited_repositories,
-            );
+impl DependencyWalk<'_> {
+    fn collect_dependencies(
+        &mut self,
+        grammar: &CompiledGrammar,
+        grammar_index: usize,
+        repository_rule: Option<&str>,
+    ) {
+        let mut visited = VisitedRules {
+            rules: vec![false; grammar.rules.len()],
+            repositories: HashSet::new(),
+        };
+        if let Some(name) = repository_rule {
+            self.collect_repository(grammar, grammar_index, name, &mut visited);
+            return;
         }
-        RuleRef::Repository(name) => {
-            // vscode-textmate's dependency processor walks the grammar's
-            // top-level repository, but does not expand repositories declared
-            // inside an include-only rule. The compiler gives those lexical
-            // overlays a collision-free internal name; following them here
-            // would load large unrelated closures (notably every fenced
-            // language reachable from Wikitext) and change the established
-            // bundled-closure contract.
-            if name.starts_with("$mark.local.") || !visited_repositories.insert(name.clone()) {
-                return;
-            }
-            if let Some(rule_ref) = grammar.repository.get(name) {
-                collect_compiled_rule_ref(
-                    grammar,
-                    rule_ref,
-                    root_scope,
-                    pending,
-                    visited_rules,
-                    visited_repositories,
-                );
+
+        self.collect_rule_refs(grammar, grammar_index, &grammar.top_level, &mut visited);
+        // Inline injections belong only to the root. Dependencies can themselves
+        // define injections, but loading those grammars as includes must not
+        // activate or expand the unrelated injection rules.
+        if grammar_index == self.root_index {
+            for injection in &grammar.injections {
+                self.collect_rule_refs(grammar, grammar_index, &injection.patterns, &mut visited);
             }
         }
-        RuleRef::SelfRef => pending.push((grammar.scope_name.clone(), None)),
-        RuleRef::BaseRef => pending.push((root_scope.to_owned(), None)),
-        RuleRef::External { scope, repository } => {
-            if let Some(scope) = grammar.scope(*scope) {
-                pending.push((scope.to_owned(), repository.clone()));
+    }
+
+    fn collect_rule_refs<'g>(
+        &mut self,
+        grammar: &'g CompiledGrammar,
+        grammar_index: usize,
+        refs: &'g [RuleRef],
+        visited: &mut VisitedRules<'g>,
+    ) {
+        for rule_ref in refs {
+            self.collect_rule_ref(grammar, grammar_index, rule_ref, visited);
+        }
+    }
+
+    fn collect_rule_ref<'g>(
+        &mut self,
+        grammar: &'g CompiledGrammar,
+        grammar_index: usize,
+        rule_ref: &'g RuleRef,
+        visited: &mut VisitedRules<'g>,
+    ) {
+        match rule_ref {
+            RuleRef::Rule(rule_id) => {
+                let Some(seen) = visited.rules.get_mut(rule_id.0 as usize) else {
+                    return;
+                };
+                if std::mem::replace(seen, true) {
+                    return;
+                }
+                let Some(rule) = grammar.rule(*rule_id) else {
+                    return;
+                };
+                let patterns = match &rule.body {
+                    RuleBody::BeginEnd { patterns, .. }
+                    | RuleBody::BeginWhile { patterns, .. }
+                    | RuleBody::IncludeOnly { patterns } => patterns,
+                    // Match captures are retokenization rules. vscode-textmate's
+                    // dependency processor does not follow capture-only includes.
+                    RuleBody::Match { .. } => return,
+                };
+                self.collect_rule_refs(grammar, grammar_index, patterns, visited);
+            }
+            RuleRef::Repository(name) => {
+                self.collect_repository(grammar, grammar_index, name, visited);
+            }
+            RuleRef::SelfRef => self.pending.push((grammar_index, None)),
+            RuleRef::BaseRef => self.pending.push((self.root_index, None)),
+            RuleRef::External { scope, repository } => {
+                if let Some(&index) = grammar
+                    .scope(*scope)
+                    .and_then(|scope| self.scope_indexes.get(scope))
+                {
+                    self.pending.push((index, repository.clone()));
+                }
             }
         }
+    }
+
+    fn collect_repository<'g>(
+        &mut self,
+        grammar: &'g CompiledGrammar,
+        grammar_index: usize,
+        name: &str,
+        visited: &mut VisitedRules<'g>,
+    ) {
+        // vscode-textmate's dependency processor walks the grammar's
+        // top-level repository, but does not expand repositories declared
+        // inside an include-only rule. The compiler gives those lexical
+        // overlays a collision-free internal name; following them here
+        // would load large unrelated closures (notably every fenced
+        // language reachable from Wikitext) and change the established
+        // bundled-closure contract.
+        if name.starts_with("$mark.local.") {
+            return;
+        }
+        let Some((name, rule_ref)) = grammar.repository.get_key_value(name) else {
+            return;
+        };
+        if !visited.repositories.insert(name) {
+            return;
+        }
+        self.collect_rule_ref(grammar, grammar_index, rule_ref, visited);
     }
 }

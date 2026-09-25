@@ -148,9 +148,10 @@ fn arena_index(index: u32) -> usize {
     index as usize
 }
 
-// Keep speculative trie allocation proportional for small inventories while
-// bounding over-reservation when many branches share the same prefixes.
+// Keep speculative Unicode trie allocation proportional for small
+// inventories while bounding over-reservation for shared prefixes.
 const LITERAL_TRIE_NODE_RESERVE_LIMIT: usize = 4 * 1024;
+const NO_TERMINAL_ORDER: u32 = u32::MAX;
 
 /// Ordered trie for an alternation whose branches are all exact literals.
 ///
@@ -162,6 +163,9 @@ const LITERAL_TRIE_NODE_RESERVE_LIMIT: usize = 4 * 1024;
 #[derive(Debug, Clone, Default)]
 struct LiteralTrie {
     nodes: Vec<LiteralTrieNode>,
+    /// Sorted outgoing edge bytes, grouped by source node. Edge `e` leads to
+    /// node `e + 1`, so byte tries need no per-node child storage.
+    edge_bytes: Vec<u8>,
     unicode_nodes: Vec<UnicodeLiteralTrieNode>,
 }
 
@@ -187,28 +191,6 @@ impl<T: Copy> LiteralTrieEdges<T> {
         }
     }
 
-    fn get(&self, key: T) -> Option<u32>
-    where
-        T: Ord,
-    {
-        match self {
-            Self::Empty => None,
-            Self::One((edge, child)) => (*edge == key).then_some(*child),
-            Self::Many(edges) => {
-                if edges.len() <= 8 {
-                    edges
-                        .iter()
-                        .find_map(|(edge, child)| (*edge == key).then_some(*child))
-                } else {
-                    edges
-                        .binary_search_by_key(&key, |(edge, _)| *edge)
-                        .ok()
-                        .map(|index| edges[index].1)
-                }
-            }
-        }
-    }
-
     fn push(&mut self, edge: (T, u32)) {
         match self {
             Self::Empty => *self = Self::One(edge),
@@ -218,12 +200,19 @@ impl<T: Copy> LiteralTrieEdges<T> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+/// Byte-trie node whose outgoing edges are `edge_bytes[first_edge..][..edge_count]`.
+#[derive(Debug, Clone, Copy)]
 struct LiteralTrieNode {
-    // Most trie nodes have one child. Keeping that edge inline avoids one heap
-    // allocation per byte while preserving a Vec only for actual branches.
-    edges: LiteralTrieEdges<u8>,
-    terminal_order: Option<u32>,
+    first_edge: u32,
+    /// Lowest branch order ending here, or `NO_TERMINAL_ORDER`.
+    terminal_order: u32,
+    edge_count: u16,
+}
+
+impl LiteralTrieNode {
+    fn terminal_order(self) -> Option<u32> {
+        (self.terminal_order != NO_TERMINAL_ORDER).then_some(self.terminal_order)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -2013,95 +2002,160 @@ impl Compiler {
 
 impl LiteralTrie {
     fn new(literals: &[Cow<'_, str>], flags: RegexFlags) -> Result<Self, CompileError> {
-        let unicode = flags.case_insensitive && literals.iter().any(|literal| !literal.is_ascii());
+        if flags.case_insensitive && literals.iter().any(|literal| !literal.is_ascii()) {
+            return Self::new_unicode(literals);
+        }
+        Self::new_bytes(literals, flags.case_insensitive)
+    }
+
+    /// Builds the byte trie breadth-first from sorted branches.
+    ///
+    /// Sorting groups every node's outgoing bytes, so each node's edges are
+    /// allocated contiguously and its children receive consecutive ids. Equal
+    /// (folded) branches sort by order, making the first one the terminal,
+    /// which matches Oniguruma's first-alternative preference.
+    fn new_bytes(literals: &[Cow<'_, str>], case_insensitive: bool) -> Result<Self, CompileError> {
+        // Fold case-insensitive branches once into one buffer so sorting and
+        // construction compare plain byte slices.
+        let folded = if case_insensitive {
+            literals
+                .iter()
+                .flat_map(|literal| literal.bytes().map(|byte| byte.to_ascii_lowercase()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let mut sorted = Vec::with_capacity(literals.len());
+        let mut folded_start = 0;
+        for (order, literal) in literals.iter().enumerate() {
+            let order = u32::try_from(order)
+                .ok()
+                .filter(|order| *order != NO_TERMINAL_ORDER)
+                .ok_or(CompileError::TableOverflow)?;
+            let bytes = if case_insensitive {
+                let bytes = &folded[folded_start..folded_start + literal.len()];
+                folded_start += literal.len();
+                bytes
+            } else {
+                literal.as_bytes()
+            };
+            sorted.push((bytes, order));
+        }
+        sorted.sort_unstable();
+
+        // Distinct prefixes, including the root, give the exact node count.
+        let mut node_count = 1usize;
+        let mut previous: &[u8] = &[];
+        for (literal, _) in &sorted {
+            let shared = previous
+                .iter()
+                .zip(literal.iter())
+                .take_while(|(left, right)| left == right)
+                .count();
+            node_count = node_count.saturating_add(literal.len() - shared);
+            previous = literal;
+        }
+        u32::try_from(node_count).map_err(|_| CompileError::TableOverflow)?;
+
+        let mut nodes = Vec::with_capacity(node_count);
+        let mut edge_bytes = Vec::with_capacity(node_count - 1);
+        // Branch range and depth for each node; consumed in node-id order.
+        let mut ranges = Vec::with_capacity(node_count);
+        nodes.push(LiteralTrieNode {
+            first_edge: 0,
+            terminal_order: NO_TERMINAL_ORDER,
+            edge_count: 0,
+        });
+        ranges.push((0usize, sorted.len(), 0usize));
+        let mut node = 0usize;
+        while node < nodes.len() {
+            let (mut start, end, depth) = ranges[node];
+            if start < end && sorted[start].0.len() == depth {
+                nodes[node].terminal_order = sorted[start].1;
+                while start < end && sorted[start].0.len() == depth {
+                    start += 1;
+                }
+            }
+            let first_edge = edge_bytes.len();
+            while start < end {
+                let byte = sorted[start].0[depth];
+                let mut run_end = start + 1;
+                while run_end < end && sorted[run_end].0[depth] == byte {
+                    run_end += 1;
+                }
+                edge_bytes.push(byte);
+                nodes.push(LiteralTrieNode {
+                    first_edge: 0,
+                    terminal_order: NO_TERMINAL_ORDER,
+                    edge_count: 0,
+                });
+                ranges.push((start, run_end, depth + 1));
+                start = run_end;
+            }
+            // Distinct folded bytes bound one node's fan-out to 256 edges.
+            nodes[node].first_edge = first_edge as u32;
+            nodes[node].edge_count = (edge_bytes.len() - first_edge) as u16;
+            node += 1;
+        }
+        debug_assert_eq!(nodes.len(), node_count);
+        Ok(Self {
+            nodes,
+            edge_bytes,
+            unicode_nodes: Vec::new(),
+        })
+    }
+
+    fn new_unicode(literals: &[Cow<'_, str>]) -> Result<Self, CompileError> {
         let node_capacity = literals
             .iter()
             .fold(1usize, |nodes, literal| {
-                nodes.saturating_add(if unicode {
-                    literal.chars().count()
-                } else {
-                    literal.len()
-                })
+                nodes.saturating_add(literal.chars().count())
             })
             .min(LITERAL_TRIE_NODE_RESERVE_LIMIT);
-        let mut trie = Self {
-            nodes: if unicode {
-                Vec::new()
-            } else {
-                Vec::with_capacity(node_capacity)
-            },
-            unicode_nodes: if unicode {
-                Vec::with_capacity(node_capacity)
-            } else {
-                Vec::new()
-            },
-        };
-        if unicode {
-            trie.unicode_nodes.push(UnicodeLiteralTrieNode::default());
-            for (order, literal) in literals.iter().enumerate() {
-                let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
-                let mut node = 0usize;
-                for ch in literal.chars() {
-                    let edge = trie.unicode_nodes[node]
-                        .edges
-                        .iter()
-                        .find(|(edge, _)| unicode_case_eq(*edge, ch))
-                        .map(|(_, child)| *child);
-                    node = if let Some(child) = edge {
-                        child as usize
-                    } else {
-                        let child = u32::try_from(trie.unicode_nodes.len())
-                            .map_err(|_| CompileError::TableOverflow)?;
-                        trie.unicode_nodes.push(UnicodeLiteralTrieNode::default());
-                        trie.unicode_nodes[node].edges.push((ch, child));
-                        child as usize
-                    };
-                }
-                let terminal = &mut trie.unicode_nodes[node].terminal_order;
-                if terminal.is_none_or(|existing| order < existing) {
-                    *terminal = Some(order);
-                }
-            }
-            return Ok(trie);
-        }
-        trie.nodes.push(LiteralTrieNode::default());
+        let mut unicode_nodes = Vec::with_capacity(node_capacity);
+        unicode_nodes.push(UnicodeLiteralTrieNode::default());
         for (order, literal) in literals.iter().enumerate() {
             let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
             let mut node = 0usize;
-            for mut byte in literal.bytes() {
-                if flags.case_insensitive {
-                    byte.make_ascii_lowercase();
-                }
-                let edge = trie.nodes[node]
+            for ch in literal.chars() {
+                let edge = unicode_nodes[node]
                     .edges
                     .iter()
-                    .find(|(edge, _)| *edge == byte)
+                    .find(|(edge, _)| unicode_case_eq(*edge, ch))
                     .map(|(_, child)| *child);
                 node = if let Some(child) = edge {
                     child as usize
                 } else {
-                    let child =
-                        u32::try_from(trie.nodes.len()).map_err(|_| CompileError::TableOverflow)?;
-                    trie.nodes.push(LiteralTrieNode::default());
-                    trie.nodes[node].edges.push((byte, child));
+                    let child = u32::try_from(unicode_nodes.len())
+                        .map_err(|_| CompileError::TableOverflow)?;
+                    unicode_nodes.push(UnicodeLiteralTrieNode::default());
+                    unicode_nodes[node].edges.push((ch, child));
                     child as usize
                 };
             }
-            let terminal = &mut trie.nodes[node].terminal_order;
+            let terminal = &mut unicode_nodes[node].terminal_order;
             if terminal.is_none_or(|existing| order < existing) {
                 *terminal = Some(order);
             }
         }
-        trie.finish_ascii_edges();
-        Ok(trie)
+        unicode_nodes.shrink_to_fit();
+        Ok(Self {
+            nodes: Vec::new(),
+            edge_bytes: Vec::new(),
+            unicode_nodes,
+        })
     }
 
-    fn finish_ascii_edges(&mut self) {
-        for node in &mut self.nodes {
-            if let LiteralTrieEdges::Many(edges) = &mut node.edges {
-                edges.sort_unstable_by_key(|(byte, _)| *byte);
-            }
-        }
+    fn byte_child(&self, node: usize, input: u8) -> Option<usize> {
+        let node = self.nodes[node];
+        let first = node.first_edge as usize;
+        let edges = &self.edge_bytes[first..first + usize::from(node.edge_count)];
+        let index = if edges.len() <= 8 {
+            edges.iter().position(|edge| *edge == input)
+        } else {
+            edges.binary_search(&input).ok()
+        }?;
+        Some(first + index + 1)
     }
 
     fn collect_matches(
@@ -2139,7 +2193,7 @@ impl LiteralTrie {
             return Ok(());
         }
         let mut node = 0usize;
-        if let Some(order) = self.nodes[0].terminal_order {
+        if let Some(order) = self.nodes[0].terminal_order() {
             matches.push((order, start));
         }
         let bytes = line.as_bytes();
@@ -2164,12 +2218,12 @@ impl LiteralTrie {
                     1,
                 )
             };
-            let Some(child) = self.nodes[node].edges.get(input) else {
+            let Some(child) = self.byte_child(node, input) else {
                 break;
             };
-            node = child as usize;
+            node = child;
             position += width;
-            if let Some(order) = self.nodes[node].terminal_order {
+            if let Some(order) = self.nodes[node].terminal_order() {
                 matches.push((order, position));
             }
         }
@@ -2489,12 +2543,14 @@ mod tests {
     }
 
     #[test]
-    fn literal_trie_bounds_reservation_for_duplicate_branches() {
+    fn literal_trie_allocates_exact_storage_for_duplicate_branches() {
         let literals = vec![Cow::Borrowed("a"); LITERAL_TRIE_NODE_RESERVE_LIMIT * 2];
         let trie = LiteralTrie::new(&literals, RegexFlags::default()).unwrap();
 
         assert_eq!(trie.nodes.len(), 2);
-        assert_eq!(trie.nodes.capacity(), LITERAL_TRIE_NODE_RESERVE_LIMIT);
+        assert_eq!(trie.nodes.capacity(), 2);
+        assert_eq!(trie.edge_bytes.capacity(), 1);
+        assert_eq!(trie.nodes[1].terminal_order(), Some(0));
     }
 
     #[test]
@@ -2556,6 +2612,93 @@ mod tests {
         // The structured branch remains ahead of the second literal run.
         let ordered = r"(?:foo|bar|baz|quux|x(?:y)?|xyz|xyzz|xyzzy)";
         assert_eq!(bytecode_span(ordered, "xyz", 0), Some(0..2));
+    }
+
+    #[test]
+    fn literal_trie_matches_reference_prefix_search() {
+        fn reference(
+            literals: &[Cow<'_, str>],
+            line: &str,
+            start: usize,
+            case_insensitive: bool,
+        ) -> Vec<(u32, usize)> {
+            let fold = |byte: &u8| {
+                if case_insensitive {
+                    byte.to_ascii_lowercase()
+                } else {
+                    *byte
+                }
+            };
+            let rest = &line.as_bytes()[start..];
+            let mut matches = Vec::<(u32, usize)>::new();
+            for (order, literal) in literals.iter().enumerate() {
+                let literal = literal.as_bytes();
+                let prefix = literal.len() <= rest.len()
+                    && literal
+                        .iter()
+                        .map(fold)
+                        .eq(rest[..literal.len()].iter().map(fold));
+                let end = start + literal.len();
+                if prefix && !matches.iter().any(|(_, existing)| *existing == end) {
+                    matches.push((order as u32, end));
+                }
+            }
+            matches.sort_unstable_by_key(|(_, end)| *end);
+            matches
+        }
+
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move |bound: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % bound as u64) as usize
+        };
+        let narrow = ["a", "b", "A", "B", "_"];
+        let wide = [
+            "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "M", "N", "O", "p", "é",
+            "ß", "0", "9",
+        ];
+        for case in 0..400 {
+            let alphabet: &[&str] = if case % 2 == 0 { &narrow } else { &wide };
+            let case_insensitive = case % 3 == 0;
+            let random_text = |next: &mut dyn FnMut(usize) -> usize, max_len: usize| {
+                (0..next(max_len + 1))
+                    .map(|_| alphabet[next(alphabet.len())])
+                    .collect::<String>()
+            };
+            let literals = (0..4 + next(40))
+                .map(|_| Cow::<str>::Owned(random_text(&mut next, 6)))
+                .collect::<Vec<_>>();
+            if case_insensitive && literals.iter().any(|literal| !literal.is_ascii()) {
+                continue;
+            }
+            let flags = RegexFlags {
+                case_insensitive,
+                ..RegexFlags::default()
+            };
+            let trie = LiteralTrie::new(&literals, flags).unwrap();
+            assert!(trie.unicode_nodes.is_empty());
+            for _ in 0..16 {
+                let prefix = random_text(&mut next, 2);
+                let line = format!("{prefix}{}", random_text(&mut next, 8));
+                let start = prefix.len();
+                let mut matches = Vec::new();
+                trie.collect_matches(
+                    &line,
+                    start,
+                    flags,
+                    &mut StepBudget::new(1024),
+                    &mut matches,
+                )
+                .unwrap();
+                assert_eq!(
+                    matches,
+                    reference(&literals, &line, start, case_insensitive),
+                    "{literals:?} at {start} in {line:?}, case-insensitive {case_insensitive}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -19,10 +19,26 @@ pub enum AnchorStrategy {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Translation {
-    pub pattern: String,
+    /// Byte length of the leading anchor removed by `anchor_strategy`.
+    stripped_prefix_len: usize,
     pub route: Route,
     pub anchor_strategy: AnchorStrategy,
     pub parsed: Arc<ParsedRegex>,
+}
+
+impl Translation {
+    /// The source after removing an anchor implemented by `anchor_strategy`.
+    pub fn stripped_source(&self) -> &str {
+        &self.parsed.source[self.stripped_prefix_len..]
+    }
+
+    /// Oniguruma→Rust spelling of the stripped source.
+    ///
+    /// Matching uses the parsed AST; this spelling serves diagnostics and
+    /// tooling, so it is produced on demand rather than retained per pattern.
+    pub fn pattern(&self) -> String {
+        normalize_oniguruma_for_rust_regex(self.stripped_source())
+    }
 }
 
 pub fn route(parsed: &ParsedRegex) -> Route {
@@ -44,16 +60,13 @@ pub fn translate(pattern: &str) -> Translation {
     if anchor_strategy == AnchorStrategy::Fallback {
         reasons.push("anchor-context");
     }
-    // Native AST matching does not need a rust-regex compile probe. Keep the
-    // Oniguruma→Rust spelling normalization for diagnostics and tooling.
-    let translated = normalize_oniguruma_for_rust_regex(stripped);
     let route = if reasons.is_empty() {
         Route::Dfa
     } else {
         Route::Fallback { reasons }
     };
     Translation {
-        pattern: translated,
+        stripped_prefix_len: pattern.len() - stripped.len(),
         route,
         anchor_strategy,
         parsed,

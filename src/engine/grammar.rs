@@ -12,7 +12,80 @@ use super::state::{GrammarId, PatternId, RuleId, ScopeId, StringId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct CaptureSpec {
-    pub entries: BTreeMap<u32, CaptureEntry>,
+    pub entries: CaptureEntries,
+}
+
+/// Capture entries ordered by group number.
+///
+/// Rules usually name only a few groups, so a sorted vector avoids a B-tree
+/// node allocation per capture map while keeping ascending group iteration.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub struct CaptureEntries(Vec<(u32, CaptureEntry)>);
+
+impl CaptureEntries {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self(Vec::with_capacity(capacity))
+    }
+
+    fn position(&self, group: u32) -> Result<usize, usize> {
+        self.0
+            .binary_search_by_key(&group, |(existing, _)| *existing)
+    }
+
+    pub fn get(&self, group: &u32) -> Option<&CaptureEntry> {
+        self.position(*group).ok().map(|index| &self.0[index].1)
+    }
+
+    pub fn contains_key(&self, group: &u32) -> bool {
+        self.position(*group).is_ok()
+    }
+
+    /// Inserts or replaces `group`, returning the replaced entry.
+    pub fn insert(&mut self, group: u32, entry: CaptureEntry) -> Option<CaptureEntry> {
+        match self.position(group) {
+            Ok(index) => Some(std::mem::replace(&mut self.0[index].1, entry)),
+            Err(index) => {
+                self.0.insert(index, (group, entry));
+                None
+            }
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (&u32, &CaptureEntry)> + ExactSizeIterator {
+        self.0.iter().map(|(group, entry)| (group, entry))
+    }
+
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &CaptureEntry> + ExactSizeIterator {
+        self.0.iter().map(|(_, entry)| entry)
+    }
+
+    pub fn values_mut(
+        &mut self,
+    ) -> impl DoubleEndedIterator<Item = &mut CaptureEntry> + ExactSizeIterator {
+        self.0.iter_mut().map(|(_, entry)| entry)
+    }
+}
+
+impl<'a> IntoIterator for &'a CaptureEntries {
+    type Item = (&'a u32, &'a CaptureEntry);
+    type IntoIter = std::iter::Map<
+        std::slice::Iter<'a, (u32, CaptureEntry)>,
+        fn(&'a (u32, CaptureEntry)) -> (&'a u32, &'a CaptureEntry),
+    >;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter().map(|(group, entry)| (group, entry))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -55,12 +128,13 @@ pub enum RuleBody {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RuleRef {
     Rule(RuleId),
-    Repository(String),
+    /// Repository names share their grammar's interned string.
+    Repository(Arc<str>),
     SelfRef,
     BaseRef,
     External {
         scope: ScopeId,
-        repository: Option<String>,
+        repository: Option<Arc<str>>,
     },
 }
 
@@ -111,9 +185,10 @@ pub struct CompiledGrammar {
     pub scope_name: String,
     pub metadata: GrammarMetadata,
     pub string_names: Vec<Arc<str>>,
-    pub patterns: Vec<String>,
+    /// Regex sources, shared with their `string_names` entries.
+    pub patterns: Vec<Arc<str>>,
     pub rules: Vec<Rule>,
-    pub repository: BTreeMap<String, RuleRef>,
+    pub repository: BTreeMap<Arc<str>, RuleRef>,
     pub top_level: Vec<RuleRef>,
     pub injections: Vec<Injection>,
     pub scope_names: Vec<Arc<str>>,
@@ -137,7 +212,7 @@ impl CompiledGrammar {
     }
 
     pub fn pattern(&self, id: PatternId) -> Option<&str> {
-        self.patterns.get(id.0 as usize).map(String::as_str)
+        self.patterns.get(id.0 as usize).map(AsRef::as_ref)
     }
 
     pub fn scope(&self, id: ScopeId) -> Option<&str> {
@@ -676,11 +751,11 @@ struct DevCompiler {
     next_rule: u32,
     strings: BTreeMap<Arc<str>, StringId>,
     string_names: Vec<Arc<str>>,
-    patterns: Vec<String>,
+    patterns: Vec<Arc<str>>,
     scopes: BTreeMap<Arc<str>, ScopeId>,
     scope_names: Vec<Arc<str>>,
     rules: Vec<Rule>,
-    repository: BTreeMap<String, RuleRef>,
+    repository: BTreeMap<Arc<str>, RuleRef>,
     local_repository_scopes: Vec<BTreeMap<String, String>>,
     next_local_repository: u32,
 }
@@ -707,7 +782,7 @@ pub fn load_dev_grammar_from_path(
     compiler.intern_grammar_header(&raw);
     let top_level = compiler.compile_patterns(raw.patterns);
     for (name, raw_rule) in raw.repository {
-        compiler.string_id(&name);
+        let name = compiler.shared_string(&name);
         let rule_ref = compiler.compile_repository_entry(raw_rule);
         compiler.repository.insert(name, rule_ref);
     }
@@ -911,7 +986,7 @@ impl DevCompiler {
                 .get(&name)
                 .expect("local repository aliases cover every entry")
                 .clone();
-            self.string_id(&alias);
+            let alias = self.shared_string(&alias);
             let rule_ref = self.compile_repository_entry(entry);
             self.repository.insert(alias, rule_ref);
         }
@@ -932,18 +1007,15 @@ impl DevCompiler {
                     .find_map(|repository| repository.get(name))
                     .cloned()
                     .unwrap_or_else(|| name.to_owned());
-                self.string_id(&resolved);
-                RuleRef::Repository(resolved)
+                RuleRef::Repository(self.shared_string(&resolved))
             }
             include => {
                 let (scope, repository) = include
                     .split_once('#')
-                    .map(|(scope, repo)| (scope, Some(repo.to_owned())))
+                    .map(|(scope, repo)| (scope, Some(repo)))
                     .unwrap_or((include, None));
                 self.string_id(scope);
-                if let Some(repository) = &repository {
-                    self.string_id(repository);
-                }
+                let repository = repository.map(|repository| self.shared_string(repository));
                 RuleRef::External {
                     scope: self.scope_id(scope),
                     repository,
@@ -952,19 +1024,18 @@ impl DevCompiler {
         }
     }
 
-    fn pattern_id(&mut self, mut pattern: String) -> PatternId {
-        self.string_id(&pattern);
-        // Direct serde_json string decoding grows escaped regexes geometrically.
-        // Grammar patterns live for the tokenizer's lifetime, so release that
-        // transient spare capacity before retaining them.
-        pattern.shrink_to_fit();
+    fn pattern_id(&mut self, pattern: String) -> PatternId {
+        // Retain the interned exact-size copy rather than the decoded string,
+        // whose capacity serde_json may have grown geometrically.
+        let string_id = self.string_id(&pattern);
         let id = PatternId(self.patterns.len() as u32);
-        self.patterns.push(pattern);
+        self.patterns
+            .push(Arc::clone(&self.string_names[string_id.0 as usize]));
         id
     }
 
     fn capture_spec(&mut self, captures: RawCaptures) -> Arc<CaptureSpec> {
-        let mut entries = BTreeMap::new();
+        let mut entries = CaptureEntries::default();
         match captures {
             RawCaptures::Empty => {}
             RawCaptures::Map(captures) => {
@@ -1006,6 +1077,11 @@ impl DevCompiler {
         self.scopes.insert(Arc::clone(&name), id);
         self.scope_names.push(name);
         id
+    }
+
+    fn shared_string(&mut self, value: &str) -> Arc<str> {
+        let id = self.string_id(value);
+        Arc::clone(&self.string_names[id.0 as usize])
     }
 
     fn string_id(&mut self, value: &str) -> StringId {
@@ -1259,10 +1335,7 @@ mod tests {
             }"##,
         )
         .unwrap();
-        assert_eq!(
-            grammar.top_level,
-            vec![RuleRef::Repository("value".to_owned())]
-        );
+        assert_eq!(grammar.top_level, vec![RuleRef::Repository("value".into())]);
         assert!(grammar.repository.contains_key("value"));
     }
 

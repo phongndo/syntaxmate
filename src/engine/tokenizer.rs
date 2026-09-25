@@ -6183,7 +6183,7 @@ fn contextualize_refs(refs: &[RuleRef], context: Option<&RepositoryBindings>) ->
         .map(|rule_ref| match rule_ref {
             RuleRef::Repository(name) => context
                 .get(name)
-                .map(|bound_name| RuleRef::Repository(bound_name.clone()))
+                .map(|bound_name| RuleRef::Repository(Arc::from(bound_name.as_str())))
                 .unwrap_or_else(|| rule_ref.clone()),
             _ => rule_ref.clone(),
         })
@@ -6511,7 +6511,7 @@ fn compile_rule_repository_contexts<'a>(
                         }
                     }
                     RuleRef::Repository(name) => {
-                        let bound_name = context.get(name).map_or(name.as_str(), String::as_str);
+                        let bound_name = context.get(name).map_or(&**name, String::as_str);
                         let known_name = repository_names.get(bound_name);
                         if !budget.charge_repository(bound_name, known_name.is_none()) {
                             break;
@@ -7686,7 +7686,7 @@ mod tests {
         let outcome = InjectionOutcome {
             left: vec![InjectionCandidate {
                 grammar_id: GrammarId(1),
-                patterns: vec![RuleRef::Repository("shared-injection".repeat(128))],
+                patterns: vec![RuleRef::Repository("shared-injection".repeat(128).into())],
             }],
             right: Vec::new(),
         };

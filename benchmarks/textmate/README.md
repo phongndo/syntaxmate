@@ -95,6 +95,8 @@ Revisit rejected approaches only with a different design and fresh evidence:
   regression cases while investigating it.
 - Larger execution budgets traded latency for fewer misses without repairing
   the underlying execution cost.
+- Shrinking over-reserved literal tries after construction lowered retention
+  but added reallocation churn; tries are now built exactly sized instead.
 
 Historical measurements and additional rejected experiments remain in the
 [0.1.3 performance roadmap](https://github.com/phongndo/syntaxmate/blob/v0.1.3/docs/performance-roadmap.md)

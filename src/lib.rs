@@ -156,7 +156,7 @@ pub mod diagnostics {
         let translation = translate(pattern);
         RegexInspection {
             parsed: parsed.to_string(),
-            translated_pattern: translation.pattern,
+            translated_pattern: translation.pattern(),
             anchor_strategy: format!("{:?}", translation.anchor_strategy),
             route: format!("{:?}", translation.route),
         }

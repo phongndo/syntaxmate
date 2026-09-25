@@ -32,7 +32,7 @@ static EMBEDDED_BUNDLE_BYTES: &[u8] = &[];
 pub fn embedded_bundle() -> &'static Bundle {
     EMBEDDED_BUNDLE.get_or_init(|| {
         if cfg!(feature = "bundled-grammars") {
-            Bundle::parse(embedded_bundle_bytes())
+            Bundle::parse_static(embedded_bundle_bytes())
                 .expect("embedded Syntaxmate grammar bundle should parse")
         } else {
             Bundle::default()

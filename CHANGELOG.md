@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Cut construction and first-use allocation: borrow embedded bundle payloads
+  and scope names from static data, share interned grammar patterns and
+  repository names, store capture specs as sorted vectors, and skip the
+  diagnostics-only translated regex spelling and parser scratch vectors.
+- Store regex literal-alternation tries in an exactly sized sorted layout
+  (12-byte nodes, one byte per edge) instead of per-node edge vectors.
+- Public APIs, outputs, and the Rust 1.88 MSRV are unchanged.
+  `PreparedLanguage` statistics report smaller charged bytes for the smaller
+  structures. The measured SDBL steady workload is about 0.7% slower
+  (within one standard deviation).
+
 ## 0.1.3 - 2026-09-19
 
 - Reduce temporary bytecode-compilation allocations by borrowing subroutine AST

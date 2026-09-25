@@ -262,7 +262,6 @@ impl RegexMatcher {
 pub struct CompiledPattern {
     id: CompiledPatternId,
     source: Arc<str>,
-    translated_pattern: String,
     matcher: RegexMatcher,
     unanchored_literal: Option<String>,
     restricted_start_bytes: Option<Vec<u8>>,
@@ -288,7 +287,6 @@ impl CompiledPattern {
         translation: Translation,
         live_captures: Vec<u32>,
     ) -> Self {
-        let translated_pattern = translation.pattern.clone();
         let parsed = Arc::clone(&translation.parsed);
         let matcher = RegexMatcher::from_translation(pattern, translation);
         let unanchored_literal = matcher.unanchored_literal().map(str::to_owned);
@@ -296,7 +294,6 @@ impl CompiledPattern {
         Self {
             id: CompiledPatternId(NEXT_COMPILED_PATTERN_ID.fetch_add(1, Ordering::Relaxed)),
             source: Arc::from(pattern),
-            translated_pattern,
             matcher,
             unanchored_literal,
             restricted_start_bytes,
@@ -335,10 +332,6 @@ impl CompiledPattern {
 
     pub fn matcher(&self) -> &RegexMatcher {
         &self.matcher
-    }
-
-    pub(crate) fn translated_pattern(&self) -> &str {
-        &self.translated_pattern
     }
 
     pub(crate) fn unanchored_literal(&self) -> Option<&str> {

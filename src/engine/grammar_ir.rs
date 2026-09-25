@@ -13,8 +13,8 @@ use std::{
 
 use super::{
     grammar::{
-        CaptureEntry, CaptureSpec, CompiledGrammar, GrammarMetadata, Injection, InjectionPriority,
-        Rule, RuleBody, RuleRef,
+        CaptureEntries, CaptureEntry, CaptureSpec, CompiledGrammar, GrammarMetadata, Injection,
+        InjectionPriority, Rule, RuleBody, RuleRef,
     },
     state::{GrammarId, PatternId, RuleId, ScopeId},
 };
@@ -110,7 +110,7 @@ pub(crate) fn encode_compiled_grammar(
 
     write_string(&mut out, &strings, &grammar.scope_name);
     write_metadata(&mut out, &strings, &grammar.metadata)?;
-    write_string_vec(&mut out, &strings, &grammar.patterns)?;
+    write_arc_string_vec(&mut out, &strings, &grammar.patterns)?;
     write_arc_string_vec(&mut out, &strings, &grammar.scope_names)?;
 
     write_len(&mut out, grammar.rules.len(), "rule count")?;
@@ -149,16 +149,22 @@ pub(crate) fn decode_compiled_grammar(
             "grammar string count exceeds string table",
         ));
     }
-    let mut strings = Vec::with_capacity(string_count);
+    let mut values = Vec::with_capacity(string_count);
     for _ in 0..string_count {
         let len = cursor.u32()? as usize;
-        let value = std::str::from_utf8(cursor.bytes(len)?).map_err(|_| GrammarIrError::BadUtf8)?;
-        strings.push(Arc::<str>::from(value));
+        values.push(std::str::from_utf8(cursor.bytes(len)?).map_err(|_| GrammarIrError::BadUtf8)?);
     }
+    let strings = DecodedStrings {
+        shared: values[..grammar_string_count]
+            .iter()
+            .map(|value| Arc::<str>::from(*value))
+            .collect(),
+        values,
+    };
 
     let scope_name = read_string(&mut cursor, &strings)?;
     let metadata = read_metadata(&mut cursor, &strings)?;
-    let patterns = read_string_vec(&mut cursor, &strings)?;
+    let patterns = read_arc_string_vec(&mut cursor, &strings)?;
     let scope_names = read_arc_string_vec(&mut cursor, &strings)?;
     let pattern_count = patterns.len();
     let scope_count = scope_names.len();
@@ -197,7 +203,7 @@ pub(crate) fn decode_compiled_grammar(
         id,
         scope_name,
         metadata,
-        string_names: strings[..grammar_string_count].to_vec(),
+        string_names: strings.shared,
         patterns,
         rules,
         repository,
@@ -205,6 +211,31 @@ pub(crate) fn decode_compiled_grammar(
         injections,
         scope_names,
     })
+}
+
+/// Decoder view of the IR string table.
+///
+/// Only the grammar-visible prefix is retained, so only it is shared as
+/// `Arc<str>`; other entries are copied directly into their owning values.
+struct DecodedStrings<'a> {
+    values: Vec<&'a str>,
+    shared: Vec<Arc<str>>,
+}
+
+impl<'a> DecodedStrings<'a> {
+    fn get(&self, id: u32) -> Result<&'a str, GrammarIrError> {
+        self.values
+            .get(id as usize)
+            .copied()
+            .ok_or(GrammarIrError::BadStringId(id))
+    }
+
+    fn get_shared(&self, id: u32) -> Result<Arc<str>, GrammarIrError> {
+        match self.shared.get(id as usize) {
+            Some(value) => Ok(Arc::clone(value)),
+            None => self.get(id).map(Arc::from),
+        }
+    }
 }
 
 struct StringTable {
@@ -253,7 +284,9 @@ fn collect_grammar_strings(grammar: &CompiledGrammar, out: &mut BTreeSet<String>
     collect_optional_string(grammar.metadata.first_line_match.as_deref(), out);
     collect_optional_string(grammar.metadata.injection_selector.as_deref(), out);
     collect_strings(&grammar.metadata.inject_to, out);
-    collect_strings(&grammar.patterns, out);
+    for pattern in &grammar.patterns {
+        collect_string(pattern, out);
+    }
     for value in &grammar.scope_names {
         collect_string(value, out);
     }
@@ -364,7 +397,7 @@ fn write_metadata(
 
 fn read_metadata(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
 ) -> Result<GrammarMetadata, GrammarIrError> {
     Ok(GrammarMetadata {
         display_name: read_optional_string(cursor, strings)?,
@@ -442,7 +475,7 @@ fn write_rule(out: &mut Vec<u8>, strings: &StringTable, rule: &Rule) -> Result<(
 
 fn read_rule(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
     pattern_count: usize,
     scope_count: usize,
     rule_count: usize,
@@ -514,7 +547,7 @@ fn write_captures(
 
 fn read_captures(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
     scope_count: usize,
     rule_count: usize,
 ) -> Result<Arc<CaptureSpec>, GrammarIrError> {
@@ -525,7 +558,7 @@ fn read_captures(
             EMPTY.get_or_init(|| Arc::new(CaptureSpec::default())),
         ));
     }
-    let mut entries = BTreeMap::new();
+    let mut entries = CaptureEntries::with_capacity(count);
     for _ in 0..count {
         let group = cursor.u32()?;
         let entry = CaptureEntry {
@@ -542,7 +575,7 @@ fn read_captures(
 fn write_repository(
     out: &mut Vec<u8>,
     strings: &StringTable,
-    repository: &BTreeMap<String, RuleRef>,
+    repository: &BTreeMap<Arc<str>, RuleRef>,
 ) -> Result<(), GrammarIrError> {
     write_len(out, repository.len(), "repository count")?;
     for (name, rule_ref) in repository {
@@ -554,14 +587,14 @@ fn write_repository(
 
 fn read_repository(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
     scope_count: usize,
     rule_count: usize,
-) -> Result<BTreeMap<String, RuleRef>, GrammarIrError> {
+) -> Result<BTreeMap<Arc<str>, RuleRef>, GrammarIrError> {
     let count = cursor.count(2, "repository")?;
     let mut repository = BTreeMap::new();
     for _ in 0..count {
-        let name = read_string(cursor, strings)?;
+        let name = strings.get_shared(cursor.u32()?)?;
         let rule_ref = read_rule_ref(cursor, strings, scope_count, rule_count)?;
         if repository.insert(name, rule_ref).is_some() {
             return Err(GrammarIrError::Malformed("duplicate repository key"));
@@ -584,7 +617,7 @@ fn write_rule_refs(
 
 fn read_rule_refs(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
     scope_count: usize,
     rule_count: usize,
 ) -> Result<Vec<RuleRef>, GrammarIrError> {
@@ -618,7 +651,7 @@ fn write_rule_ref(out: &mut Vec<u8>, strings: &StringTable, rule_ref: &RuleRef) 
 
 fn read_rule_ref(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
     scope_count: usize,
     rule_count: usize,
 ) -> Result<RuleRef, GrammarIrError> {
@@ -630,7 +663,7 @@ fn read_rule_ref(
             }
             Ok(RuleRef::Rule(RuleId(id)))
         }
-        1 => Ok(RuleRef::Repository(read_string(cursor, strings)?)),
+        1 => Ok(RuleRef::Repository(strings.get_shared(cursor.u32()?)?)),
         2 => Ok(RuleRef::SelfRef),
         3 => Ok(RuleRef::BaseRef),
         4 => {
@@ -638,9 +671,13 @@ fn read_rule_ref(
             if scope as usize >= scope_count {
                 return Err(GrammarIrError::BadScopeId(scope));
             }
+            let repository = match cursor.u32()? {
+                0 => None,
+                encoded => Some(strings.get_shared(encoded - 1)?),
+            };
             Ok(RuleRef::External {
                 scope: ScopeId(scope),
-                repository: read_optional_string(cursor, strings)?,
+                repository,
             })
         }
         tag => Err(GrammarIrError::InvalidTag {
@@ -669,7 +706,7 @@ fn write_injection(
 
 fn read_injection(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
     scope_count: usize,
     rule_count: usize,
 ) -> Result<Injection, GrammarIrError> {
@@ -698,12 +735,11 @@ fn write_string(out: &mut Vec<u8>, strings: &StringTable, value: &str) {
     write_u32(out, strings.id(value));
 }
 
-fn read_string(cursor: &mut Cursor<'_>, strings: &[Arc<str>]) -> Result<String, GrammarIrError> {
-    let id = cursor.u32()?;
-    strings
-        .get(id as usize)
-        .map(|value| value.to_string())
-        .ok_or(GrammarIrError::BadStringId(id))
+fn read_string(
+    cursor: &mut Cursor<'_>,
+    strings: &DecodedStrings<'_>,
+) -> Result<String, GrammarIrError> {
+    strings.get(cursor.u32()?).map(str::to_owned)
 }
 
 fn write_optional_string(out: &mut Vec<u8>, strings: &StringTable, value: Option<&str>) {
@@ -712,17 +748,13 @@ fn write_optional_string(out: &mut Vec<u8>, strings: &StringTable, value: Option
 
 fn read_optional_string(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
 ) -> Result<Option<String>, GrammarIrError> {
     let encoded = cursor.u32()?;
     if encoded == 0 {
         Ok(None)
     } else {
-        let id = encoded - 1;
-        strings
-            .get(id as usize)
-            .map(|value| Some(value.to_string()))
-            .ok_or(GrammarIrError::BadStringId(id))
+        strings.get(encoded - 1).map(|value| Some(value.to_owned()))
     }
 }
 
@@ -740,7 +772,7 @@ fn write_string_vec(
 
 fn read_string_vec(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
 ) -> Result<Vec<String>, GrammarIrError> {
     let count = cursor.count(1, "string vector")?;
     let mut values = Vec::with_capacity(count);
@@ -764,18 +796,12 @@ fn write_arc_string_vec(
 
 fn read_arc_string_vec(
     cursor: &mut Cursor<'_>,
-    strings: &[Arc<str>],
+    strings: &DecodedStrings<'_>,
 ) -> Result<Vec<Arc<str>>, GrammarIrError> {
     let count = cursor.count(1, "scope vector")?;
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
-        let id = cursor.u32()?;
-        values.push(
-            strings
-                .get(id as usize)
-                .cloned()
-                .ok_or(GrammarIrError::BadStringId(id))?,
-        );
+        values.push(strings.get_shared(cursor.u32()?)?);
     }
     Ok(values)
 }

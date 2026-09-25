@@ -4,7 +4,7 @@
 //! is a byte-level container with eager metadata and lazy per-grammar compiled
 //! IR access, produced by the `syntaxmate-bundle` tool.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{borrow::Cow, collections::BTreeMap, path::Path};
 
 use crate::engine::{
     grammar::CompiledGrammar, grammar_ir::decode_compiled_grammar, state::GrammarId,
@@ -44,8 +44,9 @@ pub struct SectionEntry {
 pub struct Bundle {
     pub source_hash: u64,
     pub bundle_hash: u64,
-    pub strings: Vec<String>,
-    pub scopes: Vec<String>,
+    /// Every scope name in the bundle, borrowed from the embedded bundle when
+    /// possible. Runtime highlighting only reports the count.
+    pub scopes: Vec<Cow<'static, str>>,
     pub languages: Vec<LanguageEntry>,
     pub grammar_blobs: Vec<GrammarBlob>,
     pub licenses: Vec<LicenseEntry>,
@@ -70,7 +71,8 @@ pub struct GrammarBlob {
     pub codec: u32,
     pub flags: u32,
     pub raw_len: u32,
-    pub bytes: Vec<u8>,
+    /// Encoded payload, borrowed from the embedded bundle when possible.
+    pub bytes: Cow<'static, [u8]>,
     pub pattern_count: u32,
     pub dfa_count: u32,
     pub fallback_count: u32,
@@ -179,15 +181,25 @@ impl GrammarBlob {
 
     pub fn decoded_bytes(&self) -> Result<Vec<u8>, BundleError> {
         match self.codec {
-            CODEC_NONE => Ok(self.bytes.clone()),
+            CODEC_NONE => Ok(self.bytes.to_vec()),
             CODEC_DEFLATE_ZLIB => {
-                let bytes =
-                    miniz_oxide::inflate::decompress_to_vec_zlib(&self.bytes).map_err(|_| {
-                        BundleError::Inflate {
-                            language: self.language.clone(),
-                        }
-                    })?;
-                if bytes.len() != self.raw_len as usize {
+                use miniz_oxide::inflate::{
+                    TINFLStatus,
+                    core::{DecompressorOxide, decompress, inflate_flags},
+                };
+                // The recorded length sizes the output once; a stream that
+                // needs more or fewer bytes is rejected, as is a bad checksum.
+                let mut bytes = vec![0; self.raw_len as usize];
+                let mut decompressor = Box::<DecompressorOxide>::default();
+                let (status, _, written) = decompress(
+                    &mut decompressor,
+                    &self.bytes,
+                    &mut bytes,
+                    0,
+                    inflate_flags::TINFL_FLAG_PARSE_ZLIB_HEADER
+                        | inflate_flags::TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF,
+                );
+                if status != TINFLStatus::Done || written != bytes.len() {
                     return Err(BundleError::Inflate {
                         language: self.language.clone(),
                     });
@@ -201,22 +213,42 @@ impl GrammarBlob {
 
 impl Bundle {
     pub fn parse(bytes: &[u8]) -> Result<Self, BundleError> {
+        Self::parse_with(
+            bytes,
+            |payload| Cow::Owned(payload.to_vec()),
+            |text| Cow::Owned(text.to_owned()),
+        )
+    }
+
+    /// Parses bundle bytes that outlive the process, borrowing grammar payloads.
+    pub fn parse_static(bytes: &'static [u8]) -> Result<Self, BundleError> {
+        Self::parse_with(bytes, Cow::Borrowed, Cow::Borrowed)
+    }
+
+    fn parse_with<'a>(
+        bytes: &'a [u8],
+        payload: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
+        text: impl Fn(&'a str) -> Cow<'static, str>,
+    ) -> Result<Self, BundleError> {
         let (header, sections) = read_header_and_sections(bytes)?;
         if header.format_version != FORMAT_VERSION {
             return Err(BundleError::UnsupportedVersion(header.format_version));
         }
         let strings = decode_string_table(section(bytes, &sections, SECTION_STRINGS)?)?;
-        let scopes = decode_scope_table(section(bytes, &sections, SECTION_SCOPES)?, &strings)?;
+        let scopes =
+            decode_scope_table(section(bytes, &sections, SECTION_SCOPES)?, &strings, text)?;
         let languages =
             decode_language_table(section(bytes, &sections, SECTION_LANGUAGES)?, &strings)?;
-        let grammar_blobs =
-            decode_grammar_blobs(section(bytes, &sections, SECTION_GRAMMAR_BLOBS)?, &strings)?;
+        let grammar_blobs = decode_grammar_blobs(
+            section(bytes, &sections, SECTION_GRAMMAR_BLOBS)?,
+            &strings,
+            payload,
+        )?;
         let licenses =
             decode_license_table(section(bytes, &sections, SECTION_LICENSES)?, &strings)?;
         Ok(Self {
             source_hash: header.source_hash,
             bundle_hash: header.bundle_hash,
-            strings,
             scopes,
             languages,
             grammar_blobs,
@@ -493,14 +525,14 @@ fn optional_string_id(strings: &[String], value: Option<&str>) -> u32 {
     value.map_or(NO_STRING, |value| string_id(strings, value))
 }
 
-fn string_by_id(strings: &[String], id: u32) -> Result<String, BundleError> {
+fn string_by_id(strings: &[&str], id: u32) -> Result<String, BundleError> {
     strings
         .get(id as usize)
-        .cloned()
+        .map(|value| (*value).to_owned())
         .ok_or(BundleError::BadStringId(id))
 }
 
-fn optional_string_by_id(strings: &[String], id: u32) -> Result<Option<String>, BundleError> {
+fn optional_string_by_id(strings: &[&str], id: u32) -> Result<Option<String>, BundleError> {
     if id == NO_STRING {
         Ok(None)
     } else {
@@ -525,7 +557,8 @@ fn encode_string_table(strings: &[String]) -> Vec<u8> {
     bytes
 }
 
-fn decode_string_table(bytes: &[u8]) -> Result<Vec<String>, BundleError> {
+/// Decodes borrowed string slices; parsed fields copy only the values they use.
+fn decode_string_table(bytes: &[u8]) -> Result<Vec<&str>, BundleError> {
     let mut cursor = Cursor::new(bytes, "string table");
     let count = cursor.u32()? as usize;
     let payload_len = cursor.u32()? as usize;
@@ -542,15 +575,13 @@ fn decode_string_table(bytes: &[u8]) -> Result<Vec<String>, BundleError> {
         if start > end || end > payload.len() {
             return Err(BundleError::Truncated("string table payload"));
         }
-        let string = std::str::from_utf8(&payload[start..end])
-            .map_err(|_| BundleError::BadUtf8)?
-            .to_owned();
+        let string = std::str::from_utf8(&payload[start..end]).map_err(|_| BundleError::BadUtf8)?;
         strings.push(string);
     }
     Ok(strings)
 }
 
-fn encode_scope_table(scopes: &[String], strings: &[String]) -> Vec<u8> {
+fn encode_scope_table(scopes: &[Cow<'static, str>], strings: &[String]) -> Vec<u8> {
     let mut bytes = Vec::new();
     write_u32(&mut bytes, scopes.len() as u32);
     for scope in scopes {
@@ -559,12 +590,20 @@ fn encode_scope_table(scopes: &[String], strings: &[String]) -> Vec<u8> {
     bytes
 }
 
-fn decode_scope_table(bytes: &[u8], strings: &[String]) -> Result<Vec<String>, BundleError> {
+fn decode_scope_table<'a>(
+    bytes: &[u8],
+    strings: &[&'a str],
+    text: impl Fn(&'a str) -> Cow<'static, str>,
+) -> Result<Vec<Cow<'static, str>>, BundleError> {
     let mut cursor = Cursor::new(bytes, "scope table");
     let count = cursor.u32()?;
     let mut scopes = Vec::with_capacity(count as usize);
     for _ in 0..count {
-        scopes.push(string_by_id(strings, cursor.u32()?)?);
+        let id = cursor.u32()?;
+        let scope = strings
+            .get(id as usize)
+            .ok_or(BundleError::BadStringId(id))?;
+        scopes.push(text(scope));
     }
     cursor.finish()?;
     Ok(scopes)
@@ -591,7 +630,7 @@ fn encode_language_table(languages: &[LanguageEntry], strings: &[String]) -> Vec
 
 fn decode_language_table(
     bytes: &[u8],
-    strings: &[String],
+    strings: &[&str],
 ) -> Result<Vec<LanguageEntry>, BundleError> {
     let mut cursor = Cursor::new(bytes, "language table");
     let count = cursor.u32()?;
@@ -635,7 +674,11 @@ fn encode_grammar_blobs(blobs: &[GrammarBlob], strings: &[String]) -> Vec<u8> {
     records
 }
 
-fn decode_grammar_blobs(bytes: &[u8], strings: &[String]) -> Result<Vec<GrammarBlob>, BundleError> {
+fn decode_grammar_blobs<'a>(
+    bytes: &'a [u8],
+    strings: &[&str],
+    payload: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
+) -> Result<Vec<GrammarBlob>, BundleError> {
     let mut cursor = Cursor::new(bytes, "grammar blobs");
     let count = cursor.u32()?;
     let mut records = Vec::with_capacity(count as usize);
@@ -676,7 +719,7 @@ fn decode_grammar_blobs(bytes: &[u8], strings: &[String]) -> Result<Vec<GrammarB
             codec,
             flags,
             raw_len,
-            bytes: bytes[offset..offset + len].to_vec(),
+            bytes: payload(&bytes[offset..offset + len]),
             pattern_count,
             dfa_count,
             fallback_count,
@@ -699,10 +742,7 @@ fn encode_license_table(licenses: &[LicenseEntry], strings: &[String]) -> Vec<u8
     bytes
 }
 
-fn decode_license_table(
-    bytes: &[u8],
-    strings: &[String],
-) -> Result<Vec<LicenseEntry>, BundleError> {
+fn decode_license_table(bytes: &[u8], strings: &[&str]) -> Result<Vec<LicenseEntry>, BundleError> {
     let mut cursor = Cursor::new(bytes, "license table");
     let count = cursor.u32()?;
     let mut licenses = Vec::with_capacity(count as usize);
@@ -729,7 +769,7 @@ fn write_string_id_vec(out: &mut Vec<u8>, strings: &[String], values: &[String])
 
 fn read_string_id_vec(
     cursor: &mut Cursor<'_>,
-    strings: &[String],
+    strings: &[&str],
 ) -> Result<Vec<String>, BundleError> {
     let count = cursor.u32()?;
     let mut values = Vec::with_capacity(count as usize);
@@ -859,13 +899,49 @@ mod tests {
         encode_compiled_grammar(&grammar).unwrap()
     }
 
+    #[test]
+    fn compressed_blobs_require_exact_length_and_checksum() {
+        let raw = grammar_ir("source.fixture", "true");
+        let compressed = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6);
+        let blob = |raw_len: usize, bytes: Vec<u8>| GrammarBlob {
+            language: "fixture".to_owned(),
+            scope_name: "source.fixture".to_owned(),
+            codec: CODEC_DEFLATE_ZLIB,
+            flags: GRAMMAR_BLOB_COMPILED_IR,
+            raw_len: raw_len as u32,
+            bytes: bytes.into(),
+            pattern_count: 1,
+            dfa_count: 0,
+            fallback_count: 0,
+        };
+        assert_eq!(
+            blob(raw.len(), compressed.clone()).decoded_bytes().unwrap(),
+            raw
+        );
+        let inflate_error = Err(BundleError::Inflate {
+            language: "fixture".to_owned(),
+        });
+        assert_eq!(
+            blob(raw.len() - 1, compressed.clone()).decoded_bytes(),
+            inflate_error
+        );
+        assert_eq!(
+            blob(raw.len() + 1, compressed.clone()).decoded_bytes(),
+            inflate_error
+        );
+        let mut corrupted = compressed.clone();
+        *corrupted.last_mut().unwrap() ^= 1;
+        assert_eq!(blob(raw.len(), corrupted).decoded_bytes(), inflate_error);
+        let truncated = compressed[..compressed.len() - 5].to_vec();
+        assert_eq!(blob(raw.len(), truncated).decoded_bytes(), inflate_error);
+    }
+
     fn sample_bundle() -> Bundle {
         let grammar_bytes = grammar_ir("source.rust", "true");
         Bundle {
             source_hash: 7,
             bundle_hash: 0,
-            strings: Vec::new(),
-            scopes: vec!["source.rust".to_owned()],
+            scopes: vec!["source.rust".into()],
             languages: vec![LanguageEntry {
                 canonical: "rust".to_owned(),
                 scope_name: "source.rust".to_owned(),
@@ -882,7 +958,7 @@ mod tests {
                 codec: CODEC_NONE,
                 flags: GRAMMAR_BLOB_COMPILED_IR,
                 raw_len: grammar_bytes.len() as u32,
-                bytes: grammar_bytes,
+                bytes: grammar_bytes.into(),
                 pattern_count: 0,
                 dfa_count: 0,
                 fallback_count: 0,
@@ -940,19 +1016,19 @@ mod tests {
         bundle.languages[0].aliases = vec!["fx".to_owned()];
         bundle.grammar_blobs[0].language = "fixture".to_owned();
         bundle.grammar_blobs[0].scope_name = "source.fixture".to_owned();
-        bundle.grammar_blobs[0].bytes = grammar_ir("source.fixture", "true");
+        bundle.grammar_blobs[0].bytes = grammar_ir("source.fixture", "true").into();
         bundle.grammar_blobs[0].raw_len = bundle.grammar_blobs[0].bytes.len() as u32;
         let parsed = Bundle::parse(&bundle.to_bytes()).unwrap();
         let mut registry = BundleGrammarRegistry::new(parsed);
         let grammar = registry.grammar("fx").unwrap();
         assert_eq!(grammar.scope_name, "source.fixture");
-        assert_eq!(grammar.patterns, vec!["true".to_owned()]);
+        assert_eq!(grammar.patterns, vec![std::sync::Arc::<str>::from("true")]);
     }
 
     #[test]
     fn registry_rejects_truncated_compiled_grammar_ir() {
         let mut bundle = sample_bundle();
-        bundle.grammar_blobs[0].bytes.pop();
+        bundle.grammar_blobs[0].bytes.to_mut().pop();
         bundle.grammar_blobs[0].raw_len = bundle.grammar_blobs[0].bytes.len() as u32;
         let parsed = Bundle::parse(&bundle.to_bytes()).unwrap();
         let mut registry = BundleGrammarRegistry::new(parsed);
