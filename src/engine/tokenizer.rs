@@ -2385,7 +2385,7 @@ pub struct TextMateTokenizer {
     injection_outcome_cache: FastMap<ScopeStackId, (InjectionOutcomeId, Arc<InjectionOutcome>)>,
     prepared_injection_outcome_ids: FastMap<InjectionOutcomeId, Option<PreparedInjectionOutcomeId>>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
-    include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
+    include_availability_cache: RefCell<FastMap<IncludeAvailabilityNode, bool>>,
     include_repository_names: RefCell<RepositoryNameInterner>,
     rule_repository_contexts: Arc<DeferredRuleRepositoryContexts>,
     rule_candidate_templates: RefCell<FastMap<(GrammarId, RuleId), Option<RuleCandidateTemplate>>>,
@@ -2493,7 +2493,7 @@ impl TextMateTokenizer {
             injection_outcome_cache: hashing::fast_map(),
             prepared_injection_outcome_ids: hashing::fast_map(),
             inline_candidate_cache: hashing::fast_map(),
-            include_availability_cache: RefCell::new(HashMap::new()),
+            include_availability_cache: RefCell::new(hashing::fast_map()),
             include_repository_names: RefCell::new(RepositoryNameInterner::default()),
             rule_repository_contexts,
             rule_candidate_templates: RefCell::new(hashing::fast_map()),
@@ -3808,7 +3808,7 @@ impl TextMateTokenizer {
                 grammar_id,
                 base_grammar_id,
                 refs,
-                &mut HashSet::new(),
+                &mut hashing::fast_set(),
                 0,
             )
     }
@@ -3818,7 +3818,7 @@ impl TextMateTokenizer {
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         refs: &[RuleRef],
-        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        visiting: &mut FastSet<IncludeAvailabilityNode>,
         depth: usize,
     ) -> bool {
         if depth >= MAX_INCLUDE_DEPTH {
@@ -3910,7 +3910,7 @@ impl TextMateTokenizer {
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         repository: &str,
-        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        visiting: &mut FastSet<IncludeAvailabilityNode>,
         depth: usize,
     ) -> bool {
         let repository_id = self
@@ -3949,7 +3949,7 @@ impl TextMateTokenizer {
         &self,
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
-        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        visiting: &mut FastSet<IncludeAvailabilityNode>,
         depth: usize,
     ) -> bool {
         let key = IncludeAvailabilityNode::TopLevel(grammar_id, base_grammar_id);
@@ -4208,19 +4208,14 @@ impl TextMateTokenizer {
     fn build_candidate_blueprint(&mut self, candidates: Vec<Candidate>) -> CandidateBlueprint {
         let mut matchers = Vec::with_capacity(candidates.len());
         for candidate in &candidates {
-            let live_captures = self.live_captures_for_candidate(candidate);
             let matcher = if let Some((grammar_id, pattern_id)) = candidate.pattern_id {
-                self.cached_matcher_with_live_captures(
-                    grammar_id,
-                    pattern_id,
-                    &candidate.pattern,
-                    live_captures,
-                )
+                self.cached_matcher_with_live_captures(grammar_id, pattern_id, candidate)
             } else {
                 if self.prepared_pattern_cache.is_some() {
                     self.unprepared_static_matcher_generation =
                         self.unprepared_static_matcher_generation.wrapping_add(1);
                 }
+                let live_captures = self.live_captures_for_candidate(candidate);
                 self.cached_dynamic_matcher_with_live_captures(&candidate.pattern, live_captures)
             };
             matchers.push(matcher);
@@ -4284,12 +4279,14 @@ impl TextMateTokenizer {
         matcher
     }
 
+    /// Live captures are derived from the candidate only on a cache miss;
+    /// a static pattern slot always resolves to the matcher it was first
+    /// compiled with.
     fn cached_matcher_with_live_captures(
         &mut self,
         grammar_id: GrammarId,
         pattern_id: PatternId,
-        pattern: &str,
-        live_captures: Vec<u32>,
+        candidate: &Candidate,
     ) -> Arc<CompiledPattern> {
         let key = (grammar_id, pattern_id);
         if let Some(matcher) = self.matcher_cache.get(&key).cloned() {
@@ -4299,6 +4296,8 @@ impl TextMateTokenizer {
             }
             return matcher;
         }
+        let pattern = &*candidate.pattern;
+        let live_captures = self.live_captures_for_candidate(candidate);
         if self.prepared_pattern_cache.is_some()
             && let Some(matcher) = self.prepared_static_matcher(
                 grammar_id,
