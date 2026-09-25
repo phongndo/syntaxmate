@@ -24,7 +24,7 @@ use super::grammar::{
     CaptureEntry, CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError,
     InjectionPriority, RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
 };
-use super::hashing::{self, FastMap};
+use super::hashing::{self, FastMap, FastSet};
 use super::line::{LineChunks, next_char_boundary};
 use super::regex::captures::substitute_end_pattern;
 use super::regex::{
@@ -941,41 +941,45 @@ impl RepositoryBindings {
     }
 }
 
+/// Index into `RuleRepositoryContexts::contexts`.
+type RepositoryContextId = u32;
+const NO_REPOSITORY_CONTEXT: RepositoryContextId = RepositoryContextId::MAX;
+
 #[derive(Debug)]
 struct GrammarRuleRepositoryContexts {
-    dense: Box<[Option<Arc<RepositoryBindings>>]>,
+    /// Context index per dense rule ID, `NO_REPOSITORY_CONTEXT` when unset.
+    /// Rules overwhelmingly share a few contexts, so an index avoids one
+    /// reference-count update per rule when building and dropping the table.
+    dense: Box<[RepositoryContextId]>,
     // `CompiledGrammar` is public and its rule IDs can therefore be sparse,
     // even though both native compilers produce dense IDs. Keep those unusual
     // callers correct without putting the ordinary lookup path behind a hash.
-    sparse: Vec<(RuleId, Arc<RepositoryBindings>)>,
+    sparse: Vec<(RuleId, RepositoryContextId)>,
 }
 
 impl GrammarRuleRepositoryContexts {
     fn new(dense_len: usize) -> Self {
         Self {
-            dense: std::iter::repeat_with(|| None)
-                .take(dense_len)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
+            dense: vec![NO_REPOSITORY_CONTEXT; dense_len].into_boxed_slice(),
             sparse: Vec::new(),
         }
     }
 
-    fn get(&self, rule_id: RuleId) -> Option<&Arc<RepositoryBindings>> {
+    fn get(&self, rule_id: RuleId) -> Option<RepositoryContextId> {
         if let Some(context) = self.dense.get(rule_id.0 as usize) {
-            return context.as_ref();
+            return (*context != NO_REPOSITORY_CONTEXT).then_some(*context);
         }
         self.sparse
             .iter()
-            .find_map(|(candidate, context)| (*candidate == rule_id).then_some(context))
+            .find_map(|(candidate, context)| (*candidate == rule_id).then_some(*context))
     }
 
-    fn insert_first(&mut self, rule_id: RuleId, context: Arc<RepositoryBindings>) -> bool {
+    fn insert_first(&mut self, rule_id: RuleId, context: RepositoryContextId) -> bool {
         if let Some(slot) = self.dense.get_mut(rule_id.0 as usize) {
-            if slot.is_some() {
+            if *slot != NO_REPOSITORY_CONTEXT {
                 return false;
             }
-            *slot = Some(context);
+            *slot = context;
             return true;
         }
         if self
@@ -999,6 +1003,8 @@ impl GrammarRuleRepositoryContexts {
 #[derive(Debug)]
 struct RuleRepositoryContexts {
     grammars: Box<[Option<Box<GrammarRuleRepositoryContexts>>]>,
+    /// Every distinct context a rule was bound to; rule tables store indexes.
+    contexts: Vec<Arc<RepositoryBindings>>,
 }
 
 impl RuleRepositoryContexts {
@@ -1008,6 +1014,7 @@ impl RuleRepositoryContexts {
                 .take(grammar_count)
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
+            contexts: Vec::new(),
         }
     }
 
@@ -1020,6 +1027,28 @@ impl RuleRepositoryContexts {
             .get(grammar_id.0 as usize)
             .and_then(Option::as_deref)
             .and_then(|grammar| grammar.get(rule_id))
+            .map(|context| &self.contexts[context as usize])
+    }
+
+    fn is_bound(&self, grammar_id: GrammarId, rule_id: RuleId) -> bool {
+        self.grammars
+            .get(grammar_id.0 as usize)
+            .and_then(Option::as_deref)
+            .is_some_and(|grammar| grammar.get(rule_id).is_some())
+    }
+
+    /// Registers a context for later `insert_first` calls, or `None` once
+    /// the index space is exhausted.
+    fn add_context(&mut self, context: Arc<RepositoryBindings>) -> Option<RepositoryContextId> {
+        let id = RepositoryContextId::try_from(self.contexts.len())
+            .ok()
+            .filter(|id| *id != NO_REPOSITORY_CONTEXT)?;
+        self.contexts.push(context);
+        Some(id)
+    }
+
+    fn context(&self, context: RepositoryContextId) -> &Arc<RepositoryBindings> {
+        &self.contexts[context as usize]
     }
 
     fn has_grammar_table(&self, grammar_id: GrammarId) -> bool {
@@ -1033,8 +1062,9 @@ impl RuleRepositoryContexts {
         grammar_id: GrammarId,
         rule_id: RuleId,
         dense_len: usize,
-        context: Arc<RepositoryBindings>,
+        context: RepositoryContextId,
     ) -> bool {
+        debug_assert!((context as usize) < self.contexts.len());
         let Some(grammar) = self.grammars.get_mut(grammar_id.0 as usize) else {
             return false;
         };
@@ -1052,7 +1082,7 @@ impl RuleRepositoryContexts {
                 grammar
                     .dense
                     .iter()
-                    .filter(|context| context.is_some())
+                    .filter(|context| **context != NO_REPOSITORY_CONTEXT)
                     .count()
                     + grammar.sparse.len()
             })
@@ -1073,6 +1103,87 @@ impl RuleRepositoryContexts {
             .get(grammar_id.0 as usize)
             .and_then(Option::as_deref)
             .map_or(0, |grammar| grammar.dense.len())
+    }
+}
+
+/// Rule repository contexts that an ordinary tokenizer computes on first
+/// need rather than at construction.
+///
+/// The walk visits every rule reachable from the root, including every
+/// embedded grammar, although tokenizing a document usually consults only a
+/// few grammars. A rule can be bound to a non-empty context only when the
+/// walk reaches it below a rule that declares a local repository: contexts
+/// never cross grammar boundaries (external and `$base` entries restart from
+/// the empty context), and only such rules extend a context. Every other rule
+/// is bound to the empty context, which every consumer treats exactly like an
+/// unbound rule, so lookups for it need no walk. The first lookup of a rule
+/// that may inherit a local repository runs the complete walk and answers
+/// from the same table eager construction built.
+#[derive(Debug)]
+struct DeferredRuleRepositoryContexts {
+    table: OnceLock<RuleRepositoryContexts>,
+    walk: Option<DeferredRepositoryWalk>,
+}
+
+#[derive(Debug)]
+struct DeferredRepositoryWalk {
+    grammars: GrammarSet,
+    root: GrammarId,
+    injections: Arc<Vec<CompiledInjectionSelector>>,
+    /// Per grammar, `scoped_repository_rules` computed on first lookup.
+    scoped_rules: Box<[OnceLock<FastSet<RuleId>>]>,
+}
+
+impl DeferredRuleRepositoryContexts {
+    fn ready(table: RuleRepositoryContexts) -> Self {
+        Self {
+            table: OnceLock::from(table),
+            walk: None,
+        }
+    }
+
+    fn deferred(
+        grammars: GrammarSet,
+        root: GrammarId,
+        injections: Arc<Vec<CompiledInjectionSelector>>,
+    ) -> Self {
+        let scoped_rules = std::iter::repeat_with(OnceLock::new)
+            .take(grammars.grammars().len())
+            .collect();
+        Self {
+            table: OnceLock::new(),
+            walk: Some(DeferredRepositoryWalk {
+                grammars,
+                root,
+                injections,
+                scoped_rules,
+            }),
+        }
+    }
+
+    fn get(&self, grammar_id: GrammarId, rule_id: RuleId) -> Option<&Arc<RepositoryBindings>> {
+        if let Some(table) = self.table.get() {
+            return table.get(grammar_id, rule_id);
+        }
+        let walk = self.walk.as_ref()?;
+        let scoped_rules = walk
+            .scoped_rules
+            .get(grammar_id.0 as usize)?
+            .get_or_init(|| {
+                walk.grammars
+                    .grammar(grammar_id)
+                    .map(scoped_repository_rules)
+                    .unwrap_or_default()
+            });
+        if !scoped_rules.contains(&rule_id) {
+            return None;
+        }
+        self.table
+            .get_or_init(|| {
+                compile_rule_repository_contexts(&walk.grammars, walk.root, &walk.injections, false)
+                    .0
+            })
+            .get(grammar_id, rule_id)
     }
 }
 
@@ -1114,7 +1225,8 @@ pub struct GrammarSet {
     // Weak values let those walks be reclaimed with their tokenizers.
     grammars: Arc<Vec<Arc<CompiledGrammar>>>,
     scope_to_id: Arc<HashMap<String, GrammarId>>,
-    rule_repository_context_cache: Arc<Mutex<FastMap<GrammarId, Weak<RuleRepositoryContexts>>>>,
+    rule_repository_context_cache:
+        Arc<Mutex<FastMap<GrammarId, Weak<DeferredRuleRepositoryContexts>>>>,
 }
 
 impl GrammarSet {
@@ -1224,8 +1336,8 @@ impl GrammarSet {
     fn rule_repository_contexts(
         &self,
         root: GrammarId,
-        injections: &[CompiledInjectionSelector],
-    ) -> Arc<RuleRepositoryContexts> {
+        injections: &Arc<Vec<CompiledInjectionSelector>>,
+    ) -> Arc<DeferredRuleRepositoryContexts> {
         if let Some(contexts) = self
             .rule_repository_context_cache
             .lock()
@@ -1236,10 +1348,11 @@ impl GrammarSet {
             return contexts;
         }
 
-        // Do the recursive work outside the lock. Concurrent first users may
-        // compute the same immutable value, but only one is shared.
-        let (compiled, _) = compile_rule_repository_contexts(self, root, injections, false);
-        let compiled = Arc::new(compiled);
+        let compiled = Arc::new(DeferredRuleRepositoryContexts::deferred(
+            self.clone(),
+            root,
+            Arc::clone(injections),
+        ));
         let mut cache = self
             .rule_repository_context_cache
             .lock()
@@ -1256,9 +1369,9 @@ impl GrammarSet {
         &self,
         root: GrammarId,
         injections: &[CompiledInjectionSelector],
-    ) -> Option<Arc<RuleRepositoryContexts>> {
+    ) -> Option<RuleRepositoryContexts> {
         let (contexts, complete) = compile_rule_repository_contexts(self, root, injections, true);
-        complete.then(|| Arc::new(contexts))
+        complete.then_some(contexts)
     }
 
     pub fn validate_include_graph(&self) -> Result<(), GrammarValidationError> {
@@ -2272,7 +2385,7 @@ pub struct TextMateTokenizer {
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
     include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
     include_repository_names: RefCell<RepositoryNameInterner>,
-    rule_repository_contexts: Arc<RuleRepositoryContexts>,
+    rule_repository_contexts: Arc<DeferredRuleRepositoryContexts>,
     /// Owns exact frame identities and stack edges for this tokenizer.
     frame_stack_interner: FrameStackInternTable,
     /// Repeat pushes of a known (parent stack, frame) transition skip interner lookup.
@@ -2320,7 +2433,7 @@ impl TextMateTokenizer {
         prepared_patterns: Arc<PreparedPatternCache>,
         prepared_blueprints: Arc<PreparedBlueprintCache>,
         injection_selectors: Vec<CompiledInjectionSelector>,
-        rule_repository_contexts: Arc<RuleRepositoryContexts>,
+        rule_repository_contexts: RuleRepositoryContexts,
     ) -> Self {
         Self::new_inner(
             grammars,
@@ -2328,7 +2441,9 @@ impl TextMateTokenizer {
             Some(prepared_patterns),
             Some(prepared_blueprints),
             Some(Arc::new(injection_selectors)),
-            Some(rule_repository_contexts),
+            Some(Arc::new(DeferredRuleRepositoryContexts::ready(
+                rule_repository_contexts,
+            ))),
         )
     }
 
@@ -2338,7 +2453,7 @@ impl TextMateTokenizer {
         prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
         prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
         injection_selectors: Option<Arc<Vec<CompiledInjectionSelector>>>,
-        rule_repository_contexts: Option<Arc<RuleRepositoryContexts>>,
+        rule_repository_contexts: Option<Arc<DeferredRuleRepositoryContexts>>,
     ) -> Self {
         let root_scope_key = grammars
             .grammar(root)
@@ -6284,6 +6399,158 @@ impl RepositoryContextBudget {
     }
 }
 
+/// Rules of `grammar` whose repository context can change how their own
+/// includes resolve.
+///
+/// Consumers use a rule's context only to rename the repository includes in
+/// its patterns and captures, so a context matters only for a rule that
+/// includes a name some local repository binds, and only if the walk can
+/// bind that rule to a non-empty context. Only a rule declaring a local
+/// repository extends a context, and the walk propagates a context through
+/// rule patterns, capture patterns, repository includes, and `$self`, while
+/// `$base`, external, and injection entries restart from the empty context.
+///
+/// Each declaring rule is explored separately. Below it, until another
+/// declaring rule takes over, its own entries are the innermost overlay and
+/// decide the names they define; any other include may resolve to its raw
+/// name or to a binding from any local repository, so all are followed.
+fn scoped_repository_rules(grammar: &CompiledGrammar) -> FastSet<RuleId> {
+    fn capture_refs(spec: &CaptureSpec) -> impl Iterator<Item = &RuleRef> {
+        spec.entries
+            .values()
+            .flat_map(|entry| entry.patterns.iter())
+    }
+
+    let mut reached = hashing::fast_set();
+    let local_repositories = grammar
+        .rules
+        .iter()
+        .map(|rule| &rule.local_repository)
+        .filter(|local| !local.is_empty())
+        .collect::<Vec<_>>();
+    for origin in grammar
+        .rules
+        .iter()
+        .filter(|rule| !rule.local_repository.is_empty())
+    {
+        let innermost = &origin.local_repository;
+        let mut visited = hashing::fast_set();
+        let mut expanded_names = HashSet::new();
+        let mut expanded_top_level = false;
+        let mut rules = vec![origin.id];
+        let mut refs: Vec<&RuleRef> = Vec::new();
+        loop {
+            while let Some(rule_id) = rules.pop() {
+                if !visited.insert(rule_id) {
+                    continue;
+                }
+                reached.insert(rule_id);
+                let Some(rule) = grammar.rule(rule_id) else {
+                    continue;
+                };
+                if rule.id != origin.id && !rule.local_repository.is_empty() {
+                    // That rule is an origin of its own exploration.
+                    continue;
+                }
+                match &rule.body {
+                    RuleBody::Match { captures, .. } => refs.extend(capture_refs(captures)),
+                    RuleBody::BeginEnd {
+                        begin_captures,
+                        end_captures,
+                        patterns,
+                        ..
+                    } => {
+                        refs.extend(patterns);
+                        refs.extend(capture_refs(begin_captures));
+                        refs.extend(capture_refs(end_captures));
+                    }
+                    RuleBody::BeginWhile {
+                        begin_captures,
+                        while_captures,
+                        patterns,
+                        ..
+                    } => {
+                        refs.extend(patterns);
+                        refs.extend(capture_refs(begin_captures));
+                        refs.extend(capture_refs(while_captures));
+                    }
+                    RuleBody::IncludeOnly { patterns } => refs.extend(patterns),
+                }
+            }
+            let Some(rule_ref) = refs.pop() else {
+                break;
+            };
+            match rule_ref {
+                RuleRef::Rule(rule_id) => rules.push(*rule_id),
+                RuleRef::Repository(name) => {
+                    let mut resolve = |bound_name: &str| {
+                        if let Some(target) = grammar.repository.get(bound_name)
+                            && expanded_names.insert(bound_name.to_owned())
+                        {
+                            refs.push(target);
+                        }
+                    };
+                    if let Some(bound_name) = innermost.get(name) {
+                        resolve(bound_name);
+                    } else {
+                        resolve(name);
+                        for local in &local_repositories {
+                            if let Some(bound_name) = local.get(name) {
+                                resolve(bound_name);
+                            }
+                        }
+                    }
+                }
+                RuleRef::SelfRef => {
+                    if !expanded_top_level {
+                        expanded_top_level = true;
+                        refs.extend(&grammar.top_level);
+                    }
+                }
+                RuleRef::BaseRef | RuleRef::External { .. } => {}
+            }
+        }
+    }
+    let includes_bound_name = |refs: &[RuleRef]| {
+        refs.iter().any(|rule_ref| {
+            matches!(rule_ref, RuleRef::Repository(name)
+                if local_repositories.iter().any(|local| local.contains_key(name)))
+        })
+    };
+    let captures_include_bound_name = |spec: &CaptureSpec| {
+        spec.entries
+            .values()
+            .any(|entry| includes_bound_name(&entry.patterns))
+    };
+    reached.retain(|rule_id| {
+        grammar.rule(*rule_id).is_some_and(|rule| match &rule.body {
+            RuleBody::Match { captures, .. } => captures_include_bound_name(captures),
+            RuleBody::BeginEnd {
+                begin_captures,
+                end_captures,
+                patterns,
+                ..
+            } => {
+                includes_bound_name(patterns)
+                    || captures_include_bound_name(begin_captures)
+                    || captures_include_bound_name(end_captures)
+            }
+            RuleBody::BeginWhile {
+                begin_captures,
+                while_captures,
+                patterns,
+                ..
+            } => {
+                includes_bound_name(patterns)
+                    || captures_include_bound_name(begin_captures)
+                    || captures_include_bound_name(while_captures)
+            }
+            RuleBody::IncludeOnly { patterns } => includes_bound_name(patterns),
+        })
+    });
+    reached
+}
+
 /// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
 ///
 /// Raw rules receive an id the first time they are reached. That first walk's
@@ -6297,20 +6564,28 @@ fn compile_rule_repository_contexts<'a>(
     injections: &'a [CompiledInjectionSelector],
     bounded: bool,
 ) -> (RuleRepositoryContexts, bool) {
+    // Work items name their repository context by its index in
+    // `compiled.contexts` instead of owning an `Arc`: large closures push
+    // tens of thousands of items, and per-item reference counting dominated
+    // the walk. The table keeps every context alive, so an index identifies a
+    // context exactly as its address did.
+    type ContextId = RepositoryContextId;
+    const EMPTY_CONTEXT: ContextId = 0;
+
     enum Work<'a> {
         TopLevel {
             grammar_id: GrammarId,
             base_grammar_id: GrammarId,
-            context: Arc<RepositoryBindings>,
+            context: ContextId,
         },
         Refs {
             grammar_id: GrammarId,
             base_grammar_id: GrammarId,
             refs: &'a [RuleRef],
             index: usize,
-            context: Arc<RepositoryBindings>,
+            context: ContextId,
         },
-        RepositoryExit((GrammarId, RepositoryNameId, usize)),
+        RepositoryExit((GrammarId, RepositoryNameId, ContextId)),
     }
 
     fn push_refs<'a>(
@@ -6318,7 +6593,7 @@ fn compile_rule_repository_contexts<'a>(
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         refs: &'a [RuleRef],
-        context: Arc<RepositoryBindings>,
+        context: ContextId,
     ) {
         if !refs.is_empty() {
             work.push(Work::Refs {
@@ -6335,28 +6610,23 @@ fn compile_rule_repository_contexts<'a>(
         work: &mut Vec<Work<'a>>,
         grammar_id: GrammarId,
         captures: &'a CaptureSpec,
-        context: &Arc<RepositoryBindings>,
+        context: ContextId,
     ) {
         for entry in captures.entries.values().rev() {
-            push_refs(
-                work,
-                grammar_id,
-                grammar_id,
-                &entry.patterns,
-                Arc::clone(context),
-            );
+            push_refs(work, grammar_id, grammar_id, &entry.patterns, context);
         }
     }
 
-    let empty_context = Arc::clone(empty_repository_context());
     let mut budget = RepositoryContextBudget::new(bounded);
     if !budget.charge_context_table(grammars.grammars().len()) {
         return (RuleRepositoryContexts::empty(), false);
     }
     let mut compiled = RuleRepositoryContexts::new(grammars.grammars().len());
+    let empty_context = compiled.add_context(Arc::clone(empty_repository_context()));
+    debug_assert_eq!(empty_context, Some(EMPTY_CONTEXT));
     let mut compiled_top_levels = hashing::fast_set();
     let mut repository_names = RepositoryNameInterner::default();
-    let mut visiting_repositories = HashSet::new();
+    let mut visiting_repositories = hashing::fast_set();
     let mut work = Vec::new();
     for injection in injections.iter().rev() {
         push_refs(
@@ -6364,13 +6634,13 @@ fn compile_rule_repository_contexts<'a>(
             injection.grammar_id,
             root,
             &injection.patterns,
-            Arc::clone(&empty_context),
+            EMPTY_CONTEXT,
         );
     }
     work.push(Work::TopLevel {
         grammar_id: root,
         base_grammar_id: root,
-        context: Arc::clone(&empty_context),
+        context: EMPTY_CONTEXT,
     });
 
     while !budget.exceeded {
@@ -6418,7 +6688,7 @@ fn compile_rule_repository_contexts<'a>(
                         base_grammar_id,
                         refs,
                         index: index + 1,
-                        context: Arc::clone(&context),
+                        context,
                     });
                 }
                 let Some(grammar) = grammars.grammar(grammar_id) else {
@@ -6426,7 +6696,7 @@ fn compile_rule_repository_contexts<'a>(
                 };
                 match rule_ref {
                     RuleRef::Rule(rule_id) => {
-                        if compiled.get(grammar_id, *rule_id).is_some() {
+                        if compiled.is_bound(grammar_id, *rule_id) {
                             continue;
                         }
                         let Some(rule) = grammar.rule(*rule_id) else {
@@ -6444,11 +6714,16 @@ fn compile_rule_repository_contexts<'a>(
                         let context = if rule.local_repository.is_empty() {
                             context
                         } else {
-                            RepositoryBindings::overlay(
-                                context,
+                            let overlay = RepositoryBindings::overlay(
+                                Arc::clone(compiled.context(context)),
                                 rule.local_repository.clone(),
                                 !bounded,
-                            )
+                            );
+                            let Some(id) = compiled.add_context(overlay) else {
+                                budget.exceeded = true;
+                                break;
+                            };
+                            id
                         };
                         // Never overwrite an earlier context: vscode-textmate
                         // binds a raw rule to the repository from its first
@@ -6457,12 +6732,12 @@ fn compile_rule_repository_contexts<'a>(
                             grammar_id,
                             *rule_id,
                             grammar.rules.len(),
-                            Arc::clone(&context),
+                            context,
                         );
                         debug_assert!(inserted);
                         match &rule.body {
                             RuleBody::Match { captures, .. } => {
-                                push_captures(&mut work, grammar_id, captures, &context);
+                                push_captures(&mut work, grammar_id, captures, context);
                             }
                             RuleBody::BeginEnd {
                                 begin_captures,
@@ -6475,10 +6750,10 @@ fn compile_rule_repository_contexts<'a>(
                                     grammar_id,
                                     base_grammar_id,
                                     patterns,
-                                    Arc::clone(&context),
+                                    context,
                                 );
-                                push_captures(&mut work, grammar_id, end_captures, &context);
-                                push_captures(&mut work, grammar_id, begin_captures, &context);
+                                push_captures(&mut work, grammar_id, end_captures, context);
+                                push_captures(&mut work, grammar_id, begin_captures, context);
                             }
                             RuleBody::BeginWhile {
                                 begin_captures,
@@ -6491,10 +6766,10 @@ fn compile_rule_repository_contexts<'a>(
                                     grammar_id,
                                     base_grammar_id,
                                     patterns,
-                                    Arc::clone(&context),
+                                    context,
                                 );
-                                push_captures(&mut work, grammar_id, while_captures, &context);
-                                push_captures(&mut work, grammar_id, begin_captures, &context);
+                                push_captures(&mut work, grammar_id, while_captures, context);
+                                push_captures(&mut work, grammar_id, begin_captures, context);
                             }
                             RuleBody::IncludeOnly { patterns } => {
                                 push_refs(&mut work, grammar_id, base_grammar_id, patterns, context)
@@ -6502,20 +6777,20 @@ fn compile_rule_repository_contexts<'a>(
                         }
                     }
                     RuleRef::Repository(name) => {
-                        let bound_name = context.get(name).map_or(name.as_str(), String::as_str);
+                        let bindings = compiled.context(context);
+                        let bound_name = bindings.get(name).map_or(name.as_str(), String::as_str);
                         let known_name = repository_names.get(bound_name);
                         if !budget.charge_repository(bound_name, known_name.is_none()) {
                             break;
                         }
                         let name_id =
                             known_name.unwrap_or_else(|| repository_names.intern(bound_name).0);
-                        let key = (grammar_id, name_id, Arc::as_ptr(&context) as usize);
+                        let key = (grammar_id, name_id, context);
                         if !visiting_repositories.insert(key) {
                             continue;
                         }
                         work.push(Work::RepositoryExit(key));
-                        if let Some(target) = resolve_repository_in_context(grammar, name, &context)
-                        {
+                        if let Some(target) = grammar.repository.get(bound_name) {
                             push_refs(
                                 &mut work,
                                 grammar_id,
@@ -6533,7 +6808,7 @@ fn compile_rule_repository_contexts<'a>(
                     RuleRef::BaseRef => work.push(Work::TopLevel {
                         grammar_id: base_grammar_id,
                         base_grammar_id,
-                        context: Arc::clone(&empty_context),
+                        context: EMPTY_CONTEXT,
                     }),
                     RuleRef::External { scope, repository } => {
                         let Some(external_id) = grammar
@@ -6552,7 +6827,7 @@ fn compile_rule_repository_contexts<'a>(
                             }
                             let name_id =
                                 known_name.unwrap_or_else(|| repository_names.intern(repository).0);
-                            let key = (external_id, name_id, Arc::as_ptr(&empty_context) as usize);
+                            let key = (external_id, name_id, EMPTY_CONTEXT);
                             if !visiting_repositories.insert(key) {
                                 continue;
                             }
@@ -6563,14 +6838,14 @@ fn compile_rule_repository_contexts<'a>(
                                     external_id,
                                     base_grammar_id,
                                     std::slice::from_ref(target),
-                                    Arc::clone(&empty_context),
+                                    EMPTY_CONTEXT,
                                 );
                             }
                         } else {
                             work.push(Work::TopLevel {
                                 grammar_id: external_id,
                                 base_grammar_id,
-                                context: Arc::clone(&empty_context),
+                                context: EMPTY_CONTEXT,
                             });
                         }
                     }
@@ -7534,7 +7809,7 @@ mod tests {
             Arc::clone(&patterns),
             Arc::clone(&blueprints),
             Vec::new(),
-            Arc::new(RuleRepositoryContexts::new(1)),
+            RuleRepositoryContexts::new(1),
         );
 
         tokenizer.prepare_root_candidate();
@@ -8644,9 +8919,10 @@ mod tests {
     fn dense_repository_contexts_preserve_sparse_public_rule_ids() {
         let context = Arc::new(RepositoryBindings::default());
         let mut contexts = RuleRepositoryContexts::new(1);
+        let id = contexts.add_context(Arc::clone(&context)).unwrap();
 
-        assert!(contexts.insert_first(GrammarId(0), RuleId(99), 1, Arc::clone(&context)));
-        assert!(!contexts.insert_first(GrammarId(0), RuleId(99), 1, Arc::clone(&context)));
+        assert!(contexts.insert_first(GrammarId(0), RuleId(99), 1, id));
+        assert!(!contexts.insert_first(GrammarId(0), RuleId(99), 1, id));
         assert!(Arc::ptr_eq(
             contexts.get(GrammarId(0), RuleId(99)).unwrap(),
             &context
@@ -8782,7 +9058,7 @@ mod tests {
                 }"##,
             )
             .unwrap();
-        let selectors = compile_injection_selectors(&set, root);
+        let selectors = Arc::new(compile_injection_selectors(&set, root));
         let first = set.rule_repository_contexts(root, &selectors);
         let cloned = set.clone();
         let second = cloned.rule_repository_contexts(root, &selectors);
@@ -8791,7 +9067,7 @@ mod tests {
         let cached = Arc::downgrade(&first);
         set.load_and_add(r#"{"scopeName":"source.later","patterns":[]}"#)
             .unwrap();
-        let selectors = compile_injection_selectors(&set, root);
+        let selectors = Arc::new(compile_injection_selectors(&set, root));
         let after_mutation = set.rule_repository_contexts(root, &selectors);
         assert!(!Arc::ptr_eq(&first, &after_mutation));
 
@@ -8882,6 +9158,106 @@ mod tests {
                 .all(|scope| !scope.starts_with("root.")),
             "{line:#?}"
         );
+    }
+
+    /// Every rule the deferred lookup answers without the walk must have a
+    /// walk-assigned context that leaves its own includes unchanged.
+    fn assert_unscoped_contexts_are_inert(grammars: &GrammarSet, root: GrammarId) {
+        let injections = compile_injection_selectors(grammars, root);
+        let (eager, complete) =
+            compile_rule_repository_contexts(grammars, root, &injections, false);
+        assert!(complete);
+        let mut checked = 0usize;
+        for grammar in grammars.grammars() {
+            let scoped = scoped_repository_rules(grammar);
+            for rule in &grammar.rules {
+                if scoped.contains(&rule.id) {
+                    continue;
+                }
+                let Some(context) = eager.get(grammar.id, rule.id) else {
+                    continue;
+                };
+                let (patterns, captures): (&[RuleRef], Vec<&Arc<CaptureSpec>>) = match &rule.body {
+                    RuleBody::Match { captures, .. } => (&[], vec![captures]),
+                    RuleBody::BeginEnd {
+                        patterns,
+                        begin_captures,
+                        end_captures,
+                        ..
+                    } => (patterns, vec![begin_captures, end_captures]),
+                    RuleBody::BeginWhile {
+                        patterns,
+                        begin_captures,
+                        while_captures,
+                        ..
+                    } => (patterns, vec![begin_captures, while_captures]),
+                    RuleBody::IncludeOnly { patterns } => (patterns, Vec::new()),
+                };
+                assert_eq!(
+                    contextualize_refs(patterns, Some(context)),
+                    patterns,
+                    "{} rule {:?}",
+                    grammar.scope_name,
+                    rule.id
+                );
+                for spec in captures {
+                    assert_eq!(
+                        contextualize_capture_spec(spec, Some(context)).as_ref(),
+                        spec.as_ref(),
+                        "{} rule {:?}",
+                        grammar.scope_name,
+                        rule.id
+                    );
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn deferred_repository_contexts_skip_only_inert_contexts() {
+        let grammar = r##"{
+                "scopeName": "source.deferred-context",
+                "patterns": [{"include":"#shared"}, {"include":"#nested"}, {"include":"#other"}],
+                "repository": {
+                    "shared": {"begin":"<", "end":">", "patterns":[{"include":"#value"}]},
+                    "value": {"match":"x", "name":"root.value"},
+                    "other": {"begin":"\\[", "end":"\\]", "patterns":[{"include":"#plain"}]},
+                    "plain": {"match":"p", "name":"root.plain"},
+                    "nested": {
+                        "repository": {
+                            "value": {"match":"x", "name":"local.value"},
+                            "deeper": {
+                                "repository": {"plain": {"match":"q", "name":"local.plain"}},
+                                "patterns": [{"include":"#other"}, {"include":"$self"}]
+                            }
+                        },
+                        "patterns": [{"include":"#shared"}, {"include":"#deeper"}]
+                    }
+                }
+            }"##;
+        let mut grammars = GrammarSet::new();
+        let root = grammars.load_and_add(grammar).unwrap();
+        assert_unscoped_contexts_are_inert(&grammars, root);
+
+        #[cfg(feature = "bundled-grammars")]
+        for language in [
+            "html",
+            "ruby",
+            "objective-c",
+            "objective-cpp",
+            "cadence",
+            "clarity",
+            "crystal",
+            "wikitext",
+            "typst",
+            "markdown",
+            "php",
+        ] {
+            let (grammars, root) = crate::engine::load_grammar_set(language).unwrap();
+            assert_unscoped_contexts_are_inert(&grammars, root);
+        }
     }
 
     #[test]
