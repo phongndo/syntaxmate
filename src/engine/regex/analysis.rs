@@ -51,6 +51,7 @@ pub(crate) struct RegexAnalysis {
     skip_gate: Option<SkipGate>,
     capture: CaptureAnalysis,
     scanner_supported: bool,
+    scanner_end_exact: bool,
     bytecode_beneficial: bool,
 }
 
@@ -67,6 +68,7 @@ impl RegexAnalysis {
             analyze_start_bytes(parsed, uniform_effective_flags, has_case_insensitive_scope);
         let capture = analyze_captures(parsed);
         let scanner_supported = super::scanner::Scanner::supports(parsed);
+        let scanner_end_exact = super::scanner::match_end_is_exact(parsed);
         let bytecode_beneficial = super::bytecode::Program::is_beneficial(parsed);
         let skip_gate = SkipGate::analyze_with_effective_flags(
             parsed,
@@ -85,6 +87,7 @@ impl RegexAnalysis {
             skip_gate,
             capture,
             scanner_supported,
+            scanner_end_exact,
             bytecode_beneficial,
         }
     }
@@ -128,6 +131,11 @@ impl RegexAnalysis {
 
     pub(crate) fn scanner_supported(&self) -> bool {
         self.scanner_supported
+    }
+
+    /// See [`super::scanner::match_end_is_exact`].
+    pub(crate) fn scanner_end_exact(&self) -> bool {
+        self.scanner_end_exact
     }
 
     pub(crate) fn bytecode_beneficial(&self) -> bool {

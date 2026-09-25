@@ -551,6 +551,50 @@ impl Scanner {
     }
 }
 
+/// Whether the scanner's winning end equals the backtracking end for this
+/// pattern, so an exact replay can be skipped when no captures are needed.
+///
+/// With no captures, lookaround, backreferences, or atomic groups, a
+/// priority-ordered Thompson simulation that keeps the first thread per
+/// instruction and position reproduces the backtracking priority order: a
+/// discarded duplicate has exactly the same future as the higher-priority
+/// thread that was kept. Backtracking's empty-iteration check for loops
+/// whose body can match empty depends on history instead, so any repeat of a
+/// nullable body is excluded. Case-insensitive patterns are excluded as well
+/// to keep fold handling on the authoritative path.
+pub(crate) fn match_end_is_exact(parsed: &ParsedRegex) -> bool {
+    fn nullable(ast: &Ast) -> bool {
+        match ast {
+            Ast::Empty | Ast::Anchor(_) => true,
+            Ast::Literal(value) => value.is_empty(),
+            Ast::Concat(nodes) => nodes.iter().all(nullable),
+            Ast::Alternation(branches) => branches.iter().any(nullable),
+            Ast::Repeat { node, min, .. } => *min == 0 || nullable(node),
+            Ast::Group { child, .. } | Ast::Flags { child, .. } => nullable(child),
+            // Consuming or unsupported; exactness rejects the latter below.
+            _ => false,
+        }
+    }
+    fn exact(ast: &Ast) -> bool {
+        match ast {
+            Ast::Empty | Ast::Literal(_) | Ast::Dot | Ast::Class(_) | Ast::Anchor(_) => true,
+            Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().all(exact),
+            Ast::Repeat {
+                node, possessive, ..
+            } => !*possessive && !nullable(node) && exact(node),
+            Ast::Group { child, .. } => exact(child),
+            Ast::Flags { flags, child } => !flags.case_insensitive && exact(child),
+            Ast::Look { .. }
+            | Ast::Backref(_)
+            | Ast::Conditional { .. }
+            | Ast::Subroutine(_)
+            | Ast::Grapheme
+            | Ast::Unsupported(_) => false,
+        }
+    }
+    Scanner::supports(parsed) && !parsed.flags.case_insensitive && exact(&parsed.ast)
+}
+
 fn ast_is_supported(ast: &Ast) -> bool {
     match ast {
         Ast::Empty | Ast::Literal(_) | Ast::Dot | Ast::Class(_) | Ast::Anchor(_) => true,
@@ -1375,6 +1419,57 @@ mod tests {
         // queued accept; no later start may win meanwhile.
         assert_matches_reference(&["a+b", "a+", "b", "ab"], &["aaac", "aaab", "caab", "b"]);
         assert_matches_reference(&["x.*?y", "y"], &["x y y", "yy"]);
+    }
+
+    #[test]
+    fn exact_end_excludes_history_dependent_and_folded_patterns() {
+        for (pattern, exact) in [
+            (r"\w+", true),
+            (r"\w+(?:\.\w+)+", true),
+            (r"\b(?:co|coroutine|coroutine.create)\b", true),
+            ("a{2,3}?b*", true),
+            ("(?:ab|c)+d?", true),
+            ("(?:a?)*b", false),
+            ("(?:a|)+", false),
+            ("(?:x|y?){2}", false),
+            ("(?:$|a)*", false),
+            ("(?i)abc", false),
+            ("a(?i:b)", false),
+            ("(?=a)a", false),
+            (r"(a)\1", false),
+            ("a++", false),
+        ] {
+            assert_eq!(match_end_is_exact(&parse(pattern)), exact, "{pattern}");
+        }
+    }
+
+    #[test]
+    fn exact_patterns_agree_with_backtracking_end() {
+        let patterns = [
+            r"\w+(?:\.\w+)+",
+            r"\w+:\w+",
+            r"-?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?",
+            r"\b(?:co|coroutine|coroutine.create|s|sub|string|string.sub|table)\b",
+            "a{2,4}?b|a+?",
+            "(?:ab|a)(?:bc|b)c",
+            r"[^ ]+",
+            r"\w+",
+        ];
+        for pattern in patterns {
+            assert!(match_end_is_exact(&parse(pattern)), "{pattern}");
+        }
+        assert_matches_reference(
+            &patterns,
+            &[
+                "coroutine.create math.max a:b",
+                "-1.5e+3 12 x.y.z",
+                "aaab aab abcc abbc",
+                "string.sub(s) é.ü",
+            ],
+        );
+        for pattern in patterns {
+            assert_matches_reference(&[pattern], &["coroutine.create -1.5e+3 aaab abcc é:x"]);
+        }
     }
 
     #[test]
