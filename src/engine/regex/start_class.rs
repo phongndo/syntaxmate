@@ -12,16 +12,25 @@
 //! Masks must stay conservative: a dropped bit asserts "no match can start
 //! at such a position", so every analysis default is "all classes".
 //!
-//! The scan consults masks only when both neighboring bytes are ASCII (any
-//! non-ASCII neighbor keeps every candidate), so the analysis has to be
-//! sound for ASCII word characters (`[0-9A-Za-z_]`); Unicode-only word
-//! characters such as combining marks never reach a masked decision.
+//! Each pattern gets two masks packed into one byte. The low nibble is
+//! consulted when both neighboring bytes are ASCII, so its analysis only has
+//! to be sound for ASCII word characters (`[0-9A-Za-z_]`). The high nibble
+//! is consulted at positions with a non-ASCII neighbor, where the scan
+//! classifies both neighbors with the Unicode `\w` predicate; its analysis
+//! drops every claim that only holds for ASCII (for example that `[^A-Za-z]`
+//! excludes word characters, or that `[[:alpha:]]` implies `\w`).
 
-use super::ast::{AnchorKind, Ast, CharClass, ClassAtom, LookKind, ParsedRegex, PerlClassKind};
+use super::ast::{
+    AnchorKind, Ast, CharClass, ClassAtom, LookKind, ParsedRegex, PerlClassKind, RegexFlags,
+};
 use super::is_unicode_word_char;
 
-/// Bit `1 << (prev_word * 2 + cur_word)`. Line edges count as non-word.
-pub(crate) const START_CLASS_ALL: u8 = 0b1111;
+/// Bit `1 << (prev_word * 2 + cur_word)` in the ASCII nibble, shifted by
+/// [`UNICODE_SHIFT`] in the Unicode nibble. Line edges count as non-word.
+pub(crate) const START_CLASS_ALL: u8 = 0xff;
+const NIBBLE_ALL: u8 = 0b1111;
+/// Offset of the Unicode-sound nibble within a packed mask.
+pub(crate) const UNICODE_SHIFT: u8 = 4;
 
 const PREV_WORD: u8 = 0b1100;
 const PREV_NONWORD: u8 = 0b0011;
@@ -30,14 +39,63 @@ const CUR_NONWORD: u8 = 0b0101;
 const BOUNDARY: u8 = 0b0110;
 const NOT_BOUNDARY: u8 = 0b1001;
 
-/// Start-class mask for a whole pattern. Always non-zero.
+/// Which characters a mask must be sound for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    /// Both neighbors are ASCII.
+    Ascii,
+    /// Any neighbor may be any scalar. Tracks the effective case flag: a
+    /// case-insensitive non-ASCII scalar may match partners whose word-ness
+    /// the analysis cannot prove equal, so it stays conservative.
+    Unicode { case_insensitive: bool },
+}
+
+impl Mode {
+    fn with_flags(self, flags: RegexFlags) -> Self {
+        match self {
+            Self::Ascii => Self::Ascii,
+            Self::Unicode { .. } => Self::Unicode {
+                case_insensitive: flags.case_insensitive,
+            },
+        }
+    }
+
+    fn is_unicode(self) -> bool {
+        matches!(self, Self::Unicode { .. })
+    }
+}
+
+/// Packed start-class masks for a whole pattern. Each nibble is non-zero.
 pub(crate) fn start_class_mask(parsed: &ParsedRegex) -> u8 {
-    let (mask, continuation) = node_mask(&parsed.ast, START_CLASS_ALL);
+    let unicode = Mode::Unicode {
+        case_insensitive: parsed.flags.case_insensitive,
+    };
+    nibble_mask(parsed, Mode::Ascii) | (nibble_mask(parsed, unicode) << UNICODE_SHIFT)
+}
+
+/// (may-be-word, may-be-non-word) for a pattern scalar and every scalar it
+/// matches. ASCII scalars' case partners share their word-ness (see the
+/// exhaustive `ascii_case_partners_share_word_ness` test).
+fn scalar_word_sides(ch: char, mode: Mode) -> (bool, bool) {
+    if mode
+        == (Mode::Unicode {
+            case_insensitive: true,
+        })
+        && !ch.is_ascii()
+    {
+        return (true, true);
+    }
+    let word = is_unicode_word_char(ch);
+    (word, !word)
+}
+
+fn nibble_mask(parsed: &ParsedRegex, mode: Mode) -> u8 {
+    let (mask, continuation) = node_mask(&parsed.ast, NIBBLE_ALL, mode);
     let mask = mask | continuation.unwrap_or(0);
     if mask == 0 {
         // A provably unmatchable start set is more likely an analysis gap
         // than a real grammar pattern; never let it silence a candidate.
-        START_CLASS_ALL
+        NIBBLE_ALL
     } else {
         mask
     }
@@ -76,15 +134,18 @@ fn sides_prev_bits(word: bool, nonword: bool) -> u8 {
 /// Returns the classes at which a match can begin inside `ast` under the
 /// accumulated zero-width `constraint`, plus the (possibly narrowed)
 /// constraint to carry into the next element when `ast` can match empty.
-fn node_mask(ast: &Ast, constraint: u8) -> (u8, Option<u8>) {
+fn node_mask(ast: &Ast, constraint: u8, mode: Mode) -> (u8, Option<u8>) {
     match ast {
         Ast::Empty => (0, Some(constraint)),
         Ast::Literal(literal) => match literal.chars().next() {
-            Some(ch) => (constraint & bits_cur(is_unicode_word_char(ch)), None),
+            Some(ch) => {
+                let (word, nonword) = scalar_word_sides(ch, mode);
+                (constraint & sides_cur_bits(word, nonword), None)
+            }
             None => (0, Some(constraint)),
         },
         Ast::Class(class) => {
-            let (word, nonword) = class_word_sides(class);
+            let (word, nonword) = class_word_sides(class, mode);
             (constraint & sides_cur_bits(word, nonword), None)
         }
         // `.` consumes a character of either word-ness.
@@ -106,7 +167,7 @@ fn node_mask(ast: &Ast, constraint: u8) -> (u8, Option<u8>) {
         Ast::Look { kind, child } => {
             let narrowed = match kind {
                 LookKind::Ahead => {
-                    let sides = first_char_sides(child);
+                    let sides = first_char_sides(child, mode);
                     if sides.nullable {
                         constraint
                     } else {
@@ -117,24 +178,18 @@ fn node_mask(ast: &Ast, constraint: u8) -> (u8, Option<u8>) {
                 // word char" would force X to match: then the guard failing
                 // means the next character (or line end) is non-word.
                 LookKind::NotAhead => {
-                    if negated_look_excludes_word(child, false) {
+                    if negated_look_excludes_word(child, false, mode) {
                         constraint & bits_cur(false)
                     } else {
                         constraint
                     }
                 }
-                LookKind::Behind => {
-                    let sides = last_char_sides(child);
-                    if sides.nullable {
-                        constraint
-                    } else {
-                        // Line starts are folded into "previous is non-word",
-                        // so the impossible prev=None case stays conservative.
-                        constraint & sides_prev_bits(sides.word, sides.nonword)
-                    }
-                }
+                LookKind::Behind => match behind_prev_bits(child, mode) {
+                    Some(bits) => constraint & bits,
+                    None => constraint,
+                },
                 LookKind::NotBehind => {
-                    if negated_look_excludes_word(child, true) {
+                    if negated_look_excludes_word(child, true, mode) {
                         constraint & bits_prev(false)
                     } else {
                         constraint
@@ -147,7 +202,7 @@ fn node_mask(ast: &Ast, constraint: u8) -> (u8, Option<u8>) {
             let mut mask = 0;
             let mut carried = constraint;
             for node in nodes {
-                let (node_bits, continuation) = node_mask(node, carried);
+                let (node_bits, continuation) = node_mask(node, carried, mode);
                 mask |= node_bits;
                 match continuation {
                     Some(narrowed) => carried = narrowed,
@@ -160,7 +215,7 @@ fn node_mask(ast: &Ast, constraint: u8) -> (u8, Option<u8>) {
             let mut mask = 0;
             let mut continuation: Option<u8> = None;
             for branch in branches {
-                let (branch_bits, branch_continuation) = node_mask(branch, constraint);
+                let (branch_bits, branch_continuation) = node_mask(branch, constraint, mode);
                 mask |= branch_bits;
                 if let Some(narrowed) = branch_continuation {
                     continuation = Some(continuation.unwrap_or(0) | narrowed);
@@ -172,14 +227,15 @@ fn node_mask(ast: &Ast, constraint: u8) -> (u8, Option<u8>) {
             if *max == Some(0) {
                 return (0, Some(constraint));
             }
-            let (mask, continuation) = node_mask(node, constraint);
+            let (mask, continuation) = node_mask(node, constraint, mode);
             if *min == 0 {
                 (mask, Some(constraint | continuation.unwrap_or(0)))
             } else {
                 (mask, continuation)
             }
         }
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => node_mask(child, constraint),
+        Ast::Group { child, .. } => node_mask(child, constraint, mode),
+        Ast::Flags { flags, child } => node_mask(child, constraint, mode.with_flags(*flags)),
         Ast::Backref(_) | Ast::Conditional { .. } | Ast::Subroutine(_) | Ast::Unsupported(_) => {
             (constraint, Some(constraint))
         }
@@ -207,17 +263,38 @@ impl CharSides {
     };
 }
 
+/// Previous-character bits a positive lookbehind with this child forces, or
+/// `None` when it does not constrain the previous character. A `^` / `\A`
+/// branch holds only at a line start or right after `\n`, so it forces a
+/// non-word previous character just like a consuming non-word branch.
+fn behind_prev_bits(child: &Ast, mode: Mode) -> Option<u8> {
+    match child {
+        Ast::Anchor(AnchorKind::LineStart | AnchorKind::TextStart) => Some(bits_prev(false)),
+        Ast::Group { child, .. } => behind_prev_bits(child, mode),
+        Ast::Flags { flags, child } => behind_prev_bits(child, mode.with_flags(*flags)),
+        Ast::Alternation(branches) => branches.iter().try_fold(0, |bits, branch| {
+            Some(bits | behind_prev_bits(branch, mode)?)
+        }),
+        _ => {
+            let sides = last_char_sides(child, mode);
+            // Line starts are folded into "previous is non-word", so the
+            // impossible prev=None case stays conservative.
+            (!sides.nullable).then(|| sides_prev_bits(sides.word, sides.nonword))
+        }
+    }
+}
+
 /// Word-ness of the first character `ast` consumes.
-fn first_char_sides(ast: &Ast) -> CharSides {
-    char_sides(ast, false)
+fn first_char_sides(ast: &Ast, mode: Mode) -> CharSides {
+    char_sides(ast, false, mode)
 }
 
 /// Word-ness of the last character `ast` consumes.
-fn last_char_sides(ast: &Ast) -> CharSides {
-    char_sides(ast, true)
+fn last_char_sides(ast: &Ast, mode: Mode) -> CharSides {
+    char_sides(ast, true, mode)
 }
 
-fn char_sides(ast: &Ast, from_end: bool) -> CharSides {
+fn char_sides(ast: &Ast, from_end: bool, mode: Mode) -> CharSides {
     match ast {
         Ast::Empty => CharSides::ZERO_WIDTH,
         Ast::Literal(literal) => {
@@ -228,10 +305,10 @@ fn char_sides(ast: &Ast, from_end: bool) -> CharSides {
             };
             match ch {
                 Some(ch) => {
-                    let word = is_unicode_word_char(ch);
+                    let (word, nonword) = scalar_word_sides(ch, mode);
                     CharSides {
                         word,
-                        nonword: !word,
+                        nonword,
                         nullable: false,
                     }
                 }
@@ -239,7 +316,7 @@ fn char_sides(ast: &Ast, from_end: bool) -> CharSides {
             }
         }
         Ast::Class(class) => {
-            let (word, nonword) = class_word_sides(class);
+            let (word, nonword) = class_word_sides(class, mode);
             CharSides {
                 word,
                 nonword,
@@ -256,7 +333,7 @@ fn char_sides(ast: &Ast, from_end: bool) -> CharSides {
             let mut word = false;
             let mut nonword = false;
             let mut iterate = |node: &Ast| -> bool {
-                let sides = char_sides(node, from_end);
+                let sides = char_sides(node, from_end, mode);
                 word |= sides.word;
                 nonword |= sides.nonword;
                 sides.nullable
@@ -277,7 +354,7 @@ fn char_sides(ast: &Ast, from_end: bool) -> CharSides {
             let mut nonword = false;
             let mut nullable = false;
             for branch in branches {
-                let sides = char_sides(branch, from_end);
+                let sides = char_sides(branch, from_end, mode);
                 word |= sides.word;
                 nonword |= sides.nonword;
                 nullable |= sides.nullable;
@@ -292,11 +369,12 @@ fn char_sides(ast: &Ast, from_end: bool) -> CharSides {
             if *max == Some(0) {
                 return CharSides::ZERO_WIDTH;
             }
-            let mut sides = char_sides(node, from_end);
+            let mut sides = char_sides(node, from_end, mode);
             sides.nullable |= *min == 0;
             sides
         }
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => char_sides(child, from_end),
+        Ast::Group { child, .. } => char_sides(child, from_end, mode),
+        Ast::Flags { flags, child } => char_sides(child, from_end, mode.with_flags(*flags)),
         Ast::Backref(_) | Ast::Conditional { .. } | Ast::Subroutine(_) | Ast::Unsupported(_) => {
             CharSides::UNKNOWN
         }
@@ -309,11 +387,12 @@ fn char_sides(ast: &Ast, from_end: bool) -> CharSides {
 /// element (first for lookahead, last for lookbehind) must consume one char
 /// from a word-covering class, and everything on the far side of it must be
 /// able to match empty unconditionally.
-fn negated_look_excludes_word(child: &Ast, from_end: bool) -> bool {
+fn negated_look_excludes_word(child: &Ast, from_end: bool, mode: Mode) -> bool {
     match child {
-        Ast::Class(class) => class_covers_all_ascii_word(class),
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => {
-            negated_look_excludes_word(child, from_end)
+        Ast::Class(class) => class_covers_all_word(class, mode),
+        Ast::Group { child, .. } => negated_look_excludes_word(child, from_end, mode),
+        Ast::Flags { flags, child } => {
+            negated_look_excludes_word(child, from_end, mode.with_flags(*flags))
         }
         Ast::Concat(nodes) => {
             let (adjacent, rest) = if from_end {
@@ -327,19 +406,19 @@ fn negated_look_excludes_word(child: &Ast, from_end: bool) -> bool {
                     None => return false,
                 }
             };
-            negated_look_excludes_word(adjacent, from_end)
+            negated_look_excludes_word(adjacent, from_end, mode)
                 && rest.iter().all(matches_empty_unconditionally)
         }
         // Any single word-forced branch is enough: a word char makes that
         // branch (and therefore the alternation) match.
         Ast::Alternation(branches) => branches
             .iter()
-            .any(|branch| negated_look_excludes_word(branch, from_end)),
+            .any(|branch| negated_look_excludes_word(branch, from_end, mode)),
         Ast::Repeat { node, min, max, .. } => {
             // One iteration must suffice and be permitted.
             *min <= 1
                 && max.is_none_or(|max| max >= 1)
-                && negated_look_excludes_word(node, from_end)
+                && negated_look_excludes_word(node, from_end, mode)
         }
         _ => false,
     }
@@ -360,14 +439,29 @@ fn matches_empty_unconditionally(ast: &Ast) -> bool {
     }
 }
 
-/// True when the class is a superset of the ASCII word characters
-/// (`[0-9A-Za-z_]`). Masks are never consulted at non-ASCII positions, so
-/// ASCII coverage is the required bar.
-fn class_covers_all_ascii_word(class: &CharClass) -> bool {
+/// True when the class is a superset of the word characters the mode can
+/// observe: `[0-9A-Za-z_]` at ASCII positions, all of `\w` otherwise.
+fn class_covers_all_word(class: &CharClass, mode: Mode) -> bool {
     if class.negated || !class.intersections.is_empty() {
         return false;
     }
-    atoms_cover_all_ascii_word(&class.atoms)
+    atoms_cover_all_word(&class.atoms, mode)
+}
+
+fn atoms_cover_all_word(atoms: &[ClassAtom], mode: Mode) -> bool {
+    match mode {
+        Mode::Ascii => atoms_cover_all_ascii_word(atoms),
+        // `\w` and `[[:word:]]` evaluate the same Unicode predicate as the
+        // scan's position classifier; nothing else is claimed.
+        Mode::Unicode { .. } => atoms.iter().any(|atom| match atom {
+            ClassAtom::Perl(PerlClassKind::Word) => true,
+            ClassAtom::Posix {
+                name,
+                negated: false,
+            } => name == "word",
+            _ => false,
+        }),
+    }
 }
 
 fn atoms_cover_all_ascii_word(atoms: &[ClassAtom]) -> bool {
@@ -415,7 +509,7 @@ fn atoms_cover_all_ascii_word(atoms: &[ClassAtom]) -> bool {
 }
 
 /// Conservative (may-contain-word, may-contain-nonword) sides of a class.
-fn class_word_sides(class: &CharClass) -> (bool, bool) {
+fn class_word_sides(class: &CharClass, mode: Mode) -> (bool, bool) {
     if class.atoms.is_empty() {
         return (true, true);
     }
@@ -424,7 +518,7 @@ fn class_word_sides(class: &CharClass) -> (bool, bool) {
     let mut word = false;
     let mut nonword = false;
     for atom in &class.atoms {
-        let (atom_word, atom_nonword) = atom_word_sides(atom);
+        let (atom_word, atom_nonword) = atom_word_sides(atom, mode);
         word |= atom_word;
         nonword |= atom_nonword;
         if word && nonword {
@@ -436,7 +530,7 @@ fn class_word_sides(class: &CharClass) -> (bool, bool) {
         // all of them; it contains a non-word char unless the atoms cover the
         // whole non-word side, which only `\W` asserts here.
         let covers_word =
-            class.intersections.is_empty() && atoms_cover_all_ascii_word(&class.atoms);
+            class.intersections.is_empty() && atoms_cover_all_word(&class.atoms, mode);
         let covers_nonword = class.intersections.is_empty()
             && class
                 .atoms
@@ -448,12 +542,10 @@ fn class_word_sides(class: &CharClass) -> (bool, bool) {
     }
 }
 
-fn atom_word_sides(atom: &ClassAtom) -> (bool, bool) {
+fn atom_word_sides(atom: &ClassAtom, mode: Mode) -> (bool, bool) {
     match atom {
-        ClassAtom::Char(ch) => {
-            let word = is_unicode_word_char(*ch);
-            (word, !word)
-        }
+        ClassAtom::Char(ch) => scalar_word_sides(*ch, mode),
+        ClassAtom::Range(start, end) if mode.is_unicode() => unicode_range_word_sides(*start, *end),
         ClassAtom::Range(start, end) => {
             if start.is_ascii() && end.is_ascii() {
                 let (start, end) = (*start.min(end), *start.max(end));
@@ -491,6 +583,15 @@ fn atom_word_sides(atom: &ClassAtom) -> (bool, bool) {
             if *negated {
                 return (true, true);
             }
+            if mode.is_unicode() {
+                // Alphabetic, uppercase, and lowercase include non-`\w`
+                // symbols such as circled letters; claim only exact sets.
+                return match name.as_str() {
+                    "digit" | "xdigit" | "word" => (true, false),
+                    "space" | "blank" | "cntrl" => (false, true),
+                    _ => (true, true),
+                };
+            }
             match name.as_str() {
                 "alpha" | "alnum" | "digit" | "xdigit" | "upper" | "lower" | "word" => {
                     (true, false)
@@ -502,8 +603,42 @@ fn atom_word_sides(atom: &ClassAtom) -> (bool, bool) {
             }
         }
         ClassAtom::Unicode { .. } => (true, true),
-        ClassAtom::Nested(class) => class_word_sides(class),
+        ClassAtom::Nested(class) => class_word_sides(class, mode),
     }
+}
+
+/// Word-ness of every scalar a range can match with or without case
+/// folding. A case-insensitive probe matches when its first lowercase or
+/// uppercase mapping falls inside the folded bounds; with ASCII bounds that
+/// mapping is an ASCII scalar sharing the probe's word-ness, so scanning the
+/// literal and both folded intervals is complete. Non-ASCII bounds stay
+/// conservative.
+fn unicode_range_word_sides(start: char, end: char) -> (bool, bool) {
+    let lower = |ch: char| ch.to_lowercase().next().unwrap_or(ch);
+    let upper = |ch: char| ch.to_uppercase().next().unwrap_or(ch);
+    let intervals = [
+        (start, end),
+        (lower(start), lower(end)),
+        (upper(start), upper(end)),
+    ];
+    if intervals
+        .iter()
+        .any(|(low, high)| !low.is_ascii() || !high.is_ascii())
+    {
+        return (true, true);
+    }
+    let mut word = false;
+    let mut nonword = false;
+    for (low, high) in intervals {
+        for ch in low.min(high)..=low.max(high) {
+            if is_unicode_word_char(ch) {
+                word = true;
+            } else {
+                nonword = true;
+            }
+        }
+    }
+    (word, nonword)
 }
 
 #[cfg(test)]
@@ -512,7 +647,7 @@ mod tests {
     use super::*;
 
     fn mask(pattern: &str) -> u8 {
-        start_class_mask(&parse(pattern))
+        start_class_mask(&parse(pattern)) & NIBBLE_ALL
     }
 
     const MID_WORD: u8 = 0b1000;
@@ -562,9 +697,9 @@ mod tests {
         // The backref itself is opaque, but the leading literal still bounds
         // the start class.
         assert_eq!(mask(r"(a)\1"), WORD_START | MID_WORD);
-        assert_eq!(mask(r"\1x"), START_CLASS_ALL);
-        assert_eq!(mask(r".*"), START_CLASS_ALL);
-        assert_eq!(mask(r"x|.|^"), START_CLASS_ALL);
+        assert_eq!(mask(r"\1x"), NIBBLE_ALL);
+        assert_eq!(mask(r".*"), NIBBLE_ALL);
+        assert_eq!(mask(r"x|.|^"), NIBBLE_ALL);
     }
 
     #[test]
@@ -579,6 +714,66 @@ mod tests {
     fn empty_mask_falls_back_to_all() {
         // `\b\B` can never hold, and the analysis proves it; keep the
         // conservative all-classes mask instead of silencing the pattern.
-        assert_eq!(mask(r"\b\B"), START_CLASS_ALL);
+        assert_eq!(mask(r"\b\B"), NIBBLE_ALL);
+        assert_eq!(unicode_mask(r"\b\B"), NIBBLE_ALL);
+    }
+
+    fn unicode_mask(pattern: &str) -> u8 {
+        start_class_mask(&parse(pattern)) >> UNICODE_SHIFT
+    }
+
+    #[test]
+    fn line_start_lookbehind_branch_forces_nonword_previous() {
+        let pattern = r"(?i:(?<=[^.а-яё\w]|^)(Если|If)(?=[^.а-яё\w]|$))";
+        assert_eq!(mask(pattern), WORD_START);
+        // Case-insensitive Cyrillic literals keep both current-character sides.
+        assert_eq!(unicode_mask(pattern), GAP | WORD_START);
+        // A nullable branch other than a line anchor still leaves the
+        // previous character unconstrained.
+        assert_eq!(mask(r"(?<=\W|x?)if") & MID_WORD, MID_WORD);
+    }
+
+    #[test]
+    fn unicode_masks_drop_ascii_only_claims() {
+        // `[^A-Za-z0-9_]` excludes every ASCII word char but contains `é`.
+        assert_eq!(mask(r"(?<=[^A-Za-z0-9_])x") & (MID_WORD | WORD_END), 0);
+        assert_eq!(unicode_mask(r"(?<=[^A-Za-z0-9_])x") & MID_WORD, MID_WORD);
+        assert_eq!(unicode_mask(r"(?<![A-Za-z0-9_])x") & MID_WORD, MID_WORD);
+        // `[[:alpha:]]` contains non-word symbols such as `Ⓐ`.
+        assert_eq!(mask(r"[[:alpha:]]") & (GAP | WORD_END), 0);
+        assert_ne!(unicode_mask(r"[[:alpha:]]") & (GAP | WORD_END), 0);
+        // Exact Unicode predicates keep their precision.
+        assert_eq!(unicode_mask(r"(?<!\w)this(?!\w)"), WORD_START);
+        assert_eq!(unicode_mask(r"\bwhile\b"), WORD_START);
+        assert_eq!(unicode_mask(r"(?i)[a-z]+") & (GAP | WORD_END), 0);
+    }
+
+    #[test]
+    fn ascii_case_partners_share_word_ness() {
+        // A case-insensitive ASCII literal scalar or ASCII-bounded range
+        // matches exactly the scalars whose first lowercase or uppercase
+        // mapping is ASCII, so those scalars must share its word-ness.
+        // (Non-ASCII pairs such as U+A7D2/U+A7D3 do not always agree across
+        // the Unicode tables in use; the analysis keeps them conservative.)
+        for ch in (0..=0x10_ffff).filter_map(char::from_u32) {
+            let word = is_unicode_word_char(ch);
+            for head in [ch.to_lowercase().next(), ch.to_uppercase().next()]
+                .into_iter()
+                .flatten()
+                .filter(char::is_ascii)
+            {
+                assert_eq!(is_unicode_word_char(head), word, "{ch:?} -> {head:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn case_insensitive_non_ascii_scalars_stay_conservative() {
+        assert_eq!(unicode_mask(r"(?i)ꟓ"), NIBBLE_ALL);
+        assert_eq!(unicode_mask(r"(?<=(?i:ꟓ))x"), WORD_START | MID_WORD);
+        assert_eq!(unicode_mask(r"(?<=ꟓ)x"), MID_WORD);
+        // ASCII case partners stay exact.
+        assert_eq!(unicode_mask(r"(?i)(?<!k)x") & MID_WORD, MID_WORD);
+        assert_eq!(unicode_mask(r"(?i)k"), WORD_START | MID_WORD);
     }
 }
