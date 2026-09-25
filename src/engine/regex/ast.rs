@@ -421,6 +421,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_concat(&mut self, terminator: Option<char>) -> Ast {
+        // Most alternation branches are a single node. Hold the first node
+        // inline and only materialize the sequence once a second one arrives;
+        // `push_concat_node` into an empty sequence stores a node unchanged.
+        let mut first = None;
         let mut nodes = Vec::new();
         while let Some(ch) = self.peek() {
             if Some(ch) == terminator || ch == '|' {
@@ -436,7 +440,20 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            push_concat_node(&mut nodes, self.parse_repeat());
+            let node = self.parse_repeat();
+            if nodes.is_empty() {
+                match first.take() {
+                    None => {
+                        first = Some(node);
+                        continue;
+                    }
+                    Some(previous) => nodes.push(previous),
+                }
+            }
+            push_concat_node(&mut nodes, node);
+        }
+        if let Some(node) = first {
+            return node;
         }
         match nodes.len() {
             0 => Ast::Empty,
@@ -561,9 +578,11 @@ impl<'a> Parser<'a> {
                 ));
                 Ast::Unsupported("unmatched ')'".to_owned())
             }
-            ch => {
-                let mut literal = String::new();
-                literal.push(ch);
+            _ => {
+                // Measure the literal run first so the string is allocated
+                // once at its final size; keyword inventories parse
+                // thousands of such runs per pattern.
+                let start = self.pos - 1;
                 while let Some(next) = self.peek() {
                     if is_regex_syntax(next)
                         || (self.flags.ignore_whitespace && (next.is_whitespace() || next == '#'))
@@ -574,8 +593,12 @@ impl<'a> Parser<'a> {
                     {
                         break;
                     }
-                    literal.push(self.bump().expect("peeked literal character"));
+                    self.pos += 1;
                 }
+                let run = &self.chars[start..self.pos];
+                let mut literal =
+                    String::with_capacity(run.iter().map(|ch| ch.len_utf8()).sum::<usize>());
+                literal.extend(run);
                 Ast::Literal(literal)
             }
         }
@@ -1271,6 +1294,21 @@ impl<'a> Parser<'a> {
 
 fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
     for branch_index in 0..branches.len() {
+        // Branches without an option-change marker are left in place; only
+        // a branch that needs restructuring is unpacked into a sequence.
+        let has_marker = match &branches[branch_index] {
+            Ast::Concat(nodes) => nodes.iter().any(|node| flag_change_flags(node).is_some()),
+            node => flag_change_flags(node).is_some(),
+        };
+        if !has_marker {
+            if let Ast::Concat(nodes) = &mut branches[branch_index]
+                && nodes.len() < 2
+            {
+                let nodes = std::mem::take(nodes);
+                branches[branch_index] = concat_ast(nodes);
+            }
+            continue;
+        }
         let branch = std::mem::replace(&mut branches[branch_index], Ast::Empty);
         let mut nodes = match branch {
             Ast::Concat(nodes) => nodes,
@@ -1629,6 +1667,26 @@ mod tests {
     fn coalesces_adjacent_literals() {
         let parsed = parse("return");
         assert_eq!(parsed.ast, Ast::Literal("return".to_owned()));
+        // Escaped scalars merge into the preceding run even when the whole
+        // branch collapses to one node.
+        assert_eq!(parse(r"a\.é").ast, Ast::Literal("a.é".to_owned()));
+        assert_eq!(
+            parse(r"x\.|y").ast,
+            Ast::Alternation(vec![
+                Ast::Literal("x.".to_owned()),
+                Ast::Literal("y".to_owned()),
+            ])
+        );
+        // A trailing option change scopes only the rest of its branch and
+        // the following branches, never the preceding literal.
+        let Ast::Concat(nodes) = parse("ab(?i)c|d").ast else {
+            panic!("expected scoped concat");
+        };
+        assert_eq!(nodes[0], Ast::Literal("ab".to_owned()));
+        let Ast::Flags { child, .. } = &nodes[1] else {
+            panic!("expected option scope");
+        };
+        assert!(matches!(child.as_ref(), Ast::Alternation(branches) if branches.len() == 2));
     }
 
     #[test]
