@@ -338,6 +338,12 @@ fn is_quantifier_start(ch: char) -> bool {
     matches!(ch, '*' | '+' | '?' | '{')
 }
 
+/// Escaped ASCII punctuation and whitespace always denote the scalar itself:
+/// every special escape in `parse_escape` is a letter or digit.
+fn is_punctuation_escape(ch: char) -> bool {
+    ch.is_ascii() && !ch.is_ascii_alphanumeric()
+}
+
 fn is_regex_syntax(ch: char) -> bool {
     matches!(
         ch,
@@ -408,14 +414,20 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_alternation(&mut self, terminator: Option<char>) -> Ast {
-        let mut branches = Vec::new();
-        loop {
+        let first = self.parse_concat(terminator);
+        if self.peek() != Some('|') {
+            // Most groups have one branch; only an option change inside it
+            // needs the branch-list normalization.
+            return if has_flag_change_marker(&first) {
+                normalize_flag_changes(vec![first])
+            } else {
+                first
+            };
+        }
+        let mut branches = vec![first];
+        while self.peek() == Some('|') {
+            self.bump();
             branches.push(self.parse_concat(terminator));
-            if self.peek() == Some('|') {
-                self.bump();
-                continue;
-            }
-            break;
         }
         normalize_flag_changes(branches)
     }
@@ -570,6 +582,10 @@ impl<'a> Parser<'a> {
                 self.features.line_anchor = true;
                 Ast::Anchor(AnchorKind::LineEnd)
             }
+            '\\' if self.peek().is_some_and(is_punctuation_escape) => {
+                self.pos += 1;
+                self.parse_literal_run(self.pos - 2)
+            }
             '\\' => self.parse_escape(false),
             ')' => {
                 self.diagnostics.push(format!(
@@ -578,30 +594,56 @@ impl<'a> Parser<'a> {
                 ));
                 Ast::Unsupported("unmatched ')'".to_owned())
             }
-            _ => {
-                // Measure the literal run first so the string is allocated
-                // once at its final size; keyword inventories parse
-                // thousands of such runs per pattern.
-                let start = self.pos - 1;
-                while let Some(next) = self.peek() {
-                    if is_regex_syntax(next)
-                        || (self.flags.ignore_whitespace && (next.is_whitespace() || next == '#'))
-                        || self
-                            .chars
-                            .get(self.pos + 1)
-                            .is_some_and(|following| is_quantifier_start(*following))
-                    {
-                        break;
-                    }
-                    self.pos += 1;
+            _ => self.parse_literal_run(self.pos - 1),
+        }
+    }
+
+    /// Continues a literal run whose first scalar (or punctuation escape)
+    /// starts at `start` and has been consumed. Punctuation escapes such as
+    /// `\.` are literal scalars too; absorbing them here yields the same
+    /// coalesced literal `push_concat_node` would build from one-scalar
+    /// pieces. A scalar or escape followed by a quantifier ends the run so
+    /// the quantifier binds to it alone. The run is measured first so the
+    /// string is allocated once; keyword inventories parse thousands of runs.
+    fn parse_literal_run(&mut self, start: usize) -> Ast {
+        while let Some(next) = self.peek() {
+            if next == '\\' {
+                let absorbs = self
+                    .chars
+                    .get(self.pos + 1)
+                    .is_some_and(|escaped| is_punctuation_escape(*escaped))
+                    && !self
+                        .chars
+                        .get(self.pos + 2)
+                        .is_some_and(|following| is_quantifier_start(*following));
+                if !absorbs {
+                    break;
                 }
-                let run = &self.chars[start..self.pos];
-                let mut literal =
-                    String::with_capacity(run.iter().map(|ch| ch.len_utf8()).sum::<usize>());
-                literal.extend(run);
-                Ast::Literal(literal)
+                self.pos += 2;
+                continue;
+            }
+            if is_regex_syntax(next)
+                || (self.flags.ignore_whitespace && (next.is_whitespace() || next == '#'))
+                || self
+                    .chars
+                    .get(self.pos + 1)
+                    .is_some_and(|following| is_quantifier_start(*following))
+            {
+                break;
+            }
+            self.pos += 1;
+        }
+        let run = &self.chars[start..self.pos];
+        let mut literal = String::with_capacity(run.iter().map(|ch| ch.len_utf8()).sum::<usize>());
+        let mut scalars = run.iter();
+        while let Some(&scalar) = scalars.next() {
+            if scalar == '\\' {
+                literal.push(*scalars.next().expect("absorbed escapes are complete"));
+            } else {
+                literal.push(scalar);
             }
         }
+        Ast::Literal(literal)
     }
 
     fn parse_group(&mut self) -> Ast {
@@ -1296,11 +1338,7 @@ fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
     for branch_index in 0..branches.len() {
         // Branches without an option-change marker are left in place; only
         // a branch that needs restructuring is unpacked into a sequence.
-        let has_marker = match &branches[branch_index] {
-            Ast::Concat(nodes) => nodes.iter().any(|node| flag_change_flags(node).is_some()),
-            node => flag_change_flags(node).is_some(),
-        };
-        if !has_marker {
+        if !has_flag_change_marker(&branches[branch_index]) {
             if let Ast::Concat(nodes) = &mut branches[branch_index]
                 && nodes.len() < 2
             {
@@ -1335,6 +1373,15 @@ fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
         break;
     }
     alternation_ast(branches)
+}
+
+/// Whether a parsed branch contains a bare option change (`(?i)`) that
+/// `normalize_flag_changes` must scope over the rest of the alternation.
+fn has_flag_change_marker(branch: &Ast) -> bool {
+    match branch {
+        Ast::Concat(nodes) => nodes.iter().any(|node| flag_change_flags(node).is_some()),
+        node => flag_change_flags(node).is_some(),
+    }
 }
 
 fn flag_change_marker(flags: RegexFlags) -> Ast {
@@ -1670,6 +1717,22 @@ mod tests {
         // Escaped scalars merge into the preceding run even when the whole
         // branch collapses to one node.
         assert_eq!(parse(r"a\.é").ast, Ast::Literal("a.é".to_owned()));
+        assert_eq!(parse(r"\(\\\)x").ast, Ast::Literal(r"(\)x".to_owned()));
+        // A quantified escape binds alone, exactly as a quantified scalar.
+        let Ast::Concat(nodes) = parse(r"a\.+\-").ast else {
+            panic!("expected concat");
+        };
+        assert_eq!(nodes[0], Ast::Literal("a".to_owned()));
+        assert!(
+            matches!(&nodes[1], Ast::Repeat { node, .. } if **node == Ast::Literal(".".to_owned()))
+        );
+        assert_eq!(nodes[2], Ast::Literal("-".to_owned()));
+        // Escaped whitespace and comment markers stay literal in extended mode.
+        let Ast::Flags { child, .. } = parse(r"(?x: a \ b \# c )").ast else {
+            panic!("expected option scope");
+        };
+        assert!(matches!(child.as_ref(), Ast::Flags { child, .. }
+            if **child == Ast::Literal("a b#c".to_owned())));
         assert_eq!(
             parse(r"x\.|y").ast,
             Ast::Alternation(vec![
