@@ -1779,6 +1779,7 @@ impl PreparedLanguage {
         // construction scratch would otherwise be copied into every tokenizer;
         // later rules can populate each tokenizer's own template cache on use.
         *prototype.rule_candidate_templates.get_mut() = hashing::fast_map();
+        prototype.match_name_template_memo = hashing::fast_map();
         Ok(Self {
             prototype: Mutex::new(prototype),
             static_patterns,
@@ -2565,6 +2566,9 @@ pub struct TextMateTokenizer {
     include_repository_names: RefCell<RepositoryNameInterner>,
     rule_repository_contexts: Arc<DeferredRuleRepositoryContexts>,
     rule_candidate_templates: RefCell<FastMap<(GrammarId, RuleId), Option<RuleCandidateTemplate>>>,
+    /// Static match scope template per shared candidate rule, keyed by the
+    /// rule's address; see `match_name_templates`.
+    match_name_template_memo: FastMap<usize, (Arc<CandidateRule>, Option<ScopeTemplateId>)>,
     /// Owns exact frame identities and stack edges for this tokenizer.
     frame_stack_interner: FrameStackInternTable,
     /// Repeat pushes of a known (parent stack, frame) transition skip interner lookup.
@@ -2673,6 +2677,7 @@ impl TextMateTokenizer {
             include_repository_names: RefCell::new(RepositoryNameInterner::default()),
             rule_repository_contexts,
             rule_candidate_templates: RefCell::new(hashing::fast_map()),
+            match_name_template_memo: hashing::fast_map(),
             frame_stack_interner: FrameStackInternTable::new(),
             frame_edge_cache: hashing::fast_map(),
             static_frame_identities: hashing::fast_map(),
@@ -4408,17 +4413,27 @@ impl TextMateTokenizer {
         blueprint
             .candidates
             .iter()
-            .map(|candidate| match &candidate.kind {
-                CandidateKind::Match { name, .. } => name
+            .map(|candidate| {
+                let CandidateKind::Match { name, .. } = &candidate.kind else {
+                    return None;
+                };
+                // Candidate lists share rule data, so each rule's scope is
+                // interned once. The entry keeps its rule alive, which keeps
+                // the address key unambiguous.
+                let key = Arc::as_ptr(&candidate.rule) as usize;
+                if let Some((_, template)) = self.match_name_template_memo.get(&key) {
+                    return *template;
+                }
+                let template = name
                     .as_deref()
                     .filter(|name| !name.contains('$'))
                     .map(|name| {
                         self.scope_templates
                             .intern_scope_template(name, &mut self.scope_names)
-                    }),
-                CandidateKind::BeginEnd { .. }
-                | CandidateKind::BeginWhile { .. }
-                | CandidateKind::End { .. } => None,
+                    });
+                self.match_name_template_memo
+                    .insert(key, (Arc::clone(&candidate.rule), template));
+                template
             })
             .collect::<Vec<_>>()
             .into()
