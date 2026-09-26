@@ -1046,21 +1046,21 @@ pub(crate) struct StartByteSet {
 }
 
 impl StartByteSet {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             bits: [0; 4],
             len: 0,
         }
     }
 
-    fn insert(&mut self, byte: u8) {
+    pub(crate) fn insert(&mut self, byte: u8) {
         if !self.contains(byte) {
             self.bits[byte as usize >> 6] |= 1u64 << (byte & 63);
             self.len += 1;
         }
     }
 
-    fn extend(&mut self, other: &Self) {
+    pub(crate) fn extend(&mut self, other: &Self) {
         // Word-wise union: large literal alternations merge one set per
         // branch, so a per-byte loop dominated start-byte analysis.
         for (word, other) in self.bits.iter_mut().zip(other.bits) {
@@ -1199,7 +1199,7 @@ fn alternation_start_bytes(branches: &[Ast]) -> Option<StartBytes> {
     Some(out)
 }
 
-fn class_start_bytes(class: &CharClass) -> Option<StartByteSet> {
+pub(crate) fn class_start_bytes(class: &CharClass) -> Option<StartByteSet> {
     if class.negated {
         return None;
     }
