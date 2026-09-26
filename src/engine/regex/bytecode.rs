@@ -501,7 +501,7 @@ fn ascii_mask_set(mask: &mut AsciiMask, byte: u8) {
 
 /// Exact ASCII membership bitmaps (case-sensitive, case-insensitive) for a
 /// class, mirroring `class_contains` on `0..=127`.
-fn ascii_class_masks(class: &CharClass) -> (AsciiMask, AsciiMask) {
+pub(crate) fn ascii_class_masks(class: &CharClass) -> (AsciiMask, AsciiMask) {
     let (mut sensitive, mut insensitive) = ascii_union_masks(&class.atoms);
     for union in &class.intersections {
         let (term_sensitive, term_insensitive) = ascii_union_masks(union);

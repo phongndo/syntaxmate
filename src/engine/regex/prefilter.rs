@@ -37,6 +37,12 @@ pub enum Prefilter {
         mixed_width_fold_mask: u8,
         finder: Option<MultiLiteralFinder>,
     },
+    /// A mandatory run of byte-class items (see [`RequiredFactor`]) that must
+    /// occur together with the pattern's literal prefilter.
+    Factor {
+        factor: RequiredFactor,
+        literals: Box<Prefilter>,
+    },
 }
 
 impl Prefilter {
@@ -143,6 +149,9 @@ impl Prefilter {
                 find_byte_set(slice.as_bytes(), bytes, bitmap).is_some()
             }
             Self::Literal(literal) => find_literal(slice, literal).is_some(),
+            Self::Factor { factor, literals } => {
+                literals.may_match(haystack, from) && factor.find(slice.as_bytes()).is_some()
+            }
             Self::Any {
                 literals,
                 ascii_case_insensitive: false,
@@ -189,6 +198,17 @@ impl Prefilter {
                 find_byte_set(slice.as_bytes(), bytes, bitmap).map(|pos| from + pos)
             }
             Self::Literal(literal) => find_literal(slice, literal).map(|pos| from + pos),
+            // Both conditions must still be satisfiable. Reporting the
+            // earlier occurrence keeps the answer constant for every start up
+            // to it, which scan-local cursor caching relies on.
+            Self::Factor { factor, literals } => {
+                let factor = factor.find(slice.as_bytes())? + from;
+                if literals.is_enabled() {
+                    Some(literals.next_occurrence(haystack, from)?.min(factor))
+                } else {
+                    Some(factor)
+                }
+            }
             Self::Any {
                 literals,
                 ascii_case_insensitive: false,
@@ -236,7 +256,11 @@ impl Prefilter {
     pub fn literals(&self) -> &[String] {
         match self {
             Self::Any { literals, .. } => literals,
-            Self::None | Self::Byte(_) | Self::ByteSet { .. } | Self::Literal(_) => &[],
+            Self::None
+            | Self::Byte(_)
+            | Self::ByteSet { .. }
+            | Self::Literal(_)
+            | Self::Factor { .. } => &[],
         }
     }
 }
@@ -1004,6 +1028,317 @@ pub fn required_literal(pattern: &str) -> Option<String> {
     }
 }
 
+/// Mandatory run of consecutive byte-class items, for example `\[ *]` in a
+/// pattern that must match an empty array declarator. Literal extraction can
+/// only require `[`, which ordinary subscript lines satisfy; the run rejects
+/// them without executing the pattern.
+///
+/// Items describe a byte-level superset of the regex language: an atom that
+/// may match a non-ASCII character admits every byte `0x80..=0xff` and one to
+/// four bytes per character, and repeat modes (lazy, possessive, atomic) are
+/// treated as plain repetition. A match of the regex therefore contains a
+/// match of the run, so absence is a sound rejection. Every item with a
+/// variable count is followed by an item that consumes at least one byte from
+/// a disjoint set, which makes greedy verification from a fixed start exact
+/// for that superset language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequiredFactor {
+    items: Box<[FactorItem]>,
+    /// The first item's byte when it is a single byte, for `memchr`.
+    first_byte: Option<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FactorItem {
+    set: [u64; 4],
+    min: u32,
+    /// `FACTOR_UNBOUNDED` means no upper bound.
+    max: u32,
+}
+
+const FACTOR_UNBOUNDED: u32 = u32::MAX;
+/// Items drawn from at most this many bytes count toward selectivity.
+const FACTOR_SELECTIVE_SET_BYTES: u32 = 8;
+const FACTOR_MAX_ITEMS: usize = 64;
+
+impl FactorItem {
+    fn fixed(byte: u8) -> Self {
+        let mut set = [0u64; 4];
+        set[byte as usize >> 6] |= 1u64 << (byte & 63);
+        Self {
+            set,
+            min: 1,
+            max: 1,
+        }
+    }
+
+    #[inline]
+    fn contains(&self, byte: u8) -> bool {
+        byte_in_set(&self.set, byte)
+    }
+
+    fn is_variable(&self) -> bool {
+        self.min != self.max
+    }
+
+    fn disjoint(&self, other: &Self) -> bool {
+        self.set.iter().zip(&other.set).all(|(a, b)| a & b == 0)
+    }
+
+    fn set_len(&self) -> u32 {
+        self.set.iter().map(|word| word.count_ones()).sum()
+    }
+
+    fn single_byte(&self) -> Option<u8> {
+        (self.set_len() == 1).then(|| {
+            let word = self
+                .set
+                .iter()
+                .position(|word| *word != 0)
+                .expect("one set bit");
+            (word * 64) as u8 + self.set[word].trailing_zeros() as u8
+        })
+    }
+}
+
+impl RequiredFactor {
+    fn new(items: Vec<FactorItem>) -> Self {
+        let first_byte = items.first().and_then(FactorItem::single_byte);
+        Self {
+            items: items.into_boxed_slice(),
+            first_byte,
+        }
+    }
+
+    /// Selective mandatory bytes, comparable with a required literal length.
+    pub(crate) fn score(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| item.set_len() <= FACTOR_SELECTIVE_SET_BYTES)
+            .map(|item| item.min as usize)
+            .sum()
+    }
+
+    /// Leftmost start of a run occurrence in `haystack`.
+    fn find(&self, haystack: &[u8]) -> Option<usize> {
+        let first = self.items.first()?;
+        let mut from = 0usize;
+        while from < haystack.len() {
+            let rest = &haystack[from..];
+            let relative = match self.first_byte {
+                Some(byte) => memchr::memchr(byte, rest)?,
+                None => find_byte_set_bitmap(rest, &first.set)?,
+            };
+            let start = from + relative;
+            if self.matches_at(haystack, start) {
+                return Some(start);
+            }
+            from = start + 1;
+        }
+        None
+    }
+
+    fn matches_at(&self, haystack: &[u8], start: usize) -> bool {
+        let mut position = start;
+        for item in &self.items {
+            let mut count = 0u32;
+            while count < item.max
+                && haystack
+                    .get(position)
+                    .is_some_and(|byte| item.contains(*byte))
+            {
+                count += 1;
+                position += 1;
+            }
+            if count < item.min {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Most selective mandatory byte-class run of a pattern. Callers must only
+/// use it for patterns without case-insensitive scopes.
+pub(crate) fn required_factor(ast: &Ast) -> Option<RequiredFactor> {
+    let mut best = None;
+    collect_required_factors(ast, &mut best);
+    best
+}
+
+fn collect_required_factors(ast: &Ast, best: &mut Option<RequiredFactor>) {
+    match ast {
+        Ast::Concat(nodes) => {
+            let mut run = Vec::new();
+            for node in nodes {
+                let checkpoint = run.len();
+                if factor_items(node, &mut run) {
+                    if let Ast::Look {
+                        kind: LookKind::Ahead,
+                        child,
+                    } = node
+                    {
+                        collect_required_factors(child, best);
+                    }
+                    continue;
+                }
+                run.truncate(checkpoint);
+                finish_factor_run(std::mem::take(&mut run), best);
+                collect_required_factors(node, best);
+            }
+            finish_factor_run(run, best);
+        }
+        Ast::Group { child, .. }
+        | Ast::Look {
+            kind: LookKind::Ahead,
+            child,
+        } => collect_required_factors(child, best),
+        Ast::Flags { flags, child } if !flags.case_insensitive => {
+            collect_required_factors(child, best);
+        }
+        Ast::Repeat { node, min, .. } if *min > 0 => collect_required_factors(node, best),
+        _ => {
+            let mut run = Vec::new();
+            if factor_items(ast, &mut run) {
+                finish_factor_run(run, best);
+            }
+        }
+    }
+}
+
+/// Appends the byte items consumed by a node built only from literals,
+/// classes, zero-width assertions, and repeats of one such atom. Returns
+/// `false` for anything else; the caller discards partial output.
+fn factor_items(ast: &Ast, out: &mut Vec<FactorItem>) -> bool {
+    if out.len() > FACTOR_MAX_ITEMS {
+        return false;
+    }
+    match ast {
+        Ast::Empty | Ast::Anchor(_) | Ast::Look { .. } => true,
+        Ast::Literal(literal) => {
+            out.extend(literal.bytes().map(FactorItem::fixed));
+            true
+        }
+        Ast::Class(class) => {
+            out.push(class_factor_item(class));
+            true
+        }
+        Ast::Group { child, .. } => factor_items(child, out),
+        Ast::Flags { flags, child } if !flags.case_insensitive => factor_items(child, out),
+        Ast::Concat(nodes) => nodes.iter().all(|node| factor_items(node, out)),
+        Ast::Repeat { node, min, max, .. } => {
+            let mut inner = Vec::new();
+            if !factor_items(node, &mut inner) || inner.len() > 1 {
+                return false;
+            }
+            // A zero-width body consumes nothing however often it repeats.
+            let Some(item) = inner.pop() else {
+                return true;
+            };
+            let Ok(min) = u32::try_from(*min) else {
+                return false;
+            };
+            let max = match max {
+                None => FACTOR_UNBOUNDED,
+                Some(max) => match u32::try_from(*max) {
+                    Ok(max) => item.max.saturating_mul(max).min(FACTOR_UNBOUNDED - 1),
+                    Err(_) => return false,
+                },
+            };
+            out.push(FactorItem {
+                set: item.set,
+                min: item.min.saturating_mul(min),
+                max,
+            });
+            true
+        }
+        _ => false,
+    }
+}
+
+fn class_factor_item(class: &CharClass) -> FactorItem {
+    let ascii = super::bytecode::ascii_class_masks(class).0;
+    if class_may_match_non_ascii(class) {
+        // One character is one to four UTF-8 bytes.
+        FactorItem {
+            set: [ascii[0], ascii[1], u64::MAX, u64::MAX],
+            min: 1,
+            max: 4,
+        }
+    } else {
+        FactorItem {
+            set: [ascii[0], ascii[1], 0, 0],
+            min: 1,
+            max: 1,
+        }
+    }
+}
+
+fn class_may_match_non_ascii(class: &CharClass) -> bool {
+    // Intersections only narrow the first union, so the union alone gives a
+    // conservative answer.
+    class.negated
+        || class.atoms.iter().any(|atom| match atom {
+            ClassAtom::Char(ch) => !ch.is_ascii(),
+            ClassAtom::Range(_, end) => !end.is_ascii(),
+            ClassAtom::Nested(nested) => class_may_match_non_ascii(nested),
+            ClassAtom::Perl(_) | ClassAtom::Posix { .. } | ClassAtom::Unicode { .. } => true,
+        })
+}
+
+/// Splits a mandatory item run into greedy-exact segments and keeps the most
+/// selective one. Any contiguous piece of a mandatory run is itself mandatory,
+/// and so is a variable item's minimum count at either end of a piece.
+fn finish_factor_run(run: Vec<FactorItem>, best: &mut Option<RequiredFactor>) {
+    let mut segment: Vec<FactorItem> = Vec::new();
+    let mut items = run.into_iter().peekable();
+    while let Some(mut item) = items.next() {
+        if segment.is_empty() {
+            item.max = item.min;
+        }
+        if item.min == 0 && item.max == 0 {
+            continue;
+        }
+        let greedy_exact = !item.is_variable()
+            || items
+                .peek()
+                .is_some_and(|next| next.min > 0 && item.disjoint(next));
+        if greedy_exact {
+            segment.push(item);
+            continue;
+        }
+        if item.min > 0 {
+            item.max = item.min;
+            segment.push(item);
+        }
+        offer_factor(std::mem::take(&mut segment), best);
+    }
+    offer_factor(segment, best);
+}
+
+fn offer_factor(mut items: Vec<FactorItem>, best: &mut Option<RequiredFactor>) {
+    if let Some(last) = items.last_mut() {
+        last.max = last.min;
+    }
+    while items.last().is_some_and(|item| item.min == 0) {
+        items.pop();
+    }
+    // Runs of fixed single bytes are literals, which the literal extractor
+    // already finds with substring search.
+    if items.len() < 2
+        || items
+            .iter()
+            .all(|item| !item.is_variable() && item.set_len() == 1)
+    {
+        return;
+    }
+    let candidate = RequiredFactor::new(items);
+    let score = candidate.score();
+    if score >= 2 && best.as_ref().is_none_or(|best| score > best.score()) {
+        *best = Some(candidate);
+    }
+}
+
 /// Literals one of which every match of `ast` contains; `Any` sets are
 /// sorted and deduplicated.
 pub fn required_literals(ast: &Ast) -> RequiredLiterals<'_> {
@@ -1354,6 +1689,125 @@ impl LiteralSet {
 mod tests {
     use super::*;
     use crate::engine::regex::ast::parse;
+
+    #[test]
+    fn required_factor_rejects_subscripts_for_empty_array_declarators() {
+        let parsed = parse(r"(\w+)\s*(\[) *(])\s*(=)");
+        let prefilter = parsed.prefilter();
+        assert!(
+            matches!(prefilter, Prefilter::Factor { .. }),
+            "{prefilter:?}"
+        );
+        assert!(!prefilter.may_match("values[index] = values[index] * 2;", 0));
+        assert!(prefilter.may_match("int values[ ] = {1};", 0));
+        assert!(prefilter.may_match("int values[] = {1};", 0));
+        assert!(!prefilter.may_match("int values[] = {1};", 11));
+        assert_eq!(prefilter.next_occurrence("a[i] = b[i]", 0), None);
+        assert!(prefilter.next_occurrence("a[i] b[  ] =", 0).is_some());
+    }
+
+    #[test]
+    fn required_factor_is_not_derived_under_case_folding() {
+        for pattern in [r"(?i)\[ *]=", r"(?i:\[ *])=", r"x(?i)\[ *]"] {
+            let parsed = parse(pattern);
+            assert!(
+                !matches!(parsed.prefilter(), Prefilter::Factor { .. }),
+                "{pattern}: {:?}",
+                parsed.prefilter()
+            );
+        }
+    }
+
+    #[test]
+    fn required_factor_stops_where_greedy_verification_would_be_inexact() {
+        // `a*` followed by `a` would need backtracking; neither piece of the
+        // run is more selective than the literal extractor's answer.
+        assert_eq!(required_factor(&parse("xa*a").ast), None);
+        // A variable item followed by an optional one also ends the run.
+        assert_eq!(required_factor(&parse("x *y?z").ast), None);
+        assert!(required_factor(&parse(r"x *\(").ast).is_some());
+    }
+
+    /// Every start where the pattern matches must remain viable under its
+    /// prefilter. The reference is the bytecode VM, which never consults the
+    /// prefilter.
+    #[test]
+    fn required_factor_prefilter_never_rejects_a_matching_start() {
+        use crate::engine::regex::AnchorContext;
+        use crate::engine::regex::backtrack::StepBudget;
+        use crate::engine::regex::bytecode::{BytecodeScratch, Program};
+
+        let patterns = [
+            r"(\[) *(])\s*=",
+            r"x *\(",
+            r"xa*a",
+            r"x[ab]*b",
+            r"[a-z]+ *\(",
+            r"\w+ *\(",
+            r"é+ ?x",
+            r"[^\]]* *\]x",
+            r"(?:ab)+c d",
+            r"a{2,3} b",
+            r"a(?=b *c)",
+            r"a*+a b",
+            r"(?<=x)y *z",
+            r"b\s*+=\s*+c",
+            r"[ab]{2} *c",
+            r"\[\s*\]",
+            r"(?:\[ *]|\( *\))=",
+            r"(a)\1 *b",
+            r"(?<n>a) *\k<n>",
+            r"(\( *\)|\g<1>x) *=",
+            r"𝒳 *[^a]",
+            r"[^x] +\t",
+            r"\h+ *\]",
+        ];
+        let alphabet = [
+            "a", "b", "c", "x", "y", "z", " ", " ", "[", "]", "(", ")", "=", "é", "𝒳", "\t", "\n",
+        ];
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut matched_starts = 0usize;
+        for pattern in patterns {
+            let parsed = parse(pattern);
+            let program =
+                Program::compile_captures(&parsed, &(0..=parsed.capture_count).collect::<Vec<_>>())
+                    .unwrap_or_else(|error| panic!("{pattern}: {error:?}"));
+            let prefilter = Prefilter::from_regex(&parsed);
+            let mut scratch = BytecodeScratch::default();
+            for _ in 0..20_000 {
+                let len = (next() % 14) as usize;
+                let line = (0..len)
+                    .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+                    .collect::<String>();
+                for start in (0..=line.len()).filter(|index| line.is_char_boundary(*index)) {
+                    let mut budget = StepBudget::new(1_000_000);
+                    let matched = program
+                        .execute(
+                            &line,
+                            start,
+                            AnchorContext::line_start(),
+                            &mut budget,
+                            &mut scratch,
+                        )
+                        .expect("budget");
+                    if matched.is_some() {
+                        matched_starts += 1;
+                        assert!(
+                            prefilter.may_match(&line, start),
+                            "{pattern} matches {line:?} at {start} but {prefilter:?} rejects it"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(matched_starts > 15_000, "{matched_starts}");
+    }
 
     #[test]
     fn extracts_safe_literal_prefix() {
