@@ -1531,8 +1531,10 @@ fn entry_words(entries: usize) -> usize {
 #[derive(Debug, Clone)]
 struct EntryDispatch {
     words: usize,
-    /// Row index per start byte. Row 0 holds only the unrestricted entries
-    /// and also serves the end-of-line position.
+    /// Unrestricted entries; the candidates at the end of the line.
+    end_row: Box<[u64]>,
+    /// Row index per start byte. Each byte adds at most one row, so indexes
+    /// fit in a byte.
     byte_rows: Box<[u8]>,
     rows: Box<[u64]>,
     /// One run per start class (see `start_class`).
@@ -1546,50 +1548,57 @@ impl EntryDispatch {
         start_class_masks: &[u8],
     ) -> Self {
         let words = entry_words(start_class_masks.len());
-        let set = |row: &mut [u64], idx: u32| row[idx as usize / 64] |= 1 << (idx % 64);
-        let mut base = vec![0u64; words];
+        let set = |row: &mut [u64], idx: usize| row[idx / 64] |= 1 << (idx % 64);
+        let mut end_row = vec![0u64; words];
         for &idx in unrestricted {
-            set(&mut base, idx);
+            set(&mut end_row, idx as usize);
         }
-        let mut rows = base.clone();
+        let mut rows = Vec::new();
         let mut byte_rows = vec![0u8; 256];
-        let mut row = vec![0u64; words];
-        for byte in 0..=u8::MAX {
-            let bucket = start_byte_entries.get(byte);
-            if bucket.is_empty() {
-                continue;
+        if words > 0 {
+            let mut end_row_index = None;
+            let mut row = vec![0u64; words];
+            for byte in 0..=u8::MAX {
+                let bucket = start_byte_entries.get(byte);
+                let push = |rows: &mut Vec<u64>, row: &[u64]| {
+                    rows.extend_from_slice(row);
+                    u8::try_from(rows.len() / words - 1).expect("each byte adds at most one row")
+                };
+                byte_rows[usize::from(byte)] = if bucket.is_empty() {
+                    *end_row_index.get_or_insert_with(|| push(&mut rows, &end_row))
+                } else {
+                    row.copy_from_slice(&end_row);
+                    for &idx in bucket {
+                        set(&mut row, idx as usize);
+                    }
+                    // Adjacent bytes (letter and digit ranges) usually share
+                    // a row.
+                    let previous = byte
+                        .checked_sub(1)
+                        .map(|previous| byte_rows[usize::from(previous)]);
+                    match previous {
+                        Some(previous)
+                            if rows[usize::from(previous) * words..][..words] == row[..] =>
+                        {
+                            previous
+                        }
+                        _ => push(&mut rows, &row),
+                    }
+                };
             }
-            row.copy_from_slice(&base);
-            for &idx in bucket {
-                set(&mut row, idx);
-            }
-            // Adjacent bytes (letter ranges) usually share a row; otherwise
-            // fall back to a search over the distinct rows so far.
-            let previous = byte_rows[usize::from(byte.wrapping_sub(1))];
-            let found = if byte > 0 && rows[usize::from(previous) * words..][..words] == row[..] {
-                Some(usize::from(previous))
-            } else {
-                rows.chunks_exact(words.max(1))
-                    .position(|existing| words > 0 && existing == &row[..])
-            };
-            byte_rows[usize::from(byte)] = match found {
-                Some(index) => u8::try_from(index).expect("at most 256 distinct rows"),
-                None => {
-                    rows.extend_from_slice(&row);
-                    u8::try_from(rows.len() / words - 1).expect("at most 256 distinct rows")
-                }
-            };
         }
         let mut class_masks = vec![0u64; words * START_CLASS_COUNT];
-        for (idx, mask) in start_class_masks.iter().enumerate() {
-            for class in 0..START_CLASS_COUNT {
-                if mask & (1 << class) != 0 {
-                    class_masks[class * words + idx / 64] |= 1 << (idx % 64);
-                }
+        for (idx, &mask) in start_class_masks.iter().enumerate() {
+            let mut mask = mask;
+            while mask != 0 {
+                let class = mask.trailing_zeros() as usize;
+                mask &= mask - 1;
+                set(&mut class_masks[class * words..][..words], idx);
             }
         }
         Self {
             words,
+            end_row: end_row.into_boxed_slice(),
             byte_rows: byte_rows.into_boxed_slice(),
             rows: rows.into_boxed_slice(),
             class_masks: class_masks.into_boxed_slice(),
@@ -1598,7 +1607,10 @@ impl EntryDispatch {
 
     fn retained_heap_bytes(&self) -> usize {
         self.byte_rows.len().saturating_add(
-            (self.rows.len().saturating_add(self.class_masks.len()))
+            self.end_row
+                .len()
+                .saturating_add(self.rows.len())
+                .saturating_add(self.class_masks.len())
                 .saturating_mul(std::mem::size_of::<u64>()),
         )
     }
@@ -1607,12 +1619,15 @@ impl EntryDispatch {
     /// the end of the line) and start-class bit `position_class`.
     #[inline]
     fn at(&self, byte: Option<u8>, position_class: u8) -> (&[u64], &[u64]) {
-        let row = byte.map_or(0, |byte| usize::from(self.byte_rows[usize::from(byte)]));
+        let row = match byte {
+            Some(byte) => {
+                let row = usize::from(self.byte_rows[usize::from(byte)]);
+                &self.rows[row * self.words..][..self.words]
+            }
+            None => &self.end_row[..],
+        };
         let class = position_class.trailing_zeros() as usize;
-        (
-            &self.rows[row * self.words..][..self.words],
-            &self.class_masks[class * self.words..][..self.words],
-        )
+        (row, &self.class_masks[class * self.words..][..self.words])
     }
 
     #[cfg(test)]
