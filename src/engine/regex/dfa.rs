@@ -299,24 +299,33 @@ impl SymbolSetMatcher {
         if variants.len() < 32 || variants.iter().any(String::is_empty) {
             return None;
         }
-        let mut buckets = Vec::<SymbolBucket>::new();
+        // Size every length bucket up front: symbol inventories hold
+        // thousands of entries, and growing the tables rehashes each key
+        // several times.
+        let mut lengths = Vec::<(usize, usize)>::new();
+        for symbol in &variants {
+            match lengths.binary_search_by_key(&symbol.len(), |&(len, _)| len) {
+                Ok(index) => lengths[index].1 += 1,
+                Err(index) => lengths.insert(index, (symbol.len(), 1)),
+            }
+        }
+        let mut buckets = lengths
+            .into_iter()
+            .map(|(len, count)| SymbolBucket {
+                len,
+                symbols: FastMap::with_capacity_and_hasher(count, Default::default()),
+            })
+            .collect::<Vec<_>>();
         let mut start_bitmap = [0u64; 4];
         for (order, symbol) in variants.into_iter().enumerate() {
             let bytes = symbol.into_bytes();
             if let Some(first) = bytes.first().copied() {
                 start_bitmap[first as usize >> 6] |= 1u64 << (first & 63);
             }
-            let len = bytes.len();
-            match buckets.binary_search_by_key(&len, |bucket| bucket.len) {
-                Ok(index) => {
-                    buckets[index].symbols.entry(bytes).or_insert(order);
-                }
-                Err(index) => {
-                    let mut symbols = fast_map();
-                    symbols.insert(bytes, order);
-                    buckets.insert(index, SymbolBucket { len, symbols });
-                }
-            }
+            let index = buckets
+                .binary_search_by_key(&bytes.len(), |bucket| bucket.len)
+                .expect("every symbol length has a bucket");
+            buckets[index].symbols.entry(bytes).or_insert(order);
         }
         Some(Self {
             buckets,
@@ -476,9 +485,13 @@ fn symbol_variants(ast: &Ast, limit: usize) -> Option<Vec<String>> {
             .collect::<Option<Vec<_>>>()
             .map(|parts| parts.concat().chars().map(|ch| ch.to_string()).collect()),
         Ast::Alternation(branches) => {
-            let mut variants = Vec::new();
+            let mut variants = Vec::with_capacity(branches.len());
             for branch in branches {
-                variants.extend(symbol_variants(branch, limit)?);
+                // Symbol inventories are mostly single-literal branches.
+                match branch {
+                    Ast::Literal(literal) => variants.push(literal.clone()),
+                    branch => variants.extend(symbol_variants(branch, limit)?),
+                }
                 if variants.len() > limit {
                     return None;
                 }
