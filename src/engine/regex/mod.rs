@@ -3,6 +3,7 @@ pub mod ast;
 pub mod backtrack;
 pub(crate) mod bytecode;
 pub mod captures;
+pub(crate) mod case_fold;
 pub mod dfa;
 pub mod prefilter;
 pub(crate) mod scanner;

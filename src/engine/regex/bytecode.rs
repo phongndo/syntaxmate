@@ -825,25 +825,18 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             (sensitive, insensitive)
         }
         ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => {
-            let (low, high) = (*start as u8, *end as u8);
-            // Mirror the evaluator's folded-range semantics with ASCII case
-            // maps (exact for ASCII probes and bounds): a byte matches when its
-            // lowercase map lies in the lowercased bounds or its uppercase map
-            // lies in the uppercased bounds.
-            let lowered =
-                ascii_bounded_range_mask(low.to_ascii_lowercase(), high.to_ascii_lowercase());
-            let uppered =
-                ascii_bounded_range_mask(low.to_ascii_uppercase(), high.to_ascii_uppercase());
+            // An ASCII probe matches when it or its other-case letter lies in
+            // the range; its non-ASCII variants cannot lie in an ASCII range.
+            let sensitive = ascii_bounded_range_mask(*start as u8, *end as u8);
             let insensitive = [
-                // Word 0 holds no letters, so both case maps are the identity.
-                lowered[0] | uppered[0],
-                (lowered[1] & !ASCII_UPPER_MASK[1])
-                    | (uppered[1] & !ASCII_LOWER_MASK[1])
-                    // 'a'..='z' sit exactly 32 bits above 'A'..='Z' in word 1.
-                    | ((lowered[1] & ASCII_LOWER_MASK[1]) >> 32)
-                    | ((uppered[1] & ASCII_UPPER_MASK[1]) << 32),
+                // Word 0 holds no letters.
+                sensitive[0],
+                // 'a'..='z' sit exactly 32 bits above 'A'..='Z' in word 1.
+                sensitive[1]
+                    | ((sensitive[1] & ASCII_LOWER_MASK[1]) >> 32)
+                    | ((sensitive[1] & ASCII_UPPER_MASK[1]) << 32),
             ];
-            (ascii_bounded_range_mask(low, high), insensitive)
+            (sensitive, insensitive)
         }
         // Perl, POSIX, and Unicode-property atoms ignore the case flag, so
         // one cheap per-character pass fills both masks without any Unicode
@@ -889,28 +882,12 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             }
             ([0u64; 2], insensitive)
         }
-        // Non-ASCII ranges can still fold into ASCII under case
-        // insensitivity. Mirror `atom_contains`' folded-range test with the
-        // bounds' case maps computed once; an ASCII probe's first lower- or
-        // uppercase mapping is its ASCII case map.
+        // Ranges reaching past ASCII can admit ASCII probes through their
+        // non-ASCII case variants (the Kelvin sign for `k`).
         ClassAtom::Range(start, end) => {
             let sensitive = ascii_predicate_mask(|ch| *start <= ch && ch <= *end);
-            let first = |mut mapped: std::char::ToLowercase, ch: char| mapped.next().unwrap_or(ch);
-            let first_upper =
-                |mut mapped: std::char::ToUppercase, ch: char| mapped.next().unwrap_or(ch);
-            let (low_lower, high_lower) = (
-                first(start.to_lowercase(), *start),
-                first(end.to_lowercase(), *end),
-            );
-            let (low_upper, high_upper) = (
-                first_upper(start.to_uppercase(), *start),
-                first_upper(end.to_uppercase(), *end),
-            );
             let insensitive = ascii_predicate_mask(|ch| {
-                let lower = ch.to_ascii_lowercase();
-                let upper = ch.to_ascii_uppercase();
-                (low_lower <= lower && lower <= high_lower)
-                    || (low_upper <= upper && upper <= high_upper)
+                super::case_fold::range_contains_ignore_case(*start, *end, ch)
             });
             (sensitive, insensitive)
         }

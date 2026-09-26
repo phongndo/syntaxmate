@@ -608,34 +608,20 @@ fn atom_word_sides(atom: &ClassAtom, mode: Mode) -> (bool, bool) {
 }
 
 /// Word-ness of every scalar a range can match with or without case
-/// folding. A case-insensitive probe matches when its first lowercase or
-/// uppercase mapping falls inside the folded bounds; with ASCII bounds that
-/// mapping is an ASCII scalar sharing the probe's word-ness, so scanning the
-/// literal and both folded intervals is complete. Non-ASCII bounds stay
-/// conservative.
+/// folding. Case folding adds the case variants of the range's members; with
+/// ASCII bounds those are letters sharing their member's word-ness, so the
+/// literal range is complete. Non-ASCII bounds stay conservative.
 fn unicode_range_word_sides(start: char, end: char) -> (bool, bool) {
-    let lower = |ch: char| ch.to_lowercase().next().unwrap_or(ch);
-    let upper = |ch: char| ch.to_uppercase().next().unwrap_or(ch);
-    let intervals = [
-        (start, end),
-        (lower(start), lower(end)),
-        (upper(start), upper(end)),
-    ];
-    if intervals
-        .iter()
-        .any(|(low, high)| !low.is_ascii() || !high.is_ascii())
-    {
+    if !start.is_ascii() || !end.is_ascii() {
         return (true, true);
     }
     let mut word = false;
     let mut nonword = false;
-    for (low, high) in intervals {
-        for ch in low.min(high)..=low.max(high) {
-            if is_unicode_word_char(ch) {
-                word = true;
-            } else {
-                nonword = true;
-            }
+    for ch in start.min(end)..=start.max(end) {
+        if is_unicode_word_char(ch) {
+            word = true;
+        } else {
+            nonword = true;
         }
     }
     (word, nonword)

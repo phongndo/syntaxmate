@@ -9,6 +9,7 @@ use super::ast::{
     PerlClassKind, RegexFlags, parse,
 };
 use super::bytecode::{BytecodeScratch, CompileError, Program};
+use super::case_fold::range_contains_ignore_case;
 use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
 
 pub(crate) const DEFAULT_STEP_BUDGET: usize = 100_000;
@@ -2622,18 +2623,8 @@ pub(crate) fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bo
     match atom {
         ClassAtom::Char(expected) => char_eq(*expected, ch, flags),
         ClassAtom::Range(start, end) => {
-            let in_folded_range =
-                |value: char, start: char, end: char| start <= value && value <= end;
             if flags.case_insensitive {
-                in_folded_range(
-                    ch.to_lowercase().next().unwrap_or(ch),
-                    start.to_lowercase().next().unwrap_or(*start),
-                    end.to_lowercase().next().unwrap_or(*end),
-                ) || in_folded_range(
-                    ch.to_uppercase().next().unwrap_or(ch),
-                    start.to_uppercase().next().unwrap_or(*start),
-                    end.to_uppercase().next().unwrap_or(*end),
-                )
+                range_contains_ignore_case(*start, *end, ch)
             } else {
                 start <= &ch && &ch <= end
             }
@@ -3024,7 +3015,7 @@ pub(crate) fn unicode_case_eq(left: char, right: char) -> bool {
 
 /// Full Unicode lowercase and uppercase mappings of one scalar, NUL-padded.
 ///
-/// `unicode_case_eq` and case-insensitive class ranges re-derive these
+/// `unicode_case_eq` re-derives these
 /// mappings (a binary search each) for every comparison. Keying the
 /// comparison lets hot loops map each input scalar once and compare it
 /// against pattern-side keys prepared at compile time. NUL padding is
@@ -3057,18 +3048,6 @@ impl CaseFoldKey {
         Self { ch, lower, upper }
     }
 
-    /// First scalar of the lowercase mapping (`to_lowercase().next()`).
-    #[inline]
-    pub(crate) fn lower_first(&self) -> char {
-        self.lower[0]
-    }
-
-    /// First scalar of the uppercase mapping (`to_uppercase().next()`).
-    #[inline]
-    pub(crate) fn upper_first(&self) -> char {
-        self.upper[0]
-    }
-
     /// Exactly `unicode_case_eq(self.ch, other.ch)`.
     #[inline]
     pub(crate) fn case_eq(&self, other: &Self) -> bool {
@@ -3095,8 +3074,7 @@ pub(crate) struct FoldedClass {
 #[derive(Debug, Clone)]
 enum FoldedAtom {
     Char(CaseFoldKey),
-    /// Folded bounds `(lower_start, lower_end, upper_start, upper_end)`.
-    Range(char, char, char, char),
+    Range(char, char),
     /// Atoms whose membership ignores the case flag.
     Plain(ClassAtom),
     Nested(FoldedClass),
@@ -3120,15 +3098,7 @@ impl FoldedClass {
             .iter()
             .map(|atom| match atom {
                 ClassAtom::Char(ch) => FoldedAtom::Char(CaseFoldKey::new(*ch)),
-                ClassAtom::Range(start, end) => {
-                    let (start, end) = (CaseFoldKey::new(*start), CaseFoldKey::new(*end));
-                    FoldedAtom::Range(
-                        start.lower_first(),
-                        end.lower_first(),
-                        start.upper_first(),
-                        end.upper_first(),
-                    )
-                }
+                ClassAtom::Range(start, end) => FoldedAtom::Range(*start, *end),
                 ClassAtom::Nested(class) => FoldedAtom::Nested(Self::new(class)),
                 ClassAtom::Perl(_) | ClassAtom::Posix { .. } | ClassAtom::Unicode { .. } => {
                     FoldedAtom::Plain(atom.clone())
@@ -3158,11 +3128,7 @@ impl FoldedClass {
                 expected.ch == ch
                     || expected.case_eq(key.get_or_insert_with(|| CaseFoldKey::new(ch)))
             }
-            FoldedAtom::Range(lower_start, lower_end, upper_start, upper_end) => {
-                let key = key.get_or_insert_with(|| CaseFoldKey::new(ch));
-                (*lower_start <= key.lower_first() && key.lower_first() <= *lower_end)
-                    || (*upper_start <= key.upper_first() && key.upper_first() <= *upper_end)
-            }
+            FoldedAtom::Range(start, end) => range_contains_ignore_case(*start, *end, ch),
             FoldedAtom::Plain(atom) => atom_contains(atom, ch, RegexFlags::default()),
             FoldedAtom::Nested(class) => class.contains_with(ch, key),
         })
@@ -3739,14 +3705,6 @@ mod tests {
         let scalars = case_probe_scalars();
         let keys: Vec<CaseFoldKey> = scalars.iter().copied().map(CaseFoldKey::new).collect();
         for (left, left_key) in scalars.iter().zip(&keys) {
-            assert_eq!(
-                left_key.lower_first(),
-                left.to_lowercase().next().unwrap_or(*left)
-            );
-            assert_eq!(
-                left_key.upper_first(),
-                left.to_uppercase().next().unwrap_or(*left)
-            );
             for (right, right_key) in scalars.iter().zip(&keys) {
                 assert_eq!(
                     left_key.case_eq(right_key),
