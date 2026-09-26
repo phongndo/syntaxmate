@@ -2538,9 +2538,9 @@ pub struct TextMateTokenizer {
     unprepared_static_matcher_generation: usize,
     prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
     prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
-    dynamic_matcher_cache: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
+    dynamic_matcher_cache: MatcherSourceTable,
     /// Source-keyed view of `matcher_cache`; see `shared_static_matcher`.
-    static_matcher_sources: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
+    static_matcher_sources: MatcherSourceTable,
     scope_names: ScopeInterner,
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
@@ -2647,8 +2647,8 @@ impl TextMateTokenizer {
             unprepared_static_matcher_generation: 0,
             prepared_pattern_cache,
             prepared_blueprint_cache,
-            dynamic_matcher_cache: hashing::fast_map(),
-            static_matcher_sources: hashing::fast_map(),
+            dynamic_matcher_cache: MatcherSourceTable::default(),
+            static_matcher_sources: MatcherSourceTable::default(),
             scope_names: ScopeInterner::default(),
             scope_templates: ScopeTemplateInterner::default(),
             scope_stacks: ScopeStackInterner::default(),
@@ -4548,19 +4548,20 @@ impl TextMateTokenizer {
         pattern: &str,
         live_captures: Option<Vec<u32>>,
     ) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: live_captures.clone().unwrap_or_else(|| vec![u32::MAX]),
-        };
-        if let Some(matcher) = self.static_matcher_sources.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) =
+            self.static_matcher_sources
+                .get(hash, pattern, live_captures.as_deref())
+        {
             return Arc::clone(matcher);
         }
+        let key_captures = live_captures.as_deref().map(Box::from);
         let matcher = Arc::new(match live_captures {
             Some(live_captures) => CompiledPattern::new_with_live_captures(pattern, live_captures),
             None => CompiledPattern::new(pattern),
         });
         self.static_matcher_sources
-            .insert(key, Arc::clone(&matcher));
+            .insert(hash, key_captures, Arc::clone(&matcher));
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
         }
@@ -4568,11 +4569,8 @@ impl TextMateTokenizer {
     }
 
     fn cached_dynamic_matcher(&mut self, pattern: &str) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: vec![u32::MAX],
-        };
-        if let Some(matcher) = self.dynamic_matcher_cache.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) = self.dynamic_matcher_cache.get(hash, pattern, None) {
             return matcher.clone();
         }
         // Dynamic begin/end substitutions are source-derived and potentially
@@ -4582,7 +4580,8 @@ impl TextMateTokenizer {
             self.dynamic_matcher_cache.clear();
         }
         let matcher = Arc::new(CompiledPattern::new(pattern));
-        self.dynamic_matcher_cache.insert(key, matcher.clone());
+        self.dynamic_matcher_cache
+            .insert(hash, None, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(None, None, pattern);
         }
@@ -4594,21 +4593,23 @@ impl TextMateTokenizer {
         pattern: &str,
         live_captures: Vec<u32>,
     ) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: live_captures.clone(),
-        };
-        if let Some(matcher) = self.dynamic_matcher_cache.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) = self
+            .dynamic_matcher_cache
+            .get(hash, pattern, Some(&live_captures))
+        {
             return matcher.clone();
         }
         if self.dynamic_matcher_cache.len() >= MAX_DYNAMIC_MATCHERS {
             self.dynamic_matcher_cache.clear();
         }
+        let key_captures = Some(Box::from(live_captures.as_slice()));
         let matcher = Arc::new(CompiledPattern::new_with_live_captures(
             pattern,
             live_captures,
         ));
-        self.dynamic_matcher_cache.insert(key, matcher.clone());
+        self.dynamic_matcher_cache
+            .insert(hash, key_captures, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(None, None, pattern);
         }
@@ -6306,10 +6307,76 @@ impl CandidateSourceKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DynamicMatcherKey {
-    pattern: String,
-    live_captures: Vec<u32>,
+/// Compiled matchers keyed by regex source and live-capture layout (`None`
+/// keeps every group live).
+///
+/// Grammar regexes can be kilobytes long, and a byte-wise hash of the full
+/// source recomputed on every probe, insert, and table growth was a visible
+/// share of first-use cost. Each source is hashed once, word at a time, and
+/// buckets keep the compiled matcher, whose own source text settles equality,
+/// so the table stores no second copy of the pattern.
+type MatcherSourceEntry = (Option<Box<[u32]>>, Arc<CompiledPattern>);
+
+#[derive(Debug, Clone, Default)]
+struct MatcherSourceTable {
+    buckets: FastMap<u64, Vec<MatcherSourceEntry>>,
+    len: usize,
+}
+
+impl MatcherSourceTable {
+    fn get(
+        &self,
+        hash: u64,
+        pattern: &str,
+        live_captures: Option<&[u32]>,
+    ) -> Option<&Arc<CompiledPattern>> {
+        self.buckets
+            .get(&hash)?
+            .iter()
+            .find(|(captures, matcher)| {
+                captures.as_deref() == live_captures && matcher.source() == pattern
+            })
+            .map(|(_, matcher)| matcher)
+    }
+
+    fn insert(
+        &mut self,
+        hash: u64,
+        live_captures: Option<Box<[u32]>>,
+        matcher: Arc<CompiledPattern>,
+    ) {
+        self.buckets
+            .entry(hash)
+            .or_default()
+            .push((live_captures, matcher));
+        self.len += 1;
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn clear(&mut self) {
+        self.buckets.clear();
+        self.len = 0;
+    }
+}
+
+/// Word-at-a-time hash of a regex source for `MatcherSourceTable`.
+fn matcher_source_hash(pattern: &str) -> u64 {
+    const K: u64 = 0xf135_7aea_2e62_a9c5;
+    let bytes = pattern.as_bytes();
+    let mut hash = (bytes.len() as u64).wrapping_mul(K);
+    let (words, remainder) = bytes.as_chunks::<8>();
+    for word in words {
+        hash = (hash ^ u64::from_le_bytes(*word))
+            .wrapping_mul(K)
+            .rotate_left(26);
+    }
+    let mut tail = [0u8; 8];
+    tail[..remainder.len()].copy_from_slice(remainder);
+    hash = (hash ^ u64::from_le_bytes(tail)).wrapping_mul(K);
+    hash ^ (hash >> 32)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
