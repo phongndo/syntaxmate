@@ -3040,6 +3040,10 @@ pub(crate) struct CaseFoldKey {
 }
 
 impl CaseFoldKey {
+    pub(crate) fn ch(&self) -> char {
+        self.ch
+    }
+
     #[inline]
     pub(crate) fn new(ch: char) -> Self {
         if ch.is_ascii() {
@@ -3376,6 +3380,26 @@ mod tests {
         let result = report.result.expect("selection match");
         assert_eq!(result.start..result.end, 0..13);
         assert!(matcher.bytecode.get().is_some());
+    }
+
+    #[test]
+    fn unicode_case_folded_tries_keep_non_transitive_case_pairs() {
+        // `ϑ` and `ϴ` are both case-equal to `θ` but not to each other.
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, span) in [
+            (r"(?i)(?:(?:ϴ|θ)y|éz|eq|e)(?!x)", "ϑy!", 0..3),
+            (r"(?i)(?:ϴx|θy|éz|eq)", "ϑy", 0..3),
+            (r"(?i)(?:éz|θy|eq)", "ΘY", 0..3),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let mut scratch = BytecodeScratch::default();
+            let found = matcher
+                .try_find_at_without_captures_with_scratch(line, 0, ctx(), &mut scratch)
+                .unwrap()
+                .result
+                .map(|result| result.start..result.end);
+            assert_eq!(found, Some(span), "{pattern} on {line:?}");
+        }
     }
 
     #[test]

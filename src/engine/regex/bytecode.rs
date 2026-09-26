@@ -13,6 +13,7 @@ use super::backtrack::{
     class_positive_contains, is_cpp_space_comment_separator, literal_byte_width, match_literal_end,
     previous_char, unicode_case_eq,
 };
+use super::case_fold::CaseVariants;
 use super::{AnchorContext, is_unicode_word_char};
 use std::{
     borrow::Cow,
@@ -2806,12 +2807,12 @@ impl<'a> Compiler<'a> {
                             branch += 1;
                         }
                         if branch > run_start {
-                            if run.worth_a_trie() {
-                                let id = self.intern_finite_trie(
-                                    &branches[run_start..branch],
-                                    flags,
-                                    run,
-                                )?;
+                            let trie = if run.worth_a_trie() {
+                                self.intern_finite_trie(&branches[run_start..branch], flags, run)?
+                            } else {
+                                None
+                            };
+                            if let Some(id) = trie {
                                 entries.push(self.push(Instruction::LiteralTrie {
                                     id,
                                     flags: flags.into(),
@@ -3437,7 +3438,7 @@ impl<'a> Compiler<'a> {
         branches: &'a [Ast],
         flags: RegexFlags,
         size: FiniteSize,
-    ) -> Result<LiteralTrieId, CompileError> {
+    ) -> Result<Option<LiteralTrieId>, CompileError> {
         let id =
             u32::try_from(self.literal_tries.len()).map_err(|_| CompileError::TableOverflow)?;
         let mut pending = Vec::new();
@@ -3447,7 +3448,10 @@ impl<'a> Compiler<'a> {
             for branch in branches {
                 enumerate_finite_language(branch, flags, &mut pending, &mut strings)?;
             }
-            LiteralTrie::new(&strings.strings(), flags)?
+            let Some(trie) = LiteralTrie::new(&strings.strings(), flags)? else {
+                return Ok(None);
+            };
+            trie
         } else {
             // Byte tries are built while enumerating, so a shared prefix is
             // walked once rather than once per expanded string.
@@ -3464,12 +3468,42 @@ impl<'a> Compiler<'a> {
             builder.finish()
         };
         self.literal_tries.push(trie);
-        Ok(LiteralTrieId(id))
+        Ok(Some(LiteralTrieId(id)))
     }
 }
 
+/// The existing edge `ch` joins, `Ok(None)` for a new edge, or `Err(())` when
+/// the scalar trie cannot represent it. Lookup follows the one edge that is
+/// case-equal to the input, but case equality is not transitive (`ϑ` and `ϴ`
+/// both equal `θ`, not each other). Edges therefore merge only scalars with
+/// identical case variants, and no input may be case-equal to two edges.
+fn unicode_edge(edges: &LiteralTrieEdges<CaseFoldKey>, ch: char) -> Result<Option<u32>, ()> {
+    let variants = |ch: char| {
+        let mut variants = CaseVariants::new(ch).iter().collect::<Vec<_>>();
+        variants.sort_unstable();
+        variants.dedup();
+        variants
+    };
+    let wanted = variants(ch);
+    let mut joined = None;
+    for (edge, child) in edges.iter() {
+        let existing = variants(edge.ch());
+        if existing == wanted {
+            joined = Some(*child);
+        } else if existing
+            .iter()
+            .any(|variant| wanted.binary_search(variant).is_ok())
+        {
+            return Err(());
+        }
+    }
+    Ok(joined)
+}
+
 impl LiteralTrie {
-    fn new<S: AsRef<str>>(literals: &[S], flags: RegexFlags) -> Result<Self, CompileError> {
+    /// `None` when Unicode case folding makes the scalar trie ambiguous (see
+    /// `unicode_edge`).
+    fn new<S: AsRef<str>>(literals: &[S], flags: RegexFlags) -> Result<Option<Self>, CompileError> {
         let unicode =
             flags.case_insensitive && literals.iter().any(|literal| !literal.as_ref().is_ascii());
         let node_capacity = literals
@@ -3492,12 +3526,10 @@ impl LiteralTrie {
                 let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
                 let mut node = 0usize;
                 for ch in literal.as_ref().chars() {
+                    let Ok(edge) = unicode_edge(&trie.unicode_nodes[node].edges, ch) else {
+                        return Ok(None);
+                    };
                     let ch = CaseFoldKey::new(ch);
-                    let edge = trie.unicode_nodes[node]
-                        .edges
-                        .iter()
-                        .find(|(edge, _)| edge.case_eq(&ch))
-                        .map(|(_, child)| *child);
                     node = if let Some(child) = edge {
                         child as usize
                     } else {
@@ -3513,14 +3545,14 @@ impl LiteralTrie {
                     *terminal = Some(order);
                 }
             }
-            return Ok(trie);
+            return Ok(Some(trie));
         }
         let mut builder = ByteTrieBuilder::new(node_capacity, flags.case_insensitive);
         for literal in literals {
             let node = builder.insert(literal.as_ref())?;
             builder.emit(node)?;
         }
-        Ok(builder.finish())
+        Ok(Some(builder.finish()))
     }
 
     /// First characters of the non-empty literals of a byte trie; `None` for
@@ -4652,7 +4684,9 @@ mod tests {
     #[test]
     fn literal_trie_bounds_reservation_for_duplicate_branches() {
         let literals = vec![Cow::Borrowed("a"); LITERAL_TRIE_NODE_RESERVE_LIMIT * 2];
-        let trie = LiteralTrie::new(&literals, RegexFlags::default()).unwrap();
+        let trie = LiteralTrie::new(&literals, RegexFlags::default())
+            .unwrap()
+            .unwrap();
 
         assert_eq!(trie.nodes.len(), 2);
         assert_eq!(trie.nodes.capacity(), LITERAL_TRIE_NODE_RESERVE_LIMIT);
