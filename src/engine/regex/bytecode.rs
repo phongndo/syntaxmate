@@ -239,6 +239,13 @@ struct ByteTrieBuilder {
     case_insensitive: bool,
     /// Order of the next string emitted through [`FiniteSink`].
     next_order: u32,
+    /// Nodes along the previous [`Self::insert`]ed literal and its folded
+    /// bytes. Keyword inventories are usually sorted, so each literal resumes
+    /// below its common prefix with the previous one instead of re-walking
+    /// sibling lists from the root.
+    path: Vec<u32>,
+    previous: Vec<u8>,
+    current: Vec<u8>,
 }
 
 impl ByteTrieBuilder {
@@ -254,7 +261,33 @@ impl ByteTrieBuilder {
             root_children: [NO_TRIE_NODE; 256],
             case_insensitive,
             next_order: 0,
+            path: vec![0],
+            previous: Vec::new(),
+            current: Vec::new(),
         }
+    }
+
+    /// The node reached by `literal`, created as needed.
+    fn insert(&mut self, literal: &str) -> Result<u32, CompileError> {
+        let mut current = std::mem::take(&mut self.current);
+        current.clear();
+        current.extend_from_slice(literal.as_bytes());
+        if self.case_insensitive {
+            current.make_ascii_lowercase();
+        }
+        let common = current
+            .iter()
+            .zip(&self.previous)
+            .take_while(|(current, previous)| current == previous)
+            .count();
+        self.path.truncate(common + 1);
+        let mut node = self.path[common];
+        for &byte in &current[common..] {
+            node = self.child(node, byte)?;
+            self.path.push(node);
+        }
+        self.current = std::mem::replace(&mut self.previous, current);
+        Ok(node)
     }
 
     /// The child of `node` along `byte`, created when missing.
@@ -2351,7 +2384,7 @@ impl<'a> Compiler<'a> {
                             branch += 1;
                         }
                         if branch > run_start {
-                            if run.strings >= 4 {
+                            if run.worth_a_trie() {
                                 let id = self.intern_finite_trie(
                                     &branches[run_start..branch],
                                     flags,
@@ -2896,7 +2929,15 @@ impl<'a> Compiler<'a> {
                     (None, None) => None,
                 }
             }
-            // Accepting, calls, backreferences, conditionals, tries, the
+            Instruction::LiteralTrie { id, flags, next } => {
+                let trie = &self.literal_tries[id.0 as usize];
+                let mut first = trie.first_chars(flags.case_insensitive())?;
+                if trie.nodes[0].terminal_order.is_some() {
+                    first.union(&self.first_chars_from(*next, steps, visited)?);
+                }
+                Some(first)
+            }
+            // Accepting, calls, backreferences, conditionals, the
             // specialized separator, and placeholders are not analyzed.
             Instruction::Accept
             | Instruction::Fail
@@ -2904,7 +2945,6 @@ impl<'a> Compiler<'a> {
             | Instruction::Return
             | Instruction::Backref { .. }
             | Instruction::Conditional { .. }
-            | Instruction::LiteralTrie { .. }
             | Instruction::CppSpaceCommentSeparator { .. } => None,
         }
     }
@@ -2966,7 +3006,12 @@ impl<'a> Compiler<'a> {
             let mut builder =
                 ByteTrieBuilder::new(size.bytes.saturating_add(1), flags.case_insensitive);
             for branch in branches {
-                enumerate_finite_language(branch, flags, &mut pending, &mut builder)?;
+                if let Ast::Literal(literal) = branch {
+                    let node = builder.insert(literal)?;
+                    builder.emit(node)?;
+                } else {
+                    enumerate_finite_language(branch, flags, &mut pending, &mut builder)?;
+                }
             }
             builder.finish()
         };
@@ -3022,36 +3067,34 @@ impl LiteralTrie {
             }
             return Ok(trie);
         }
-        // Nodes along the previous literal's path. Sorted keyword inventories
-        // arrive grouped by shared prefix, so each literal resumes below its
-        // common prefix with the previous one instead of re-walking sibling
-        // lists from the root.
         let mut builder = ByteTrieBuilder::new(node_capacity, flags.case_insensitive);
-        let mut path = vec![0u32];
-        let mut previous = Vec::new();
-        let mut current = Vec::new();
-        for (order, literal) in literals.iter().enumerate() {
-            let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
-            current.clear();
-            current.extend_from_slice(literal.as_ref().as_bytes());
-            if flags.case_insensitive {
-                current.make_ascii_lowercase();
-            }
-            let common = current
-                .iter()
-                .zip(&previous)
-                .take_while(|(current, previous)| current == previous)
-                .count();
-            path.truncate(common + 1);
-            let mut node = path[common];
-            for &byte in &current[common..] {
-                node = builder.child(node, byte)?;
-                path.push(node);
-            }
-            std::mem::swap(&mut previous, &mut current);
-            builder.mark_terminal(node, order);
+        for literal in literals {
+            let node = builder.insert(literal.as_ref())?;
+            builder.emit(node)?;
         }
         Ok(builder.finish())
+    }
+
+    /// First characters of the non-empty literals of a byte trie; `None` for
+    /// the scalar (Unicode case-folding) trie.
+    fn first_chars(&self, case_insensitive: bool) -> Option<FirstChars> {
+        if !self.unicode_nodes.is_empty() {
+            return None;
+        }
+        let root = self.nodes[0];
+        let start = root.edge_start as usize;
+        let mut first = FirstChars::NONE;
+        for &byte in &self.edge_bytes[start..start + root.edge_len as usize] {
+            if byte.is_ascii() {
+                first.union(&FirstChars::of_literal(
+                    char::from(byte).encode_utf8(&mut [0; 4]),
+                    case_insensitive,
+                ));
+            } else {
+                first.non_ascii = FirstChars::NON_ASCII_ANY;
+            }
+        }
+        Some(first)
     }
 
     fn edge(&self, node: usize, byte: u8) -> Option<u32> {
@@ -3266,6 +3309,9 @@ const FINITE_LANGUAGE_BYTE_LIMIT: usize = 64 * 1024;
 const FINITE_REPEAT_LIMIT: usize = 4;
 /// Largest character class expanded into single-character literals.
 const FINITE_CLASS_LIMIT: u32 = 16;
+/// Most expanded strings per literal or class leaf a trie may replace.
+/// Nested inventories expand to about one string per leaf.
+const FINITE_EXPANSION_RATIO: usize = 2;
 
 /// Upper bounds for an expandable finite language: how many strings it
 /// denotes and their total length, whether it matches empty, and whether any
@@ -3274,6 +3320,9 @@ const FINITE_CLASS_LIMIT: u32 = 16;
 struct FiniteSize {
     strings: usize,
     bytes: usize,
+    /// Literal and class leaves: roughly the instructions the structured
+    /// form would compile to.
+    atoms: usize,
     nullable: bool,
     non_ascii: bool,
 }
@@ -3282,15 +3331,25 @@ impl FiniteSize {
     const NONE: Self = Self {
         strings: 0,
         bytes: 0,
+        atoms: 0,
         nullable: false,
         non_ascii: false,
     };
     const EMPTY: Self = Self {
         strings: 1,
         bytes: 0,
+        atoms: 0,
         nullable: true,
         non_ascii: false,
     };
+
+    /// Whether a trie is worth building. Products of small classes (such
+    /// as `[Ii][Nn][Ff]`) multiply into far more strings than the
+    /// instructions they replace, which costs more to build on first use
+    /// than a short Split chain costs to run.
+    fn worth_a_trie(self) -> bool {
+        self.strings >= 4 && self.strings <= self.atoms.saturating_mul(FINITE_EXPANSION_RATIO)
+    }
 
     fn remaining_limits(self) -> FiniteLimits {
         FiniteLimits {
@@ -3304,6 +3363,7 @@ impl FiniteSize {
         Self {
             strings: self.strings.saturating_add(other.strings),
             bytes: self.bytes.saturating_add(other.bytes),
+            atoms: self.atoms.saturating_add(other.atoms),
             nullable: self.nullable || other.nullable,
             non_ascii: self.non_ascii || other.non_ascii,
         }
@@ -3317,6 +3377,7 @@ impl FiniteSize {
                 .bytes
                 .saturating_mul(other.strings)
                 .saturating_add(other.bytes.saturating_mul(self.strings)),
+            atoms: self.atoms.saturating_add(other.atoms),
             nullable: self.nullable && other.nullable,
             non_ascii: self.non_ascii || other.non_ascii,
         }
@@ -3350,6 +3411,7 @@ fn finite_language_size(ast: &Ast, flags: RegexFlags, limits: FiniteLimits) -> O
         Ast::Literal(literal) => FiniteSize {
             strings: 1,
             bytes: literal.len(),
+            atoms: 1,
             nullable: literal.is_empty(),
             non_ascii: !literal.is_ascii(),
         },
@@ -3375,6 +3437,7 @@ fn finite_language_size(ast: &Ast, flags: RegexFlags, limits: FiniteLimits) -> O
             FiniteSize {
                 strings: members,
                 bytes: members,
+                atoms: 1,
                 nullable: false,
                 non_ascii: false,
             }
@@ -3426,7 +3489,11 @@ fn finite_language_size(ast: &Ast, flags: RegexFlags, limits: FiniteLimits) -> O
                 }
                 exactly = exactly.product(body);
             }
-            total
+            // The structured loop compiles its body once.
+            FiniteSize {
+                atoms: body.atoms,
+                ..total
+            }
         }
         _ => return None,
     };
@@ -4556,6 +4623,32 @@ mod tests {
             .iter()
             .filter(|instruction| matches!(instruction, Instruction::ScanRepeat { .. }))
             .count()
+    }
+
+    #[test]
+    fn greedy_repeats_before_literal_tries_use_the_trie_first_bytes() {
+        // `\w` is not ASCII-only, so only the first-character analysis can
+        // prove these continuations exclusive; it must look into the trie.
+        let exclusive = r"\w+(?:;a|;b|;c|:d)";
+        let overlapping = r"\w+(?:;a|;b|;c|dd)";
+        let nullable = r"\w+(?:;a|;b|;c|)d";
+        assert_eq!(scan_repeat_count(exclusive), 1);
+        assert_eq!(scan_repeat_count(overlapping), 0);
+        assert_eq!(scan_repeat_count(nullable), 0);
+        for pattern in [exclusive, overlapping, nullable] {
+            for line in ["ab;a", "abdd", "abd", "ab:d", "λx;c", "ab"] {
+                for start in 0..line.len() {
+                    if !line.is_char_boundary(start) {
+                        continue;
+                    }
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive_position_span(&parse(pattern), line, start, context()),
+                        "{pattern:?} on {line:?} at {start}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
