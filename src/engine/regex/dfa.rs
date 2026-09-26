@@ -1138,20 +1138,22 @@ fn word_set_spec(ast: &Ast, flags: RegexFlags) -> Option<WordSetSpec> {
             ] = nodes.as_slice()
                 && let Ast::Concat(remainder) = child.as_ref()
             {
-                let mut flattened = Vec::with_capacity(remainder.len() + 1);
-                flattened.push(prefix.clone());
-                flattened.extend(remainder.iter().cloned());
-                return word_set_spec_from_concat(&flattened, *scoped);
+                return word_set_spec_from_concat(
+                    std::iter::once(prefix).chain(remainder.iter()),
+                    *scoped,
+                );
             }
-            word_set_spec_from_concat(nodes, flags)
+            word_set_spec_from_concat(nodes.iter(), flags)
         }
         _ => None,
     }
 }
 
-fn word_set_spec_from_concat(nodes: &[Ast], flags: RegexFlags) -> Option<WordSetSpec> {
+fn word_set_spec_from_concat<'a>(
+    nodes: impl Iterator<Item = &'a Ast>,
+    flags: RegexFlags,
+) -> Option<WordSetSpec> {
     let significant = nodes
-        .iter()
         .filter(|node| !matches!(node, Ast::Empty))
         .collect::<Vec<_>>();
     if significant.len() < 3 {
