@@ -161,9 +161,16 @@ const LITERAL_TRIE_NODE_RESERVE_LIMIT: usize = 4 * 1024;
 /// hundreds of branches, so that duplicates both dispatch and byte compares.
 /// Terminals retain the original branch order because Oniguruma chooses the
 /// first matching alternative, not necessarily the longest one.
+///
+/// Byte tries keep each node's outgoing edges as one contiguous, byte-sorted
+/// run of shared edge arrays, so building a keyword inventory with thousands
+/// of branches performs a handful of allocations rather than one per
+/// branching node.
 #[derive(Debug, Clone, Default)]
 struct LiteralTrie {
     nodes: Vec<LiteralTrieNode>,
+    edge_bytes: Vec<u8>,
+    edge_targets: Vec<u32>,
     unicode_nodes: Vec<UnicodeLiteralTrieNode>,
 }
 
@@ -184,28 +191,6 @@ impl<T: Copy> LiteralTrieEdges<T> {
         }
     }
 
-    fn get(&self, key: T) -> Option<u32>
-    where
-        T: Ord,
-    {
-        match self {
-            Self::Empty => None,
-            Self::One((edge, child)) => (*edge == key).then_some(*child),
-            Self::Many(edges) => {
-                if edges.len() <= 8 {
-                    edges
-                        .iter()
-                        .find_map(|(edge, child)| (*edge == key).then_some(*child))
-                } else {
-                    edges
-                        .binary_search_by_key(&key, |(edge, _)| *edge)
-                        .ok()
-                        .map(|index| edges[index].1)
-                }
-            }
-        }
-    }
-
     fn push(&mut self, edge: (T, u32)) {
         match self {
             Self::Empty => *self = Self::One(edge),
@@ -215,13 +200,15 @@ impl<T: Copy> LiteralTrieEdges<T> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 struct LiteralTrieNode {
-    // Most trie nodes have one child. Keeping that edge inline avoids one heap
-    // allocation per byte while preserving a Vec only for actual branches.
-    edges: LiteralTrieEdges<u8>,
+    edge_start: u32,
+    edge_len: u32,
     terminal_order: Option<u32>,
 }
+
+/// Sentinel for an absent child while a byte trie is being built.
+const NO_TRIE_NODE: u32 = u32::MAX;
 
 #[derive(Debug, Clone, Default)]
 struct UnicodeLiteralTrieNode {
@@ -378,21 +365,49 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             (mask, mask)
         }
         ClassAtom::Nested(class) => ascii_class_masks(class),
-        // Non-ASCII chars and ranges can still fold into ASCII under case
-        // insensitivity (e.g. the Kelvin sign); evaluate the atom directly.
-        ClassAtom::Char(_) | ClassAtom::Range(..) => {
-            let sensitive = ascii_predicate_mask(|ch| {
-                super::backtrack::atom_contains(atom, ch, RegexFlags::default())
-            });
+        // A non-ASCII scalar never equals an ASCII one, and under
+        // `unicode_case_eq` it matches an ASCII probe only through a
+        // single-scalar ASCII lower- or uppercase mapping (e.g. the Kelvin
+        // sign). Derive those few probes from its two case maps instead of
+        // evaluating the Unicode fold against all 128 ASCII scalars.
+        ClassAtom::Char(expected) => {
+            let mut insensitive = [0u64; 2];
+            if *expected != '\u{131}' {
+                if let Some(lower) = single_ascii_mapping(expected.to_lowercase()) {
+                    ascii_mask_set_where(&mut insensitive, |byte| {
+                        byte.to_ascii_lowercase() == lower
+                    });
+                }
+                if let Some(upper) = single_ascii_mapping(expected.to_uppercase()) {
+                    ascii_mask_set_where(&mut insensitive, |byte| {
+                        byte.to_ascii_uppercase() == upper
+                    });
+                }
+            }
+            ([0u64; 2], insensitive)
+        }
+        // Non-ASCII ranges can still fold into ASCII under case
+        // insensitivity. Mirror `atom_contains`' folded-range test with the
+        // bounds' case maps computed once; an ASCII probe's first lower- or
+        // uppercase mapping is its ASCII case map.
+        ClassAtom::Range(start, end) => {
+            let sensitive = ascii_predicate_mask(|ch| *start <= ch && ch <= *end);
+            let first = |mut mapped: std::char::ToLowercase, ch: char| mapped.next().unwrap_or(ch);
+            let first_upper =
+                |mut mapped: std::char::ToUppercase, ch: char| mapped.next().unwrap_or(ch);
+            let (low_lower, high_lower) = (
+                first(start.to_lowercase(), *start),
+                first(end.to_lowercase(), *end),
+            );
+            let (low_upper, high_upper) = (
+                first_upper(start.to_uppercase(), *start),
+                first_upper(end.to_uppercase(), *end),
+            );
             let insensitive = ascii_predicate_mask(|ch| {
-                super::backtrack::atom_contains(
-                    atom,
-                    ch,
-                    RegexFlags {
-                        case_insensitive: true,
-                        ..RegexFlags::default()
-                    },
-                )
+                let lower = ch.to_ascii_lowercase();
+                let upper = ch.to_ascii_uppercase();
+                (low_lower <= lower && lower <= high_lower)
+                    || (low_upper <= upper && upper <= high_upper)
             });
             (sensitive, insensitive)
         }
@@ -451,6 +466,20 @@ fn perl_ascii_mask(kind: PerlClassKind) -> AsciiMask {
         PerlClassKind::VerticalSpace => ASCII_VERTICAL_SPACE_MASK,
         PerlClassKind::NotVerticalSpace => ascii_mask_complement(ASCII_VERTICAL_SPACE_MASK),
         PerlClassKind::NotNewline => ascii_mask_complement(ASCII_NEWLINE_MASK),
+    }
+}
+
+/// The ASCII byte a case mapping yields when it is exactly one ASCII scalar.
+fn single_ascii_mapping(mut mapped: impl Iterator<Item = char>) -> Option<u8> {
+    let first = mapped.next()?;
+    (first.is_ascii() && mapped.next().is_none()).then_some(first as u8)
+}
+
+fn ascii_mask_set_where(mask: &mut AsciiMask, predicate: impl Fn(u8) -> bool) {
+    for byte in 0u8..=127 {
+        if predicate(byte) {
+            ascii_mask_set(mask, byte);
+        }
     }
 }
 
@@ -2114,7 +2143,7 @@ impl Compiler {
                         } else {
                             byte
                         };
-                        root.edges.iter().all(|(edge, _)| *edge != byte)
+                        trie.edge(0, byte).is_none()
                     });
                     if !rejects {
                         return false;
@@ -2267,6 +2296,8 @@ impl LiteralTrie {
             } else {
                 Vec::with_capacity(node_capacity)
             },
+            edge_bytes: Vec::new(),
+            edge_targets: Vec::new(),
             unicode_nodes: if unicode {
                 Vec::with_capacity(node_capacity)
             } else {
@@ -2302,7 +2333,17 @@ impl LiteralTrie {
             }
             return Ok(trie);
         }
+        // Insert through first-child/next-sibling links (with a dense root
+        // table) so that no node owns an edge allocation, then lay every
+        // node's children out as one sorted run of the shared edge arrays.
+        let mut first_child = Vec::with_capacity(node_capacity);
+        let mut next_sibling = Vec::with_capacity(node_capacity);
+        let mut node_bytes = Vec::with_capacity(node_capacity);
+        let mut root_children = [NO_TRIE_NODE; 256];
         trie.nodes.push(LiteralTrieNode::default());
+        first_child.push(NO_TRIE_NODE);
+        next_sibling.push(NO_TRIE_NODE);
+        node_bytes.push(0u8);
         for (order, literal) in literals.iter().enumerate() {
             let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
             let mut node = 0usize;
@@ -2310,36 +2351,73 @@ impl LiteralTrie {
                 if flags.case_insensitive {
                     byte.make_ascii_lowercase();
                 }
-                let edge = trie.nodes[node]
-                    .edges
-                    .iter()
-                    .find(|(edge, _)| *edge == byte)
-                    .map(|(_, child)| *child);
-                node = if let Some(child) = edge {
-                    child as usize
+                let mut child = if node == 0 {
+                    root_children[byte as usize]
                 } else {
-                    let child =
-                        u32::try_from(trie.nodes.len()).map_err(|_| CompileError::TableOverflow)?;
-                    trie.nodes.push(LiteralTrieNode::default());
-                    trie.nodes[node].edges.push((byte, child));
-                    child as usize
+                    let mut child = first_child[node];
+                    while child != NO_TRIE_NODE && node_bytes[child as usize] != byte {
+                        child = next_sibling[child as usize];
+                    }
+                    child
                 };
+                if child == NO_TRIE_NODE {
+                    child =
+                        u32::try_from(trie.nodes.len()).map_err(|_| CompileError::TableOverflow)?;
+                    if child == NO_TRIE_NODE {
+                        return Err(CompileError::TableOverflow);
+                    }
+                    trie.nodes.push(LiteralTrieNode::default());
+                    first_child.push(NO_TRIE_NODE);
+                    next_sibling.push(first_child[node]);
+                    node_bytes.push(byte);
+                    first_child[node] = child;
+                    trie.nodes[node].edge_len += 1;
+                    if node == 0 {
+                        root_children[byte as usize] = child;
+                    }
+                }
+                node = child as usize;
             }
             let terminal = &mut trie.nodes[node].terminal_order;
             if terminal.is_none_or(|existing| order < existing) {
                 *terminal = Some(order);
             }
         }
-        trie.finish_ascii_edges();
+        let mut edge_start = 0u32;
+        for node in &mut trie.nodes {
+            node.edge_start = edge_start;
+            edge_start += node.edge_len;
+        }
+        trie.edge_bytes = vec![0; edge_start as usize];
+        trie.edge_targets = vec![0; edge_start as usize];
+        let mut run = Vec::new();
+        for (node, &first) in trie.nodes.iter().zip(&first_child) {
+            let start = node.edge_start as usize;
+            run.clear();
+            let mut child = first;
+            while child != NO_TRIE_NODE {
+                run.push((node_bytes[child as usize], child));
+                child = next_sibling[child as usize];
+            }
+            run.sort_unstable_by_key(|(byte, _)| *byte);
+            for (slot, &(byte, target)) in (start..).zip(&run) {
+                trie.edge_bytes[slot] = byte;
+                trie.edge_targets[slot] = target;
+            }
+        }
         Ok(trie)
     }
 
-    fn finish_ascii_edges(&mut self) {
-        for node in &mut self.nodes {
-            if let LiteralTrieEdges::Many(edges) = &mut node.edges {
-                edges.sort_unstable_by_key(|(byte, _)| *byte);
-            }
-        }
+    fn edge(&self, node: usize, byte: u8) -> Option<u32> {
+        let node = self.nodes[node];
+        let start = node.edge_start as usize;
+        let bytes = &self.edge_bytes[start..start + node.edge_len as usize];
+        let index = if bytes.len() <= 8 {
+            bytes.iter().position(|candidate| *candidate == byte)?
+        } else {
+            bytes.binary_search(&byte).ok()?
+        };
+        Some(self.edge_targets[start + index])
     }
 
     fn collect_matches(
@@ -2403,7 +2481,7 @@ impl LiteralTrie {
                     1,
                 )
             };
-            let Some(child) = self.nodes[node].edges.get(input) else {
+            let Some(child) = self.edge(node, input) else {
                 break;
             };
             node = child as usize;
@@ -2627,6 +2705,35 @@ mod tests {
     use super::*;
     use crate::engine::regex::ast::parse;
     use crate::engine::regex::backtrack::{FallbackMatcher, recursive_position_span};
+
+    #[test]
+    fn non_ascii_class_atoms_derive_exact_ascii_masks() {
+        // Scalars and ranges whose Unicode case maps reach ASCII (Kelvin,
+        // long s, dotted/dotless i, Å/ſ spans) and ones that do not.
+        for pattern in [
+            "[\u{212a}]",
+            "[\u{17f}]",
+            "[\u{130}\u{131}]",
+            "[é⍺∇]",
+            "[\u{c0}-\u{17f}]",
+            "[\u{17f}-\u{212a}]",
+            "[\u{100}-\u{130}]",
+            "[\u{131}-\u{2000}]",
+            "[a-\u{212a}]",
+            "[\u{80}-\u{10ffff}]",
+            "[^\u{212a}x]",
+        ] {
+            let parsed = parse(pattern);
+            let Ast::Class(class) = &parsed.ast else {
+                panic!("{pattern:?} should parse as a class");
+            };
+            assert_eq!(
+                ascii_class_masks(class),
+                ascii_masks_by_evaluation(class),
+                "{pattern:?}"
+            );
+        }
+    }
 
     fn context() -> AnchorContext {
         AnchorContext {
@@ -2862,6 +2969,34 @@ mod tests {
             );
         }
         assert_eq!(bytecode_span(r"(?:foo|bar|baz|quux)", "nope", 0), None);
+    }
+
+    #[test]
+    fn literal_trie_wide_fanouts_match_the_recursive_engine() {
+        // Unsorted branches with wide root and interior fanouts (binary
+        // searched edge runs), duplicate and prefix branches, and a suffix
+        // that forces backtracking into shorter preferred alternatives.
+        let mut branches = Vec::new();
+        for first in ['q', 'b', 'z', 'a', 'm'] {
+            for second in "zyxwvutsrqponmlkjihgfedcba".chars() {
+                branches.push(format!("{first}{second}"));
+                branches.push(format!("{first}{second}{second}"));
+            }
+        }
+        branches.push("ab".to_owned());
+        branches.push("q".to_owned());
+        for flags in ["", "(?i)"] {
+            let pattern = format!("{flags}(?:{})(?:b|!)", branches.join("|"));
+            for line in ["abb!", "qq", "QZZb", "mab", "zzz!", "q!", "ab!", "nope"] {
+                for start in 0..line.len() {
+                    assert_eq!(
+                        bytecode_span(&pattern, line, start),
+                        recursive_position_span(&parse(&pattern), line, start, context()),
+                        "{pattern:?} on {line:?} at {start}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

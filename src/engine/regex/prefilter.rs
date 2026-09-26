@@ -1,15 +1,17 @@
-use std::collections::VecDeque;
+use std::borrow::Cow;
 
 use super::ast::{Ast, CharClass, ClassAtom, LookKind, ParsedRegex};
 
+/// Literals one of which every match must contain. Literals borrow from the
+/// AST where possible; only the ones a prefilter retains are copied.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RequiredLiterals {
+pub enum RequiredLiterals<'a> {
     None,
-    One(String),
-    Any(Vec<String>),
+    One(Cow<'a, str>),
+    Any(Vec<Cow<'a, str>>),
 }
 
-impl RequiredLiterals {
+impl RequiredLiterals<'_> {
     fn is_empty(&self) -> bool {
         matches!(self, Self::None)
     }
@@ -26,6 +28,8 @@ pub enum Prefilter {
     },
     Literal(String),
     Any {
+        /// Retained for searches without a compiled `finder`; a finder
+        /// answers every query itself, so its literals are not kept.
         literals: Vec<String>,
         ascii_case_insensitive: bool,
         mixed_width_fold_mask: u8,
@@ -42,12 +46,17 @@ impl Prefilter {
         Self::from_required(required_literals(ast), false)
     }
 
-    pub(crate) fn from_required(required: RequiredLiterals, ascii_case_insensitive: bool) -> Self {
+    pub(crate) fn from_required(
+        required: RequiredLiterals<'_>,
+        ascii_case_insensitive: bool,
+    ) -> Self {
         if ascii_case_insensitive {
             let literals = match required {
                 RequiredLiterals::None => return Self::None,
-                RequiredLiterals::One(literal) => vec![literal],
-                RequiredLiterals::Any(literals) => literals,
+                RequiredLiterals::One(literal) => vec![literal.into_owned()],
+                RequiredLiterals::Any(literals) => {
+                    literals.into_iter().map(Cow::into_owned).collect()
+                }
             };
             if literals.is_empty()
                 || literals
@@ -71,11 +80,15 @@ impl Prefilter {
         }
         match required {
             RequiredLiterals::None => Self::None,
-            RequiredLiterals::One(literal) => prefilter_one(literal),
+            RequiredLiterals::One(literal) => prefilter_one(literal.into_owned()),
             RequiredLiterals::Any(literals) if literals.is_empty() => Self::None,
-            RequiredLiterals::Any(literals) if literals.len() == 1 => {
-                prefilter_one(literals.into_iter().next().expect("one literal"))
-            }
+            RequiredLiterals::Any(literals) if literals.len() == 1 => prefilter_one(
+                literals
+                    .into_iter()
+                    .next()
+                    .expect("one literal")
+                    .into_owned(),
+            ),
             RequiredLiterals::Any(literals)
                 if literals
                     .iter()
@@ -91,12 +104,20 @@ impl Prefilter {
                 }
                 Self::ByteSet { bytes, bitmap }
             }
-            RequiredLiterals::Any(literals) => Self::Any {
-                finder: MultiLiteralFinder::for_literals(&literals),
-                literals,
-                ascii_case_insensitive: false,
-                mixed_width_fold_mask: 0,
-            },
+            RequiredLiterals::Any(literals) => {
+                let finder = MultiLiteralFinder::for_literals(&literals);
+                let literals = if finder.is_some() {
+                    Vec::new()
+                } else {
+                    literals.into_iter().map(Cow::into_owned).collect()
+                };
+                Self::Any {
+                    finder,
+                    literals,
+                    ascii_case_insensitive: false,
+                    mixed_width_fold_mask: 0,
+                }
+            }
         }
     }
 
@@ -219,10 +240,17 @@ impl Prefilter {
 /// case-insensitive keyword lists such as ABAP's). An ASCII case-insensitive
 /// finder stores lowercased literals and lowercases each input byte, which
 /// matches `eq_ignore_ascii_case` windows exactly for ASCII literals.
+///
+/// Each node's outgoing edges occupy one contiguous, byte-sorted run of the
+/// shared edge arrays. Large keyword inventories produce tens of thousands of
+/// trie states; flat storage keeps construction and teardown to a handful of
+/// allocations instead of one or more per state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct MultiLiteralFinder {
     nodes: Vec<FinderNode>,
+    edge_bytes: Vec<u8>,
+    edge_targets: Vec<u32>,
     /// Every input byte probes the root at least once. A dense root table
     /// avoids a linear scan over the large first-byte fanout while keeping
     /// deeper, usually tiny transition sets compact.
@@ -231,100 +259,161 @@ pub struct MultiLiteralFinder {
     fold_ascii_case: bool,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct FinderNode {
-    edges: FinderEdges,
+    edge_start: u32,
+    edge_len: u32,
     failure: u32,
     /// Longest literal ending in this state or one of its failure states.
     /// The longest output has the earliest start for a fixed end position.
-    output_len: usize,
+    output_len: u32,
 }
 
 impl MultiLiteralFinder {
-    fn for_literals(literals: &[String]) -> Option<Self> {
+    fn for_literals<S: AsRef<str>>(literals: &[S]) -> Option<Self> {
         Self::worthwhile(literals).then(|| Self::new(literals, false))
     }
 
-    fn for_literals_ignore_ascii_case(literals: &[String]) -> Option<Self> {
+    fn for_literals_ignore_ascii_case<S: AsRef<str>>(literals: &[S]) -> Option<Self> {
         Self::worthwhile(literals).then(|| Self::new(literals, true))
     }
 
-    fn worthwhile(literals: &[String]) -> bool {
-        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+    fn worthwhile<S: AsRef<str>>(literals: &[S]) -> bool {
+        let total_bytes = literals
+            .iter()
+            .map(|literal| literal.as_ref().len())
+            .sum::<usize>();
         literals.len() >= multi_literal_min_literals()
             && total_bytes >= multi_literal_min_total_bytes()
     }
 
-    fn new(literals: &[String], fold_ascii_case: bool) -> Self {
-        let total_bytes = literals.iter().map(String::len).sum::<usize>();
-        let mut nodes = Vec::with_capacity(total_bytes.saturating_add(1));
+    fn new<S: AsRef<str>>(literals: &[S], fold_ascii_case: bool) -> Self {
+        // Required-literal sets arrive sorted; sort a borrowed view otherwise.
+        // A case-folding finder stores lowercased literals, which can reorder
+        // them, so it always owns and sorts its copies.
+        let mut sorted = literals
+            .iter()
+            .map(|literal| {
+                let bytes = literal.as_ref().as_bytes();
+                if fold_ascii_case {
+                    Cow::Owned(bytes.to_ascii_lowercase())
+                } else {
+                    Cow::Borrowed(bytes)
+                }
+            })
+            .collect::<Vec<Cow<'_, [u8]>>>();
+        if !sorted.is_sorted() {
+            sorted.sort_unstable();
+        }
+        let total_bytes = sorted.iter().map(|literal| literal.len()).sum::<usize>();
+        let capacity = total_bytes.saturating_add(1);
+        let mut nodes = Vec::with_capacity(capacity);
+        let mut parents = Vec::with_capacity(capacity);
+        let mut node_bytes = Vec::with_capacity(capacity);
         nodes.push(FinderNode::default());
-        // Root transitions are dense from the start: keyword inventories give
-        // the root a wide fanout that every insertion and failure walk probes.
-        let mut root_edges = Box::new([u32::MAX; 256]);
+        parents.push(0u32);
+        node_bytes.push(0u8);
+
+        // In sorted order, a literal shares exactly its longest common prefix
+        // with the previous literal's trie path and every later byte needs a
+        // new state. Insertion is therefore one pass without edge searches,
+        // and each state's children are created in ascending byte order.
+        let mut path = vec![0u32];
+        let mut previous: &[u8] = &[];
         let mut max_literal_len = 0usize;
-        for literal in literals {
+        for literal in &sorted {
+            let literal: &[u8] = literal;
             debug_assert!(!literal.is_empty());
             max_literal_len = max_literal_len.max(literal.len());
-            let mut state = 0usize;
-            for mut byte in literal.bytes() {
-                if fold_ascii_case {
-                    byte.make_ascii_lowercase();
-                }
-                let next = if state == 0 {
-                    Some(root_edges[byte as usize]).filter(|next| *next != u32::MAX)
-                } else {
-                    nodes[state].edges.get(byte)
-                };
-                state = if let Some(next) = next {
-                    next as usize
-                } else {
-                    let next = u32::try_from(nodes.len()).expect("prefilter trie exceeds u32");
-                    nodes.push(FinderNode::default());
-                    nodes[state].edges.push((byte, next));
-                    if state == 0 {
-                        root_edges[byte as usize] = next;
-                    }
-                    next as usize
-                };
+            let common = previous
+                .iter()
+                .zip(literal)
+                .take_while(|(left, right)| left == right)
+                .count();
+            path.truncate(common + 1);
+            for &byte in &literal[common..] {
+                let parent = *path.last().expect("trie path keeps the root");
+                let node = u32::try_from(nodes.len()).expect("prefilter trie exceeds u32");
+                nodes[parent as usize].edge_len += 1;
+                nodes.push(FinderNode::default());
+                parents.push(parent);
+                node_bytes.push(byte);
+                path.push(node);
             }
-            nodes[state].output_len = nodes[state].output_len.max(literal.len());
+            let state = *path.last().expect("trie path keeps the root") as usize;
+            let output_len = u32::try_from(literal.len()).expect("prefilter literal exceeds u32");
+            nodes[state].output_len = nodes[state].output_len.max(output_len);
+            previous = literal;
         }
 
-        let goto = |nodes: &[FinderNode], state: u32, byte: u8| {
-            if state == 0 {
-                Some(root_edges[byte as usize]).filter(|next| *next != u32::MAX)
-            } else {
-                nodes[state as usize].edges.get(byte)
-            }
-        };
-        let mut queue = VecDeque::with_capacity(nodes.len());
-        queue.extend(nodes[0].edges.iter().map(|(_, child)| child));
-        while let Some(state) = queue.pop_front() {
-            for index in 0..nodes[state as usize].edges.len() {
-                let (byte, child) = nodes[state as usize].edges.nth(index);
-                let mut failure = nodes[state as usize].failure;
-                while failure != 0 && goto(&nodes, failure, byte).is_none() {
-                    failure = nodes[failure as usize].failure;
-                }
-                if let Some(next) = goto(&nodes, failure, byte)
-                    && next != child
-                {
-                    failure = next;
-                }
-                nodes[child as usize].failure = failure;
-                nodes[child as usize].output_len = nodes[child as usize]
-                    .output_len
-                    .max(nodes[failure as usize].output_len);
-                queue.push_back(child);
-            }
+        // Lay out each state's edges contiguously. Creation order keeps every
+        // run sorted by byte. `failure` is a temporary fill cursor here.
+        let mut edge_start = 0u32;
+        for node in &mut nodes {
+            node.edge_start = edge_start;
+            node.failure = edge_start;
+            edge_start += node.edge_len;
         }
-        Self {
+        let edge_count = edge_start as usize;
+        let mut edge_bytes = vec![0u8; edge_count];
+        let mut edge_targets = vec![0u32; edge_count];
+        for child in 1..nodes.len() {
+            let parent = parents[child] as usize;
+            let slot = nodes[parent].failure as usize;
+            nodes[parent].failure += 1;
+            edge_bytes[slot] = node_bytes[child];
+            edge_targets[slot] = child as u32;
+        }
+        drop(parents);
+        drop(node_bytes);
+        for node in &mut nodes {
+            node.failure = 0;
+        }
+
+        let mut finder = Self {
             nodes,
-            root_edges,
+            edge_bytes,
+            edge_targets,
+            root_edges: Box::new([u32::MAX; 256]),
             max_literal_len,
             fold_ascii_case,
+        };
+        let root = finder.nodes[0];
+        for index in root.edge_start as usize..(root.edge_start + root.edge_len) as usize {
+            finder.root_edges[finder.edge_bytes[index] as usize] = finder.edge_targets[index];
         }
+        // Failure targets are strictly shallower, so a breadth-first sweep
+        // finalizes each one before any state that depends on it.
+        let mut queue = Vec::with_capacity(finder.nodes.len());
+        queue.push(0u32);
+        let mut cursor = 0usize;
+        while let Some(&state) = queue.get(cursor) {
+            cursor += 1;
+            let node = finder.nodes[state as usize];
+            for index in node.edge_start as usize..(node.edge_start + node.edge_len) as usize {
+                let byte = finder.edge_bytes[index];
+                let child = finder.edge_targets[index];
+                queue.push(child);
+                if state == 0 {
+                    continue;
+                }
+                let mut failure = node.failure;
+                let target = loop {
+                    if let Some(next) = finder.goto(failure, byte) {
+                        break next;
+                    }
+                    if failure == 0 {
+                        break 0;
+                    }
+                    failure = finder.nodes[failure as usize].failure;
+                };
+                let failure_output = finder.nodes[target as usize].output_len;
+                let child = &mut finder.nodes[child as usize];
+                child.failure = target;
+                child.output_len = child.output_len.max(failure_output);
+            }
+        }
+        finder
     }
 
     /// Returns the leftmost literal start. Scanning may stop once the maximum
@@ -339,7 +428,7 @@ impl MultiLiteralFinder {
                 byte
             };
             state = self.step(state, byte);
-            let output_len = self.nodes[state as usize].output_len;
+            let output_len = self.nodes[state as usize].output_len as usize;
             if output_len != 0 {
                 let start = index + 1 - output_len;
                 best = Some(best.map_or(start, |current: usize| current.min(start)));
@@ -355,15 +444,32 @@ impl MultiLiteralFinder {
 
     fn step(&self, mut state: u32, byte: u8) -> u32 {
         loop {
-            if state == 0 {
-                let next = self.root_edges[byte as usize];
-                return if next == u32::MAX { 0 } else { next };
-            }
-            if let Some(next) = self.nodes[state as usize].edges.get(byte) {
+            if let Some(next) = self.goto(state, byte) {
                 return next;
+            }
+            if state == 0 {
+                return 0;
             }
             state = self.nodes[state as usize].failure;
         }
+    }
+
+    #[inline]
+    fn goto(&self, state: u32, byte: u8) -> Option<u32> {
+        if state == 0 {
+            let next = self.root_edges[byte as usize];
+            return (next != u32::MAX).then_some(next);
+        }
+        let node = &self.nodes[state as usize];
+        let start = node.edge_start as usize;
+        let end = start + node.edge_len as usize;
+        let bytes = &self.edge_bytes[start..end];
+        let index = if bytes.len() <= 16 {
+            bytes.iter().position(|candidate| *candidate == byte)?
+        } else {
+            bytes.binary_search(&byte).ok()?
+        };
+        Some(self.edge_targets[start + index])
     }
 }
 
@@ -373,56 +479,6 @@ fn multi_literal_min_literals() -> usize {
 
 fn multi_literal_min_total_bytes() -> usize {
     32
-}
-
-/// Finder transitions. Most trie nodes have exactly one child, so that edge
-/// stays inline and only branching nodes allocate.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-enum FinderEdges {
-    #[default]
-    Empty,
-    One(u8, u32),
-    Many(Vec<(u8, u32)>),
-}
-
-impl FinderEdges {
-    fn get(&self, byte: u8) -> Option<u32> {
-        match self {
-            Self::Empty => None,
-            Self::One(edge, next) => (*edge == byte).then_some(*next),
-            Self::Many(edges) => edges
-                .iter()
-                .find_map(|(candidate, next)| (*candidate == byte).then_some(*next)),
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Empty => 0,
-            Self::One(..) => 1,
-            Self::Many(edges) => edges.len(),
-        }
-    }
-
-    fn nth(&self, index: usize) -> (u8, u32) {
-        match self {
-            Self::One(byte, next) if index == 0 => (*byte, *next),
-            Self::Many(edges) => edges[index],
-            _ => unreachable!("finder edge index out of range"),
-        }
-    }
-
-    fn iter(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
-        (0..self.len()).map(|index| self.nth(index))
-    }
-
-    fn push(&mut self, edge: (u8, u32)) {
-        match self {
-            Self::Empty => *self = Self::One(edge.0, edge.1),
-            Self::One(byte, next) => *self = Self::Many(vec![(*byte, *next), edge]),
-            Self::Many(edges) => edges.push(edge),
-        }
-    }
 }
 
 fn prefilter_one(literal: String) -> Prefilter {
@@ -694,18 +750,20 @@ fn cached_next_occurrence(
 pub fn required_literal(pattern: &str) -> Option<String> {
     let parsed = super::ast::parse(pattern);
     match required_literals(&parsed.ast) {
-        RequiredLiterals::One(literal) => Some(literal),
-        RequiredLiterals::Any(literals) => literals.into_iter().max_by_key(|literal| literal.len()),
+        RequiredLiterals::One(literal) => Some(literal.into_owned()),
+        RequiredLiterals::Any(literals) => literals
+            .into_iter()
+            .max_by_key(|literal| literal.len())
+            .map(Cow::into_owned),
         RequiredLiterals::None => literal_prefix(pattern),
     }
 }
 
-pub fn required_literals(ast: &Ast) -> RequiredLiterals {
+pub fn required_literals(ast: &Ast) -> RequiredLiterals<'_> {
     if let Some(literal) = exact_literal(ast).filter(|literal| !literal.is_empty()) {
         return RequiredLiterals::One(literal);
     }
     match ast {
-        Ast::Literal(literal) if !literal.is_empty() => RequiredLiterals::One(literal.clone()),
         Ast::Concat(nodes) => sequence_required_literals(nodes),
         Ast::Alternation(branches) => alternation_required_literals(branches),
         Ast::Group { child, .. } | Ast::Flags { child, .. } => required_literals(child),
@@ -719,43 +777,76 @@ pub fn required_literals(ast: &Ast) -> RequiredLiterals {
     }
 }
 
-fn sequence_required_literals(nodes: &[Ast]) -> RequiredLiterals {
+fn sequence_required_literals(nodes: &[Ast]) -> RequiredLiterals<'_> {
     let mut best = RequiredLiterals::None;
     let mut run = String::new();
     for node in nodes {
-        if let Some(literal) = exact_literal(node) {
-            run.push_str(&literal);
+        let run_len = run.len();
+        if append_exact_literal(node, &mut run) {
             continue;
         }
+        run.truncate(run_len);
         if !run.is_empty() {
-            best = choose_more_selective(best, RequiredLiterals::One(std::mem::take(&mut run)));
+            best = choose_more_selective(
+                best,
+                RequiredLiterals::One(Cow::Owned(std::mem::take(&mut run))),
+            );
         }
         let candidate = required_literals(node);
         best = choose_more_selective(best, candidate);
     }
     if !run.is_empty() {
-        best = choose_more_selective(best, RequiredLiterals::One(run));
+        best = choose_more_selective(best, RequiredLiterals::One(Cow::Owned(run)));
     }
     best
 }
 
-fn exact_literal(ast: &Ast) -> Option<String> {
+/// The exact string `ast` matches, if it is one. A single literal (possibly
+/// grouped) is borrowed; only concatenations build a new string.
+fn exact_literal(ast: &Ast) -> Option<Cow<'_, str>> {
     match ast {
-        Ast::Empty => Some(String::new()),
-        Ast::Literal(literal) => Some(literal.clone()),
+        Ast::Empty => Some(Cow::Borrowed("")),
+        Ast::Literal(literal) => Some(Cow::Borrowed(literal)),
         Ast::Concat(nodes) => {
+            if !nodes.iter().all(is_exact_literal) {
+                return None;
+            }
             let mut out = String::new();
             for node in nodes {
-                out.push_str(&exact_literal(node)?);
+                append_exact_literal(node, &mut out);
             }
-            Some(out)
+            Some(Cow::Owned(out))
         }
         Ast::Group { child, .. } | Ast::Flags { child, .. } => exact_literal(child),
         _ => None,
     }
 }
 
-fn alternation_required_literals(branches: &[Ast]) -> RequiredLiterals {
+fn is_exact_literal(ast: &Ast) -> bool {
+    match ast {
+        Ast::Empty | Ast::Literal(_) => true,
+        Ast::Concat(nodes) => nodes.iter().all(is_exact_literal),
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => is_exact_literal(child),
+        _ => false,
+    }
+}
+
+/// Appends the exact string `ast` matches; on `false` the caller discards
+/// whatever was appended.
+fn append_exact_literal(ast: &Ast, out: &mut String) -> bool {
+    match ast {
+        Ast::Empty => true,
+        Ast::Literal(literal) => {
+            out.push_str(literal);
+            true
+        }
+        Ast::Concat(nodes) => nodes.iter().all(|node| append_exact_literal(node, out)),
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => append_exact_literal(child, out),
+        _ => false,
+    }
+}
+
+fn alternation_required_literals(branches: &[Ast]) -> RequiredLiterals<'_> {
     let mut literals = Vec::new();
     for branch in branches {
         match required_literals(branch) {
@@ -769,7 +860,10 @@ fn alternation_required_literals(branches: &[Ast]) -> RequiredLiterals {
     RequiredLiterals::Any(literals)
 }
 
-fn choose_more_selective(left: RequiredLiterals, right: RequiredLiterals) -> RequiredLiterals {
+fn choose_more_selective<'a>(
+    left: RequiredLiterals<'a>,
+    right: RequiredLiterals<'a>,
+) -> RequiredLiterals<'a> {
     if left.is_empty() {
         return right;
     }
@@ -795,7 +889,11 @@ fn max_literal_len(literals: &RequiredLiterals) -> usize {
     match literals {
         RequiredLiterals::None => 0,
         RequiredLiterals::One(literal) => literal.len(),
-        RequiredLiterals::Any(literals) => literals.iter().map(String::len).max().unwrap_or(0),
+        RequiredLiterals::Any(literals) => literals
+            .iter()
+            .map(|literal| literal.len())
+            .max()
+            .unwrap_or(0),
     }
 }
 
@@ -807,7 +905,7 @@ fn literal_cardinality(literals: &RequiredLiterals) -> usize {
     }
 }
 
-fn class_required_literals(class: &CharClass) -> RequiredLiterals {
+fn class_required_literals(class: &CharClass) -> RequiredLiterals<'_> {
     if class.negated || class.atoms.is_empty() {
         return RequiredLiterals::None;
     }
@@ -816,7 +914,7 @@ fn class_required_literals(class: &CharClass) -> RequiredLiterals {
     let mut literals = Vec::new();
     for atom in &class.atoms {
         match atom {
-            ClassAtom::Char(ch) => literals.push(ch.to_string()),
+            ClassAtom::Char(ch) => literals.push(Cow::Owned(ch.to_string())),
             ClassAtom::Range(..)
             | ClassAtom::Perl(_)
             | ClassAtom::Posix { .. }
@@ -988,7 +1086,7 @@ mod tests {
         let parsed = parse("foo|bar");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::Any(vec!["bar".to_owned(), "foo".to_owned()])
+            RequiredLiterals::Any(vec!["bar".into(), "foo".into()])
         );
     }
 
@@ -997,13 +1095,13 @@ mod tests {
         let parsed = parse(r"(?<=return)\s*(?=(<)\s*([A-Za-z]+))");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::One("<".to_owned())
+            RequiredLiterals::One("<".into())
         );
 
         let parsed = parse(r"(?<!\\)(?=;)");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::One(";".to_owned())
+            RequiredLiterals::One(";".into())
         );
 
         let parsed = parse(r"(?<=return)");
@@ -1015,7 +1113,7 @@ mod tests {
         let parsed = parse(r"(?=[;)])(?<!\\)");
         assert_eq!(
             required_literals(&parsed.ast),
-            RequiredLiterals::Any(vec![")".to_owned(), ";".to_owned()])
+            RequiredLiterals::Any(vec![")".into(), ";".into()])
         );
 
         let parsed = parse(r"(?=[A-Z])");
@@ -1082,6 +1180,59 @@ mod tests {
         // `he` is reached through the failure link after scanning `she`.
         assert_eq!(finder.find(b"ushers"), Some(1));
         assert_eq!(finder.find(b"nothing"), None);
+    }
+
+    #[test]
+    fn multi_literal_finder_matches_naive_leftmost_search() {
+        // Small alphabet forces shared prefixes, deep failure chains, wide
+        // fanouts (binary-searched edges), and overlapping outputs.
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut next = |bound: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % bound
+        };
+        for round in 0..200 {
+            let alphabet: &[u8] = if round % 3 == 0 {
+                b"ab"
+            } else if round % 3 == 1 {
+                b"abcd-"
+            } else {
+                b"abcdefghijklmnopqrstuvwxyz0123456789"
+            };
+            let count = 1 + next(40) as usize;
+            let mut literals = (0..count)
+                .map(|_| {
+                    let len = 1 + next(6) as usize;
+                    (0..len)
+                        .map(|_| alphabet[next(alphabet.len() as u64) as usize] as char)
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>();
+            if round % 3 == 2 {
+                // A wide interior fanout exercises binary-searched edges.
+                literals.extend(alphabet.iter().map(|byte| format!("a{}", *byte as char)));
+            }
+            let finder = MultiLiteralFinder::new(&literals, false);
+            for _ in 0..20 {
+                let len = next(24) as usize;
+                let haystack = (0..len)
+                    .map(|_| alphabet[next(alphabet.len() as u64) as usize])
+                    .collect::<Vec<_>>();
+                let naive = (0..=haystack.len()).find(|&start| {
+                    literals
+                        .iter()
+                        .any(|literal| haystack[start..].starts_with(literal.as_bytes()))
+                });
+                assert_eq!(
+                    finder.find(&haystack),
+                    naive,
+                    "literals {literals:?} haystack {:?}",
+                    String::from_utf8_lossy(&haystack)
+                );
+            }
+        }
     }
 
     #[test]
@@ -1159,7 +1310,10 @@ mod tests {
         .into_iter()
         .map(str::to_owned)
         .collect();
-        let prefilter = Prefilter::from_required(RequiredLiterals::Any(literals.clone()), true);
+        let prefilter = Prefilter::from_required(
+            RequiredLiterals::Any(literals.iter().cloned().map(Cow::Owned).collect()),
+            true,
+        );
         let Prefilter::Any {
             finder,
             mixed_width_fold_mask,

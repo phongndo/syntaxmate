@@ -954,7 +954,8 @@ impl StartByteSet {
     }
 
     fn extend(&mut self, other: &Self) {
-        // Word-wise union: large keyword alternations extend once per branch.
+        // Word-wise union: large literal alternations merge one set per
+        // branch, so a per-byte loop dominated start-byte analysis.
         for (word, other) in self.bits.iter_mut().zip(other.bits) {
             *word |= other;
         }
