@@ -6856,7 +6856,8 @@ fn scoped_repository_rules(grammar: &CompiledGrammar) -> FastSet<RuleId> {
     {
         let innermost = &origin.local_repository;
         let mut visited = hashing::fast_set();
-        let mut expanded_names = HashSet::new();
+        // Repository entries expanded so far, by address (one per name).
+        let mut expanded_names = hashing::fast_set();
         let mut expanded_top_level = false;
         let mut rules = vec![origin.id];
         let mut refs: Vec<&RuleRef> = Vec::new();
@@ -6906,7 +6907,7 @@ fn scoped_repository_rules(grammar: &CompiledGrammar) -> FastSet<RuleId> {
                 RuleRef::Repository(name) => {
                     let mut resolve = |bound_name: &str| {
                         if let Some(target) = grammar.repository.get(bound_name)
-                            && expanded_names.insert(bound_name.to_owned())
+                            && expanded_names.insert(std::ptr::from_ref(target) as usize)
                         {
                             refs.push(target);
                         }
