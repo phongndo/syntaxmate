@@ -2666,6 +2666,7 @@ struct Compiler<'a> {
     repeat_slots: VmSlot,
     capture_layout: Vec<u32>,
     named_captures: std::collections::BTreeMap<String, u32>,
+    duplicate_names: std::collections::BTreeMap<String, Vec<u32>>,
     routine_entries: std::collections::BTreeMap<u32, ProgramCounter>,
     /// Loops whose body is being compiled. Their `Repeat` instruction is
     /// still a placeholder, so continuation analysis reads the loop's exit
@@ -2704,6 +2705,7 @@ impl<'a> Compiler<'a> {
             repeat_slots: 0,
             capture_layout: Vec::new(),
             named_captures: std::collections::BTreeMap::new(),
+            duplicate_names: std::collections::BTreeMap::new(),
             routine_entries: std::collections::BTreeMap::new(),
             open_repeats: Vec::new(),
             split_guards: 0,
@@ -2721,6 +2723,7 @@ impl<'a> Compiler<'a> {
 
     fn compile(mut self, parsed: &'a ParsedRegex) -> Result<Program, CompileError> {
         self.named_captures.clone_from(&parsed.named_captures);
+        self.duplicate_names.clone_from(&parsed.duplicate_names);
         if self.captures_under_choice.is_none() {
             self.captures_under_choice = Some(
                 !self.capture_layout.is_empty()
@@ -3031,6 +3034,11 @@ impl<'a> Compiler<'a> {
             Ast::Backref(backref) => {
                 let group = match backref {
                     Backref::Number(group) => *group,
+                    // A shared name refers to several groups; the evaluator
+                    // implements Oniguruma's choice among them.
+                    Backref::Name(name) if self.duplicate_names.contains_key(name) => {
+                        return Err(CompileError::Backreference);
+                    }
                     Backref::Name(name) => self
                         .named_captures
                         .get(name)

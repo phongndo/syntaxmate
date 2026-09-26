@@ -93,6 +93,8 @@ export const conformanceCases = Object.freeze([
   { name: 'numbered-backref', pattern: String.raw`(foo)\1`, line: 'xxfoofoo', engine: 'fallback', constructs: ['backreference.numbered'] },
   { name: 'named-backref-angle', pattern: String.raw`(?<word>foo)\k<word>`, line: 'xxfoofoo', engine: 'fallback', constructs: ['named-group.angle', 'backreference.named-angle'] },
   { name: 'duplicate-named-backref', pattern: String.raw`(?<x>a)(?<x>b)\k<x>`, line: 'abb', engine: 'fallback', constructs: ['named-group.angle', 'named-group.duplicate', 'backreference.named-angle'] },
+  { name: 'duplicate-named-backref-earlier-group', pattern: String.raw`(?<x>a)(?<x>b)\k<x>`, line: 'abab', engine: 'fallback', constructs: ['named-group.angle', 'named-group.duplicate', 'backreference.named-angle'] },
+  { name: 'duplicate-named-backref-commits', pattern: String.raw`(?<x>a)(?<x>ab)\k<x>b`, line: 'aabab', engine: 'fallback', expectMiss: true, constructs: ['named-group.angle', 'named-group.duplicate', 'backreference.named-angle'] },
 
   { name: 'global-ignore-case', pattern: String.raw`(?i)foo`, line: 'xxFOO', engine: 'fallback', constructs: ['inline-flags.global-set'] },
   { name: 'global-ignore-case-extended', pattern: '(?ix) f o o', line: 'xxFOO', engine: 'fallback', constructs: ['inline-flags.global-set', 'inline-flags.extended-set'] },

@@ -410,7 +410,10 @@ pub struct ParsedRegex {
     pub features: RegexFeatures,
     pub flags: RegexFlags,
     pub capture_count: u32,
+    /// Last group of each name.
     pub named_captures: BTreeMap<String, u32>,
+    /// Every group of each name used by more than one group, ascending.
+    pub duplicate_names: BTreeMap<String, Vec<u32>>,
     pub diagnostics: Vec<String>,
     analysis: OnceLock<RegexAnalysis>,
 }
@@ -423,6 +426,7 @@ impl PartialEq for ParsedRegex {
             && self.flags == other.flags
             && self.capture_count == other.capture_count
             && self.named_captures == other.named_captures
+            && self.duplicate_names == other.duplicate_names
             && self.diagnostics == other.diagnostics
     }
 }
@@ -527,6 +531,7 @@ struct Parser<'a> {
     class_atoms: Vec<ClassAtom>,
     next_capture: u32,
     named_captures: BTreeMap<String, u32>,
+    duplicate_names: BTreeMap<String, Vec<u32>>,
     features: RegexFeatures,
     flags: RegexFlags,
     diagnostics: Vec<String>,
@@ -552,6 +557,7 @@ impl<'a> Parser<'a> {
             class_atoms: Vec::new(),
             next_capture: 1,
             named_captures: BTreeMap::new(),
+            duplicate_names: BTreeMap::new(),
             features: RegexFeatures::default(),
             flags: RegexFlags::default(),
             diagnostics: Vec::new(),
@@ -582,6 +588,7 @@ impl<'a> Parser<'a> {
             flags: RegexFlags::default(),
             capture_count: self.next_capture.saturating_sub(1),
             named_captures: self.named_captures,
+            duplicate_names: self.duplicate_names,
             diagnostics: self.diagnostics,
             analysis: OnceLock::new(),
         }
@@ -1530,7 +1537,15 @@ impl<'a> Parser<'a> {
         let index = self.next_capture;
         self.next_capture += 1;
         if let Some(name) = name {
-            self.named_captures.insert(name, index);
+            if let Some(last) = self.named_captures.get_mut(&name) {
+                let previous = std::mem::replace(last, index);
+                self.duplicate_names
+                    .entry(name)
+                    .or_insert_with(|| vec![previous])
+                    .push(index);
+            } else {
+                self.named_captures.insert(name, index);
+            }
         }
         index
     }

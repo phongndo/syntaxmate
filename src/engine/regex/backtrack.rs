@@ -2565,21 +2565,25 @@ fn match_backref(
     flags: RegexFlags,
     _budget: &mut StepBudget,
 ) -> Result<VmStates, BudgetExceeded> {
-    let index = match backref {
-        Backref::Number(index) => *index as usize,
-        Backref::Name(name) => parsed.named_captures.get(name).copied().unwrap_or(0) as usize,
+    let backref_end = |index: usize| {
+        let range = state.captures.get(index)?.as_ref()?;
+        match_literal_end(line, state.pos, line.get(range.clone())?, flags)
     };
-    let Some(Some(range)) = state.captures.get(index) else {
-        return Ok(VmStates::empty());
+    let end = match backref {
+        Backref::Number(index) => backref_end(*index as usize),
+        // Oniguruma tries same-named groups from the last one, skips unset
+        // groups, and commits to the first whose text matches.
+        Backref::Name(name) => match parsed.duplicate_names.get(name) {
+            Some(groups) => groups
+                .iter()
+                .rev()
+                .find_map(|group| backref_end(*group as usize)),
+            None => backref_end(parsed.named_captures.get(name).copied().unwrap_or(0) as usize),
+        },
     };
-    let Some(captured) = line.get(range.clone()) else {
-        return Ok(VmStates::empty());
-    };
-    if let Some(end) = match_literal_end(line, state.pos, captured, flags) {
-        Ok(VmStates::one(VmState { pos: end, ..state }))
-    } else {
-        Ok(VmStates::empty())
-    }
+    Ok(end.map_or_else(VmStates::empty, |end| {
+        VmStates::one(VmState { pos: end, ..state })
+    }))
 }
 
 fn ast_exact_literal(ast: &Ast) -> Option<String> {
@@ -3556,6 +3560,25 @@ mod tests {
         let matcher = FallbackMatcher::new(r"(?<parens>\((?:[^()]|\g<parens>)*\))");
         let result = matcher.find("x((a)(b))y", 0, ctx()).unwrap();
         assert_eq!(result.start..result.end, 1..9);
+    }
+
+    #[test]
+    fn duplicate_name_backrefs_commit_to_the_last_matching_group() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, expected) in [
+            (r"(?<x>a)(?<x>b)\k<x>", "abab", Some(0..3)),
+            (r"(?<x>a)(?<x>ab)\k<x>", "aababx", Some(0..5)),
+            (r"(?<x>a)(?<x>ab)\k<x>b", "aabab", None),
+            (r"(?<x>ab)(?<x>a)\k<x>b", "abaab", Some(0..5)),
+            (r"(?:(?<x>a)|(?<x>b))\k<x>", "bb", Some(0..2)),
+            (r"(?:(?<x>a)|(?<x>b))\k<x>", "ab", None),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let found = matcher
+                .find(line, 0, ctx())
+                .map(|result| result.start..result.end);
+            assert_eq!(found, expected, "{pattern} on {line:?}");
+        }
     }
 
     #[test]

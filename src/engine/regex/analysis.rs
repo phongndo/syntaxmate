@@ -458,7 +458,9 @@ fn push_backref_group(backref: &Backref, parsed: &ParsedRegex, groups: &mut Vec<
             }
         }
         Backref::Name(name) => {
-            if let Some(group) = parsed.named_captures.get(name) {
+            if let Some(shared) = parsed.duplicate_names.get(name) {
+                groups.extend_from_slice(shared);
+            } else if let Some(group) = parsed.named_captures.get(name) {
                 groups.push(*group);
             }
         }
