@@ -1231,8 +1231,12 @@ impl RepeatUndo {
         }
     }
 
+    fn vm_slot(self) -> VmSlot {
+        self.slot_and_stalled & !REPEAT_UNDO_STALLED
+    }
+
     fn slot(self) -> usize {
-        arena_index(self.slot_and_stalled & !REPEAT_UNDO_STALLED)
+        arena_index(self.vm_slot())
     }
 
     fn state(self) -> RepeatState {
@@ -1304,6 +1308,7 @@ struct AssertionFrame {
 struct CallFrame {
     return_pc: ProgramCounter,
     capture_undo_mark: u32,
+    repeat_undo_mark: u32,
     /// The caller's `BytecodeScratch::call_frame` value.
     parent: u32,
     depth: u32,
@@ -1317,7 +1322,7 @@ const _: () = {
     assert!(std::mem::size_of::<Instruction>() == 24);
     assert!(std::mem::size_of::<BacktrackFrame>() == 32);
     assert!(std::mem::size_of::<AssertionFrame>() == 64);
-    assert!(std::mem::size_of::<CallFrame>() == 16);
+    assert!(std::mem::size_of::<CallFrame>() == 20);
     assert!(std::mem::size_of::<RepeatState>() == 16);
     assert!(std::mem::size_of::<RepeatUndo>() == 16);
     assert!(std::mem::size_of::<GuardCell>() == 16);
@@ -1766,6 +1771,7 @@ impl Program {
                         let frame = CallFrame {
                             return_pc: *next,
                             capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
+                            repeat_undo_mark: arena_mark(scratch.repeat_undo.len())?,
                             parent: scratch.call_frame,
                             depth,
                         };
@@ -1780,16 +1786,27 @@ impl Program {
                     scratch.call_frame = frame.parent;
                     // Recursive calls to the same capturing group overwrite
                     // an enclosing pending start. Restore pending captures on
-                    // return; completed captures remain observable.
-                    for index in arena_index(frame.capture_undo_mark)..scratch.capture_undo.len() {
+                    // return; completed captures remain observable. Restores
+                    // are logged so backtracking into the routine undoes them.
+                    let capture_mark = arena_index(frame.capture_undo_mark);
+                    for index in capture_mark..scratch.capture_undo.len() {
                         let (slot, previous) = &scratch.capture_undo[index];
-                        if let CaptureState::Open(start) = previous
-                            && !scratch.capture_undo[arena_index(frame.capture_undo_mark)..index]
+                        if let CaptureState::Open(start) = *previous
+                            && !scratch.capture_undo[capture_mark..index]
                                 .iter()
                                 .any(|(earlier, _)| earlier == slot)
                         {
-                            scratch.captures[arena_index(*slot)] = CaptureState::Open(*start);
+                            set_capture(scratch, *slot, CaptureState::Open(start));
                         }
+                    }
+                    // A recursive call reuses its caller's loop slots. Put
+                    // every slot the call changed back to its value at the
+                    // call: replaying the undo entries newest first leaves the
+                    // oldest value per slot.
+                    let repeat_mark = arena_index(frame.repeat_undo_mark);
+                    for index in (repeat_mark..scratch.repeat_undo.len()).rev() {
+                        let undo = scratch.repeat_undo[index];
+                        set_repeat(scratch, undo.vm_slot(), undo.state());
                     }
                     pc = frame.return_pc;
                 }
@@ -4525,7 +4542,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Instruction>(), 24);
         assert_eq!(std::mem::size_of::<BacktrackFrame>(), 32);
         assert_eq!(std::mem::size_of::<AssertionFrame>(), 64);
-        assert_eq!(std::mem::size_of::<CallFrame>(), 16);
+        assert_eq!(std::mem::size_of::<CallFrame>(), 20);
         assert_eq!(std::mem::size_of::<RepeatState>(), 16);
         assert_eq!(std::mem::size_of::<ResumeAction>(), 8);
         assert_eq!(std::mem::size_of::<AssertDirection>(), 8);
@@ -5570,6 +5587,27 @@ mod tests {
     fn capture_subroutines_use_bounded_explicit_call_stack() {
         assert_capture_replay(r"(?<x>a|b)\g<x>", "aa", 0, &[1]);
         assert_capture_replay(r"(?<parens>\((?:[^()]|\g<parens>)*\))", "((a)(b))", 0, &[1]);
+    }
+
+    #[test]
+    fn recursive_subroutines_keep_their_callers_loop_counts() {
+        // The inner call re-enters `{2}` on the same repeat slot; the outer
+        // loop must resume with its own count. Oniguruma matches 0..18.
+        let pattern = r"(?<n>a(?:b\g<n>?c){2}d)";
+        let line = "abababcbcdcbcdcbcd";
+        assert_capture_replay(pattern, line, 0, &[1]);
+        // Position selection uses the internal capture layout.
+        let program = Program::compile_captures(&parse(pattern), &[]).expect("selection program");
+        let end = program
+            .execute(
+                line,
+                0,
+                context(),
+                &mut StepBudget::new(100_000),
+                &mut BytecodeScratch::default(),
+            )
+            .unwrap();
+        assert_eq!(end, Some(18));
     }
 
     #[test]
