@@ -1960,7 +1960,7 @@ impl PatternSetMatcher {
                     continue;
                 }
                 if let Some(gate) = &self.skip_gates[idx] {
-                    match gate.decide(line, start, &mut skip_state) {
+                    match gate.decide(line, start, ctx, &mut skip_state) {
                         super::skip_prefix::SkipGateDecision::Allow => {}
                         super::skip_prefix::SkipGateDecision::Skip => continue,
                         super::skip_prefix::SkipGateDecision::NeedsCommentCheck => {
@@ -2720,6 +2720,94 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn nullable_prefix_skip_gates_are_selection_neutral() {
+        // Each pattern alone, so an earlier winner cannot hide a wrong skip.
+        let sep = r"((?:\s*+/\*(?:[^*]++|\*+(?!/))*+\*/\s*+)+|\s++|(?<=\W)|(?=\W)|^|\n?$|\A|\Z)";
+        let patterns = [
+            format!(r"(\s*+((?:\[\[.*?]]|__attribute\(.*?\)))?{sep}(?:unsigned|long)\b"),
+            format!(r"^({sep}(#)\s+{{0,1}}define)\b"),
+            format!(
+                r"(?!class|enum)\b(\s*+(\[\[.*?]])?{sep}(?:(?:signed|short){sep})*[A-Z_a-z]\w*\s*+\("
+            ),
+            r"(?:(?:^|\G|(?<=[;}]))|(?<=>|\*/))\s*+(?:(template)\s+)?\w+\s*+\(".to_owned(),
+            r"^(?:(\s+{0,1}(//)x)|(\s+{0,1}(/\*)y))".to_owned(),
+            r"\s*^x".to_owned(),
+            r"\s?(?<=[ \t])x".to_owned(),
+            r"(?:x|\s+)(?<=[;x])y".to_owned(),
+            r"(?<=;|^)\s*x".to_owned(),
+            r"(?<=a\*/)\s*z".to_owned(),
+            r"(?<=é)\s*x".to_owned(),
+            r"(?i)(?<=k)\s+y".to_owned(),
+            r"(?i)\s*(?:select|Kelvin)\b".to_owned(),
+            r"(\s*)\1?x".to_owned(),
+            r"(?:\s*+/\*.*?\*/)?\s*x".to_owned(),
+            r"\G\s*(,)".to_owned(),
+            r"(?:\s*[\[{])?\s*+(?!\w)(?:::|\()".to_owned(),
+            r"(?:\s*;|\s*})+\s*x?".to_owned(),
+            r"(?:^|x)\s*y".to_owned(),
+            r"(?:(?<=;)|\s)\s*y".to_owned(),
+            r"(?:(?<=;)|a?)\s*y".to_owned(),
+        ];
+        let texts = [
+            "unsigned x; long y;",
+            "  [[nodiscard]] unsigned long",
+            "__attribute(x)long",
+            "/* c */ unsigned /* d */ long",
+            "#define X 1",
+            "  #  define Y",
+            "/**/#define Z",
+            "foo(x) static short bar (y)",
+            "class Foo(",
+            "a; b(c); }d( >e(*/f(",
+            "template g(",
+            "\tfoo (",
+            " // x",
+            "/* y */",
+            "x \u{a0}x \tx",
+            "; x;y xy ;xy",
+            "a*/ z a*/z */z",
+            "éx é x ex",
+            "k y K y \u{212a} y ky",
+            "SELECT \u{212a}elvin select",
+            "  x xx",
+            ", a,, ,",
+            "{:: [( (::",
+            ";;} }x ;",
+            "ax y a y; ;y  y",
+            "",
+            "\n",
+        ];
+        let mut gated_count = 0;
+        for pattern in &patterns {
+            let compiled = [Arc::new(super::super::CompiledPattern::new(pattern))];
+            let gated = PatternSetMatcher::from_compiled(&compiled);
+            gated_count += usize::from(gated.skip_gates[0].is_some());
+            let mut ungated = gated.clone();
+            ungated.skip_gates.iter_mut().for_each(|gate| *gate = None);
+            for text in texts {
+                for from in (0..=text.len()).filter(|from| text.is_char_boundary(*from)) {
+                    for ctx in [
+                        AnchorContext::line_start(),
+                        AnchorContext::start_of_file(),
+                        AnchorContext::continuation(from),
+                        AnchorContext::continuation(0),
+                    ] {
+                        let got = gated.find_with_context(text, from, ctx);
+                        let expected = ungated.find_with_context(text, from, ctx);
+                        assert_eq!(
+                            got.map(|(idx, result)| (idx, result.start, result.end)),
+                            expected.map(|(idx, result)| (idx, result.start, result.end)),
+                            "pattern={pattern:?} text={text:?} from={from} ctx={ctx:?}"
+                        );
+                    }
+                }
+            }
+        }
+        // Only the backreference pattern stays ungated.
+        assert_eq!(gated_count, patterns.len() - 1);
     }
 
     #[test]
