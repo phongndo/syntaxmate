@@ -1754,10 +1754,15 @@ impl Program {
     }
 }
 
+/// Collects every numbered group with its effective flags, and the group
+/// numbers that subroutine calls resolve to (named calls through
+/// `named_captures`, exactly as `compile_node` resolves them).
 fn collect_group_definitions<'a>(
     ast: &'a Ast,
     flags: RegexFlags,
+    named_captures: &std::collections::BTreeMap<String, u32>,
     definitions: &mut std::collections::BTreeMap<u32, (&'a Ast, RegexFlags)>,
+    called: &mut Vec<u32>,
 ) {
     if let Ast::Group {
         index: Some(index), ..
@@ -1768,23 +1773,30 @@ fn collect_group_definitions<'a>(
     match ast {
         Ast::Concat(nodes) | Ast::Alternation(nodes) => {
             for node in nodes {
-                collect_group_definitions(node, flags, definitions);
+                collect_group_definitions(node, flags, named_captures, definitions, called);
             }
         }
         Ast::Conditional {
             matched, unmatched, ..
         } => {
-            collect_group_definitions(matched, flags, definitions);
-            collect_group_definitions(unmatched, flags, definitions);
+            collect_group_definitions(matched, flags, named_captures, definitions, called);
+            collect_group_definitions(unmatched, flags, named_captures, definitions, called);
         }
         Ast::Flags {
             flags: local,
             child,
-        } => collect_group_definitions(child, *local, definitions),
+        } => collect_group_definitions(child, *local, named_captures, definitions, called),
         Ast::Repeat { node, .. }
         | Ast::Group { child: node, .. }
         | Ast::Look { child: node, .. } => {
-            collect_group_definitions(node, flags, definitions);
+            collect_group_definitions(node, flags, named_captures, definitions, called);
+        }
+        Ast::Subroutine(call) => {
+            let target = match &call.target {
+                Backref::Number(group) => Some(*group),
+                Backref::Name(name) => named_captures.get(name).copied(),
+            };
+            called.extend(target);
         }
         Ast::Empty
         | Ast::Literal(_)
@@ -1793,7 +1805,6 @@ fn collect_group_definitions<'a>(
         | Ast::Class(_)
         | Ast::Anchor(_)
         | Ast::Backref(_)
-        | Ast::Subroutine(_)
         | Ast::Unsupported(_) => {}
     }
 }
@@ -1994,7 +2005,20 @@ impl<'a> Compiler<'a> {
             .reserve(parsed.analysis().instruction_capacity_hint());
         if !self.capture_layout.is_empty() && parsed.features.subroutine {
             let mut definitions = std::collections::BTreeMap::new();
-            collect_group_definitions(&parsed.ast, parsed.flags, &mut definitions);
+            let mut called = Vec::new();
+            collect_group_definitions(
+                &parsed.ast,
+                parsed.flags,
+                &parsed.named_captures,
+                &mut definitions,
+                &mut called,
+            );
+            // Only called groups need out-of-line routine bodies. Inline
+            // captures remain in the main program; nested capturing groups
+            // otherwise duplicate each subtree once per enclosing group.
+            called.sort_unstable();
+            called.dedup();
+            definitions.retain(|group, _| called.binary_search(group).is_ok());
             for group in definitions.keys() {
                 let placeholder = self.push(Instruction::Fail);
                 self.routine_entries.insert(*group, placeholder);
@@ -3363,7 +3387,15 @@ mod tests {
     fn literal_inventory_and_subroutine_definitions_borrow_the_parsed_ast() {
         let parsed = parse(r"(?<word>alpha|beta|gamma|delta)");
         let mut definitions = std::collections::BTreeMap::new();
-        collect_group_definitions(&parsed.ast, parsed.flags, &mut definitions);
+        let mut called = Vec::new();
+        collect_group_definitions(
+            &parsed.ast,
+            parsed.flags,
+            &parsed.named_captures,
+            &mut definitions,
+            &mut called,
+        );
+        assert!(called.is_empty());
         let (definition, _) = definitions[&1];
         let Ast::Group { child, .. } = definition else {
             panic!("capturing group definition");
@@ -3953,6 +3985,49 @@ mod tests {
     fn capture_subroutines_use_bounded_explicit_call_stack() {
         assert_capture_replay(r"(?<x>a|b)\g<x>", "aa", 0, &[1]);
         assert_capture_replay(r"(?<parens>\((?:[^()]|\g<parens>)*\))", "((a)(b))", 0, &[1]);
+    }
+
+    #[test]
+    fn subroutine_programs_compile_only_called_routines() {
+        // Uncalled groups (including ones nesting the called group) stay
+        // inline-only; a call inside a routine body reaches another routine.
+        for (pattern, line, live) in [
+            (
+                r"((a)(?<b>b|c))x\g<b>(d(e))",
+                "abxcde",
+                &[1, 2, 3, 4, 5][..],
+            ),
+            (
+                r"(?<outer>(?<inner>[a-c])\g<inner>)-\g<outer>",
+                "ab-ca",
+                &[1, 2],
+            ),
+            (r"((x)|(?<y>y\g<2>?))z\g<y>", "yxzy", &[1, 2, 3]),
+            (r"(q)(?<n>\d+)\g<1>\g<n>", "q12q3", &[]),
+            (r"(?i:(?<word>ab)){0}(x)\g<word>", "xAB", &[1, 2]),
+            (r"(?<a>a|b\g<a>)(c)\g<a>", "bacba", &[1, 2]),
+        ] {
+            assert_capture_replay(pattern, line, 0, live);
+            let parsed = parse(pattern);
+            let all = Program::compile_captures(&parsed, live).expect("capture program");
+            let mut definitions = std::collections::BTreeMap::new();
+            let mut called = Vec::new();
+            collect_group_definitions(
+                &parsed.ast,
+                parsed.flags,
+                &parsed.named_captures,
+                &mut definitions,
+                &mut called,
+            );
+            called.sort_unstable();
+            called.dedup();
+            let routine_count = all
+                .instructions
+                .iter()
+                .filter(|instruction| matches!(instruction, Instruction::Return))
+                .count();
+            assert_eq!(routine_count, called.len(), "{pattern:?}");
+        }
     }
 
     #[test]
