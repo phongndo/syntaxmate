@@ -678,12 +678,6 @@ impl FallbackMatcher {
         from: usize,
         ctx: AnchorContext,
     ) -> Result<FallbackReport, FallbackError> {
-        if line.is_char_boundary(from) && !self.parsed.prefilter().may_match(line, from) {
-            return Ok(FallbackReport {
-                result: None,
-                steps: 0,
-            });
-        }
         let capture_count = self.selection_capture_count();
         let mut report = self.try_find_with_capture_count(line, from, ctx, capture_count)?;
         if let Some(result) = &mut report.result {
