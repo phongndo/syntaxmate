@@ -545,26 +545,24 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
         }
         ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => {
             let (low, high) = (*start as u8, *end as u8);
-            let mut sensitive = [0u64; 2];
-            let mut insensitive = [0u64; 2];
-            for byte in 0u8..=127 {
-                let ch = byte as char;
-                if low <= byte && byte <= high {
-                    ascii_mask_set(&mut sensitive, byte);
-                }
-                // Mirror the evaluator's folded-range semantics with ASCII
-                // case maps (exact for ASCII probes and bounds).
-                let folded_low = ch.to_ascii_lowercase() as u8;
-                let folded_up = ch.to_ascii_uppercase() as u8;
-                if (low.to_ascii_lowercase() <= folded_low
-                    && folded_low <= high.to_ascii_lowercase())
-                    || (low.to_ascii_uppercase() <= folded_up
-                        && folded_up <= high.to_ascii_uppercase())
-                {
-                    ascii_mask_set(&mut insensitive, byte);
-                }
-            }
-            (sensitive, insensitive)
+            // Mirror the evaluator's folded-range semantics with ASCII case
+            // maps (exact for ASCII probes and bounds): a byte matches when its
+            // lowercase map lies in the lowercased bounds or its uppercase map
+            // lies in the uppercased bounds.
+            let lowered =
+                ascii_bounded_range_mask(low.to_ascii_lowercase(), high.to_ascii_lowercase());
+            let uppered =
+                ascii_bounded_range_mask(low.to_ascii_uppercase(), high.to_ascii_uppercase());
+            let insensitive = [
+                // Word 0 holds no letters, so both case maps are the identity.
+                lowered[0] | uppered[0],
+                (lowered[1] & !ASCII_UPPER_MASK[1])
+                    | (uppered[1] & !ASCII_LOWER_MASK[1])
+                    // 'a'..='z' sit exactly 32 bits above 'A'..='Z' in word 1.
+                    | ((lowered[1] & ASCII_LOWER_MASK[1]) >> 32)
+                    | ((uppered[1] & ASCII_UPPER_MASK[1]) << 32),
+            ];
+            (ascii_bounded_range_mask(low, high), insensitive)
         }
         // Perl, POSIX, and Unicode-property atoms ignore the case flag, so
         // one cheap per-character pass fills both masks without any Unicode
@@ -653,6 +651,25 @@ const fn ascii_mask_complement(mask: AsciiMask) -> AsciiMask {
 }
 
 const ASCII_DIGIT_MASK: AsciiMask = ascii_range_mask(b'0', b'9');
+const ASCII_UPPER_MASK: AsciiMask = ascii_range_mask(b'A', b'Z');
+const ASCII_LOWER_MASK: AsciiMask = ascii_range_mask(b'a', b'z');
+
+/// `low..=high` as a mask, empty when the bounds are reversed.
+fn ascii_bounded_range_mask(low: u8, high: u8) -> AsciiMask {
+    if low > high {
+        return [0; 2];
+    }
+    let bits = |word: u8| {
+        let (start, end) = (u32::from(word) * 64, u32::from(word) * 64 + 63);
+        let (from, to) = (u32::from(low).max(start), u32::from(high).min(end));
+        if from > to {
+            0
+        } else {
+            (u64::MAX >> (63 - (to - from))) << (from - start)
+        }
+    };
+    [bits(0), bits(1)]
+}
 const ASCII_HEX_DIGIT_MASK: AsciiMask = ascii_mask_union(
     ASCII_DIGIT_MASK,
     ascii_mask_union(ascii_range_mask(b'A', b'F'), ascii_range_mask(b'a', b'f')),
@@ -3207,6 +3224,24 @@ mod tests {
                 )),
                 "{kind:?}"
             );
+        }
+    }
+
+    #[test]
+    fn every_ascii_range_mask_matches_class_evaluation() {
+        for low in 0u8..128 {
+            for high in 0u8..128 {
+                let class = CharClass {
+                    negated: false,
+                    intersections: Vec::new(),
+                    atoms: vec![ClassAtom::Range(low as char, high as char)],
+                };
+                assert_eq!(
+                    ascii_class_masks(&class),
+                    ascii_masks_by_evaluation(&class),
+                    "{low}..={high}"
+                );
+            }
         }
     }
 
