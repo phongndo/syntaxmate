@@ -143,6 +143,7 @@ export const conformanceCases = Object.freeze([
   { name: 'numbered-conditional-unmatched', pattern: String.raw`(a)?(?(1)b|c)d`, line: 'cd', engine: 'fallback', constructs: ['conditional.numbered'] },
   { name: 'named-conditional-matched', pattern: String.raw`(?<x>a)?(?(<x>)b|c)d`, line: 'abd', engine: 'fallback', constructs: ['named-group.angle', 'conditional.named-angle'] },
   { name: 'named-conditional-unmatched', pattern: String.raw`(?<x>a)?(?(<x>)b|c)d`, line: 'cd', engine: 'fallback', constructs: ['named-group.angle', 'conditional.named-angle'] },
+  { name: 'unset-group-non-ascii-line', pattern: String.raw`(a)?c`, line: 'cλ', engine: 'fallback', constructs: [] },
   { name: 'named-subroutine-call', pattern: String.raw`(?<word>ab)\g<word>`, line: 'xxabab', engine: 'fallback', constructs: ['named-group.angle', 'subroutine.angle'] },
   { name: 'absent-group-documented-degradation', pattern: '(?~a)', line: 'bbb', engine: 'fallback', constructs: ['absent-group'], expectedDegradation: 'unsupported-no-match' },
   ...inventoryVariantCases(),
@@ -282,9 +283,18 @@ function simplifyOnig(match, line) {
 }
 
 function spansEqual(syntaxmate, onig, line) {
+  if (!syntaxmate && isUnsetGroupArtifact(onig, line)) return true
   onig = normalizeOnigSpan(onig, line)
   if (!syntaxmate || !onig) return syntaxmate == null && onig == null
   return syntaxmate.start === onig.start && syntaxmate.end === onig.end
+}
+
+// vscode-oniguruma converts offsets to UTF-16 only for lines with non-ASCII
+// text, and that conversion reports an unset group as an empty span at the
+// line end. A real empty capture there looks the same, so accept the span only
+// against an unset syntaxmate capture.
+function isUnsetGroupArtifact(span, line) {
+  return span != null && span.start === line.length && span.end === line.length && /[^\x00-\x7f]/.test(line)
 }
 
 function normalizeOnigSpan(span, line) {
