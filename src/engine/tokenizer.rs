@@ -3636,15 +3636,17 @@ impl TextMateTokenizer {
                 let end = frame.end_pattern.as_ref().map(|pattern| Candidate {
                     order: 0,
                     base_grammar_id: frame.base_grammar_id,
-                    pattern: Arc::clone(pattern),
-                    pattern_id: frame
-                        .end_pattern_id
-                        .map(|pattern_id| (frame.grammar_id, pattern_id)),
                     scope_prefix: frame.scope_prefix.clone(),
-                    kind: CandidateKind::End {
-                        grammar_id: frame.grammar_id,
-                        captures: Arc::clone(&frame.end_captures),
-                    },
+                    rule: Arc::new(CandidateRule {
+                        pattern: Arc::clone(pattern),
+                        pattern_id: frame
+                            .end_pattern_id
+                            .map(|pattern_id| (frame.grammar_id, pattern_id)),
+                        kind: CandidateKind::End {
+                            grammar_id: frame.grammar_id,
+                            captures: Arc::clone(&frame.end_captures),
+                        },
+                    }),
                 });
                 (
                     frame.grammar_id,
@@ -3750,13 +3752,12 @@ impl TextMateTokenizer {
             .rule_repository_contexts
             .get(grammar_id, rule_id)
             .map(Arc::as_ref);
-        let candidate = |pattern: &str, pattern_id: PatternId, kind: CandidateKind| Candidate {
-            order: 0,
-            base_grammar_id: grammar_id,
-            pattern: Arc::from(pattern),
-            pattern_id: Some((grammar_id, pattern_id)),
-            scope_prefix: None,
-            kind,
+        let candidate = |pattern: &str, pattern_id: PatternId, kind: CandidateKind| {
+            Arc::new(CandidateRule {
+                pattern: Arc::from(pattern),
+                pattern_id: Some((grammar_id, pattern_id)),
+                kind,
+            })
         };
         match &rule.body {
             RuleBody::Match {
@@ -3771,7 +3772,6 @@ impl TextMateTokenizer {
                     CandidateKind::Match {
                         grammar_id,
                         name: scope_name(grammar, *name).map(Arc::from),
-                        name_template: None,
                         captures: contextualize_capture_spec(captures, repository_context),
                     },
                 )))
@@ -3884,9 +3884,9 @@ impl TextMateTokenizer {
                             order,
                             depth + 1,
                         ),
-                        Some(RuleCandidateTemplate::Candidate(mut candidate)) => {
+                        Some(RuleCandidateTemplate::Candidate(rule)) => {
                             if let CandidateKind::BeginEnd { patterns, .. }
-                            | CandidateKind::BeginWhile { patterns, .. } = &candidate.kind
+                            | CandidateKind::BeginWhile { patterns, .. } = &rule.kind
                                 && self.only_unavailable_includes(
                                     grammar_id,
                                     base_grammar_id,
@@ -3895,10 +3895,12 @@ impl TextMateTokenizer {
                             {
                                 continue;
                             }
-                            candidate.order = *order;
-                            candidate.base_grammar_id = base_grammar_id;
-                            candidate.scope_prefix = scope_prefix.clone();
-                            out.push(candidate);
+                            out.push(Candidate {
+                                order: *order,
+                                base_grammar_id,
+                                scope_prefix: scope_prefix.clone(),
+                                rule,
+                            });
                             *order += 1;
                         }
                     }
@@ -4377,30 +4379,33 @@ impl TextMateTokenizer {
 
     fn bind_owned_candidate_blueprint(
         &mut self,
-        mut blueprint: CandidateBlueprint,
+        blueprint: CandidateBlueprint,
     ) -> BoundCandidateBlueprint {
-        for candidate in &mut blueprint.candidates {
-            if let CandidateKind::Match {
-                name,
-                name_template,
-                ..
-            } = &mut candidate.kind
-                && let Some(name) = name.as_deref().filter(|name| !name.contains('$'))
-            {
-                *name_template = Some(
-                    self.scope_templates
-                        .intern_scope_template(name, &mut self.scope_names),
-                );
-            }
+        let blueprint = Arc::new(blueprint);
+        let match_name_templates = self.match_name_templates(&blueprint);
+        BoundCandidateBlueprint::Owned {
+            blueprint,
+            match_name_templates,
         }
-        BoundCandidateBlueprint::Owned(Arc::new(blueprint))
     }
 
     fn bind_shared_candidate_blueprint(
         &mut self,
         blueprint: Arc<CandidateBlueprint>,
     ) -> BoundCandidateBlueprint {
-        let match_name_templates = blueprint
+        let match_name_templates = self.match_name_templates(&blueprint);
+        BoundCandidateBlueprint::Shared {
+            blueprint,
+            match_name_templates,
+        }
+    }
+
+    /// Static match scopes resolved in this tokenizer's interners.
+    fn match_name_templates(
+        &mut self,
+        blueprint: &CandidateBlueprint,
+    ) -> Arc<[Option<ScopeTemplateId>]> {
+        blueprint
             .candidates
             .iter()
             .map(|candidate| match &candidate.kind {
@@ -4416,11 +4421,7 @@ impl TextMateTokenizer {
                 | CandidateKind::End { .. } => None,
             })
             .collect::<Vec<_>>()
-            .into();
-        BoundCandidateBlueprint::Shared {
-            blueprint,
-            match_name_templates,
-        }
+            .into()
     }
 
     fn build_shareable_candidate_blueprint(
@@ -6044,7 +6045,10 @@ impl Deref for CandidateSet {
 
 #[derive(Debug, Clone)]
 enum BoundCandidateBlueprint {
-    Owned(Arc<CandidateBlueprint>),
+    Owned {
+        blueprint: Arc<CandidateBlueprint>,
+        match_name_templates: Arc<[Option<ScopeTemplateId>]>,
+    },
     Shared {
         blueprint: Arc<CandidateBlueprint>,
         match_name_templates: Arc<[Option<ScopeTemplateId>]>,
@@ -6058,28 +6062,24 @@ impl BoundCandidateBlueprint {
 
     fn blueprint_arc(&self) -> &Arc<CandidateBlueprint> {
         match self {
-            Self::Owned(blueprint) => blueprint,
-            Self::Shared { blueprint, .. } => blueprint,
+            Self::Owned { blueprint, .. } | Self::Shared { blueprint, .. } => blueprint,
         }
     }
 
     fn shared_blueprint(&self) -> Option<&Arc<CandidateBlueprint>> {
         match self {
-            Self::Owned(_) => None,
+            Self::Owned { .. } => None,
             Self::Shared { blueprint, .. } => Some(blueprint),
         }
     }
 
     fn match_name_template(&self, index: usize) -> Option<ScopeTemplateId> {
         match self {
-            Self::Owned(blueprint) => blueprint.candidates.get(index).and_then(|candidate| {
-                if let CandidateKind::Match { name_template, .. } = &candidate.kind {
-                    *name_template
-                } else {
-                    None
-                }
-            }),
-            Self::Shared {
+            Self::Owned {
+                match_name_templates,
+                ..
+            }
+            | Self::Shared {
                 match_name_templates,
                 ..
             } => match_name_templates.get(index).copied().flatten(),
@@ -6234,10 +6234,11 @@ fn candidate_dynamic_retained_bytes(candidate: &Candidate) -> usize {
 /// blueprint. Compiled regexes are charged to the separately bounded pattern
 /// cache; the set surcharge covers its per-pattern scanner/index allocations.
 fn candidate_blueprint_retained_bytes(blueprint: &CandidateBlueprint) -> usize {
+    // Shared rule data is charged to every candidate that reaches it.
     let mut candidate_bytes = blueprint
         .candidates
         .capacity()
-        .saturating_mul(std::mem::size_of::<Candidate>());
+        .saturating_mul(std::mem::size_of::<Candidate>() + std::mem::size_of::<CandidateRule>());
     for candidate in &blueprint.candidates {
         let dynamic_bytes = candidate_dynamic_retained_bytes(candidate);
         candidate_bytes = candidate_bytes.saturating_add(dynamic_bytes);
@@ -6407,13 +6408,28 @@ struct PatternHotspotKey {
     pattern: String,
 }
 
+/// One entry of a candidate list: per-use placement around the rule data
+/// that every list reaching the same rule shares.
 #[derive(Debug, Clone)]
 struct Candidate {
     order: usize,
     base_grammar_id: GrammarId,
+    scope_prefix: Option<Arc<str>>,
+    rule: Arc<CandidateRule>,
+}
+
+impl Deref for Candidate {
+    type Target = CandidateRule;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rule
+    }
+}
+
+#[derive(Debug)]
+struct CandidateRule {
     pattern: Arc<str>,
     pattern_id: Option<(GrammarId, PatternId)>,
-    scope_prefix: Option<Arc<str>>,
     kind: CandidateKind,
 }
 
@@ -6421,7 +6437,7 @@ struct Candidate {
 /// `TextMateTokenizer::rule_candidate_template`.
 #[derive(Debug, Clone)]
 enum RuleCandidateTemplate {
-    Candidate(Candidate),
+    Candidate(Arc<CandidateRule>),
     IncludeOnly(Arc<[RuleRef]>),
 }
 
@@ -6430,7 +6446,6 @@ enum CandidateKind {
     Match {
         grammar_id: GrammarId,
         name: Option<Arc<str>>,
-        name_template: Option<ScopeTemplateId>,
         captures: Arc<CaptureSpec>,
     },
     BeginEnd {
@@ -8509,15 +8524,16 @@ mod tests {
             candidates: vec![Candidate {
                 order: 0,
                 base_grammar_id: GrammarId(0),
-                pattern: "x".repeat(MAX_PREPARED_BLUEPRINT_BYTES).into(),
-                pattern_id: None,
                 scope_prefix: None,
-                kind: CandidateKind::Match {
-                    grammar_id: GrammarId(0),
-                    name: None,
-                    name_template: None,
-                    captures: Arc::new(CaptureSpec::default()),
-                },
+                rule: Arc::new(CandidateRule {
+                    pattern: "x".repeat(MAX_PREPARED_BLUEPRINT_BYTES).into(),
+                    pattern_id: None,
+                    kind: CandidateKind::Match {
+                        grammar_id: GrammarId(0),
+                        name: None,
+                        captures: Arc::new(CaptureSpec::default()),
+                    },
+                }),
             }],
             matchers: Arc::from([]),
             pattern_set_search: None,
@@ -10228,15 +10244,16 @@ mod tests {
         let candidate = |name: &str| Candidate {
             order: 0,
             base_grammar_id: GrammarId(0),
-            pattern: Arc::from("pattern"),
-            pattern_id: None,
             scope_prefix: None,
-            kind: CandidateKind::Match {
-                grammar_id: GrammarId(0),
-                name: Some(Arc::from(name)),
-                name_template: None,
-                captures: Arc::new(CaptureSpec::default()),
-            },
+            rule: Arc::new(CandidateRule {
+                pattern: Arc::from("pattern"),
+                pattern_id: None,
+                kind: CandidateKind::Match {
+                    grammar_id: GrammarId(0),
+                    name: Some(Arc::from(name)),
+                    captures: Arc::new(CaptureSpec::default()),
+                },
+            }),
         };
 
         assert!(!candidate_requires_capture_replay(&candidate(
