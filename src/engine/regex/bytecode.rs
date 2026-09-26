@@ -231,9 +231,11 @@ struct UnicodeLiteralTrieNode {
     terminal_order: Option<u32>,
 }
 
+/// A character class with exact ASCII membership bitmaps, shared by the
+/// bytecode VM and the multi-pattern scanner.
 #[derive(Debug, Clone)]
-struct CompiledClass {
-    source: CharClass,
+pub(crate) struct CompiledClass {
+    pub(crate) source: CharClass,
     ascii_sensitive: [u64; 2],
     ascii_insensitive: [u64; 2],
     /// Case-insensitive evaluator for non-ASCII probes, prepared only when a
@@ -242,7 +244,7 @@ struct CompiledClass {
 }
 
 impl CompiledClass {
-    fn new(source: CharClass) -> Self {
+    pub(crate) fn new(source: CharClass) -> Self {
         // Build the ASCII bitmaps per atom instead of evaluating the whole
         // class 128 × 2 times: the per-character evaluation runs Unicode case
         // conversions for every probe and dominated one-shot grammar compile
@@ -270,7 +272,9 @@ impl CompiledClass {
         }
     }
 
-    fn matches_ascii(&self, byte: u8, case_insensitive: bool) -> bool {
+    #[inline]
+    pub(crate) fn matches_ascii(&self, byte: u8, case_insensitive: bool) -> bool {
+        debug_assert!(byte < 128);
         let bitmap = if case_insensitive {
             &self.ascii_insensitive
         } else {
@@ -358,7 +362,7 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
         // one cheap per-character pass fills both masks without any Unicode
         // case conversion.
         ClassAtom::Perl(kind) => {
-            let mask = ascii_predicate_mask(|ch| super::backtrack::perl_class_contains(*kind, ch));
+            let mask = perl_ascii_mask(*kind);
             (mask, mask)
         }
         ClassAtom::Posix { name, negated } => {
@@ -392,6 +396,61 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             });
             (sensitive, insensitive)
         }
+    }
+}
+
+const fn ascii_range_mask(low: u8, high: u8) -> AsciiMask {
+    let mut mask = [0u64; 2];
+    let mut byte = low;
+    while byte <= high {
+        mask[byte as usize / 64] |= 1u64 << (byte % 64);
+        byte += 1;
+    }
+    mask
+}
+
+const fn ascii_mask_union(left: AsciiMask, right: AsciiMask) -> AsciiMask {
+    [left[0] | right[0], left[1] | right[1]]
+}
+
+const fn ascii_mask_complement(mask: AsciiMask) -> AsciiMask {
+    [!mask[0], !mask[1]]
+}
+
+const ASCII_DIGIT_MASK: AsciiMask = ascii_range_mask(b'0', b'9');
+const ASCII_HEX_DIGIT_MASK: AsciiMask = ascii_mask_union(
+    ASCII_DIGIT_MASK,
+    ascii_mask_union(ascii_range_mask(b'A', b'F'), ascii_range_mask(b'a', b'f')),
+);
+/// `char::is_whitespace` on ASCII: U+0009..=U+000D and space.
+const ASCII_SPACE_MASK: AsciiMask =
+    ascii_mask_union(ascii_range_mask(b'\t', b'\r'), ascii_range_mask(b' ', b' '));
+const ASCII_WORD_MASK: AsciiMask = ascii_mask_union(
+    ascii_mask_union(ASCII_DIGIT_MASK, ascii_range_mask(b'_', b'_')),
+    ascii_mask_union(ascii_range_mask(b'A', b'Z'), ascii_range_mask(b'a', b'z')),
+);
+const ASCII_VERTICAL_SPACE_MASK: AsciiMask = ascii_mask_union(
+    ascii_range_mask(b'\n', b'\x0c'),
+    ascii_range_mask(b'\r', b'\r'),
+);
+const ASCII_NEWLINE_MASK: AsciiMask = ascii_range_mask(b'\n', b'\n');
+
+/// ASCII membership of a Perl class, identical to `perl_class_contains` on
+/// `0..=127` (checked by `perl_ascii_masks_match_the_evaluator`) without 128
+/// predicate calls per class atom.
+fn perl_ascii_mask(kind: PerlClassKind) -> AsciiMask {
+    match kind {
+        PerlClassKind::Digit => ASCII_DIGIT_MASK,
+        PerlClassKind::NotDigit => ascii_mask_complement(ASCII_DIGIT_MASK),
+        PerlClassKind::Space => ASCII_SPACE_MASK,
+        PerlClassKind::NotSpace => ascii_mask_complement(ASCII_SPACE_MASK),
+        PerlClassKind::Word => ASCII_WORD_MASK,
+        PerlClassKind::NotWord => ascii_mask_complement(ASCII_WORD_MASK),
+        PerlClassKind::HorizontalSpace => ASCII_HEX_DIGIT_MASK,
+        PerlClassKind::NotHorizontalSpace => ascii_mask_complement(ASCII_HEX_DIGIT_MASK),
+        PerlClassKind::VerticalSpace => ASCII_VERTICAL_SPACE_MASK,
+        PerlClassKind::NotVerticalSpace => ascii_mask_complement(ASCII_VERTICAL_SPACE_MASK),
+        PerlClassKind::NotNewline => ascii_mask_complement(ASCII_NEWLINE_MASK),
     }
 }
 
@@ -2574,6 +2633,62 @@ mod tests {
             allow_a: true,
             allow_g: true,
             g_pos: 0,
+        }
+    }
+
+    #[test]
+    fn perl_ascii_masks_match_the_evaluator() {
+        use PerlClassKind::*;
+        for kind in [
+            Digit,
+            NotDigit,
+            Space,
+            NotSpace,
+            Word,
+            NotWord,
+            HorizontalSpace,
+            NotHorizontalSpace,
+            VerticalSpace,
+            NotVerticalSpace,
+            NotNewline,
+        ] {
+            assert_eq!(
+                perl_ascii_mask(kind),
+                ascii_predicate_mask(|ch| crate::engine::regex::backtrack::perl_class_contains(
+                    kind, ch
+                )),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn atom_ascii_masks_match_class_evaluation() {
+        for pattern in [
+            r"[\w\-.]",
+            r"[^\s\d]",
+            r"[\h\v]",
+            r"[\S&&[^\n]]",
+            r"[a-zA-Z0-9_$]",
+            r"[^A-Z]",
+            r"[\x{212A}\x{17F}]",
+            r"[\x{212A}-\x{212B}]",
+            r"[[:alpha:][:^digit:]]",
+            r"[\p{L}\P{N}_]",
+            r"[\p{XIDS}\p{XIDC}]",
+            r"[[a-f]&&[^c]]",
+            r"\W",
+            r"\N",
+        ] {
+            let parsed = parse(pattern);
+            let Ast::Class(class) = &parsed.ast else {
+                panic!("{pattern} is not a class: {:?}", parsed.ast);
+            };
+            assert_eq!(
+                ascii_class_masks(class),
+                ascii_masks_by_evaluation(class),
+                "{pattern}"
+            );
         }
     }
 

@@ -8,6 +8,7 @@
 use super::AnchorContext;
 use super::ast::{Ast, CharClass, ClassAtom, ParsedRegex, RegexFlags};
 use super::backtrack::{anchor_matches, char_at, class_contains};
+use super::bytecode::CompiledClass;
 
 const NO_TARGET: usize = usize::MAX;
 const MAX_STATES: usize = 16_384;
@@ -68,55 +69,9 @@ enum Inst {
 #[derive(Debug, Clone)]
 pub(crate) struct Scanner {
     insts: Vec<Inst>,
-    classes: Vec<ScannerClass>,
+    classes: Vec<CompiledClass>,
     entries: Vec<usize>,
     starts: ScannerStarts,
-}
-
-#[derive(Debug, Clone)]
-struct ScannerClass {
-    source: CharClass,
-    ascii_sensitive: [u64; 2],
-    ascii_insensitive: [u64; 2],
-}
-
-impl ScannerClass {
-    fn new(source: CharClass) -> Self {
-        let mut ascii_sensitive = [0u64; 2];
-        let mut ascii_insensitive = [0u64; 2];
-        for byte in 0u8..=127 {
-            let ch = byte as char;
-            if class_contains(&source, ch, RegexFlags::default()) {
-                ascii_sensitive[byte as usize / 64] |= 1u64 << (byte % 64);
-            }
-            if class_contains(
-                &source,
-                ch,
-                RegexFlags {
-                    case_insensitive: true,
-                    ..RegexFlags::default()
-                },
-            ) {
-                ascii_insensitive[byte as usize / 64] |= 1u64 << (byte % 64);
-            }
-        }
-        Self {
-            source,
-            ascii_sensitive,
-            ascii_insensitive,
-        }
-    }
-
-    #[inline]
-    fn matches_ascii(&self, byte: u8, case_insensitive: bool) -> bool {
-        debug_assert!(byte < 128);
-        let bitmap = if case_insensitive {
-            &self.ascii_insensitive
-        } else {
-            &self.ascii_sensitive
-        };
-        bitmap[byte as usize / 64] & (1u64 << (byte % 64)) != 0
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -215,7 +170,7 @@ impl Scanner {
             .saturating_add(
                 self.classes
                     .capacity()
-                    .saturating_mul(std::mem::size_of::<ScannerClass>()),
+                    .saturating_mul(std::mem::size_of::<CompiledClass>()),
             );
         for class in &self.classes {
             bytes = bytes.saturating_add(char_class_heap_bytes(&class.source));
@@ -488,10 +443,8 @@ impl ScannerStarts {
                 unrestricted.push(u32::try_from(index).expect("scanner entry index fits in u32"));
                 continue;
             };
-            for byte in 0u8..=u8::MAX {
-                if bitmap[byte as usize >> 6] & (1u64 << (byte & 63)) != 0 {
-                    counts[byte as usize] += 1;
-                }
+            for byte in bitmap_bytes(bitmap) {
+                counts[byte] += 1;
             }
         }
 
@@ -509,11 +462,8 @@ impl ScannerStarts {
             let Some(bitmap) = &entry.start_bitmap else {
                 continue;
             };
-            for byte in 0u8..=u8::MAX {
-                if bitmap[byte as usize >> 6] & (1u64 << (byte & 63)) == 0 {
-                    continue;
-                }
-                let cursor = &mut cursors[byte as usize];
+            for byte in bitmap_bytes(bitmap) {
+                let cursor = &mut cursors[byte];
                 restricted[*cursor as usize] =
                     u32::try_from(index).expect("scanner entry index fits in u32");
                 *cursor += 1;
@@ -531,6 +481,20 @@ impl ScannerStarts {
         let index = byte as usize;
         &self.restricted[self.offsets[index] as usize..self.offsets[index + 1] as usize]
     }
+}
+
+/// Ascending byte values present in a 256-bit set.
+fn bitmap_bytes(bitmap: &[u64; 4]) -> impl Iterator<Item = usize> + '_ {
+    bitmap.iter().enumerate().flat_map(|(word_index, &word)| {
+        let mut bits = word;
+        std::iter::from_fn(move || {
+            (bits != 0).then(|| {
+                let bit = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                word_index * 64 + bit
+            })
+        })
+    })
 }
 
 fn first_accept(insts: &[Inst], threads: &[Thread]) -> Option<ScanMatch> {
@@ -666,7 +630,7 @@ impl ScannerScratch {
 #[derive(Default)]
 struct Compiler {
     insts: Vec<Inst>,
-    classes: Vec<ScannerClass>,
+    classes: Vec<CompiledClass>,
     entries: Vec<CompilerEntry>,
 }
 
@@ -742,7 +706,7 @@ impl Compiler {
             Ast::Dot => self.push(Inst::Any { flags, next }),
             Ast::Class(class) => {
                 let id = self.classes.len();
-                self.classes.push(ScannerClass::new(class.clone()));
+                self.classes.push(CompiledClass::new(class.clone()));
                 self.push(Inst::Class {
                     class: id,
                     flags,
