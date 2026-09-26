@@ -6,7 +6,11 @@ use std::{
 
 use serde_json::Value;
 
-use super::{compiled_grammar_closure, grammars};
+use super::{
+    compiled_grammar_closure, decode_bundle_grammars, grammar_closure,
+    grammar_ir::encode_compiled_grammar,
+};
+use crate::grammars;
 
 #[test]
 fn compiled_dependency_walk_matches_representative_json_contracts() {
@@ -28,6 +32,44 @@ fn compiled_dependency_walk_matches_representative_json_contracts() {
             .collect::<Vec<_>>();
         let expected = reference_closure(bundle, &language.scope_name, &sources);
         assert_eq!(actual, expected, "{}", language.canonical);
+    }
+}
+
+#[test]
+fn recorded_bundle_closures_match_the_dependency_walk() {
+    let bundle = grammars::embedded_bundle();
+    let compiled = decode_bundle_grammars(bundle);
+    assert_eq!(bundle.grammar_graphs.len(), compiled.len());
+    let walked = bundle
+        .grammar_graphs
+        .iter()
+        .flat_map(|graph| &graph.closure)
+        .filter(|member| member.traits.repository_contexts)
+        .map(|member| member.blob as usize)
+        .collect::<BTreeSet<_>>();
+    for (root, recorded) in bundle.grammar_graphs.iter().enumerate() {
+        let members = grammar_closure::dependency_closure(&compiled, root);
+        let traits = grammar_closure::closure_member_traits(&compiled, &members);
+        let expected = grammars::bundle::GrammarGraph {
+            closure: members
+                .into_iter()
+                .zip(traits)
+                .map(|(blob, traits)| grammars::bundle::ClosureMember {
+                    blob: blob as u32,
+                    traits,
+                })
+                .collect(),
+            repository_walk_skeleton: walked.contains(&root).then(|| {
+                encode_compiled_grammar(&grammar_closure::repository_walk_skeleton(&compiled[root]))
+                    .unwrap()
+            }),
+            top_level_availability: grammar_closure::top_level_availability_chain(&compiled[root]),
+        };
+        assert_eq!(
+            recorded, &expected,
+            "{}: regenerate the bundle with syntaxmate-bundle",
+            bundle.grammar_blobs[root].language
+        );
     }
 }
 

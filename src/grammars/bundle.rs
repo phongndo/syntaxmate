@@ -2,16 +2,21 @@
 //!
 //! The production highlighter resolves every grammar through this bundle. It
 //! is a byte-level container with eager metadata and lazy per-grammar compiled
-//! IR access, produced by the `syntaxmate-bundle` tool.
+//! IR access, produced by the `syntaxmate-bundle` tool. Each grammar's
+//! external-include closure is recorded at build time, so a tokenizer can
+//! decode closure members only when it reaches them.
 
-use std::{collections::BTreeMap, path::Path};
+use std::{borrow::Cow, collections::BTreeMap, path::Path};
 
 use crate::engine::{
-    grammar::CompiledGrammar, grammar_ir::decode_compiled_grammar, state::GrammarId,
+    grammar::CompiledGrammar,
+    grammar_closure::{AvailabilityStep, ClosureMemberTraits, MAX_AVAILABILITY_STEPS},
+    grammar_ir::decode_compiled_grammar,
+    state::{GrammarId, RuleId},
 };
 
 pub const MAGIC: &[u8; 4] = b"MRKB";
-pub const FORMAT_VERSION: u16 = 2;
+pub const FORMAT_VERSION: u16 = 3;
 pub const CODEC_NONE: u32 = 0;
 pub const CODEC_DEFLATE_ZLIB: u32 = 1;
 pub const GRAMMAR_BLOB_COMPILED_IR: u32 = 1;
@@ -20,6 +25,15 @@ pub const SECTION_SCOPES: u32 = 4;
 pub const SECTION_LANGUAGES: u32 = 5;
 pub const SECTION_GRAMMAR_BLOBS: u32 = 6;
 pub const SECTION_LICENSES: u32 = 7;
+pub const SECTION_GRAMMAR_GRAPHS: u32 = 8;
+
+const CLOSURE_REPOSITORY_CONTEXTS: u32 = 1 << 31;
+const CLOSURE_BASE_REFERENCE: u32 = 1 << 30;
+const CLOSURE_INJECTS: u32 = 1 << 29;
+const CLOSURE_BLOB_MASK: u32 = CLOSURE_INJECTS - 1;
+const NO_AVAILABILITY: u32 = u32::MAX;
+const AVAILABILITY_REPOSITORY: u32 = 1 << 31;
+const NO_SKELETON: u32 = u32::MAX;
 
 const HEADER_LEN: usize = 32;
 const SECTION_ENTRY_LEN: usize = 24;
@@ -48,7 +62,31 @@ pub struct Bundle {
     pub scopes: Vec<String>,
     pub languages: Vec<LanguageEntry>,
     pub grammar_blobs: Vec<GrammarBlob>,
+    /// Include-graph facts recorded for each grammar blob, indexed like
+    /// `grammar_blobs`.
+    pub grammar_graphs: Vec<GrammarGraph>,
     pub licenses: Vec<LicenseEntry>,
+}
+
+/// Include-graph facts the runtime needs before decoding a grammar.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GrammarGraph {
+    /// External-include closure when this grammar is the root.
+    pub closure: Vec<ClosureMember>,
+    /// Compiled IR of `grammar_closure::repository_walk_skeleton`, present
+    /// when some closure's repository-context walk must visit this grammar.
+    pub repository_walk_skeleton: Option<Vec<u8>>,
+    /// Proof that the grammar's top level has an available rule; see
+    /// `grammar_closure::top_level_availability_chain`.
+    pub top_level_availability: Option<Vec<AvailabilityStep>>,
+}
+
+/// One grammar in a root's closure. Members are stored in ascending blob
+/// order, which is also their closure-local `GrammarId` order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClosureMember {
+    pub blob: u32,
+    pub traits: ClosureMemberTraits,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +143,7 @@ pub enum BundleError {
     Truncated(&'static str),
     TrailingBytes(&'static str),
     GrammarIr { language: String, message: String },
+    BadGrammarGraph(u32),
 }
 
 #[derive(Debug, Clone)]
@@ -177,22 +216,27 @@ impl GrammarBlob {
         })
     }
 
-    pub fn decoded_bytes(&self) -> Result<Vec<u8>, BundleError> {
+    pub fn decoded_bytes(&self) -> Result<Cow<'_, [u8]>, BundleError> {
         match self.codec {
-            CODEC_NONE => Ok(self.bytes.clone()),
+            CODEC_NONE => Ok(Cow::Borrowed(&self.bytes)),
             CODEC_DEFLATE_ZLIB => {
-                let bytes =
-                    miniz_oxide::inflate::decompress_to_vec_zlib(&self.bytes).map_err(|_| {
-                        BundleError::Inflate {
-                            language: self.language.clone(),
-                        }
-                    })?;
-                if bytes.len() != self.raw_len as usize {
-                    return Err(BundleError::Inflate {
-                        language: self.language.clone(),
-                    });
+                // The recorded length sizes the output exactly: no growth
+                // copies, and a longer stream fails as `HasMoreOutput`.
+                let inflate_error = || BundleError::Inflate {
+                    language: self.language.clone(),
+                };
+                let mut bytes = vec![0; self.raw_len as usize];
+                let len = miniz_oxide::inflate::decompress_slice_iter_to_slice(
+                    &mut bytes,
+                    std::iter::once(self.bytes.as_slice()),
+                    true,
+                    false,
+                )
+                .map_err(|_| inflate_error())?;
+                if len != bytes.len() {
+                    return Err(inflate_error());
                 }
-                Ok(bytes)
+                Ok(Cow::Owned(bytes))
             }
             other => Err(BundleError::BadCodec(other)),
         }
@@ -213,6 +257,10 @@ impl Bundle {
             decode_grammar_blobs(section(bytes, &sections, SECTION_GRAMMAR_BLOBS)?, &strings)?;
         let licenses =
             decode_license_table(section(bytes, &sections, SECTION_LICENSES)?, &strings)?;
+        let grammar_graphs = decode_grammar_graphs(
+            section(bytes, &sections, SECTION_GRAMMAR_GRAPHS)?,
+            grammar_blobs.len(),
+        )?;
         Ok(Self {
             source_hash: header.source_hash,
             bundle_hash: header.bundle_hash,
@@ -220,6 +268,7 @@ impl Bundle {
             scopes,
             languages,
             grammar_blobs,
+            grammar_graphs,
             licenses,
         })
     }
@@ -240,6 +289,10 @@ impl Bundle {
             (
                 SECTION_LICENSES,
                 encode_license_table(&self.licenses, &strings),
+            ),
+            (
+                SECTION_GRAMMAR_GRAPHS,
+                encode_grammar_graphs(&self.grammar_graphs),
             ),
         ];
         let bundle_hash = hash_sections(&sections);
@@ -310,12 +363,18 @@ impl Bundle {
     }
 
     pub fn grammar_blob_for_language(&self, language: &str) -> Option<&GrammarBlob> {
+        self.grammar_blobs
+            .get(self.grammar_blob_index_for_language(language)?)
+    }
+
+    pub fn grammar_blob_index_for_language(&self, language: &str) -> Option<usize> {
         let canonical = self.canonical_language(language)?;
         let entry = self
             .languages
             .iter()
             .find(|entry| entry.canonical == canonical)?;
-        self.grammar_blobs.get(entry.grammar_blob as usize)
+        let index = entry.grammar_blob as usize;
+        (index < self.grammar_blobs.len()).then_some(index)
     }
 
     pub fn grammar_blob_for_scope(&self, scope_name: &str) -> Option<&GrammarBlob> {
@@ -685,6 +744,139 @@ fn decode_grammar_blobs(bytes: &[u8], strings: &[String]) -> Result<Vec<GrammarB
     Ok(blobs)
 }
 
+fn encode_grammar_graphs(graphs: &[GrammarGraph]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    write_u32(&mut bytes, graphs.len() as u32);
+    for graph in graphs {
+        write_u32(&mut bytes, graph.closure.len() as u32);
+        for member in &graph.closure {
+            assert!(
+                member.blob <= CLOSURE_BLOB_MASK,
+                "closure blob index fits below the flag bits"
+            );
+            let mut value = member.blob;
+            if member.traits.repository_contexts {
+                value |= CLOSURE_REPOSITORY_CONTEXTS;
+            }
+            if member.traits.base_reference {
+                value |= CLOSURE_BASE_REFERENCE;
+            }
+            if member.traits.injects {
+                value |= CLOSURE_INJECTS;
+            }
+            write_u32(&mut bytes, value);
+        }
+        if let Some(skeleton) = &graph.repository_walk_skeleton {
+            assert!(
+                skeleton.len() < NO_SKELETON as usize,
+                "walk skeleton length fits"
+            );
+            write_u32(&mut bytes, skeleton.len() as u32);
+            bytes.extend_from_slice(skeleton);
+        } else {
+            write_u32(&mut bytes, NO_SKELETON);
+        }
+        let Some(steps) = &graph.top_level_availability else {
+            write_u32(&mut bytes, NO_AVAILABILITY);
+            continue;
+        };
+        write_u32(&mut bytes, steps.len() as u32);
+        for step in steps {
+            match step {
+                AvailabilityStep::Rule(rule_id) => {
+                    assert!(
+                        rule_id.0 < AVAILABILITY_REPOSITORY,
+                        "rule id fits the step tag"
+                    );
+                    write_u32(&mut bytes, rule_id.0);
+                }
+                AvailabilityStep::Repository(name) => {
+                    write_u32(&mut bytes, AVAILABILITY_REPOSITORY | name.len() as u32);
+                    bytes.extend_from_slice(name.as_bytes());
+                }
+            }
+        }
+    }
+    bytes
+}
+
+fn decode_grammar_graphs(
+    bytes: &[u8],
+    blob_count: usize,
+) -> Result<Vec<GrammarGraph>, BundleError> {
+    let mut cursor = Cursor::new(bytes, "grammar graphs");
+    let count = cursor.u32()? as usize;
+    if count != blob_count {
+        return Err(BundleError::BadGrammarGraph(count as u32));
+    }
+    let mut graphs = Vec::with_capacity(count);
+    for root in 0..count {
+        let bad = || BundleError::BadGrammarGraph(root as u32);
+        let member_count = cursor.u32()? as usize;
+        if member_count > blob_count {
+            return Err(bad());
+        }
+        let mut closure = Vec::with_capacity(member_count);
+        for _ in 0..member_count {
+            let value = cursor.u32()?;
+            let blob = value & CLOSURE_BLOB_MASK;
+            // Members are strictly ascending blob indexes, which also bounds
+            // the closure-local grammar IDs derived from their positions.
+            let ascending = closure
+                .last()
+                .is_none_or(|previous: &ClosureMember| previous.blob < blob);
+            if blob as usize >= blob_count || !ascending {
+                return Err(bad());
+            }
+            closure.push(ClosureMember {
+                blob,
+                traits: ClosureMemberTraits {
+                    repository_contexts: value & CLOSURE_REPOSITORY_CONTEXTS != 0,
+                    base_reference: value & CLOSURE_BASE_REFERENCE != 0,
+                    injects: value & CLOSURE_INJECTS != 0,
+                },
+            });
+        }
+        if !closure.iter().any(|member| member.blob as usize == root) {
+            return Err(bad());
+        }
+        let skeleton_len = cursor.u32()?;
+        let repository_walk_skeleton = (skeleton_len != NO_SKELETON)
+            .then(|| cursor.bytes(skeleton_len as usize).map(<[u8]>::to_vec))
+            .transpose()?;
+        let step_count = cursor.u32()?;
+        let top_level_availability = if step_count == NO_AVAILABILITY {
+            None
+        } else {
+            if step_count as usize > MAX_AVAILABILITY_STEPS {
+                return Err(bad());
+            }
+            let mut steps = Vec::with_capacity(step_count as usize);
+            for _ in 0..step_count {
+                let value = cursor.u32()?;
+                steps.push(if value & AVAILABILITY_REPOSITORY == 0 {
+                    AvailabilityStep::Rule(RuleId(value))
+                } else {
+                    let name = cursor.bytes((value & !AVAILABILITY_REPOSITORY) as usize)?;
+                    AvailabilityStep::Repository(
+                        std::str::from_utf8(name)
+                            .map_err(|_| BundleError::BadUtf8)?
+                            .to_owned(),
+                    )
+                });
+            }
+            Some(steps)
+        };
+        graphs.push(GrammarGraph {
+            closure,
+            repository_walk_skeleton,
+            top_level_availability,
+        });
+    }
+    cursor.finish()?;
+    Ok(graphs)
+}
+
 fn encode_license_table(licenses: &[LicenseEntry], strings: &[String]) -> Vec<u8> {
     let mut bytes = Vec::new();
     write_u32(&mut bytes, licenses.len() as u32);
@@ -887,6 +1079,17 @@ mod tests {
                 dfa_count: 0,
                 fallback_count: 0,
             }],
+            grammar_graphs: vec![GrammarGraph {
+                closure: vec![ClosureMember {
+                    blob: 0,
+                    traits: ClosureMemberTraits::default(),
+                }],
+                repository_walk_skeleton: Some(grammar_ir("source.rust", "")),
+                top_level_availability: Some(vec![
+                    AvailabilityStep::Repository("entry".to_owned()),
+                    AvailabilityStep::Rule(RuleId(0)),
+                ]),
+            }],
             licenses: vec![LicenseEntry {
                 language: "rust".to_owned(),
                 source_path: "assets/grammars/languages/rust.tmLanguage.json".to_owned(),
@@ -903,10 +1106,11 @@ mod tests {
         let bytes = sample_bundle().to_bytes();
         let header = read_header(&bytes).unwrap();
         assert_eq!(header.format_version, FORMAT_VERSION);
-        assert_eq!(header.section_count, 5);
+        assert_eq!(header.section_count, 6);
         assert_eq!(header.source_hash, 7);
         assert_ne!(header.bundle_hash, 0);
         let parsed = Bundle::parse(&bytes).unwrap();
+        assert_eq!(parsed.grammar_graphs, sample_bundle().grammar_graphs);
         assert_eq!(
             parsed.version_stamp(),
             format!("{:016x}", header.bundle_hash)
@@ -960,6 +1164,58 @@ mod tests {
             registry.grammar("rust"),
             Err(BundleError::GrammarIr { .. })
         ));
+    }
+
+    #[test]
+    fn rejects_malformed_grammar_graphs() {
+        let member = |blob| ClosureMember {
+            blob,
+            traits: ClosureMemberTraits::default(),
+        };
+        for closure in [vec![], vec![member(1)], vec![member(0), member(0)]] {
+            let mut bundle = sample_bundle();
+            bundle.grammar_graphs[0].closure = closure;
+            assert_eq!(
+                Bundle::parse(&bundle.to_bytes()),
+                Err(BundleError::BadGrammarGraph(0))
+            );
+        }
+        let mut bundle = sample_bundle();
+        bundle.grammar_graphs[0].top_level_availability =
+            Some(vec![
+                AvailabilityStep::Rule(RuleId(0));
+                MAX_AVAILABILITY_STEPS + 1
+            ]);
+        assert_eq!(
+            Bundle::parse(&bundle.to_bytes()),
+            Err(BundleError::BadGrammarGraph(0))
+        );
+        let mut bundle = sample_bundle();
+        bundle.grammar_graphs.clear();
+        assert_eq!(
+            Bundle::parse(&bundle.to_bytes()),
+            Err(BundleError::BadGrammarGraph(0))
+        );
+    }
+
+    #[test]
+    fn inflates_compressed_blobs_to_their_recorded_length() {
+        let mut blob = sample_bundle().grammar_blobs.remove(0);
+        let raw = blob.bytes.clone();
+        blob.codec = CODEC_DEFLATE_ZLIB;
+        blob.bytes = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6);
+        assert_eq!(blob.decoded_bytes().unwrap().as_ref(), raw.as_slice());
+        assert_eq!(
+            blob.compiled_grammar(GrammarId(0)).unwrap().scope_name,
+            "source.rust"
+        );
+        for raw_len in [raw.len() - 1, raw.len() + 1] {
+            blob.raw_len = raw_len as u32;
+            assert!(matches!(
+                blob.decoded_bytes(),
+                Err(BundleError::Inflate { .. })
+            ));
+        }
     }
 
     #[test]

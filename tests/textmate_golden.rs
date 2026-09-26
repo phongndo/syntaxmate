@@ -462,7 +462,7 @@ fn full_asset_grammar_set() -> GrammarSet {
             continue;
         }
         let source = fs::read_to_string(&path).expect("grammar asset");
-        let id = GrammarId(set.grammars().len() as u16);
+        let id = GrammarId(set.len() as u16);
         if let Ok(grammar) = load_dev_grammar_from_str(id, &source) {
             set.add(grammar);
         }
