@@ -1335,7 +1335,7 @@ struct BacktrackFrame {
     pc: ProgramCounter,
     repeat_undo_mark: u32,
     capture_undo_mark: u32,
-    call_depth: u32,
+    call_frame: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -1348,17 +1348,23 @@ struct AssertionFrame {
     parent_pc: ProgramCounter,
     parent_repeat_undo_mark: u32,
     parent_capture_undo_mark: u32,
-    parent_call_depth: u32,
+    parent_call_frame: u32,
     backtrack_base: u32,
     cut_base: u32,
     positive: bool,
     has_next_probe: bool,
 }
 
+/// Call frames are never overwritten: backtracking can resume inside a
+/// routine that already returned, and its `Return` must still find the frame
+/// of the call that entered it. Frames link to their caller instead.
 #[derive(Debug, Clone, Copy)]
 struct CallFrame {
     return_pc: ProgramCounter,
     capture_undo_mark: u32,
+    /// The caller's `BytecodeScratch::call_frame` value.
+    parent: u32,
+    depth: u32,
 }
 
 // These are performance contracts, not incidental implementation details.
@@ -1369,7 +1375,7 @@ const _: () = {
     assert!(std::mem::size_of::<Instruction>() == 24);
     assert!(std::mem::size_of::<BacktrackFrame>() == 32);
     assert!(std::mem::size_of::<AssertionFrame>() == 64);
-    assert!(std::mem::size_of::<CallFrame>() == 8);
+    assert!(std::mem::size_of::<CallFrame>() == 16);
     assert!(std::mem::size_of::<RepeatState>() == 16);
     assert!(std::mem::size_of::<RepeatUndo>() == 16);
     assert!(std::mem::size_of::<GuardCell>() == 16);
@@ -1388,7 +1394,8 @@ pub(crate) struct BytecodeScratch {
     repeat_undo: Vec<RepeatUndo>,
     capture_undo: Vec<(VmSlot, CaptureState)>,
     calls: Vec<CallFrame>,
-    call_depth: u32,
+    /// One-based index of the current call frame; 0 outside subroutines.
+    call_frame: u32,
     cuts: Vec<u32>,
     literal_matches: Vec<(u32, usize)>,
     scanner: super::scanner::ScannerScratch,
@@ -1540,7 +1547,7 @@ fn backtrack_frame(
         pc,
         repeat_undo_mark: arena_mark(scratch.repeat_undo.len())?,
         capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
-        call_depth: scratch.call_depth,
+        call_frame: scratch.call_frame,
     })
 }
 
@@ -1805,7 +1812,11 @@ impl Program {
                 }
                 Instruction::Jump { target } => pc = *target,
                 Instruction::Call { entry, next } => {
-                    if scratch.call_depth >= 128 {
+                    let depth = scratch
+                        .call_frame
+                        .checked_sub(1)
+                        .map_or(0, |caller| scratch.calls[arena_index(caller)].depth + 1);
+                    if depth >= 128 {
                         if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
                             return Ok(None);
                         }
@@ -1813,21 +1824,18 @@ impl Program {
                         let frame = CallFrame {
                             return_pc: *next,
                             capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
+                            parent: scratch.call_frame,
+                            depth,
                         };
-                        let call_depth = arena_index(scratch.call_depth);
-                        if call_depth == scratch.calls.len() {
-                            scratch.calls.push(frame);
-                        } else {
-                            scratch.calls[call_depth] = frame;
-                        }
-                        scratch.call_depth += 1;
+                        scratch.calls.push(frame);
+                        scratch.call_frame = arena_mark(scratch.calls.len())?;
                         pc = *entry;
                     }
                 }
                 Instruction::Return => {
-                    debug_assert!(scratch.call_depth > 0, "Return outside subroutine");
-                    scratch.call_depth -= 1;
-                    let frame = scratch.calls[arena_index(scratch.call_depth)];
+                    debug_assert!(scratch.call_frame > 0, "Return outside subroutine");
+                    let frame = scratch.calls[arena_index(scratch.call_frame - 1)];
+                    scratch.call_frame = frame.parent;
                     // Recursive calls to the same capturing group overwrite
                     // an enclosing pending start. Restore pending captures on
                     // return; completed captures remain observable.
@@ -1984,7 +1992,7 @@ impl Program {
                         parent_pc: *next,
                         parent_repeat_undo_mark: arena_mark(scratch.repeat_undo.len())?,
                         parent_capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
-                        parent_call_depth: scratch.call_depth,
+                        parent_call_frame: scratch.call_frame,
                         backtrack_base: arena_mark(scratch.backtrack.len())?,
                         cut_base: arena_mark(scratch.cuts.len())?,
                         positive: *positive,
@@ -2386,7 +2394,7 @@ impl Program {
                 let frame = scratch.backtrack.pop().expect("frame above base");
                 undo_repeats_to(scratch, frame.repeat_undo_mark);
                 undo_captures_to(scratch, frame.capture_undo_mark);
-                scratch.call_depth = frame.call_depth;
+                scratch.call_frame = frame.call_frame;
                 match frame.action {
                     ResumeAction::PopCut => {
                         // The whole atomic region failed; unwind its mark and
@@ -2431,7 +2439,7 @@ impl Program {
             };
             undo_repeats_to(scratch, assertion.parent_repeat_undo_mark);
             undo_captures_to(scratch, assertion.parent_capture_undo_mark);
-            scratch.call_depth = assertion.parent_call_depth;
+            scratch.call_frame = assertion.parent_call_frame;
             scratch.cuts.truncate(arena_index(assertion.cut_base));
             if let Some(probe) = next_probe(line, &mut assertion) {
                 let entry = assertion.entry;
@@ -2470,7 +2478,7 @@ impl Program {
         if !exports_captures {
             undo_captures_to(scratch, assertion.parent_capture_undo_mark);
         }
-        scratch.call_depth = assertion.parent_call_depth;
+        scratch.call_frame = assertion.parent_call_frame;
         *position = assertion.parent_position;
         if matched == assertion.positive {
             *pc = assertion.parent_pc;
@@ -2573,7 +2581,8 @@ impl BytecodeScratch {
         self.assertions.clear();
         self.repeat_undo.clear();
         self.capture_undo.clear();
-        self.call_depth = 0;
+        self.calls.clear();
+        self.call_frame = 0;
         self.cuts.clear();
         self.repeats.resize(repeat_slots, RepeatState::default());
         // Every repeat entry executes RepeatInit before its slot can be read.
@@ -4537,7 +4546,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Instruction>(), 24);
         assert_eq!(std::mem::size_of::<BacktrackFrame>(), 32);
         assert_eq!(std::mem::size_of::<AssertionFrame>(), 64);
-        assert_eq!(std::mem::size_of::<CallFrame>(), 8);
+        assert_eq!(std::mem::size_of::<CallFrame>(), 16);
         assert_eq!(std::mem::size_of::<RepeatState>(), 16);
         assert_eq!(std::mem::size_of::<ResumeAction>(), 8);
         assert_eq!(std::mem::size_of::<AssertDirection>(), 8);
@@ -5580,6 +5589,20 @@ mod tests {
     fn capture_subroutines_use_bounded_explicit_call_stack() {
         assert_capture_replay(r"(?<x>a|b)\g<x>", "aa", 0, &[1]);
         assert_capture_replay(r"(?<parens>\((?:[^()]|\g<parens>)*\))", "((a)(b))", 0, &[1]);
+    }
+
+    #[test]
+    fn capture_subroutines_return_to_their_caller_after_backtracking() {
+        // The second call fails, so matching backtracks into the first
+        // call's routine after it returned. Its second return must reach the
+        // first call site, not the second call that reused the stack depth.
+        assert_capture_replay(r"(?<n>a+)b\g<n>(\g<n>)", "abaa", 0, &[2]);
+        assert_capture_replay(r"(?<n>a+)b\g<n>(\g<n>)c", "abaaac", 0, &[1, 2]);
+        // Calls under choices and repeats rewrite the called group's capture.
+        assert_capture_replay(r"(?<n>a|b)(?:\g<n>|c)d", "abd", 0, &[1]);
+        assert_capture_replay(r"(?<n>a|b)(?:\g<n>)*c", "abac", 0, &[1]);
+        assert_capture_replay(r"(?<n>a|b)(?:x|\g<n>)+", "abxb", 0, &[1]);
+        assert_capture_replay(r"(?<n>a(b)?)\g<n>+(x)", "aabaax", 0, &[1, 2, 3]);
     }
 
     #[test]
