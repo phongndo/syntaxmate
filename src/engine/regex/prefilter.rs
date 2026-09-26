@@ -2273,7 +2273,7 @@ mod tests {
         for (index, asset) in CORE_ASSETS.iter().enumerate() {
             let grammar = load_dev_grammar_from_str(GrammarId(index as u16), asset.source)
                 .expect("core grammar parses");
-            patterns.extend(grammar.patterns.iter().cloned());
+            patterns.extend(grammar.patterns.iter().map(|pattern| pattern.to_string()));
         }
         for pattern in &patterns {
             let parsed = parse(pattern);
