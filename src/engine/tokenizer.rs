@@ -7723,11 +7723,11 @@ fn fallback_call_budget(source_bytes: usize) -> u64 {
     )
 }
 
-/// Specified captures that emit tokens after a nonempty match. vscode-textmate
-/// skips empty captures and stops at the first capture that starts after the
-/// match, so only lookahead captures beginning exactly at the match end count.
-/// Scanning still resumes at the match end; monotone token production drops
-/// any later token prefix those captures already covered.
+/// Specified captures that emit tokens after the match, which can be empty.
+/// vscode-textmate skips empty captures and stops at the first capture that
+/// starts after the match, so only lookahead captures beginning exactly at the
+/// match end count. Scanning still resumes at the match end; monotone token
+/// production drops any later token prefix those captures already covered.
 fn outside_captures<'a>(
     result: &'a MatchResult,
     captures: &'a CaptureSpec,
@@ -7736,7 +7736,6 @@ fn outside_captures<'a>(
     captures
         .entries
         .iter()
-        .filter(move |_| result.start < match_end)
         .filter_map(|(group, entry)| {
             result
                 .capture(*group as usize)
