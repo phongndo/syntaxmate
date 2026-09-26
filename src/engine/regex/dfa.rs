@@ -182,7 +182,7 @@ impl Matcher for SimpleMatcher {
 fn pure_literal_body(ast: &Ast) -> Option<String> {
     match ast {
         Ast::Empty => Some(String::new()),
-        Ast::Literal(literal) => Some(literal.clone()),
+        Ast::Literal(literal) => Some(literal.as_str().to_owned()),
         Ast::Concat(nodes) => {
             let mut out = String::new();
             let mut saw_non_anchor = false;
@@ -567,7 +567,7 @@ fn separator_look(ast: &Ast, expected: LookKind) -> Option<Separator> {
 fn symbol_variants(ast: &Ast, limit: usize) -> Option<Vec<String>> {
     match ast {
         Ast::Empty => Some(vec![String::new()]),
-        Ast::Literal(literal) => Some(vec![literal.clone()]),
+        Ast::Literal(literal) => Some(vec![literal.as_str().to_owned()]),
         Ast::Group {
             child, name: None, ..
         }
@@ -591,7 +591,7 @@ fn symbol_variants(ast: &Ast, limit: usize) -> Option<Vec<String>> {
             for branch in branches {
                 // Symbol inventories are mostly single-literal branches.
                 match branch {
-                    Ast::Literal(literal) => variants.push(literal.clone()),
+                    Ast::Literal(literal) => variants.push(literal.as_str().to_owned()),
                     branch => variants.extend(symbol_variants(branch, limit)?),
                 }
                 if variants.len() > limit {
@@ -1303,7 +1303,7 @@ fn is_perl_space_class(ast: &Ast) -> bool {
 fn word_variants(ast: &Ast) -> Option<Vec<String>> {
     match ast {
         Ast::Empty => Some(vec![String::new()]),
-        Ast::Literal(literal) => Some(vec![literal.clone()]),
+        Ast::Literal(literal) => Some(vec![literal.as_str().to_owned()]),
         Ast::Group {
             child, name: None, ..
         } => word_variants(child),
