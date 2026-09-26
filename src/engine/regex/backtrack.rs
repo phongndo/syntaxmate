@@ -2560,7 +2560,7 @@ fn match_backref(
 fn ast_exact_literal(ast: &Ast) -> Option<String> {
     match ast {
         Ast::Empty => Some(String::new()),
-        Ast::Literal(literal) => Some(literal.clone()),
+        Ast::Literal(literal) => Some(literal.as_str().to_owned()),
         Ast::Concat(nodes) => {
             let mut out = String::new();
             for node in nodes {

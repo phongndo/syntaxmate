@@ -124,14 +124,29 @@ impl ByteTable {
         let mut byte_class = Box::new([0u8; 256]);
         // (first byte with this membership, target range)
         let mut classes: Vec<(usize, usize, usize)> = Vec::new();
+        // Membership fingerprint per class, so wide rows (large dispatches)
+        // are compared in full only when they probably match.
+        let mut fingerprints: Vec<u64> = Vec::new();
         let mut targets = Vec::new();
         let mut pruned = false;
         for byte in 0..256 {
             let row = &members[byte * words..(byte + 1) * words];
+            let fingerprint = match row {
+                [word] => *word,
+                row => row.iter().fold(0u64, |hash, word| {
+                    (hash ^ word)
+                        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+                        .rotate_left(29)
+                }),
+            };
             let class = classes
                 .iter()
-                .position(|&(first, _, _)| members[first * words..(first + 1) * words] == *row)
+                .zip(&fingerprints)
+                .position(|(&(first, _, _), &known)| {
+                    known == fingerprint && members[first * words..(first + 1) * words] == *row
+                })
                 .unwrap_or_else(|| {
+                    fingerprints.push(fingerprint);
                     let start = targets.len();
                     targets.extend(
                         items
@@ -534,9 +549,17 @@ pub(crate) fn match_end_is_exact(parsed: &ParsedRegex) -> bool {
         match ast {
             Ast::Empty | Ast::Literal(_) | Ast::Dot | Ast::Class(_) | Ast::Anchor(_) => true,
             Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().all(exact),
+            // Also enforces everything `Scanner::supports` requires, so the
+            // pattern is walked once.
             Ast::Repeat {
-                node, possessive, ..
-            } => !*possessive && !nullable(node) && exact(node),
+                node,
+                min,
+                max,
+                possessive,
+                ..
+            } => {
+                !*possessive && max.is_none_or(|max| max >= *min) && !nullable(node) && exact(node)
+            }
             Ast::Group { child, .. } => exact(child),
             Ast::Flags { flags, child } => !flags.case_insensitive && exact(child),
             Ast::Look { .. }
@@ -547,7 +570,7 @@ pub(crate) fn match_end_is_exact(parsed: &ParsedRegex) -> bool {
             | Ast::Unsupported(_) => false,
         }
     }
-    Scanner::supports(parsed) && !parsed.flags.case_insensitive && exact(&parsed.ast)
+    !parsed.features.possessive_or_atomic && !parsed.flags.case_insensitive && exact(&parsed.ast)
 }
 
 fn ast_is_supported(ast: &Ast) -> bool {

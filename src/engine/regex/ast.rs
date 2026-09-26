@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::OnceLock;
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock};
 
 use super::analysis::RegexAnalysis;
 
@@ -148,10 +149,140 @@ pub struct SubroutineCall {
     pub(crate) target_path: Option<Vec<AstPathStep>>,
 }
 
+/// Text of a literal node. Unescaped literal runs borrow a span of the
+/// shared pattern source instead of owning a copy: keyword inventories parse
+/// to thousands of literals, and one allocation per literal dominated both
+/// parsing and teardown.
+#[derive(Clone)]
+pub struct LiteralText(LiteralRepr);
+
+#[derive(Clone)]
+enum LiteralRepr {
+    Source {
+        source: Arc<str>,
+        start: u32,
+        end: u32,
+    },
+    Owned(String),
+}
+
+impl LiteralText {
+    fn from_source(source: &Arc<str>, start: usize, end: usize) -> Self {
+        match (u32::try_from(start), u32::try_from(end)) {
+            (Ok(start), Ok(end)) => Self(LiteralRepr::Source {
+                source: Arc::clone(source),
+                start,
+                end,
+            }),
+            _ => Self(LiteralRepr::Owned(source[start..end].to_owned())),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match &self.0 {
+            LiteralRepr::Source { source, start, end } => &source[*start as usize..*end as usize],
+            LiteralRepr::Owned(text) => text,
+        }
+    }
+
+    /// Appends `other`, extending a source span in place when `other`
+    /// continues it.
+    fn push_literal(&mut self, other: &Self) {
+        if let (
+            LiteralRepr::Source { source, end, .. },
+            LiteralRepr::Source {
+                source: next_source,
+                start: next_start,
+                end: next_end,
+            },
+        ) = (&mut self.0, &other.0)
+            && Arc::ptr_eq(source, next_source)
+            && *end == *next_start
+        {
+            *end = *next_end;
+            return;
+        }
+        let mut text = std::mem::take(self).into_string();
+        text.push_str(other);
+        self.0 = LiteralRepr::Owned(text);
+    }
+
+    fn into_string(self) -> String {
+        match self.0 {
+            LiteralRepr::Owned(text) => text,
+            repr => Self(repr).as_str().to_owned(),
+        }
+    }
+}
+
+impl Default for LiteralText {
+    fn default() -> Self {
+        Self(LiteralRepr::Owned(String::new()))
+    }
+}
+
+impl Deref for LiteralText {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for LiteralText {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl From<String> for LiteralText {
+    fn from(text: String) -> Self {
+        Self(LiteralRepr::Owned(text))
+    }
+}
+
+impl From<&str> for LiteralText {
+    fn from(text: &str) -> Self {
+        Self(LiteralRepr::Owned(text.to_owned()))
+    }
+}
+
+impl PartialEq for LiteralText {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for LiteralText {}
+
+impl PartialEq<str> for LiteralText {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for LiteralText {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl fmt::Debug for LiteralText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+impl fmt::Display for LiteralText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ast {
     Empty,
-    Literal(String),
+    Literal(LiteralText),
     Dot,
     Grapheme,
     Class(CharClass),
@@ -345,6 +476,40 @@ fn is_regex_syntax(ch: char) -> bool {
     )
 }
 
+/// ASCII bytes that stand for themselves outside a class: everything except
+/// regex syntax and, under the extended `x` option, whitespace and `#`.
+/// Quantifier starts are syntax, so a run of these bytes never contains a
+/// quantifier. Indexed by `extended` then byte.
+static PLAIN_LITERAL_BYTE: [[bool; 256]; 2] = {
+    let mut table = [[false; 256]; 2];
+    let mut byte = 0;
+    while byte < 128 {
+        let plain = !matches!(
+            byte as u8,
+            b'(' | b'[' | b'.' | b'^' | b'$' | b'\\' | b')' | b'|' | b'*' | b'+' | b'?' | b'{'
+        );
+        // `char::is_whitespace` for ASCII scalars.
+        let extended_syntax = matches!(byte as u8, b'\t'..=b'\r' | b' ' | b'#');
+        table[0][byte] = plain;
+        table[1][byte] = plain && !extended_syntax;
+        byte += 1;
+    }
+    table
+};
+
+/// End of the run of plain literal bytes starting at `pos`.
+#[inline]
+fn plain_literal_end(bytes: &[u8], mut pos: usize, extended: bool) -> usize {
+    let table = &PLAIN_LITERAL_BYTE[usize::from(extended)];
+    while let Some(&byte) = bytes.get(pos) {
+        if !table[usize::from(byte)] {
+            break;
+        }
+        pos += 1;
+    }
+    pos
+}
+
 struct Parser<'a> {
     source: &'a str,
     bytes: &'a [u8],
@@ -355,6 +520,9 @@ struct Parser<'a> {
     /// so each list occupies the top of the stack and leaves as one
     /// exactly-sized vector instead of growing its own allocation.
     nodes: Vec<Ast>,
+    /// Shared copy of `source` that unescaped literals borrow spans of;
+    /// created on the first such literal.
+    shared_source: Option<Arc<str>>,
     /// The same scratch discipline for character-class unions.
     class_atoms: Vec<ClassAtom>,
     next_capture: u32,
@@ -380,6 +548,7 @@ impl<'a> Parser<'a> {
             bytes: source.as_bytes(),
             pos: 0,
             nodes: Vec::new(),
+            shared_source: None,
             class_atoms: Vec::new(),
             next_capture: 1,
             named_captures: BTreeMap::new(),
@@ -418,6 +587,14 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Literal text of the unescaped source span `start..end`.
+    fn source_literal(&mut self, start: usize, end: usize) -> LiteralText {
+        let source = self
+            .shared_source
+            .get_or_insert_with(|| Arc::from(self.source));
+        LiteralText::from_source(source, start, end)
+    }
+
     fn parse_alternation(&mut self, terminator: Option<char>) -> Ast {
         let first = self.parse_concat(terminator);
         if self.peek() != Some('|') {
@@ -433,7 +610,12 @@ impl<'a> Parser<'a> {
         self.nodes.push(first);
         while self.peek() == Some('|') {
             self.bump();
-            let branch = self.parse_concat(terminator);
+            // Keyword inventories are thousands of plain words; build each
+            // directly in the branch list.
+            let branch = match self.parse_plain_literal_branch(terminator) {
+                Some(literal) => literal,
+                None => self.parse_concat(terminator),
+            };
             self.nodes.push(branch);
         }
         let branches = self.nodes.drain(base..).collect();
@@ -441,6 +623,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_concat(&mut self, terminator: Option<char>) -> Ast {
+        if let Some(literal) = self.parse_plain_literal_branch(terminator) {
+            return literal;
+        }
         let base = self.nodes.len();
         while let Some(ch) = self.peek() {
             if Some(ch) == terminator || ch == '|' {
@@ -464,6 +649,38 @@ impl<'a> Parser<'a> {
             1 => self.nodes.pop().expect("one node"),
             _ => Ast::Concat(self.nodes.drain(base..).collect()),
         }
+    }
+
+    /// Keyword inventories spell most sequences as bare ASCII words ending at
+    /// a branch or group boundary. Such a sequence parses to the single
+    /// literal (under the active option snapshot) that the general path
+    /// would build scalar run by scalar run, so take it in one scan.
+    #[inline(always)]
+    fn parse_plain_literal_branch(&mut self, terminator: Option<char>) -> Option<Ast> {
+        let start = self.pos;
+        let end = plain_literal_end(self.bytes, start, self.flags.ignore_whitespace);
+        if end == start {
+            return None;
+        }
+        let ends_sequence = match self.bytes.get(end) {
+            None => true,
+            Some(b'|') => true,
+            Some(b')') => terminator == Some(')'),
+            Some(_) => false,
+        };
+        if !ends_sequence {
+            return None;
+        }
+        self.pos = end;
+        let literal = Ast::Literal(self.source_literal(start, end));
+        Some(if self.flags == RegexFlags::default() {
+            literal
+        } else {
+            Ast::Flags {
+                flags: self.flags,
+                child: Box::new(literal),
+            }
+        })
     }
 
     fn parse_repeat(&mut self) -> Ast {
@@ -599,6 +816,20 @@ impl<'a> Parser<'a> {
         let mut escaped = start < self.pos && self.bytes[start] == b'\\';
         let extended = self.flags.ignore_whitespace;
         while let Some(&byte) = self.bytes.get(self.pos) {
+            if PLAIN_LITERAL_BYTE[usize::from(extended)][usize::from(byte)] {
+                // A plain byte is followed by a quantifier only where the run
+                // of plain bytes stops; that final scalar then binds alone.
+                self.pos = plain_literal_end(self.bytes, self.pos, extended);
+                if self
+                    .bytes
+                    .get(self.pos)
+                    .is_some_and(|following| is_quantifier_start(char::from(*following)))
+                {
+                    self.pos -= 1;
+                    break;
+                }
+                continue;
+            }
             if byte == b'\\' {
                 // Punctuation escapes and quantifiers are ASCII, so byte
                 // lookahead cannot split a multi-byte scalar.
@@ -641,7 +872,7 @@ impl<'a> Parser<'a> {
         }
         let run = &self.source[start..self.pos];
         if !escaped {
-            return Ast::Literal(run.to_owned());
+            return Ast::Literal(self.source_literal(start, self.pos));
         }
         let mut literal = String::with_capacity(run.len());
         let mut scalars = run.chars();
@@ -652,7 +883,7 @@ impl<'a> Parser<'a> {
                 literal.push(scalar);
             }
         }
-        Ast::Literal(literal)
+        Ast::Literal(literal.into())
     }
 
     fn parse_group(&mut self) -> Ast {
@@ -1091,7 +1322,7 @@ impl<'a> Parser<'a> {
 
     fn parse_escape(&mut self, in_class: bool) -> Ast {
         let Some(ch) = self.bump() else {
-            return Ast::Literal("\\".to_owned());
+            return Ast::Literal("\\".into());
         };
         match ch {
             'A' => {
@@ -1222,18 +1453,18 @@ impl<'a> Parser<'a> {
                 self.bump();
                 let digits = self.take_until(b'}');
                 self.expect('}');
-                Ast::Literal(hex_char(digits).unwrap_or('\u{FFFD}').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('\u{FFFD}').to_string().into())
             }
             'x' => {
                 let digits = self.take_hex_digits(2);
-                Ast::Literal(hex_char(digits).unwrap_or('x').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('x').to_string().into())
             }
             'u' => {
                 let digits = self.take_hex_digits(4);
-                Ast::Literal(hex_char(digits).unwrap_or('u').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('u').to_string().into())
             }
             'R' => Ast::Alternation(vec![
-                Ast::Literal("\r\n".to_owned()),
+                Ast::Literal("\r\n".into()),
                 Ast::Class(CharClass {
                     negated: false,
                     intersections: Vec::new(),
@@ -1248,7 +1479,7 @@ impl<'a> Parser<'a> {
                     ],
                 }),
             ]),
-            _ => Ast::Literal(unescape_char(ch).to_string()),
+            _ => Ast::Literal(unescape_char(ch).to_string().into()),
         }
     }
 
@@ -1485,7 +1716,7 @@ fn push_concat_node(nodes: &mut Vec<Ast>, base: usize, node: Ast) {
         None
     };
     match (previous, &node) {
-        (Some(Ast::Literal(previous)), Ast::Literal(literal)) => previous.push_str(literal),
+        (Some(Ast::Literal(previous)), Ast::Literal(literal)) => previous.push_literal(literal),
         // Keep option snapshots compact. Without this, `(?i:keyword)` becomes
         // one flag node per scalar and defeats literal/alternation fast paths.
         (
@@ -1501,7 +1732,7 @@ fn push_concat_node(nodes: &mut Vec<Ast>, base: usize, node: Ast) {
             if let (Ast::Literal(previous), Ast::Literal(literal)) =
                 (previous_child.as_mut(), child.as_ref())
             {
-                previous.push_str(literal);
+                previous.push_literal(literal);
             }
         }
         _ => nodes.push(node),
@@ -1760,39 +1991,36 @@ mod tests {
     #[test]
     fn coalesces_adjacent_literals() {
         let parsed = parse("return");
-        assert_eq!(parsed.ast, Ast::Literal("return".to_owned()));
+        assert_eq!(parsed.ast, Ast::Literal("return".into()));
         // Escaped scalars merge into the preceding run even when the whole
         // branch collapses to one node.
-        assert_eq!(parse(r"a\.é").ast, Ast::Literal("a.é".to_owned()));
-        assert_eq!(parse(r"\(\\\)x").ast, Ast::Literal(r"(\)x".to_owned()));
+        assert_eq!(parse(r"a\.é").ast, Ast::Literal("a.é".into()));
+        assert_eq!(parse(r"\(\\\)x").ast, Ast::Literal(r"(\)x".into()));
         // A quantified escape binds alone, exactly as a quantified scalar.
         let Ast::Concat(nodes) = parse(r"a\.+\-").ast else {
             panic!("expected concat");
         };
-        assert_eq!(nodes[0], Ast::Literal("a".to_owned()));
+        assert_eq!(nodes[0], Ast::Literal("a".into()));
         assert!(
-            matches!(&nodes[1], Ast::Repeat { node, .. } if **node == Ast::Literal(".".to_owned()))
+            matches!(&nodes[1], Ast::Repeat { node, .. } if **node == Ast::Literal(".".into()))
         );
-        assert_eq!(nodes[2], Ast::Literal("-".to_owned()));
+        assert_eq!(nodes[2], Ast::Literal("-".into()));
         // Escaped whitespace and comment markers stay literal in extended mode.
         let Ast::Flags { child, .. } = parse(r"(?x: a \ b \# c )").ast else {
             panic!("expected option scope");
         };
         assert!(matches!(child.as_ref(), Ast::Flags { child, .. }
-            if **child == Ast::Literal("a b#c".to_owned())));
+            if **child == Ast::Literal("a b#c".into())));
         assert_eq!(
             parse(r"x\.|y").ast,
-            Ast::Alternation(vec![
-                Ast::Literal("x.".to_owned()),
-                Ast::Literal("y".to_owned()),
-            ])
+            Ast::Alternation(vec![Ast::Literal("x.".into()), Ast::Literal("y".into()),])
         );
         // A trailing option change scopes only the rest of its branch and
         // the following branches, never the preceding literal.
         let Ast::Concat(nodes) = parse("ab(?i)c|d").ast else {
             panic!("expected scoped concat");
         };
-        assert_eq!(nodes[0], Ast::Literal("ab".to_owned()));
+        assert_eq!(nodes[0], Ast::Literal("ab".into()));
         let Ast::Flags { child, .. } = &nodes[1] else {
             panic!("expected option scope");
         };
@@ -1821,22 +2049,22 @@ mod tests {
         let Ast::Concat(nodes) = parse("日本語+").ast else {
             panic!("expected concat");
         };
-        assert_eq!(nodes[0], Ast::Literal("日本".to_owned()));
+        assert_eq!(nodes[0], Ast::Literal("日本".into()));
         assert!(
-            matches!(&nodes[1], Ast::Repeat { node, min: 1, .. } if **node == Ast::Literal("語".to_owned()))
+            matches!(&nodes[1], Ast::Repeat { node, min: 1, .. } if **node == Ast::Literal("語".into()))
         );
         let Ast::Repeat { node, .. } = parse("🛰?").ast else {
             panic!("expected repeat");
         };
-        assert_eq!(*node, Ast::Literal("🛰".to_owned()));
+        assert_eq!(*node, Ast::Literal("🛰".into()));
         // Escaped punctuation still coalesces across multi-byte neighbours.
-        assert_eq!(parse(r"é\.ß\-").ast, Ast::Literal("é.ß-".to_owned()));
+        assert_eq!(parse(r"é\.ß\-").ast, Ast::Literal("é.ß-".into()));
         // Extended mode skips Unicode whitespace inside a literal run.
         let Ast::Flags { child, .. } = parse("(?x:a\u{a0}é b)").ast else {
             panic!("expected option scope");
         };
         assert!(matches!(child.as_ref(), Ast::Flags { child, .. }
-            if **child == Ast::Literal("aéb".to_owned())));
+            if **child == Ast::Literal("aéb".into())));
         // Class ranges and POSIX names read whole scalars.
         let Ast::Class(class) = parse("[α-ω[:alpha:]é]").ast else {
             panic!("expected class");
@@ -1884,7 +2112,7 @@ mod tests {
                     ]],
                     atoms: vec![ClassAtom::Char('é')],
                 }),
-                Ast::Literal("y".to_owned()),
+                Ast::Literal("y".into()),
             ])
         );
     }
@@ -1895,11 +2123,11 @@ mod tests {
         let Ast::Concat(nodes) = parsed.ast else {
             panic!("expected concat");
         };
-        assert_eq!(nodes.first(), Some(&Ast::Literal("a".to_owned())));
+        assert_eq!(nodes.first(), Some(&Ast::Literal("a".into())));
         assert!(matches!(nodes.get(1), Some(Ast::Repeat { .. })));
-        assert_eq!(nodes.get(2), Some(&Ast::Literal("c".to_owned())));
+        assert_eq!(nodes.get(2), Some(&Ast::Literal("c".into())));
         assert!(matches!(nodes.get(3), Some(Ast::Group { .. })));
-        assert_eq!(nodes.get(4), Some(&Ast::Literal("e".to_owned())));
+        assert_eq!(nodes.get(4), Some(&Ast::Literal("e".into())));
     }
 
     #[test]
