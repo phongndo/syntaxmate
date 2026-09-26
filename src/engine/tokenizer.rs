@@ -1773,6 +1773,10 @@ impl PreparedLanguage {
             rule_repository_contexts,
         );
         prototype.prepare_root_candidate();
+        // The root blueprint already owns the candidate data it needs. This
+        // construction scratch would otherwise be copied into every tokenizer;
+        // later rules can populate each tokenizer's own template cache on use.
+        *prototype.rule_candidate_templates.get_mut() = hashing::fast_map();
         Ok(Self {
             prototype: Mutex::new(prototype),
             static_patterns,

@@ -75,7 +75,7 @@ pub struct GrammarGraph {
     pub closure: Vec<ClosureMember>,
     /// Compiled IR of `grammar_closure::repository_walk_skeleton`, present
     /// when some closure's repository-context walk must visit this grammar.
-    pub repository_walk_skeleton: Option<Vec<u8>>,
+    pub repository_walk_skeleton: Option<Cow<'static, [u8]>>,
     /// Proof that the grammar's top level has an available rule; see
     /// `grammar_closure::top_level_availability_chain`.
     pub top_level_availability: Option<Vec<AvailabilityStep>>,
@@ -245,6 +245,19 @@ impl GrammarBlob {
 
 impl Bundle {
     pub fn parse(bytes: &[u8]) -> Result<Self, BundleError> {
+        Self::parse_with_skeleton_storage(bytes, |skeleton| Cow::Owned(skeleton.to_vec()))
+    }
+
+    /// Embedded bytes already live for the process lifetime; keep repository
+    /// walk skeletons in that storage instead of copying them onto the heap.
+    pub(crate) fn parse_static(bytes: &'static [u8]) -> Result<Self, BundleError> {
+        Self::parse_with_skeleton_storage(bytes, Cow::Borrowed)
+    }
+
+    fn parse_with_skeleton_storage<'a>(
+        bytes: &'a [u8],
+        store_skeleton: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
+    ) -> Result<Self, BundleError> {
         let (header, sections) = read_header_and_sections(bytes)?;
         if header.format_version != FORMAT_VERSION {
             return Err(BundleError::UnsupportedVersion(header.format_version));
@@ -260,6 +273,7 @@ impl Bundle {
         let grammar_graphs = decode_grammar_graphs(
             section(bytes, &sections, SECTION_GRAMMAR_GRAPHS)?,
             grammar_blobs.len(),
+            store_skeleton,
         )?;
         Ok(Self {
             source_hash: header.source_hash,
@@ -800,9 +814,10 @@ fn encode_grammar_graphs(graphs: &[GrammarGraph]) -> Vec<u8> {
     bytes
 }
 
-fn decode_grammar_graphs(
-    bytes: &[u8],
+fn decode_grammar_graphs<'a>(
+    bytes: &'a [u8],
     blob_count: usize,
+    store_skeleton: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
 ) -> Result<Vec<GrammarGraph>, BundleError> {
     let mut cursor = Cursor::new(bytes, "grammar graphs");
     let count = cursor.u32()? as usize;
@@ -842,7 +857,7 @@ fn decode_grammar_graphs(
         }
         let skeleton_len = cursor.u32()?;
         let repository_walk_skeleton = (skeleton_len != NO_SKELETON)
-            .then(|| cursor.bytes(skeleton_len as usize).map(<[u8]>::to_vec))
+            .then(|| cursor.bytes(skeleton_len as usize).map(&store_skeleton))
             .transpose()?;
         let step_count = cursor.u32()?;
         let top_level_availability = if step_count == NO_AVAILABILITY {
@@ -1084,7 +1099,7 @@ mod tests {
                     blob: 0,
                     traits: ClosureMemberTraits::default(),
                 }],
-                repository_walk_skeleton: Some(grammar_ir("source.rust", "")),
+                repository_walk_skeleton: Some(grammar_ir("source.rust", "").into()),
                 top_level_availability: Some(vec![
                     AvailabilityStep::Repository("entry".to_owned()),
                     AvailabilityStep::Rule(RuleId(0)),
@@ -1118,6 +1133,30 @@ mod tests {
         assert_eq!(parsed.available_languages(), vec!["rust"]);
         assert_eq!(parsed.canonical_language("RS"), Some("rust"));
         assert_eq!(parsed.detect_language_from_path("src/lib.rs"), Some("rust"));
+    }
+
+    #[test]
+    fn static_bundle_borrows_skeletons_and_matches_owned_parsing() {
+        let bytes = Box::leak(sample_bundle().to_bytes().into_boxed_slice());
+        let borrowed = Bundle::parse_static(bytes).unwrap();
+        let owned = Bundle::parse(bytes).unwrap();
+        assert_eq!(borrowed, owned);
+        assert_eq!(borrowed.to_bytes(), bytes);
+        assert!(matches!(
+            borrowed.grammar_graphs[0].repository_walk_skeleton,
+            Some(Cow::Borrowed(_))
+        ));
+        assert!(matches!(
+            owned.grammar_graphs[0].repository_walk_skeleton,
+            Some(Cow::Owned(_))
+        ));
+        for length in 0..bytes.len() {
+            assert_eq!(
+                Bundle::parse_static(&bytes[..length]),
+                Bundle::parse(&bytes[..length]),
+                "truncated bundle at {length}"
+            );
+        }
     }
 
     #[test]

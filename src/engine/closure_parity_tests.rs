@@ -62,6 +62,7 @@ fn recorded_bundle_closures_match_the_dependency_walk() {
             repository_walk_skeleton: walked.contains(&root).then(|| {
                 encode_compiled_grammar(&grammar_closure::repository_walk_skeleton(&compiled[root]))
                     .unwrap()
+                    .into()
             }),
             top_level_availability: grammar_closure::top_level_availability_chain(&compiled[root]),
         };

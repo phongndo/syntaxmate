@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Restore allocation guardrails for prepared tokenizers and bundled construction
+  by dropping construction-only rule templates and borrowing embedded repository
+  skeleton bytes.
 - Reduce first-use tokenization costs for complex and embedded grammars through
   lower-allocation regex parsing, deferred matcher construction, and reuse within
   each tokenizer. Refresh the [catalog reference measurements](benchmarks/textmate/catalog-performance.json).
