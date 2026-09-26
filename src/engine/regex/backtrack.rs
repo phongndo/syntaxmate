@@ -2623,95 +2623,204 @@ pub(crate) fn posix_class_predicate(name: &str) -> CharPredicate {
 }
 
 pub(crate) fn unicode_class_contains(name: &str, ch: char) -> bool {
-    use unicode_general_category::{GeneralCategory as Gc, get_general_category};
-    use unicode_script::UnicodeScript;
+    unicode_property(name).contains(name, ch)
+}
 
-    let category = get_general_category(ch);
-    let is_letter = matches!(
-        category,
-        Gc::LowercaseLetter
-            | Gc::ModifierLetter
-            | Gc::OtherLetter
-            | Gc::TitlecaseLetter
-            | Gc::UppercaseLetter
-    );
-    let is_mark = matches!(
-        category,
-        Gc::EnclosingMark | Gc::NonspacingMark | Gc::SpacingMark
-    );
-    let is_number = matches!(
-        category,
-        Gc::DecimalNumber | Gc::LetterNumber | Gc::OtherNumber
-    );
-    let is_punctuation = matches!(
-        category,
-        Gc::ClosePunctuation
-            | Gc::ConnectorPunctuation
-            | Gc::DashPunctuation
-            | Gc::FinalPunctuation
-            | Gc::InitialPunctuation
-            | Gc::OpenPunctuation
-            | Gc::OtherPunctuation
-    );
-    let is_symbol = matches!(
-        category,
-        Gc::CurrencySymbol | Gc::MathSymbol | Gc::ModifierSymbol | Gc::OtherSymbol
-    );
-    if name.eq_ignore_ascii_case("l") || name.eq_ignore_ascii_case("letter") {
-        is_letter
-    } else if name.eq_ignore_ascii_case("alphabetic") {
-        ch.is_alphabetic()
-    } else if name.eq_ignore_ascii_case("alnum") {
-        ch.is_alphanumeric()
-    } else if name.eq_ignore_ascii_case("alpha") {
-        ch.is_alphabetic()
-    } else if name.eq_ignore_ascii_case("ascii") {
-        ch.is_ascii()
-    } else if name.eq_ignore_ascii_case("blank") {
-        matches!(ch, '\t' | ' ')
-    } else if name.eq_ignore_ascii_case("cntrl") {
-        ch.is_control()
-    } else if name.eq_ignore_ascii_case("digit") {
-        ch.is_ascii_digit()
-    } else if name.eq_ignore_ascii_case("graph") {
-        !ch.is_whitespace() && !ch.is_control()
-    } else if name.eq_ignore_ascii_case("lower") {
-        ch.is_lowercase()
-    } else if name.eq_ignore_ascii_case("print") {
-        !ch.is_control()
-    } else if name.eq_ignore_ascii_case("punct") {
-        ch.is_ascii_punctuation()
-    } else if name.eq_ignore_ascii_case("space") {
-        ch.is_whitespace()
-    } else if name.eq_ignore_ascii_case("upper") {
-        ch.is_uppercase()
-    } else if name.eq_ignore_ascii_case("xdigit") {
-        ch.is_ascii_hexdigit()
-    } else if name.eq_ignore_ascii_case("n") || name.eq_ignore_ascii_case("number") {
-        is_number
-    } else if name.eq_ignore_ascii_case("m") || name.eq_ignore_ascii_case("mark") {
-        is_mark
-    } else if name.eq_ignore_ascii_case("p") || name.eq_ignore_ascii_case("punctuation") {
-        is_punctuation
-    } else if name.eq_ignore_ascii_case("s") || name.eq_ignore_ascii_case("symbol") {
-        is_symbol
-    } else if name.eq_ignore_ascii_case(category.abbreviation()) {
-        true
-    } else if name.eq_ignore_ascii_case("decimal_number") {
-        category == Gc::DecimalNumber
-    } else if name.eq_ignore_ascii_case("z") || name.eq_ignore_ascii_case("separator") {
-        ch.is_whitespace()
-    } else if name.eq_ignore_ascii_case("word") {
-        is_word_char(ch)
+/// Property selected by a `\p{…}` name. Resolving the name first means a
+/// query computes only the Unicode table lookup that property needs, instead
+/// of a general-category search for every name plus two script searches for
+/// every non-matching category name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnicodeProperty {
+    Letter,
+    Alphabetic,
+    Alnum,
+    Ascii,
+    Blank,
+    Cntrl,
+    Digit,
+    Graph,
+    Lower,
+    Print,
+    Punct,
+    Space,
+    Upper,
+    Xdigit,
+    Number,
+    Mark,
+    Punctuation,
+    Symbol,
+    Category(unicode_general_category::GeneralCategory),
+    DecimalNumber,
+    Separator,
+    Word,
+    XidStart,
+    XidContinue,
+    Script,
+}
+
+/// Every general category, for resolving two-letter abbreviations.
+const GENERAL_CATEGORIES: [unicode_general_category::GeneralCategory; 30] = {
+    use unicode_general_category::GeneralCategory as Gc;
+    [
+        Gc::ClosePunctuation,
+        Gc::ConnectorPunctuation,
+        Gc::Control,
+        Gc::CurrencySymbol,
+        Gc::DashPunctuation,
+        Gc::DecimalNumber,
+        Gc::EnclosingMark,
+        Gc::FinalPunctuation,
+        Gc::Format,
+        Gc::InitialPunctuation,
+        Gc::LetterNumber,
+        Gc::LineSeparator,
+        Gc::LowercaseLetter,
+        Gc::MathSymbol,
+        Gc::ModifierLetter,
+        Gc::ModifierSymbol,
+        Gc::NonspacingMark,
+        Gc::OpenPunctuation,
+        Gc::OtherLetter,
+        Gc::OtherNumber,
+        Gc::OtherPunctuation,
+        Gc::OtherSymbol,
+        Gc::ParagraphSeparator,
+        Gc::PrivateUse,
+        Gc::SpaceSeparator,
+        Gc::SpacingMark,
+        Gc::Surrogate,
+        Gc::TitlecaseLetter,
+        Gc::Unassigned,
+        Gc::UppercaseLetter,
+    ]
+};
+
+/// Resolves names in the evaluator's precedence order. A category
+/// abbreviation is checked where the evaluator compared it with the
+/// character's own category; no later name (a long property name, `XID_*`,
+/// or a script name) is also a two-letter category abbreviation, which
+/// `unicode_property_resolution_matches_the_reference_evaluator` checks.
+fn unicode_property(name: &str) -> UnicodeProperty {
+    let is = |candidate: &str| name.eq_ignore_ascii_case(candidate);
+    if is("l") || is("letter") {
+        UnicodeProperty::Letter
+    } else if is("alphabetic") || is("alpha") {
+        UnicodeProperty::Alphabetic
+    } else if is("alnum") {
+        UnicodeProperty::Alnum
+    } else if is("ascii") {
+        UnicodeProperty::Ascii
+    } else if is("blank") {
+        UnicodeProperty::Blank
+    } else if is("cntrl") {
+        UnicodeProperty::Cntrl
+    } else if is("digit") {
+        UnicodeProperty::Digit
+    } else if is("graph") {
+        UnicodeProperty::Graph
+    } else if is("lower") {
+        UnicodeProperty::Lower
+    } else if is("print") {
+        UnicodeProperty::Print
+    } else if is("punct") {
+        UnicodeProperty::Punct
+    } else if is("space") {
+        UnicodeProperty::Space
+    } else if is("upper") {
+        UnicodeProperty::Upper
+    } else if is("xdigit") {
+        UnicodeProperty::Xdigit
+    } else if is("n") || is("number") {
+        UnicodeProperty::Number
+    } else if is("m") || is("mark") {
+        UnicodeProperty::Mark
+    } else if is("p") || is("punctuation") {
+        UnicodeProperty::Punctuation
+    } else if is("s") || is("symbol") {
+        UnicodeProperty::Symbol
+    } else if let Some(category) = GENERAL_CATEGORIES
+        .iter()
+        .find(|category| is(category.abbreviation()))
+    {
+        UnicodeProperty::Category(*category)
+    } else if is("decimal_number") {
+        UnicodeProperty::DecimalNumber
+    } else if is("z") || is("separator") {
+        UnicodeProperty::Separator
+    } else if is("word") {
+        UnicodeProperty::Word
     } else if let Some(start) = xid_property(name) {
         if start {
-            unicode_ident::is_xid_start(ch)
+            UnicodeProperty::XidStart
         } else {
-            unicode_ident::is_xid_continue(ch)
+            UnicodeProperty::XidContinue
         }
     } else {
-        ch.script().full_name().eq_ignore_ascii_case(name)
-            || ch.script().short_name().eq_ignore_ascii_case(name)
+        UnicodeProperty::Script
+    }
+}
+
+impl UnicodeProperty {
+    fn contains(self, name: &str, ch: char) -> bool {
+        use unicode_general_category::{GeneralCategory as Gc, get_general_category};
+        use unicode_script::UnicodeScript;
+
+        match self {
+            Self::Letter => matches!(
+                get_general_category(ch),
+                Gc::LowercaseLetter
+                    | Gc::ModifierLetter
+                    | Gc::OtherLetter
+                    | Gc::TitlecaseLetter
+                    | Gc::UppercaseLetter
+            ),
+            Self::Alphabetic => ch.is_alphabetic(),
+            Self::Alnum => ch.is_alphanumeric(),
+            Self::Ascii => ch.is_ascii(),
+            Self::Blank => matches!(ch, '\t' | ' '),
+            Self::Cntrl => ch.is_control(),
+            Self::Digit => ch.is_ascii_digit(),
+            Self::Graph => !ch.is_whitespace() && !ch.is_control(),
+            Self::Lower => ch.is_lowercase(),
+            Self::Print => !ch.is_control(),
+            Self::Punct => ch.is_ascii_punctuation(),
+            Self::Space | Self::Separator => ch.is_whitespace(),
+            Self::Upper => ch.is_uppercase(),
+            Self::Xdigit => ch.is_ascii_hexdigit(),
+            Self::Number => matches!(
+                get_general_category(ch),
+                Gc::DecimalNumber | Gc::LetterNumber | Gc::OtherNumber
+            ),
+            Self::Mark => matches!(
+                get_general_category(ch),
+                Gc::EnclosingMark | Gc::NonspacingMark | Gc::SpacingMark
+            ),
+            Self::Punctuation => matches!(
+                get_general_category(ch),
+                Gc::ClosePunctuation
+                    | Gc::ConnectorPunctuation
+                    | Gc::DashPunctuation
+                    | Gc::FinalPunctuation
+                    | Gc::InitialPunctuation
+                    | Gc::OpenPunctuation
+                    | Gc::OtherPunctuation
+            ),
+            Self::Symbol => matches!(
+                get_general_category(ch),
+                Gc::CurrencySymbol | Gc::MathSymbol | Gc::ModifierSymbol | Gc::OtherSymbol
+            ),
+            Self::Category(category) => get_general_category(ch) == category,
+            Self::DecimalNumber => get_general_category(ch) == Gc::DecimalNumber,
+            Self::Word => is_word_char(ch),
+            Self::XidStart => unicode_ident::is_xid_start(ch),
+            Self::XidContinue => unicode_ident::is_xid_continue(ch),
+            Self::Script => {
+                let script = ch.script();
+                script.full_name().eq_ignore_ascii_case(name)
+                    || script.short_name().eq_ignore_ascii_case(name)
+            }
+        }
     }
 }
 
@@ -3079,6 +3188,189 @@ mod tests {
             allow_a: true,
             allow_g: false,
             g_pos: 0,
+        }
+    }
+
+    /// The evaluator before property names were resolved up front.
+    fn unicode_class_contains_reference(name: &str, ch: char) -> bool {
+        use unicode_general_category::{GeneralCategory as Gc, get_general_category};
+        use unicode_script::UnicodeScript;
+
+        let category = get_general_category(ch);
+        let is_letter = matches!(
+            category,
+            Gc::LowercaseLetter
+                | Gc::ModifierLetter
+                | Gc::OtherLetter
+                | Gc::TitlecaseLetter
+                | Gc::UppercaseLetter
+        );
+        let is_mark = matches!(
+            category,
+            Gc::EnclosingMark | Gc::NonspacingMark | Gc::SpacingMark
+        );
+        let is_number = matches!(
+            category,
+            Gc::DecimalNumber | Gc::LetterNumber | Gc::OtherNumber
+        );
+        let is_punctuation = matches!(
+            category,
+            Gc::ClosePunctuation
+                | Gc::ConnectorPunctuation
+                | Gc::DashPunctuation
+                | Gc::FinalPunctuation
+                | Gc::InitialPunctuation
+                | Gc::OpenPunctuation
+                | Gc::OtherPunctuation
+        );
+        let is_symbol = matches!(
+            category,
+            Gc::CurrencySymbol | Gc::MathSymbol | Gc::ModifierSymbol | Gc::OtherSymbol
+        );
+        if name.eq_ignore_ascii_case("l") || name.eq_ignore_ascii_case("letter") {
+            is_letter
+        } else if name.eq_ignore_ascii_case("alphabetic") {
+            ch.is_alphabetic()
+        } else if name.eq_ignore_ascii_case("alnum") {
+            ch.is_alphanumeric()
+        } else if name.eq_ignore_ascii_case("alpha") {
+            ch.is_alphabetic()
+        } else if name.eq_ignore_ascii_case("ascii") {
+            ch.is_ascii()
+        } else if name.eq_ignore_ascii_case("blank") {
+            matches!(ch, '\t' | ' ')
+        } else if name.eq_ignore_ascii_case("cntrl") {
+            ch.is_control()
+        } else if name.eq_ignore_ascii_case("digit") {
+            ch.is_ascii_digit()
+        } else if name.eq_ignore_ascii_case("graph") {
+            !ch.is_whitespace() && !ch.is_control()
+        } else if name.eq_ignore_ascii_case("lower") {
+            ch.is_lowercase()
+        } else if name.eq_ignore_ascii_case("print") {
+            !ch.is_control()
+        } else if name.eq_ignore_ascii_case("punct") {
+            ch.is_ascii_punctuation()
+        } else if name.eq_ignore_ascii_case("space") {
+            ch.is_whitespace()
+        } else if name.eq_ignore_ascii_case("upper") {
+            ch.is_uppercase()
+        } else if name.eq_ignore_ascii_case("xdigit") {
+            ch.is_ascii_hexdigit()
+        } else if name.eq_ignore_ascii_case("n") || name.eq_ignore_ascii_case("number") {
+            is_number
+        } else if name.eq_ignore_ascii_case("m") || name.eq_ignore_ascii_case("mark") {
+            is_mark
+        } else if name.eq_ignore_ascii_case("p") || name.eq_ignore_ascii_case("punctuation") {
+            is_punctuation
+        } else if name.eq_ignore_ascii_case("s") || name.eq_ignore_ascii_case("symbol") {
+            is_symbol
+        } else if name.eq_ignore_ascii_case(category.abbreviation()) {
+            true
+        } else if name.eq_ignore_ascii_case("decimal_number") {
+            category == Gc::DecimalNumber
+        } else if name.eq_ignore_ascii_case("z") || name.eq_ignore_ascii_case("separator") {
+            ch.is_whitespace()
+        } else if name.eq_ignore_ascii_case("word") {
+            is_word_char(ch)
+        } else if let Some(start) = xid_property(name) {
+            if start {
+                unicode_ident::is_xid_start(ch)
+            } else {
+                unicode_ident::is_xid_continue(ch)
+            }
+        } else {
+            ch.script().full_name().eq_ignore_ascii_case(name)
+                || ch.script().short_name().eq_ignore_ascii_case(name)
+        }
+    }
+
+    #[test]
+    fn unicode_property_resolution_matches_the_reference_evaluator() {
+        use unicode_script::UnicodeScript;
+
+        let mut names = vec![
+            "l",
+            "L",
+            "letter",
+            "Letter",
+            "alphabetic",
+            "alnum",
+            "alpha",
+            "ascii",
+            "blank",
+            "cntrl",
+            "digit",
+            "graph",
+            "lower",
+            "print",
+            "punct",
+            "space",
+            "upper",
+            "xdigit",
+            "n",
+            "number",
+            "m",
+            "mark",
+            "p",
+            "punctuation",
+            "s",
+            "symbol",
+            "decimal_number",
+            "z",
+            "separator",
+            "word",
+            "XID_Start",
+            "xidc",
+            "Xid-Continue",
+            "Latin",
+            "latn",
+            "Greek",
+            "Han",
+            "Hiragana",
+            "Cyrillic",
+            "Common",
+            "Yi",
+            "unknown_property",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        for category in GENERAL_CATEGORIES {
+            names.push(category.abbreviation().to_owned());
+            names.push(category.abbreviation().to_ascii_lowercase());
+            names.push(category.abbreviation().to_ascii_uppercase());
+        }
+        // Every scalar below U+3000 and a stride of the rest cover each
+        // property's ASCII, Latin, and astral behavior.
+        let scalars = (0..=0x10ffffu32)
+            .filter(|scalar| *scalar < 0x3000 || scalar % 13 == 0)
+            .filter_map(char::from_u32);
+        for ch in scalars {
+            for name in &names {
+                assert_eq!(
+                    unicode_class_contains(name, ch),
+                    unicode_class_contains_reference(name, ch),
+                    "{name} {ch:?}"
+                );
+            }
+        }
+        // No script name collides with a category abbreviation, so resolving
+        // abbreviations before script names is exact.
+        for ch in (0..=0x10ffffu32).filter_map(char::from_u32) {
+            let script = ch.script();
+            for category in GENERAL_CATEGORIES {
+                assert!(
+                    !script
+                        .full_name()
+                        .eq_ignore_ascii_case(category.abbreviation())
+                );
+                assert!(
+                    !script
+                        .short_name()
+                        .eq_ignore_ascii_case(category.abbreviation())
+                );
+            }
         }
     }
 
