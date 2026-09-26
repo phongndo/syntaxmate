@@ -812,8 +812,14 @@ impl FallbackMatcher {
             });
         }
         let mut budget = StepBudget::new(self.budget);
-        let mut local_scratch = BytecodeScratch::default();
-        let scratch = scratch.unwrap_or(&mut local_scratch);
+        let mut local_scratch;
+        let scratch = match scratch {
+            Some(scratch) => scratch,
+            None => {
+                local_scratch = BytecodeScratch::default();
+                &mut local_scratch
+            }
+        };
         let result = if capture_count == 0
             && let Some(program) = self.active_bytecode()
         {
