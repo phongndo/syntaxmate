@@ -1488,17 +1488,7 @@ impl Program {
                     }
                 }
                 Instruction::Class { id, flags, next } => {
-                    let class = &self.classes[id.0 as usize];
-                    let matched = match line.as_bytes().get(position).copied() {
-                        Some(byte) if byte.is_ascii() => class
-                            .matches_ascii(byte, flags.case_insensitive())
-                            .then_some(position + 1),
-                        Some(_) => char_at(line, position)
-                            .filter(|(ch, _)| class.matches_char(*ch, flags.regex()))
-                            .map(|(_, end)| end),
-                        None => None,
-                    };
-                    if let Some(end) = matched {
+                    if let Some(end) = self.class_end(*id, *flags, line, position) {
                         position = end;
                         pc = *next;
                     } else if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
@@ -1697,6 +1687,21 @@ impl Program {
                     direction,
                     next,
                 } => {
+                    if let Some(matched) =
+                        self.single_consumer_assertion(line, position, *entry, *direction)
+                    {
+                        if matched == *positive {
+                            pc = *next;
+                        } else if !self.backtrack_or_resolve(
+                            line,
+                            scratch,
+                            &mut pc,
+                            &mut position,
+                        )? {
+                            return Ok(None);
+                        }
+                        continue;
+                    }
                     let mut frame = AssertionFrame {
                         parent_position: position,
                         target_end: position,
@@ -1836,6 +1841,87 @@ impl Program {
                 }
             }
         }
+    }
+
+    #[inline]
+    fn class_end(
+        &self,
+        id: ClassId,
+        flags: InstructionFlags,
+        line: &str,
+        position: usize,
+    ) -> Option<usize> {
+        let class = &self.classes[id.0 as usize];
+        match line.as_bytes().get(position).copied() {
+            Some(byte) if byte.is_ascii() => class
+                .matches_ascii(byte, flags.case_insensitive())
+                .then_some(position + 1),
+            Some(_) => char_at(line, position)
+                .filter(|(ch, _)| class.matches_char(*ch, flags.regex()))
+                .map(|(_, end)| end),
+            None => None,
+        }
+    }
+
+    /// Evaluates an assertion whose body is one class or case-sensitive
+    /// literal directly followed by its `Accept` (`(?<![$\w])`, `(?!\.)`,
+    /// `(?<=\.\.\.)`, …) without entering the assertion sub-machine.
+    /// Such bodies have no captures, repeats, or alternatives, so a single
+    /// direct test decides the result. Returns whether the body matched, or
+    /// `None` when the general path is needed.
+    #[inline]
+    fn single_consumer_assertion(
+        &self,
+        line: &str,
+        position: usize,
+        entry: ProgramCounter,
+        direction: AssertDirection,
+    ) -> Option<bool> {
+        let (next, lookbehind_start) = match &self.instructions[arena_index(entry)] {
+            Instruction::Class { id, flags, next } => {
+                if direction.is_ahead() {
+                    let matched = self.class_end(*id, *flags, line, position).is_some();
+                    return self.is_accept(*next).then_some(matched);
+                }
+                // The only probe that can end exactly at `position` starts
+                // at the previous character.
+                let start = line
+                    .get(..position)?
+                    .chars()
+                    .next_back()
+                    .map(|ch| position - ch.len_utf8());
+                let matched = start.is_some_and(|start| {
+                    self.class_end(*id, *flags, line, start) == Some(position)
+                });
+                (*next, start.filter(|_| matched))
+            }
+            Instruction::Literal { id, flags, next } if !flags.case_insensitive() => {
+                let literal = &self.literals[id.0 as usize];
+                if direction.is_ahead() {
+                    let matched =
+                        match_literal_end(line, position, literal, flags.regex()).is_some();
+                    return self.is_accept(*next).then_some(matched);
+                }
+                let start = position.checked_sub(literal.len()).filter(|start| {
+                    line.is_char_boundary(*start)
+                        && line.as_bytes()[*start..position] == *literal.as_bytes()
+                });
+                (*next, start)
+            }
+            _ => return None,
+        };
+        if !self.is_accept(next) {
+            return None;
+        }
+        // Honour the probe window exactly as `first_probe` would.
+        Some(lookbehind_start.is_some_and(|start| {
+            let width = position - start;
+            width >= direction.min_width() && direction.max_width().is_none_or(|max| width <= max)
+        }))
+    }
+
+    fn is_accept(&self, pc: ProgramCounter) -> bool {
+        matches!(self.instructions[arena_index(pc)], Instruction::Accept)
     }
 
     /// Characters one of which every successful path from `pc` must consume
@@ -4062,6 +4148,50 @@ mod tests {
             "abcdc",
             "aab",
             "xyxzqw",
+        ];
+        for pattern in patterns {
+            let parsed = parse(pattern);
+            let live = (1..=parsed.capture_count).collect::<Vec<_>>();
+            for line in lines {
+                for start in line
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(line.len()))
+                {
+                    let recursive = recursive_position_span(&parsed, line, start, context());
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive,
+                        "pattern {pattern:?}, line {line:?}, start {start}"
+                    );
+                    assert_capture_replay(pattern, line, start, &live);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn single_consumer_assertions_match_recursive_engine() {
+        let patterns = [
+            r"(?<![$_[:alnum:]])[a-z]+(?![$_[:alnum:]])",
+            r"(?:(?<=\.\.\.)|(?<!\.))\b[a-z]+",
+            r"(?<=é)x|(?<![é])y",
+            r"(?<=[^a])b(?=[é\s])",
+            r"(?<=ab)c(?!d)",
+            r"(?i:(?<=AB)c(?=D))",
+            r"(?<=)a(?=)",
+            r"(?<!\w)(?=\d)\d+(?<=\d)(?!\.)",
+            r"(?<=[a-z]{2})x",
+        ];
+        let lines = [
+            "",
+            "abc",
+            "$abc def1 ...xyz .q",
+            "éx ay éy ëy",
+            "ab b\u{e9} ab\u{e9} cb ",
+            "abcd abce ABcD abcx",
+            "a1 12.5 x99",
+            "xx abx",
         ];
         for pattern in patterns {
             let parsed = parse(pattern);
