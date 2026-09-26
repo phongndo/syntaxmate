@@ -586,8 +586,9 @@ impl FallbackMatcher {
         // One program can serve both selection and capture replay when the
         // replayed groups do not change its selection shape. Patterns whose
         // matching reads capture state keep their dedicated selection layout.
+        // Subroutine calls only write captures, so they can share.
         let features = &self.parsed.features;
-        let reads_captures = features.backreference || features.subroutine || features.conditional;
+        let reads_captures = features.backreference || features.conditional;
         if !reads_captures
             && let Some(live) = self.shared_captures.as_deref()
             && let Some(Ok(program)) =
@@ -608,7 +609,7 @@ impl FallbackMatcher {
         // The position-only layout has no capture slots, so these features
         // can never compile there. Skip the doomed attempt instead of
         // discarding a partial compile of a large pattern.
-        let position = if reads_captures {
+        let position = if reads_captures || features.subroutine {
             Err(CompileError::Subroutine)
         } else {
             Program::compile(&self.parsed)

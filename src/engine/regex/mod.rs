@@ -565,6 +565,18 @@ mod tests {
             replay(&separate, "amp;", 0).captures,
             vec![Some(0..3), Some(0..3)]
         );
+
+        // Subroutine calls write the called group's capture on the shared
+        // program's explicit call stack.
+        let called = CompiledPattern::new_with_live_captures(r"(?<n>a|b)x\g<n>(?=;)", vec![0, 1]);
+        let RegexMatcher::Fallback(matcher) = called.matcher() else {
+            panic!("lookahead should route to the fallback matcher");
+        };
+        assert!(matcher.shared_capture_program().is_some());
+        assert_eq!(
+            replay(&called, "axb;", 0).captures,
+            vec![Some(0..3), Some(2..3)]
+        );
     }
 
     #[test]
