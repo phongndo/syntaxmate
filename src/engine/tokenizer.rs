@@ -7107,7 +7107,9 @@ fn compile_rule_repository_contexts<'a>(
             index: usize,
             context: ContextId,
         },
-        RepositoryExit((GrammarId, RepositoryNameId, ContextId)),
+        /// Keyed by the resolved repository entry's address, which names one
+        /// `(grammar, repository name)` for the walk's lifetime.
+        RepositoryExit((usize, ContextId)),
     }
 
     fn push_refs<'a>(
@@ -7126,6 +7128,23 @@ fn compile_rule_repository_contexts<'a>(
                 context,
             });
         }
+    }
+
+    /// Bounded preparation charges each repository name the first time the
+    /// walk meets it.
+    fn charge_repository_name(
+        budget: &mut RepositoryContextBudget,
+        names: &mut RepositoryNameInterner,
+        name: &str,
+    ) -> bool {
+        let known = names.get(name).is_some();
+        if !budget.charge_repository(name, !known) {
+            return false;
+        }
+        if !known {
+            names.intern(name);
+        }
+        true
     }
 
     fn push_captures<'a>(
@@ -7310,26 +7329,32 @@ fn compile_rule_repository_contexts<'a>(
                     RuleRef::Repository(name) => {
                         let bindings = compiled.context(context);
                         let bound_name = bindings.get(name).map_or(name.as_str(), String::as_str);
-                        let known_name = repository_names.get(bound_name);
-                        if !budget.charge_repository(bound_name, known_name.is_none()) {
+                        if bounded
+                            && !charge_repository_name(
+                                &mut budget,
+                                &mut repository_names,
+                                bound_name,
+                            )
+                        {
                             break;
                         }
-                        let name_id =
-                            known_name.unwrap_or_else(|| repository_names.intern(bound_name).0);
-                        let key = (grammar_id, name_id, context);
+                        // A missing entry would only enter and leave the
+                        // visiting set.
+                        let Some(target) = grammar.repository.get(bound_name) else {
+                            continue;
+                        };
+                        let key = (std::ptr::from_ref(target) as usize, context);
                         if !visiting_repositories.insert(key) {
                             continue;
                         }
                         work.push(Work::RepositoryExit(key));
-                        if let Some(target) = grammar.repository.get(bound_name) {
-                            push_refs(
-                                &mut work,
-                                grammar_id,
-                                base_grammar_id,
-                                std::slice::from_ref(target),
-                                context,
-                            );
-                        }
+                        push_refs(
+                            &mut work,
+                            grammar_id,
+                            base_grammar_id,
+                            std::slice::from_ref(target),
+                            context,
+                        );
                     }
                     RuleRef::SelfRef => work.push(Work::TopLevel {
                         grammar_id,
@@ -7362,26 +7387,30 @@ fn compile_rule_repository_contexts<'a>(
                             continue;
                         };
                         if let Some(repository) = repository {
-                            let known_name = repository_names.get(repository);
-                            if !budget.charge_repository(repository, known_name.is_none()) {
+                            if bounded
+                                && !charge_repository_name(
+                                    &mut budget,
+                                    &mut repository_names,
+                                    repository,
+                                )
+                            {
                                 break;
                             }
-                            let name_id =
-                                known_name.unwrap_or_else(|| repository_names.intern(repository).0);
-                            let key = (external_id, name_id, EMPTY_CONTEXT);
+                            let Some(target) = external.repository.get(repository) else {
+                                continue;
+                            };
+                            let key = (std::ptr::from_ref(target) as usize, EMPTY_CONTEXT);
                             if !visiting_repositories.insert(key) {
                                 continue;
                             }
                             work.push(Work::RepositoryExit(key));
-                            if let Some(target) = external.repository.get(repository) {
-                                push_refs(
-                                    &mut work,
-                                    external_id,
-                                    base_grammar_id,
-                                    std::slice::from_ref(target),
-                                    EMPTY_CONTEXT,
-                                );
-                            }
+                            push_refs(
+                                &mut work,
+                                external_id,
+                                base_grammar_id,
+                                std::slice::from_ref(target),
+                                EMPTY_CONTEXT,
+                            );
                         } else {
                             work.push(Work::TopLevel {
                                 grammar_id: external_id,
