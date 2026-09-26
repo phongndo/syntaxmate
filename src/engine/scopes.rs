@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use super::hashing::{self, FastMap};
+use super::hashing::{self, FastMap, StrMap};
 
 use crate::SyntaxClass;
 
@@ -12,7 +12,7 @@ pub struct ScopeInterner {
     // Scope names used to be copied into both `names` and `ids`, then copied
     // again for every highlighting result produced by a tokenizer.
     names: Vec<Arc<str>>,
-    ids: HashMap<Arc<str>, ScopeId>,
+    ids: StrMap<Arc<str>, ScopeId>,
     classes: Vec<Option<SyntaxClass>>,
 }
 
@@ -58,8 +58,8 @@ pub struct ScopeTemplateId(pub u32);
 pub struct ScopeTemplateInterner {
     templates: Vec<Arc<[ScopeId]>>,
     ids: HashMap<Arc<[ScopeId]>, ScopeTemplateId>,
-    scope_text_ids: HashMap<String, ScopeTemplateId>,
-    prefix_text_ids: HashMap<String, ScopeTemplateId>,
+    scope_text_ids: StrMap<String, ScopeTemplateId>,
+    prefix_text_ids: StrMap<String, ScopeTemplateId>,
 }
 
 impl ScopeTemplateInterner {

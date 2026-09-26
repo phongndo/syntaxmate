@@ -29,7 +29,7 @@ use super::grammar::{
 };
 use super::grammar_closure::{AvailabilityStep, ClosureMemberTraits};
 use super::grammar_ir::decode_compiled_grammar;
-use super::hashing::{self, FastMap, FastSet};
+use super::hashing::{self, FastMap, FastSet, StrMap};
 use super::line::{LineChunks, next_char_boundary};
 use super::regex::captures::substitute_end_pattern;
 use super::regex::{
@@ -1292,7 +1292,7 @@ pub struct GrammarSet {
     // immutable compiled grammars and live root-specific repository walks.
     // Weak values let those walks be reclaimed with their tokenizers.
     grammars: Arc<Vec<GrammarSlot>>,
-    scope_to_id: Arc<HashMap<String, GrammarId>>,
+    scope_to_id: Arc<StrMap<String, GrammarId>>,
     rule_repository_context_cache:
         Arc<Mutex<FastMap<GrammarId, Weak<DeferredRuleRepositoryContexts>>>>,
 }
