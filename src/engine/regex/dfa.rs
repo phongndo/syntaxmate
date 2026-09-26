@@ -1287,10 +1287,14 @@ impl AutomataMatcher {
     /// This lets fallback-routed patterns (notably fixed-width separator
     /// lookarounds around huge symbol inventories) bypass the general VM
     /// without relabeling every fallback expression as an automata matcher.
-    pub(crate) fn from_specialized_translation(translation: Translation) -> Option<Self> {
-        let engine = specialized_engine(&translation)?;
+    pub(crate) fn from_specialized_translation(
+        translation: Translation,
+    ) -> Result<Self, Translation> {
+        let Some(engine) = specialized_engine(&translation) else {
+            return Err(translation);
+        };
         translation.parsed.initialize_analysis();
-        Some(Self {
+        Ok(Self {
             engine,
             translation,
             generic_prefilter: false,

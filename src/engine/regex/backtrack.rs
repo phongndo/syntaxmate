@@ -70,8 +70,9 @@ pub struct FallbackMatcher {
     special: Option<SpecialFallbackMatcher>,
     start_hint: StartHint,
     budget: usize,
-    /// Process-unique id keying scan-local prefilter cursors.
-    prefilter_slot: u32,
+    /// Process-unique id keying scan-local prefilter cursors. Assigned on
+    /// first execution so construction does not build the prefilter.
+    prefilter_slot: OnceLock<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -481,13 +482,6 @@ impl FallbackMatcher {
 
     pub(crate) fn from_parsed(parsed: Arc<ParsedRegex>, budget: usize) -> Self {
         let start_hint = start_hint(&parsed.ast);
-        static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
-            std::sync::atomic::AtomicU32::new(0);
-        let prefilter_slot = if parsed.prefilter().is_enabled() {
-            NEXT_PREFILTER_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        } else {
-            u32::MAX
-        };
         let special = SpecialFallbackMatcher::from_source(&parsed.source);
         Self {
             parsed,
@@ -495,8 +489,20 @@ impl FallbackMatcher {
             special,
             start_hint,
             budget,
-            prefilter_slot,
+            prefilter_slot: OnceLock::new(),
         }
+    }
+
+    fn prefilter_slot(&self) -> u32 {
+        static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
+        *self.prefilter_slot.get_or_init(|| {
+            if self.parsed.prefilter().is_enabled() {
+                NEXT_PREFILTER_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            } else {
+                u32::MAX
+            }
+        })
     }
 
     pub fn parsed(&self) -> &ParsedRegex {
@@ -558,11 +564,16 @@ impl FallbackMatcher {
         let bytes = analysis
             .start_bytes()
             .filter(|_| !analysis.start_nullable())?;
-        Some(
-            (0u8..=u8::MAX)
-                .filter(|byte| bytes.contains(*byte))
-                .collect(),
-        )
+        // Ascending byte order, read straight from the bitmap words.
+        let mut out = Vec::with_capacity(bytes.len);
+        for (word_index, &word) in bytes.bits.iter().enumerate() {
+            let mut word = word;
+            while word != 0 {
+                out.push((word_index * 64) as u8 + word.trailing_zeros() as u8);
+                word &= word - 1;
+            }
+        }
+        Some(out)
     }
 
     pub fn try_find(
@@ -735,7 +746,7 @@ impl FallbackMatcher {
         let mut scratch = scratch;
         let prefilter_viable = match scratch.as_deref_mut() {
             Some(scratch) => scratch.prefilter_cursors().may_match(
-                self.prefilter_slot,
+                self.prefilter_slot(),
                 self.parsed.prefilter(),
                 line,
                 start,

@@ -130,12 +130,6 @@ pub struct CharClass {
     pub atoms: Vec<ClassAtom>,
 }
 
-impl CharClass {
-    fn current_union_mut(&mut self) -> &mut Vec<ClassAtom> {
-        self.intersections.last_mut().unwrap_or(&mut self.atoms)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Backref {
     Number(u32),
@@ -353,8 +347,16 @@ fn is_regex_syntax(ch: char) -> bool {
 
 struct Parser<'a> {
     source: &'a str,
-    chars: Vec<char>,
+    bytes: &'a [u8],
+    /// Byte offset into `source`; always on a scalar boundary.
     pos: usize,
+    /// Scratch stack shared by every sequence and branch list under
+    /// construction. Nested constructs complete before their parent resumes,
+    /// so each list occupies the top of the stack and leaves as one
+    /// exactly-sized vector instead of growing its own allocation.
+    nodes: Vec<Ast>,
+    /// The same scratch discipline for character-class unions.
+    class_atoms: Vec<ClassAtom>,
     next_capture: u32,
     named_captures: BTreeMap<String, u32>,
     features: RegexFeatures,
@@ -375,8 +377,10 @@ impl<'a> Parser<'a> {
     fn new(source: &'a str) -> Self {
         Self {
             source,
-            chars: source.chars().collect(),
+            bytes: source.as_bytes(),
             pos: 0,
+            nodes: Vec::new(),
+            class_atoms: Vec::new(),
             next_capture: 1,
             named_captures: BTreeMap::new(),
             features: RegexFeatures::default(),
@@ -388,9 +392,10 @@ impl<'a> Parser<'a> {
 
     fn parse(mut self) -> ParsedRegex {
         let mut ast = self.parse_alternation(None);
-        if self.pos < self.chars.len() {
+        if self.pos < self.bytes.len() {
+            let at = self.char_index(self.pos);
             self.diagnostics
-                .push(format!("trailing input at char {}", self.pos));
+                .push(format!("trailing input at char {at}"));
         }
         if self.features.subroutine {
             let mut paths = BTreeMap::new();
@@ -424,20 +429,19 @@ impl<'a> Parser<'a> {
                 first
             };
         }
-        let mut branches = vec![first];
+        let base = self.nodes.len();
+        self.nodes.push(first);
         while self.peek() == Some('|') {
             self.bump();
-            branches.push(self.parse_concat(terminator));
+            let branch = self.parse_concat(terminator);
+            self.nodes.push(branch);
         }
+        let branches = self.nodes.drain(base..).collect();
         normalize_flag_changes(branches)
     }
 
     fn parse_concat(&mut self, terminator: Option<char>) -> Ast {
-        // Most alternation branches are a single node. Hold the first node
-        // inline and only materialize the sequence once a second one arrives;
-        // `push_concat_node` into an empty sequence stores a node unchanged.
-        let mut first = None;
-        let mut nodes = Vec::new();
+        let base = self.nodes.len();
         while let Some(ch) = self.peek() {
             if Some(ch) == terminator || ch == '|' {
                 break;
@@ -453,24 +457,12 @@ impl<'a> Parser<'a> {
                 continue;
             }
             let node = self.parse_repeat();
-            if nodes.is_empty() {
-                match first.take() {
-                    None => {
-                        first = Some(node);
-                        continue;
-                    }
-                    Some(previous) => nodes.push(previous),
-                }
-            }
-            push_concat_node(&mut nodes, node);
+            push_concat_node(&mut self.nodes, base, node);
         }
-        if let Some(node) = first {
-            return node;
-        }
-        match nodes.len() {
+        match self.nodes.len() - base {
             0 => Ast::Empty,
-            1 => nodes.pop().expect("one node"),
-            _ => Ast::Concat(nodes),
+            1 => self.nodes.pop().expect("one node"),
+            _ => Ast::Concat(self.nodes.drain(base..).collect()),
         }
     }
 
@@ -588,13 +580,11 @@ impl<'a> Parser<'a> {
             }
             '\\' => self.parse_escape(false),
             ')' => {
-                self.diagnostics.push(format!(
-                    "unmatched ')' at char {}",
-                    self.pos.saturating_sub(1)
-                ));
+                let at = self.char_index(self.pos - 1);
+                self.diagnostics.push(format!("unmatched ')' at char {at}"));
                 Ast::Unsupported("unmatched ')'".to_owned())
             }
-            _ => self.parse_literal_run(self.pos - 1),
+            _ => self.parse_literal_run(self.pos - ch.len_utf8()),
         }
     }
 
@@ -606,39 +596,58 @@ impl<'a> Parser<'a> {
     /// the quantifier binds to it alone. The run is measured first so the
     /// string is allocated once; keyword inventories parse thousands of runs.
     fn parse_literal_run(&mut self, start: usize) -> Ast {
-        while let Some(next) = self.peek() {
-            if next == '\\' {
+        let mut escaped = start < self.pos && self.bytes[start] == b'\\';
+        let extended = self.flags.ignore_whitespace;
+        while let Some(&byte) = self.bytes.get(self.pos) {
+            if byte == b'\\' {
+                // Punctuation escapes and quantifiers are ASCII, so byte
+                // lookahead cannot split a multi-byte scalar.
                 let absorbs = self
-                    .chars
+                    .bytes
                     .get(self.pos + 1)
-                    .is_some_and(|escaped| is_punctuation_escape(*escaped))
+                    .is_some_and(|escaped| is_punctuation_escape(char::from(*escaped)))
                     && !self
-                        .chars
+                        .bytes
                         .get(self.pos + 2)
-                        .is_some_and(|following| is_quantifier_start(*following));
+                        .is_some_and(|following| is_quantifier_start(char::from(*following)));
                 if !absorbs {
                     break;
                 }
+                escaped = true;
                 self.pos += 2;
                 continue;
             }
-            if is_regex_syntax(next)
-                || (self.flags.ignore_whitespace && (next.is_whitespace() || next == '#'))
-                || self
-                    .chars
-                    .get(self.pos + 1)
-                    .is_some_and(|following| is_quantifier_start(*following))
+            let width = if byte.is_ascii() {
+                let next = char::from(byte);
+                if is_regex_syntax(next) || (extended && (next.is_whitespace() || next == '#')) {
+                    break;
+                }
+                1
+            } else {
+                let next = self.peek().expect("scalar boundary");
+                if extended && next.is_whitespace() {
+                    break;
+                }
+                next.len_utf8()
+            };
+            if self
+                .bytes
+                .get(self.pos + width)
+                .is_some_and(|following| is_quantifier_start(char::from(*following)))
             {
                 break;
             }
-            self.pos += 1;
+            self.pos += width;
         }
-        let run = &self.chars[start..self.pos];
-        let mut literal = String::with_capacity(run.iter().map(|ch| ch.len_utf8()).sum::<usize>());
-        let mut scalars = run.iter();
-        while let Some(&scalar) = scalars.next() {
+        let run = &self.source[start..self.pos];
+        if !escaped {
+            return Ast::Literal(run.to_owned());
+        }
+        let mut literal = String::with_capacity(run.len());
+        let mut scalars = run.chars();
+        while let Some(scalar) = scalars.next() {
             if scalar == '\\' {
-                literal.push(*scalars.next().expect("absorbed escapes are complete"));
+                literal.push(scalars.next().expect("absorbed escapes are complete"));
             } else {
                 literal.push(scalar);
             }
@@ -755,7 +764,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                     _ => {
-                        let name = self.take_until('>');
+                        let name = self.take_until(b'>').to_owned();
                         self.expect('>');
                         self.features.named_group = true;
                         let index = self.alloc_capture(Some(name.clone()));
@@ -771,10 +780,10 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            Some('P') if self.peek_n(1) == Some('<') => {
+            Some('P') if self.peek_second() == Some('<') => {
                 self.bump();
                 self.bump();
-                let name = self.take_until('>');
+                let name = self.take_until(b'>').to_owned();
                 self.expect('>');
                 self.features.named_group = true;
                 let index = self.alloc_capture(Some(name.clone()));
@@ -806,7 +815,7 @@ impl<'a> Parser<'a> {
             }
             Some('#') => {
                 self.bump();
-                self.take_until(')');
+                self.take_until(b')');
                 self.expect(')');
                 Ast::Empty
             }
@@ -820,7 +829,7 @@ impl<'a> Parser<'a> {
             Some(ch) if is_flag_char(ch) || ch == '-' => self.parse_flag_group(),
             _ => {
                 self.features.unsupported_escape = true;
-                let rest = self.take_until(')');
+                let rest = self.take_until(b')');
                 self.expect(')');
                 Ast::Unsupported(format!("unsupported group (?{rest})"))
             }
@@ -829,7 +838,7 @@ impl<'a> Parser<'a> {
 
     fn parse_conditional(&mut self) -> Ast {
         self.bump(); // condition's opening `(`
-        let raw = self.take_until(')');
+        let raw = self.take_until(b')');
         self.expect(')');
         let condition = if let Ok(index) = raw.parse::<u32>() {
             Some(Backref::Number(index))
@@ -928,70 +937,88 @@ impl<'a> Parser<'a> {
             self.bump();
             class.negated = true;
         }
+        // The union being read accumulates on the scratch atom stack from
+        // `base`; nested classes use and release the stack above it. The
+        // first union becomes `atoms`, each one after `&&` an intersection.
+        let base = self.class_atoms.len();
+        let mut first_union = true;
         // Oniguruma treats `]` as a literal when it is the first class atom,
         // e.g. `[]),;}]`. Several VS Code TypeScript rules rely on this form.
         if self.peek() == Some(']') {
             self.bump();
-            class.atoms.push(ClassAtom::Char(']'));
+            self.class_atoms.push(ClassAtom::Char(']'));
         }
         while let Some(ch) = self.peek() {
             if ch == ']' {
                 self.bump();
                 break;
             }
-            if ch == '&' && self.peek_n(1) == Some('&') {
+            if ch == '&' && self.peek_second() == Some('&') {
                 self.bump();
                 self.bump();
-                class.intersections.push(Vec::new());
+                self.finish_class_union(&mut class, base, &mut first_union);
                 continue;
             }
             let atom = self.read_class_atom();
             if let ClassAtom::Char(start) = atom {
-                if self.peek() == Some('-') && self.peek_n(1).is_some_and(|next| next != ']') {
+                if self.peek() == Some('-') && self.peek_second().is_some_and(|next| next != ']') {
                     self.bump();
                     let end_atom = self.read_class_atom();
                     if let ClassAtom::Char(end) = end_atom {
-                        class.current_union_mut().push(ClassAtom::Range(start, end));
+                        self.class_atoms.push(ClassAtom::Range(start, end));
                     } else {
-                        let union = class.current_union_mut();
-                        union.push(ClassAtom::Char(start));
-                        union.push(ClassAtom::Char('-'));
-                        union.push(end_atom);
+                        self.class_atoms.push(ClassAtom::Char(start));
+                        self.class_atoms.push(ClassAtom::Char('-'));
+                        self.class_atoms.push(end_atom);
                     }
                     continue;
                 }
-                class.current_union_mut().push(ClassAtom::Char(start));
+                self.class_atoms.push(ClassAtom::Char(start));
             } else {
-                class.current_union_mut().push(atom);
+                self.class_atoms.push(atom);
             }
         }
+        self.finish_class_union(&mut class, base, &mut first_union);
         class
+    }
+
+    fn finish_class_union(&mut self, class: &mut CharClass, base: usize, first_union: &mut bool) {
+        let union = self.class_atoms.drain(base..).collect();
+        if std::mem::take(first_union) {
+            class.atoms = union;
+        } else {
+            class.intersections.push(union);
+        }
     }
 
     fn read_class_atom(&mut self) -> ClassAtom {
         let Some(ch) = self.peek() else {
             return ClassAtom::Char('\0');
         };
-        if ch == '[' && self.peek_n(1) == Some(':') {
+        if ch == '[' && self.peek_second() == Some(':') {
             self.bump();
             self.bump();
-            let mut name = String::new();
             let mut negated = false;
             if self.peek() == Some('^') {
                 self.bump();
                 negated = true;
             }
+            let start = self.pos;
+            let mut end = self.bytes.len();
             while let Some(next) = self.peek() {
-                if next == ':' && self.peek_n(1) == Some(']') {
+                if next == ':' && self.peek_second() == Some(']') {
+                    end = self.pos;
                     self.bump();
                     self.bump();
                     break;
                 }
-                name.push(next);
                 self.bump();
             }
             self.features.unicode_or_posix_class = true;
-            return ClassAtom::Posix { name, negated };
+            return ClassAtom::Posix {
+                name: self.source[start..end].to_owned(),
+                negated,
+            };
         }
         if ch == '[' {
             self.bump();
@@ -1023,7 +1050,7 @@ impl<'a> Parser<'a> {
             'N' => ClassAtom::Perl(PerlClassKind::NotNewline),
             'p' | 'P' if self.peek() == Some('{') => {
                 self.bump();
-                let name = self.take_until('}');
+                let name = self.take_until(b'}').to_owned();
                 self.expect('}');
                 self.features.unicode_or_posix_class = true;
                 ClassAtom::Unicode {
@@ -1034,7 +1061,7 @@ impl<'a> Parser<'a> {
             'x' => {
                 let digits = if self.peek() == Some('{') {
                     self.bump();
-                    let digits = self.take_until('}');
+                    let digits = self.take_until(b'}');
                     self.expect('}');
                     digits
                 } else {
@@ -1056,7 +1083,7 @@ impl<'a> Parser<'a> {
             }
             'u' => {
                 let digits = self.take_hex_digits(4);
-                ClassAtom::Char(hex_char(&digits).unwrap_or('u'))
+                ClassAtom::Char(hex_char(digits).unwrap_or('u'))
             }
             _ => ClassAtom::Char(unescape_char(ch)),
         }
@@ -1137,7 +1164,7 @@ impl<'a> Parser<'a> {
             'X' => Ast::Grapheme,
             'p' | 'P' if self.peek() == Some('{') => {
                 self.bump();
-                let name = self.take_until('}');
+                let name = self.take_until(b'}').to_owned();
                 self.expect('}');
                 self.features.unicode_or_posix_class = true;
                 Ast::Class(CharClass {
@@ -1151,14 +1178,14 @@ impl<'a> Parser<'a> {
             }
             'k' if self.peek() == Some('<') => {
                 self.bump();
-                let name = self.take_until('>');
+                let name = self.take_until(b'>').to_owned();
                 self.expect('>');
                 self.features.backreference = true;
                 Ast::Backref(Backref::Name(name))
             }
             'g' if self.peek() == Some('<') => {
                 self.bump();
-                let name = self.take_until('>');
+                let name = self.take_until(b'>').to_owned();
                 self.expect('>');
                 self.features.subroutine = true;
                 if let Ok(index) = name.parse::<u32>() {
@@ -1193,17 +1220,17 @@ impl<'a> Parser<'a> {
             }
             'x' if self.peek() == Some('{') => {
                 self.bump();
-                let digits = self.take_until('}');
+                let digits = self.take_until(b'}');
                 self.expect('}');
-                Ast::Literal(hex_char(&digits).unwrap_or('\u{FFFD}').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('\u{FFFD}').to_string())
             }
             'x' => {
                 let digits = self.take_hex_digits(2);
-                Ast::Literal(hex_char(&digits).unwrap_or('x').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('x').to_string())
             }
             'u' => {
                 let digits = self.take_hex_digits(4);
-                Ast::Literal(hex_char(&digits).unwrap_or('u').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('u').to_string())
             }
             'R' => Ast::Alternation(vec![
                 Ast::Literal("\r\n".to_owned()),
@@ -1277,59 +1304,72 @@ impl<'a> Parser<'a> {
         index
     }
 
-    fn take_digits(&mut self) -> String {
-        let mut out = String::new();
-        while let Some(ch) = self.peek().filter(|ch| ch.is_ascii_digit()) {
-            out.push(ch);
-            self.bump();
+    fn take_digits(&mut self) -> &'a str {
+        let start = self.pos;
+        while self.bytes.get(self.pos).is_some_and(u8::is_ascii_digit) {
+            self.pos += 1;
         }
-        out
+        &self.source[start..self.pos]
     }
 
-    fn take_hex_digits(&mut self, limit: usize) -> String {
-        let mut out = String::new();
-        for _ in 0..limit {
-            let Some(ch) = self.peek().filter(|ch| ch.is_ascii_hexdigit()) else {
-                break;
-            };
-            out.push(ch);
-            self.bump();
+    fn take_hex_digits(&mut self, limit: usize) -> &'a str {
+        let start = self.pos;
+        while self.pos - start < limit
+            && self.bytes.get(self.pos).is_some_and(u8::is_ascii_hexdigit)
+        {
+            self.pos += 1;
         }
-        out
+        &self.source[start..self.pos]
     }
 
-    fn take_until(&mut self, terminator: char) -> String {
-        let mut out = String::new();
-        while let Some(ch) = self.peek() {
-            if ch == terminator {
-                break;
-            }
-            out.push(ch);
-            self.bump();
-        }
-        out
+    /// Consumes input up to, not including, the first ASCII `terminator`.
+    fn take_until(&mut self, terminator: u8) -> &'a str {
+        let start = self.pos;
+        let rest = &self.bytes[start..];
+        self.pos = memchr::memchr(terminator, rest).map_or(self.bytes.len(), |end| start + end);
+        &self.source[start..self.pos]
     }
 
     fn expect(&mut self, expected: char) {
         if self.peek() == Some(expected) {
             self.bump();
         } else {
+            let at = self.char_index(self.pos);
             self.diagnostics
-                .push(format!("expected '{expected}' at char {}", self.pos));
+                .push(format!("expected '{expected}' at char {at}"));
         }
     }
 
+    /// Scalar index of a byte offset; diagnostics report scalar positions.
+    fn char_index(&self, byte: usize) -> usize {
+        self.source[..byte].chars().count()
+    }
+
+    #[inline]
+    fn char_at(&self, pos: usize) -> Option<char> {
+        let byte = *self.bytes.get(pos)?;
+        if byte.is_ascii() {
+            Some(char::from(byte))
+        } else {
+            self.source[pos..].chars().next()
+        }
+    }
+
+    #[inline]
     fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos).copied()
+        self.char_at(self.pos)
     }
 
-    fn peek_n(&self, n: usize) -> Option<char> {
-        self.chars.get(self.pos + n).copied()
+    /// The scalar after the next one.
+    fn peek_second(&self) -> Option<char> {
+        let first = self.peek()?;
+        self.char_at(self.pos + first.len_utf8())
     }
 
+    #[inline]
     fn bump(&mut self) -> Option<char> {
         let ch = self.peek()?;
-        self.pos += 1;
+        self.pos += ch.len_utf8();
         Some(ch)
     }
 }
@@ -1435,40 +1475,36 @@ fn alternation_ast(mut branches: Vec<Ast>) -> Ast {
     }
 }
 
-fn push_concat_node(nodes: &mut Vec<Ast>, node: Ast) {
-    if let Ast::Literal(literal) = node {
-        if let Some(Ast::Literal(previous)) = nodes.last_mut() {
-            previous.push_str(&literal);
-        } else {
-            nodes.push(Ast::Literal(literal));
-        }
-    } else if let Ast::Flags { flags, child } = node {
+/// Appends `node` to the sequence occupying `nodes[base..]`, coalescing
+/// adjacent literals (and adjacent literals under identical option
+/// snapshots) with the sequence's last node.
+fn push_concat_node(nodes: &mut Vec<Ast>, base: usize, node: Ast) {
+    let previous = if nodes.len() > base {
+        nodes.last_mut()
+    } else {
+        None
+    };
+    match (previous, &node) {
+        (Some(Ast::Literal(previous)), Ast::Literal(literal)) => previous.push_str(literal),
         // Keep option snapshots compact. Without this, `(?i:keyword)` becomes
         // one flag node per scalar and defeats literal/alternation fast paths.
-        match *child {
-            Ast::Literal(literal) => {
-                if let Some(Ast::Flags {
-                    flags: previous_flags,
-                    child: previous_child,
-                }) = nodes.last_mut()
-                    && *previous_flags == flags
-                    && let Ast::Literal(previous) = previous_child.as_mut()
-                {
-                    previous.push_str(&literal);
-                } else {
-                    nodes.push(Ast::Flags {
-                        flags,
-                        child: Box::new(Ast::Literal(literal)),
-                    });
-                }
-            }
-            child => nodes.push(Ast::Flags {
-                flags,
-                child: Box::new(child),
+        (
+            Some(Ast::Flags {
+                flags: previous_flags,
+                child: previous_child,
             }),
+            Ast::Flags { flags, child },
+        ) if previous_flags == flags
+            && matches!(previous_child.as_ref(), Ast::Literal(_))
+            && matches!(child.as_ref(), Ast::Literal(_)) =>
+        {
+            if let (Ast::Literal(previous), Ast::Literal(literal)) =
+                (previous_child.as_mut(), child.as_ref())
+            {
+                previous.push_str(literal);
+            }
         }
-    } else {
-        nodes.push(node);
+        _ => nodes.push(node),
     }
 }
 
@@ -1776,6 +1812,81 @@ mod tests {
         );
         assert!(parse(r"\4294967295").features.backreference);
         assert!(matches!(parse(r"(a)\1").ast, Ast::Concat(_)));
+    }
+
+    #[test]
+    fn multibyte_scalars_parse_by_scalar_not_byte() {
+        // A quantifier binds to the whole preceding scalar, whatever its
+        // UTF-8 width, and the run before it stays one literal.
+        let Ast::Concat(nodes) = parse("日本語+").ast else {
+            panic!("expected concat");
+        };
+        assert_eq!(nodes[0], Ast::Literal("日本".to_owned()));
+        assert!(
+            matches!(&nodes[1], Ast::Repeat { node, min: 1, .. } if **node == Ast::Literal("語".to_owned()))
+        );
+        let Ast::Repeat { node, .. } = parse("🛰?").ast else {
+            panic!("expected repeat");
+        };
+        assert_eq!(*node, Ast::Literal("🛰".to_owned()));
+        // Escaped punctuation still coalesces across multi-byte neighbours.
+        assert_eq!(parse(r"é\.ß\-").ast, Ast::Literal("é.ß-".to_owned()));
+        // Extended mode skips Unicode whitespace inside a literal run.
+        let Ast::Flags { child, .. } = parse("(?x:a\u{a0}é b)").ast else {
+            panic!("expected option scope");
+        };
+        assert!(matches!(child.as_ref(), Ast::Flags { child, .. }
+            if **child == Ast::Literal("aéb".to_owned())));
+        // Class ranges and POSIX names read whole scalars.
+        let Ast::Class(class) = parse("[α-ω[:alpha:]é]").ast else {
+            panic!("expected class");
+        };
+        assert_eq!(
+            class.atoms,
+            vec![
+                ClassAtom::Range('α', 'ω'),
+                ClassAtom::Posix {
+                    name: "alpha".to_owned(),
+                    negated: false,
+                },
+                ClassAtom::Char('é'),
+            ]
+        );
+        // Unterminated POSIX names keep the remaining input.
+        let Ast::Class(class) = parse("[[:é").ast else {
+            panic!("expected class");
+        };
+        assert_eq!(
+            class.atoms,
+            vec![ClassAtom::Posix {
+                name: "é".to_owned(),
+                negated: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn diagnostics_report_scalar_positions() {
+        assert_eq!(parse("é)").diagnostics, vec!["unmatched ')' at char 1"]);
+        assert_eq!(parse("(日本").diagnostics, vec!["expected ')' at char 3"]);
+        assert_eq!(
+            parse("[é&&[^ß]x]y").ast,
+            Ast::Concat(vec![
+                Ast::Class(CharClass {
+                    negated: false,
+                    intersections: vec![vec![
+                        ClassAtom::Nested(Box::new(CharClass {
+                            negated: true,
+                            intersections: Vec::new(),
+                            atoms: vec![ClassAtom::Char('ß')],
+                        })),
+                        ClassAtom::Char('x'),
+                    ]],
+                    atoms: vec![ClassAtom::Char('é')],
+                }),
+                Ast::Literal("y".to_owned()),
+            ])
+        );
     }
 
     #[test]
