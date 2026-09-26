@@ -242,6 +242,20 @@ impl RegexMatcher {
         }
     }
 
+    /// See [`FallbackMatcher::selection_prefilter_viable`]. Specialized
+    /// native engines never consult the prefilter and always report `true`.
+    pub(crate) fn selection_prefilter_viable(
+        &self,
+        line: &str,
+        start: usize,
+        scratch: &mut bytecode::BytecodeScratch,
+    ) -> bool {
+        match self {
+            Self::Automata(matcher) => matcher.selection_prefilter_viable(line, start, scratch),
+            Self::Fallback(matcher) => matcher.selection_prefilter_viable(line, start, scratch),
+        }
+    }
+
     pub(crate) fn find_at_for_selection_with_scratch(
         &self,
         line: &str,

@@ -517,6 +517,20 @@ impl FallbackMatcher {
         &self.parsed
     }
 
+    /// Whether the required-literal prefilter still admits a match starting
+    /// at `start` or later on this line. The prefilter searches the suffix
+    /// from `start`, so `false` also holds for every later start.
+    pub(crate) fn selection_prefilter_viable(
+        &self,
+        line: &str,
+        start: usize,
+        scratch: &mut BytecodeScratch,
+    ) -> bool {
+        scratch
+            .prefilter_cursors()
+            .may_match(self.prefilter_slot(), self.parsed.prefilter(), line, start)
+    }
+
     fn bytecode(&self) -> Option<&Program> {
         self.bytecode
             .get_or_init(|| {

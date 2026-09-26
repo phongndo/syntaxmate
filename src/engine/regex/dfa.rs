@@ -1391,6 +1391,18 @@ impl AutomataMatcher {
         }
     }
 
+    pub(crate) fn selection_prefilter_viable(
+        &self,
+        line: &str,
+        start: usize,
+        scratch: &mut super::bytecode::BytecodeScratch,
+    ) -> bool {
+        match &self.engine {
+            NativeEngine::Vm(matcher) => matcher.selection_prefilter_viable(line, start, scratch),
+            _ => true,
+        }
+    }
+
     pub(crate) fn find_at_for_selection_with_scratch(
         &self,
         line: &str,
@@ -1503,6 +1515,10 @@ fn anchor_permits_at(
         _ => anchor_permits_search(strategy, start, ctx, line),
     }
 }
+
+/// Entries tracked by the per-search exhausted-prefilter bitmap; later
+/// entries still get the (cached) prefilter check at every start.
+const EXHAUSTED_WORDS: usize = 4;
 
 #[derive(Debug, Clone, Copy)]
 enum PatternEntry {
@@ -1923,6 +1939,9 @@ impl PatternSetMatcher {
         let mut skip_state = super::skip_prefix::SkipGateLineState::default();
         let mut line_has_comment: Option<bool> = None;
         let mut budget_killed = false;
+        // Entries whose required literal no longer occurs in the rest of the
+        // line; they cannot match at this or any later start.
+        let mut exhausted = [0u64; EXHAUSTED_WORDS];
         let start = match start_prefilter {
             Some(prefilter) => prefilter.next_start(line, from),
             None => Some(from),
@@ -1975,6 +1994,20 @@ impl PatternSetMatcher {
                 if bound.is_some_and(|(bound_start, bound_index)| {
                     start == bound_start && idx >= bound_index
                 }) {
+                    continue;
+                }
+                let (word, bit) = (idx / 64, 1u64 << (idx % 64));
+                if exhausted.get(word).is_some_and(|mask| mask & bit != 0) {
+                    continue;
+                }
+                if matches!(self.entries[idx], PatternEntry::Matcher)
+                    && !self.compiled[idx]
+                        .matcher()
+                        .selection_prefilter_viable(line, start, scratch)
+                {
+                    if let Some(mask) = exhausted.get_mut(word) {
+                        *mask |= bit;
+                    }
                     continue;
                 }
                 let (result, killed) = self.match_entry_at(idx, line, start, ctx, scratch);
