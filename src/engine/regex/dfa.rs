@@ -2045,6 +2045,9 @@ impl PatternSetMatcher {
         let Some(selected) = regular else {
             return (None, budget_killed);
         };
+        if let Some(result) = self.exact_scanner_result(selected) {
+            return (Some((selected.pattern, result)), budget_killed);
+        }
         let replay = if selected.pattern < self.entries.len() {
             let (result, killed) =
                 self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch);
@@ -2103,12 +2106,27 @@ impl PatternSetMatcher {
         let Some(selected) = scanner.find(line, from, ctx, scratch.scanner()) else {
             return Some((None, false));
         };
+        if let Some(result) = self.exact_scanner_result(selected) {
+            return Some((Some((selected.pattern, result)), false));
+        }
         let (result, budget_killed) =
             self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch);
         Some((
             result.map(|result| (selected.pattern, result)),
             budget_killed,
         ))
+    }
+
+    /// The scanner's own result when it is provably the replay result: the
+    /// pattern's scanner end is exact and the selection needs no captures.
+    fn exact_scanner_result(&self, selected: super::scanner::ScanMatch) -> Option<MatchResult> {
+        let pattern = self.compiled.get(selected.pattern)?;
+        (pattern.analysis().scanner_end_exact() && !pattern.needs_capture_replay_after_selection())
+            .then_some(MatchResult {
+                start: selected.start,
+                end: selected.end,
+                captures: Vec::new(),
+            })
     }
 
     /// Returns the winning entry plus whether any candidate attempt was cut
@@ -2867,11 +2885,23 @@ mod tests {
 
     #[test]
     fn partial_frontier_falls_back_when_regular_replay_fails() {
-        let mut set = forced_frontier(&["a", "(?=z)z"]);
+        // Case-insensitive selections are always replayed.
+        let mut set = forced_frontier(&["(?i)a", "(?=z)z"]);
         set.force_regular_replay_failure_for(0);
-        let (idx, result) = set.find("a z", 0).unwrap();
+        let (idx, result) = set.find("A z", 0).unwrap();
         assert_eq!(idx, 0);
         assert_eq!(result.start..result.end, 0..1);
+    }
+
+    #[test]
+    fn exact_regular_selection_uses_scanner_end_without_replay() {
+        // `\w+(?:\.\w+)*` has no nullable loop body, captures, or folds, so
+        // the scanner end is authoritative and the replay is not consulted.
+        let mut set = forced_frontier(&[r"\w+(?:\.\w+)*", "(?=z)z"]);
+        set.force_regular_replay_failure_for(0);
+        let (idx, result) = set.find("  math.max(", 0).unwrap();
+        assert_eq!(idx, 0);
+        assert_eq!(result.start..result.end, 2..10);
     }
 
     #[test]

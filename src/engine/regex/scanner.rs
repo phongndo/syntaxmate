@@ -12,6 +12,9 @@ use super::bytecode::CompiledClass;
 
 const NO_TARGET: usize = usize::MAX;
 const MAX_STATES: usize = 16_384;
+/// Alternations with at least this many branches get a first-byte dispatch
+/// table instead of a linear `Split` chain.
+const DISPATCH_MIN_BRANCHES: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CompileError {
@@ -61,6 +64,11 @@ enum Inst {
         preferred: usize,
         alternate: usize,
     },
+    /// Ordered alternation whose live branches depend only on the next input
+    /// byte. See [`Dispatch`].
+    Dispatch {
+        table: usize,
+    },
     Accept {
         pattern: usize,
     },
@@ -70,21 +78,129 @@ enum Inst {
 pub(crate) struct Scanner {
     insts: Vec<Inst>,
     classes: Vec<CompiledClass>,
+    dispatches: Vec<Dispatch>,
     entries: Vec<usize>,
-    starts: ScannerStarts,
+    /// Start entries (indexes into `entries`) that can begin at each byte.
+    starts: ByteTable,
+}
+
+/// Ordered targets that can make progress for each next input byte.
+///
+/// Threads whose first consuming instruction cannot accept the next byte die
+/// on the next step without producing anything, so leaving them out of a
+/// closure is unobservable. Each byte class lists, in the original priority
+/// order, the targets that can consume a byte of that class or reach
+/// `Accept` without consuming; the final class is the end-of-input list and
+/// keeps only the latter. First-byte sets come from [`Compiler::first_bytes`]
+/// and are conservative.
+#[derive(Debug, Clone)]
+struct ByteTable {
+    byte_class: Box<[u8; 256]>,
+    /// `offsets[class]..offsets[class + 1]` indexes `targets`.
+    offsets: Box<[u32]>,
+    targets: Box<[u32]>,
+}
+
+impl ByteTable {
+    /// Returns the table and whether any byte excludes at least one target.
+    fn build(items: &[(u32, FirstBytes)]) -> (Self, bool) {
+        // Transpose the per-item byte sets into one item bitset per byte, so
+        // grouping bytes into classes compares a few words instead of
+        // rebuilding every byte's target list.
+        let words = items.len().div_ceil(64).max(1);
+        let mut members = vec![0u64; 256 * words];
+        for (index, (_, first)) in items.iter().enumerate() {
+            let bit = 1u64 << (index % 64);
+            let word = index / 64;
+            for (chunk, bits) in first.bytes.iter().enumerate() {
+                let mut bits = if first.nullable { u64::MAX } else { *bits };
+                while bits != 0 {
+                    let byte = chunk * 64 + bits.trailing_zeros() as usize;
+                    members[byte * words + word] |= bit;
+                    bits &= bits - 1;
+                }
+            }
+        }
+        let mut byte_class = Box::new([0u8; 256]);
+        // (first byte with this membership, target range)
+        let mut classes: Vec<(usize, usize, usize)> = Vec::new();
+        let mut targets = Vec::new();
+        let mut pruned = false;
+        for byte in 0..256 {
+            let row = &members[byte * words..(byte + 1) * words];
+            let class = classes
+                .iter()
+                .position(|&(first, _, _)| members[first * words..(first + 1) * words] == *row)
+                .unwrap_or_else(|| {
+                    let start = targets.len();
+                    targets.extend(
+                        items
+                            .iter()
+                            .enumerate()
+                            .filter(|(index, _)| row[index / 64] & (1u64 << (index % 64)) != 0)
+                            .map(|(_, (target, _))| *target),
+                    );
+                    classes.push((byte, start, targets.len()));
+                    classes.len() - 1
+                });
+            let (_, start, end) = classes[class];
+            pruned |= end - start < items.len();
+            // At most 256 distinct classes exist for 256 bytes.
+            byte_class[byte] = class as u8;
+        }
+        let end_start = targets.len();
+        targets.extend(
+            items
+                .iter()
+                .filter(|(_, first)| first.nullable)
+                .map(|(target, _)| *target),
+        );
+        let mut offsets = classes
+            .iter()
+            .map(|&(_, start, _)| start as u32)
+            .collect::<Vec<_>>();
+        offsets.push(end_start as u32);
+        offsets.push(targets.len() as u32);
+        (
+            Self {
+                byte_class,
+                offsets: offsets.into_boxed_slice(),
+                targets: targets.into_boxed_slice(),
+            },
+            pruned,
+        )
+    }
+
+    #[inline]
+    fn targets(&self, byte: Option<u8>) -> &[u32] {
+        let class = match byte {
+            Some(byte) => usize::from(self.byte_class[byte as usize]),
+            None => self.offsets.len() - 2,
+        };
+        &self.targets[self.offsets[class] as usize..self.offsets[class + 1] as usize]
+    }
+
+    fn retained_heap_bytes(&self) -> usize {
+        256usize
+            .saturating_add(self.offsets.len().saturating_mul(4))
+            .saturating_add(self.targets.len().saturating_mul(4))
+    }
+}
+
+/// First-byte dispatch replacing the `Split` chain of a large ordered
+/// alternation, whose branches (for example the words of a keyword list)
+/// mostly cannot start at any given byte.
+#[derive(Debug, Clone)]
+struct Dispatch {
+    table: ByteTable,
+    /// Every branch entry, in priority order, for compile-time analysis.
+    branches: Box<[u32]>,
 }
 
 #[derive(Debug, Clone)]
 struct CompilerEntry {
     pc: usize,
     start_bitmap: Option<[u64; 4]>,
-}
-
-#[derive(Debug, Clone)]
-struct ScannerStarts {
-    unrestricted: Box<[u32]>,
-    offsets: [u32; 257],
-    restricted: Box<[u32]>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -105,6 +221,8 @@ pub(crate) struct ScannerScratch {
     work: Vec<usize>,
     seen: Vec<u32>,
     generation: u32,
+    /// Whether an `Accept` thread was added to the list being built.
+    accepted: bool,
 }
 
 fn char_class_heap_bytes(class: &CharClass) -> usize {
@@ -155,18 +273,7 @@ impl Scanner {
                     .capacity()
                     .saturating_mul(std::mem::size_of::<usize>()),
             )
-            .saturating_add(
-                self.starts
-                    .unrestricted
-                    .len()
-                    .saturating_mul(std::mem::size_of::<u32>()),
-            )
-            .saturating_add(
-                self.starts
-                    .restricted
-                    .len()
-                    .saturating_mul(std::mem::size_of::<u32>()),
-            )
+            .saturating_add(self.starts.retained_heap_bytes())
             .saturating_add(
                 self.classes
                     .capacity()
@@ -174,6 +281,16 @@ impl Scanner {
             );
         for class in &self.classes {
             bytes = bytes.saturating_add(char_class_heap_bytes(&class.source));
+        }
+        bytes = bytes.saturating_add(
+            self.dispatches
+                .capacity()
+                .saturating_mul(std::mem::size_of::<Dispatch>()),
+        );
+        for dispatch in &self.dispatches {
+            bytes = bytes
+                .saturating_add(dispatch.table.retained_heap_bytes())
+                .saturating_add(dispatch.branches.len().saturating_mul(4));
         }
         bytes
     }
@@ -249,6 +366,7 @@ impl Scanner {
             }
 
             scratch.next.clear();
+            scratch.accepted = false;
             scratch.begin_generation();
             let next_position = match line.as_bytes().get(position).copied() {
                 Some(byte) if byte < 0x80 => Some(position + 1),
@@ -271,7 +389,7 @@ impl Scanner {
                         };
                         if let Some(end) = matched {
                             add_thread(
-                                &self.insts,
+                                self,
                                 *next,
                                 thread.start,
                                 end,
@@ -295,7 +413,7 @@ impl Scanner {
                         };
                         if let Some(end) = matched {
                             add_thread(
-                                &self.insts,
+                                self,
                                 *next,
                                 thread.start,
                                 end,
@@ -318,7 +436,7 @@ impl Scanner {
                         };
                         if let Some(end) = matched {
                             add_thread(
-                                &self.insts,
+                                self,
                                 *next,
                                 thread.start,
                                 end,
@@ -333,7 +451,7 @@ impl Scanner {
                         // Keep the fallback match, and discard everything of
                         // lower ordered priority.
                         add_thread(
-                            &self.insts,
+                            self,
                             thread.pc,
                             thread.start,
                             thread.end,
@@ -344,7 +462,7 @@ impl Scanner {
                         );
                         break;
                     }
-                    Inst::Anchor { .. } | Inst::Split { .. } => {
+                    Inst::Anchor { .. } | Inst::Split { .. } | Inst::Dispatch { .. } => {
                         unreachable!("epsilon instruction in thread list")
                     }
                 }
@@ -355,8 +473,12 @@ impl Scanner {
                 return first_accept(&self.insts, &scratch.next);
             };
             position = next_position;
-            // Existing threads have priority over starts injected later.
-            self.add_start_threads(line, position, ctx, scratch, List::Next);
+            // Existing threads have priority over starts injected later. Once
+            // an `Accept` is queued, the result starts no later than it, and
+            // every later start ranks below it, so new starts cannot win.
+            if !scratch.accepted {
+                self.add_start_threads(line, position, ctx, scratch, List::Next);
+            }
             std::mem::swap(&mut scratch.current, &mut scratch.next);
         }
     }
@@ -369,39 +491,10 @@ impl Scanner {
         scratch: &mut ScannerScratch,
         list: List,
     ) {
-        let restricted = line
-            .as_bytes()
-            .get(position)
-            .map_or(&[][..], |byte| self.starts.restricted(*byte));
-        let mut unrestricted_index = 0usize;
-        let mut restricted_index = 0usize;
-        while unrestricted_index < self.starts.unrestricted.len()
-            || restricted_index < restricted.len()
-        {
-            let unrestricted = self.starts.unrestricted.get(unrestricted_index).copied();
-            let restricted_entry = restricted.get(restricted_index).copied();
-            let entry = match (unrestricted, restricted_entry) {
-                (Some(left), Some(right)) if left < right => {
-                    unrestricted_index += 1;
-                    left
-                }
-                (Some(_), Some(right)) => {
-                    restricted_index += 1;
-                    right
-                }
-                (Some(left), None) => {
-                    unrestricted_index += 1;
-                    left
-                }
-                (None, Some(right)) => {
-                    restricted_index += 1;
-                    right
-                }
-                (None, None) => break,
-            } as usize;
+        for &entry in self.starts.targets(line.as_bytes().get(position).copied()) {
             add_thread(
-                &self.insts,
-                self.entries[entry],
+                self,
+                self.entries[entry as usize],
                 position,
                 position,
                 line,
@@ -411,6 +504,50 @@ impl Scanner {
             );
         }
     }
+}
+
+/// Whether the scanner's winning end equals the backtracking end for this
+/// pattern, so an exact replay can be skipped when no captures are needed.
+///
+/// With no captures, lookaround, backreferences, or atomic groups, a
+/// priority-ordered Thompson simulation that keeps the first thread per
+/// instruction and position reproduces the backtracking priority order: a
+/// discarded duplicate has exactly the same future as the higher-priority
+/// thread that was kept. Backtracking's empty-iteration check for loops
+/// whose body can match empty depends on history instead, so any repeat of a
+/// nullable body is excluded. Case-insensitive patterns are excluded as well
+/// to keep fold handling on the authoritative path.
+pub(crate) fn match_end_is_exact(parsed: &ParsedRegex) -> bool {
+    fn nullable(ast: &Ast) -> bool {
+        match ast {
+            Ast::Empty | Ast::Anchor(_) => true,
+            Ast::Literal(value) => value.is_empty(),
+            Ast::Concat(nodes) => nodes.iter().all(nullable),
+            Ast::Alternation(branches) => branches.iter().any(nullable),
+            Ast::Repeat { node, min, .. } => *min == 0 || nullable(node),
+            Ast::Group { child, .. } | Ast::Flags { child, .. } => nullable(child),
+            // Consuming or unsupported; exactness rejects the latter below.
+            _ => false,
+        }
+    }
+    fn exact(ast: &Ast) -> bool {
+        match ast {
+            Ast::Empty | Ast::Literal(_) | Ast::Dot | Ast::Class(_) | Ast::Anchor(_) => true,
+            Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().all(exact),
+            Ast::Repeat {
+                node, possessive, ..
+            } => !*possessive && !nullable(node) && exact(node),
+            Ast::Group { child, .. } => exact(child),
+            Ast::Flags { flags, child } => !flags.case_insensitive && exact(child),
+            Ast::Look { .. }
+            | Ast::Backref(_)
+            | Ast::Conditional { .. }
+            | Ast::Subroutine(_)
+            | Ast::Grapheme
+            | Ast::Unsupported(_) => false,
+        }
+    }
+    Scanner::supports(parsed) && !parsed.flags.case_insensitive && exact(&parsed.ast)
 }
 
 fn ast_is_supported(ast: &Ast) -> bool {
@@ -432,69 +569,6 @@ fn ast_is_supported(ast: &Ast) -> bool {
         | Ast::Grapheme
         | Ast::Unsupported(_) => false,
     }
-}
-
-impl ScannerStarts {
-    fn new(entries: &[CompilerEntry]) -> Self {
-        let mut unrestricted = Vec::new();
-        let mut counts = [0u32; 256];
-        for (index, entry) in entries.iter().enumerate() {
-            let Some(bitmap) = &entry.start_bitmap else {
-                unrestricted.push(u32::try_from(index).expect("scanner entry index fits in u32"));
-                continue;
-            };
-            for byte in bitmap_bytes(bitmap) {
-                counts[byte] += 1;
-            }
-        }
-
-        let mut offsets = [0u32; 257];
-        for byte in 0..256 {
-            offsets[byte + 1] = offsets[byte]
-                .checked_add(counts[byte])
-                .expect("scanner start offsets fit in u32");
-        }
-        let mut cursors: [u32; 256] = offsets[..256]
-            .try_into()
-            .expect("scanner offset prefix has 256 entries");
-        let mut restricted = vec![0u32; offsets[256] as usize];
-        for (index, entry) in entries.iter().enumerate() {
-            let Some(bitmap) = &entry.start_bitmap else {
-                continue;
-            };
-            for byte in bitmap_bytes(bitmap) {
-                let cursor = &mut cursors[byte];
-                restricted[*cursor as usize] =
-                    u32::try_from(index).expect("scanner entry index fits in u32");
-                *cursor += 1;
-            }
-        }
-        Self {
-            unrestricted: unrestricted.into_boxed_slice(),
-            offsets,
-            restricted: restricted.into_boxed_slice(),
-        }
-    }
-
-    #[inline]
-    fn restricted(&self, byte: u8) -> &[u32] {
-        let index = byte as usize;
-        &self.restricted[self.offsets[index] as usize..self.offsets[index + 1] as usize]
-    }
-}
-
-/// Ascending byte values present in a 256-bit set.
-fn bitmap_bytes(bitmap: &[u64; 4]) -> impl Iterator<Item = usize> + '_ {
-    bitmap.iter().enumerate().flat_map(|(word_index, &word)| {
-        let mut bits = word;
-        std::iter::from_fn(move || {
-            (bits != 0).then(|| {
-                let bit = bits.trailing_zeros() as usize;
-                bits &= bits - 1;
-                word_index * 64 + bit
-            })
-        })
-    })
 }
 
 fn first_accept(insts: &[Inst], threads: &[Thread]) -> Option<ScanMatch> {
@@ -532,7 +606,7 @@ enum List {
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 fn add_thread(
-    insts: &[Inst],
+    scanner: &Scanner,
     pc: usize,
     start: usize,
     position: usize,
@@ -549,11 +623,15 @@ fn add_thread(
         start,
         end: position,
     };
-    if !matches!(insts[pc], Inst::Split { .. } | Inst::Anchor { .. }) {
+    if !matches!(
+        scanner.insts[pc],
+        Inst::Split { .. } | Inst::Anchor { .. } | Inst::Dispatch { .. }
+    ) {
         // Most transitions lead directly to a consuming instruction. Avoid
         // clearing, pushing, and popping the epsilon-work stack for that
         // overwhelmingly common one-state closure.
         scratch.seen[pc] = scratch.generation;
+        scratch.accepted |= matches!(scanner.insts[pc], Inst::Accept { .. });
         match list {
             List::Current => scratch.current.push(initial),
             List::Next => scratch.next.push(initial),
@@ -561,13 +639,13 @@ fn add_thread(
         return;
     }
 
-    add_epsilon_threads(insts, initial, position, line, ctx, scratch, list);
+    add_epsilon_threads(scanner, initial, position, line, ctx, scratch, list);
 }
 
 #[allow(clippy::too_many_arguments)]
 #[inline(never)]
 fn add_epsilon_threads(
-    insts: &[Inst],
+    scanner: &Scanner,
     initial: Thread,
     position: usize,
     line: &str,
@@ -582,7 +660,7 @@ fn add_epsilon_threads(
             continue;
         }
         scratch.seen[pc] = scratch.generation;
-        match insts[pc] {
+        match scanner.insts[pc] {
             Inst::Split {
                 preferred,
                 alternate,
@@ -591,12 +669,23 @@ fn add_epsilon_threads(
                 scratch.work.push(alternate);
                 scratch.work.push(preferred);
             }
+            Inst::Dispatch { table } => {
+                let targets = scanner.dispatches[table]
+                    .table
+                    .targets(line.as_bytes().get(position).copied());
+                // LIFO: push in reverse so the first branch is explored first,
+                // exactly as the equivalent `Split` chain would.
+                scratch
+                    .work
+                    .extend(targets.iter().rev().map(|&target| target as usize));
+            }
             Inst::Anchor { kind, next } => {
                 if anchor_matches(kind, line, position, ctx) {
                     scratch.work.push(next);
                 }
             }
-            _ => {
+            ref inst => {
+                scratch.accepted |= matches!(inst, Inst::Accept { .. });
                 let thread = Thread { pc, ..initial };
                 match list {
                     List::Current => scratch.current.push(thread),
@@ -631,19 +720,153 @@ impl ScannerScratch {
 struct Compiler {
     insts: Vec<Inst>,
     classes: Vec<CompiledClass>,
+    dispatches: Vec<Dispatch>,
     entries: Vec<CompilerEntry>,
+    visit_stamps: Vec<u32>,
+    visit_generation: u32,
+}
+
+/// Conservative set of first bytes a closure can consume, and whether it can
+/// reach `Accept` (or an unresolved target) without consuming.
+struct FirstBytes {
+    bytes: [u64; 4],
+    nullable: bool,
+}
+
+impl FirstBytes {
+    fn insert(&mut self, byte: u8) {
+        self.bytes[byte as usize >> 6] |= 1u64 << (byte & 63);
+    }
+
+    fn insert_non_ascii(&mut self) {
+        self.bytes[2] = u64::MAX;
+        self.bytes[3] = u64::MAX;
+    }
+
+    fn contains(&self, byte: u8) -> bool {
+        self.bytes[byte as usize >> 6] & (1u64 << (byte & 63)) != 0
+    }
 }
 
 impl Compiler {
-    fn finish(self) -> Scanner {
-        let starts = ScannerStarts::new(&self.entries);
+    fn finish(mut self) -> Scanner {
+        let items = (0..self.entries.len())
+            .map(|index| {
+                let mut first = self.first_bytes(self.entries[index].pc);
+                if let Some(hint) = self.entries[index].start_bitmap {
+                    // Hints come from non-nullable patterns and were the only
+                    // bytes at which such an entry started; keep that rule.
+                    if first.nullable {
+                        first.bytes = [u64::MAX; 4];
+                        first.nullable = false;
+                    }
+                    for (bits, hint) in first.bytes.iter_mut().zip(hint) {
+                        *bits &= hint;
+                    }
+                }
+                (index as u32, first)
+            })
+            .collect::<Vec<_>>();
+        let (starts, _) = ByteTable::build(&items);
         let entries = self.entries.into_iter().map(|entry| entry.pc).collect();
         Scanner {
             insts: self.insts,
             classes: self.classes,
+            dispatches: self.dispatches,
             entries,
             starts,
         }
+    }
+
+    /// First bytes of the epsilon closure rooted at `pc`, matching the
+    /// runtime consume checks in [`Scanner::find`]. Anchors are treated as
+    /// always passing, which only widens the set.
+    fn first_bytes(&mut self, pc: usize) -> FirstBytes {
+        let mut out = FirstBytes {
+            bytes: [0; 4],
+            nullable: false,
+        };
+        if self.visit_stamps.len() < self.insts.len() {
+            self.visit_stamps.resize(self.insts.len(), 0);
+        }
+        self.visit_generation = self.visit_generation.wrapping_add(1);
+        if self.visit_generation == 0 {
+            self.visit_stamps.fill(0);
+            self.visit_generation = 1;
+        }
+        let generation = self.visit_generation;
+        let mut work = vec![pc];
+        while let Some(pc) = work.pop() {
+            if pc == NO_TARGET {
+                // A loop placeholder that has not been patched yet.
+                out.bytes = [u64::MAX; 4];
+                out.nullable = true;
+                continue;
+            }
+            if self.visit_stamps[pc] == generation {
+                continue;
+            }
+            self.visit_stamps[pc] = generation;
+            match &self.insts[pc] {
+                Inst::Char { ch, flags, .. } => {
+                    if flags.case_insensitive {
+                        if ch.is_ascii() {
+                            out.insert(ch.to_ascii_lowercase() as u8);
+                            out.insert(ch.to_ascii_uppercase() as u8);
+                            // Unicode folds (for example U+017F for `s`).
+                            out.insert_non_ascii();
+                        } else {
+                            out.bytes = [u64::MAX; 4];
+                        }
+                    } else {
+                        let mut buffer = [0u8; 4];
+                        out.insert(ch.encode_utf8(&mut buffer).as_bytes()[0]);
+                    }
+                }
+                Inst::Class { class, flags, .. } => {
+                    let class = &self.classes[*class];
+                    for byte in 0u8..0x80 {
+                        if class.matches_ascii(byte, flags.case_insensitive) {
+                            out.insert(byte);
+                        }
+                    }
+                    out.insert_non_ascii();
+                }
+                Inst::Any { .. } => out.bytes = [u64::MAX; 4],
+                Inst::Anchor { next, .. } => work.push(*next),
+                Inst::Split {
+                    preferred,
+                    alternate,
+                } => {
+                    work.push(*alternate);
+                    work.push(*preferred);
+                }
+                Inst::Dispatch { table } => {
+                    work.extend(
+                        self.dispatches[*table]
+                            .branches
+                            .iter()
+                            .map(|&branch| branch as usize),
+                    );
+                }
+                Inst::Accept { .. } => out.nullable = true,
+            }
+        }
+        out
+    }
+
+    /// Builds a dispatch for `branches` (entry pcs in priority order), or
+    /// returns `None` when no input byte would prune any branch.
+    fn dispatch(&mut self, branches: &[usize]) -> Option<Dispatch> {
+        let items = branches
+            .iter()
+            .map(|&branch| Some((u32::try_from(branch).ok()?, self.first_bytes(branch))))
+            .collect::<Option<Vec<_>>>()?;
+        let (table, pruned) = ByteTable::build(&items);
+        pruned.then(|| Dispatch {
+            table,
+            branches: items.iter().map(|(branch, _)| *branch).collect(),
+        })
     }
 
     fn try_add(
@@ -654,6 +877,7 @@ impl Compiler {
     ) -> Result<(), CompileFailure> {
         let inst_checkpoint = self.insts.len();
         let class_checkpoint = self.classes.len();
+        let dispatch_checkpoint = self.dispatches.len();
         let result = (|| {
             if parsed.features.possessive_or_atomic {
                 return Err(CompileError::Possessive);
@@ -675,6 +899,7 @@ impl Compiler {
         if let Err(error) = result {
             self.insts.truncate(inst_checkpoint);
             self.classes.truncate(class_checkpoint);
+            self.dispatches.truncate(dispatch_checkpoint);
             return Err(CompileFailure { pattern, error });
         }
         Ok(())
@@ -718,6 +943,27 @@ impl Compiler {
                 let mut entry = next;
                 for node in nodes.iter().rev() {
                     entry = self.node(node, flags, entry)?;
+                }
+                Ok(entry)
+            }
+            Ast::Alternation(branches) if branches.len() >= DISPATCH_MIN_BRANCHES => {
+                let mut entries = Vec::with_capacity(branches.len());
+                for branch in branches.iter().rev() {
+                    entries.push(self.node(branch, flags, next)?);
+                }
+                entries.reverse();
+                if let Some(dispatch) = self.dispatch(&entries) {
+                    let table = self.dispatches.len();
+                    self.dispatches.push(dispatch);
+                    return self.push(Inst::Dispatch { table });
+                }
+                let (&last, rest) = entries.split_last().expect("alternation has branches");
+                let mut entry = last;
+                for &preferred in rest.iter().rev() {
+                    entry = self.push(Inst::Split {
+                        preferred,
+                        alternate: entry,
+                    })?;
                 }
                 Ok(entry)
             }
@@ -1005,6 +1251,179 @@ mod tests {
                 expected,
                 "{pattern}"
             );
+        }
+    }
+
+    /// Leftmost start, then pattern order, using the fallback interpreter at
+    /// every exact start as the semantic oracle.
+    fn reference_set_find(patterns: &[&str], text: &str, from: usize) -> Option<ScanMatch> {
+        let oracles = patterns
+            .iter()
+            .map(|pattern| FallbackMatcher::new(pattern))
+            .collect::<Vec<_>>();
+        text.char_indices()
+            .map(|(start, _)| start)
+            .chain(std::iter::once(text.len()))
+            .filter(|start| *start >= from)
+            .find_map(|start| {
+                oracles.iter().enumerate().find_map(|(pattern, oracle)| {
+                    oracle
+                        .try_find_at(text, start, AnchorContext::line_start())
+                        .unwrap()
+                        .result
+                        .map(|found| ScanMatch {
+                            pattern,
+                            start: found.start,
+                            end: found.end,
+                        })
+                })
+            })
+    }
+
+    fn assert_matches_reference(patterns: &[&str], texts: &[&str]) {
+        let nfa = scanner(patterns);
+        let mut scratch = ScannerScratch::default();
+        for text in texts {
+            for from in text
+                .char_indices()
+                .map(|(start, _)| start)
+                .chain(std::iter::once(text.len()))
+            {
+                assert_eq!(
+                    nfa.find(text, from, AnchorContext::line_start(), &mut scratch),
+                    reference_set_find(patterns, text, from),
+                    "patterns={patterns:?} text={text:?} from={from}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn large_alternation_dispatch_preserves_branch_priority() {
+        // Eight or more branches compile to a first-byte dispatch. Shared
+        // prefixes, a `.` inside a branch, and trailing boundaries make branch
+        // order observable.
+        let keywords = r"\b(co|coroutine|coroutine.create|string|string.sub|select|s|sub|table)\b";
+        assert_matches_reference(
+            &[keywords, r"\w+"],
+            &[
+                "coroutine.create(x)",
+                "string.sub s sub",
+                "co coroutine coroutineXcreate",
+                "tables table",
+                "",
+            ],
+        );
+        let nfa = scanner(&[keywords]);
+        assert!(!nfa.dispatches.is_empty(), "keyword list uses a dispatch");
+    }
+
+    #[test]
+    fn dispatch_keeps_nullable_anchor_and_looping_branches() {
+        assert_matches_reference(
+            &[
+                "x(?:a|b|c|d|e|f|g|)y",
+                "(?:^a|b$|\\bc|d|e|f|g|h)+",
+                "(?:(?:aa|bb|cc|dd|ee|ff|gg|hh)x)*z",
+                "(?:q|r|s|t|u|v|w|(?:z*))!",
+            ],
+            &["xy xgy", "a b c", "aaxbbxz", "hhxgz", "zzz! !", "q!", "b"],
+        );
+    }
+
+    #[test]
+    fn dispatch_keeps_case_folds_across_utf8_widths() {
+        // U+212A KELVIN SIGN folds to `k` and U+017F LONG S folds to `s`:
+        // an ASCII-only first-byte set would drop those branches.
+        let folded = "(?i:a|b|c|d|e|k|s|é)";
+        assert_matches_reference(&[folded], &["\u{212a}", "x\u{17f}", "É", "é", "K S", "zzz"]);
+        let nfa = scanner(&[folded]);
+        let mut scratch = ScannerScratch::default();
+        let found = nfa
+            .find("\u{212a}", 0, AnchorContext::line_start(), &mut scratch)
+            .expect("kelvin sign folds to k");
+        assert_eq!(found.start..found.end, 0..3);
+        let found = nfa
+            .find("\u{17f}", 0, AnchorContext::line_start(), &mut scratch)
+            .expect("long s folds to s");
+        assert_eq!(found.start..found.end, 0..2);
+    }
+
+    #[test]
+    fn start_tables_preserve_entry_priority_and_line_end() {
+        // Word classes, literal starts, nullable patterns, and end-of-line
+        // anchors all start through the byte table.
+        assert_matches_reference(
+            &[
+                r"\w+:\w+",
+                r"\w+(?:\.\w+)+",
+                r"[#%*+]|\?\.|:",
+                "$",
+                r"\w+",
+                "x*",
+            ],
+            &["math.max a:b", ":k +1", "é.ü", "", "  "],
+        );
+        assert_matches_reference(&["$", "a"], &["", "ba", "b"]);
+        assert_matches_reference(&["a", "", "b"], &["ba", ""]);
+    }
+
+    #[test]
+    fn later_starts_do_not_outrank_queued_accept() {
+        // Greedy loops keep a higher-priority consuming thread ahead of their
+        // queued accept; no later start may win meanwhile.
+        assert_matches_reference(&["a+b", "a+", "b", "ab"], &["aaac", "aaab", "caab", "b"]);
+        assert_matches_reference(&["x.*?y", "y"], &["x y y", "yy"]);
+    }
+
+    #[test]
+    fn exact_end_excludes_history_dependent_and_folded_patterns() {
+        for (pattern, exact) in [
+            (r"\w+", true),
+            (r"\w+(?:\.\w+)+", true),
+            (r"\b(?:co|coroutine|coroutine.create)\b", true),
+            ("a{2,3}?b*", true),
+            ("(?:ab|c)+d?", true),
+            ("(?:a?)*b", false),
+            ("(?:a|)+", false),
+            ("(?:x|y?){2}", false),
+            ("(?:$|a)*", false),
+            ("(?i)abc", false),
+            ("a(?i:b)", false),
+            ("(?=a)a", false),
+            (r"(a)\1", false),
+            ("a++", false),
+        ] {
+            assert_eq!(match_end_is_exact(&parse(pattern)), exact, "{pattern}");
+        }
+    }
+
+    #[test]
+    fn exact_patterns_agree_with_backtracking_end() {
+        let patterns = [
+            r"\w+(?:\.\w+)+",
+            r"\w+:\w+",
+            r"-?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?",
+            r"\b(?:co|coroutine|coroutine.create|s|sub|string|string.sub|table)\b",
+            "a{2,4}?b|a+?",
+            "(?:ab|a)(?:bc|b)c",
+            r"[^ ]+",
+            r"\w+",
+        ];
+        for pattern in patterns {
+            assert!(match_end_is_exact(&parse(pattern)), "{pattern}");
+        }
+        assert_matches_reference(
+            &patterns,
+            &[
+                "coroutine.create math.max a:b",
+                "-1.5e+3 12 x.y.z",
+                "aaab aab abcc abbc",
+                "string.sub(s) é.ü",
+            ],
+        );
+        for pattern in patterns {
+            assert_matches_reference(&[pattern], &["coroutine.create -1.5e+3 aaab abcc é:x"]);
         }
     }
 

@@ -151,28 +151,51 @@ impl OutputScopeTableBuilder {
             return table;
         }
 
-        let mut stacks = Vec::with_capacity(self.output_stacks.len());
+        let mut stacks: Vec<Arc<[ScopeAtomId]>> = Vec::with_capacity(self.output_stacks.len());
         let mut atoms = Vec::<Arc<str>>::new();
-        let mut atom_ids = hashing::fast_map();
-        let mut resolved_ids = Vec::new();
-        for engine_stack in &self.output_stacks {
-            scope_stacks.resolve_ids_into(*engine_stack, &mut resolved_ids);
-            let stack_atoms = resolved_ids
-                .iter()
-                .map(|&scope| {
-                    if let Some(atom) = atom_ids.get(&scope) {
-                        return *atom;
-                    }
+        // Scope IDs are dense interner indexes, so a vector replaces one hash
+        // lookup per stack element.
+        let mut atom_ids = vec![u32::MAX; scope_names.len()];
+        let mut suffix = Vec::new();
+        let mut stack_atoms = Vec::new();
+        for (output_index, engine_stack) in self.output_stacks.iter().enumerate() {
+            // Deeply nested documents produce many stacks that differ from an
+            // already-emitted ancestor by one or two scopes. Walk only up to
+            // the nearest emitted ancestor and copy its atoms instead of
+            // resolving the full parent chain for every stack.
+            suffix.clear();
+            let mut cursor = *engine_stack;
+            let prefix = loop {
+                if cursor == scope_stacks.empty() {
+                    break None;
+                }
+                if cursor != *engine_stack
+                    && let Some(ancestor) = self.engine_to_output.get(&cursor)
+                    && (ancestor.0 as usize) < output_index
+                {
+                    break Some(ancestor.0 as usize);
+                }
+                if let Some(scope) = scope_stacks.top_scope(cursor) {
+                    suffix.push(scope);
+                }
+                cursor = scope_stacks.parent(cursor);
+            };
+            stack_atoms.clear();
+            if let Some(prefix) = prefix {
+                stack_atoms.extend_from_slice(&stacks[prefix]);
+            }
+            for &scope in suffix.iter().rev() {
+                let slot = &mut atom_ids[scope.0 as usize];
+                if *slot == u32::MAX {
                     let name = scope_names
                         .get_arc(scope)
                         .expect("scope-stack IDs come from the scope interner");
-                    let atom = ScopeAtomId(atoms.len() as u32);
+                    *slot = atoms.len() as u32;
                     atoms.push(name);
-                    atom_ids.insert(scope, atom);
-                    atom
-                })
-                .collect::<Arc<[ScopeAtomId]>>();
-            stacks.push(stack_atoms);
+                }
+                stack_atoms.push(ScopeAtomId(*slot));
+            }
+            stacks.push(Arc::from(stack_atoms.as_slice()));
         }
         let table = Arc::new(HighlightScopeTable::from_parts(atoms, stacks));
         if cache.tables.len() >= MAX_OUTPUT_SCOPE_TABLES {
@@ -4064,8 +4087,14 @@ impl TextMateTokenizer {
             if let Some(cached) = self.injection_outcome_cache.get(&active_stack_id) {
                 cached.clone()
             } else {
-                let stack = self.resolve_scope_stack_cached(active_stack_id);
-                let outcome = self.injection_outcome(stack.as_ref());
+                let outcome = if self.injection_selectors.is_empty() {
+                    // No selector can match, so the outcome does not depend
+                    // on the (possibly deep) resolved scope stack.
+                    self.injection_outcome(&[])
+                } else {
+                    let stack = self.resolve_scope_stack_cached(active_stack_id);
+                    self.injection_outcome(stack.as_ref())
+                };
                 if self.injection_outcome_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
                     self.injection_outcome_cache.clear();
                 }
@@ -5382,9 +5411,14 @@ impl TextMateTokenizer {
                         )
                     } else {
                         let stacks = self.current_scope_stack_ids(&state, Some(base_stack_id));
-                        let active_scopes = self.resolve_scope_stack_cached(stacks.active_stack_id);
                         let (injection_outcome_id, injection_outcome) =
-                            self.injection_outcome(active_scopes.as_ref());
+                            if self.injection_selectors.is_empty() {
+                                self.injection_outcome(&[])
+                            } else {
+                                let active_scopes =
+                                    self.resolve_scope_stack_cached(stacks.active_stack_id);
+                                self.injection_outcome(active_scopes.as_ref())
+                            };
                         let source = CandidateSourceKey::for_state(self.root, &state);
                         let prepared = self.prepared_blueprint_key(
                             source,
@@ -10175,6 +10209,53 @@ mod tests {
         assert_eq!(
             table.stack_names(output).collect::<Vec<_>>(),
             ["entity.name.generated-4095"]
+        );
+    }
+
+    #[test]
+    fn output_scope_table_reuses_emitted_ancestors_in_any_order() {
+        let mut scope_names = ScopeInterner::default();
+        let mut scope_stacks = ScopeStackInterner::default();
+        let source = scope_names.intern("source.fixture");
+        let nested = scope_names.intern("meta.nested");
+        let leaf = scope_names.intern("keyword.leaf");
+        let root = scope_stacks.push(scope_stacks.empty(), source, &scope_names);
+        let mut stack = root;
+        let mut depths = Vec::new();
+        for _ in 0..3 {
+            stack = scope_stacks.push(stack, nested, &scope_names);
+            depths.push(stack);
+        }
+        let deep_leaf = scope_stacks.push(stack, leaf, &scope_names);
+        // A sibling that shares a non-emitted ancestor.
+        let other = scope_names.intern("string.other");
+        let sibling = scope_stacks.push(depths[1], other, &scope_names);
+
+        // Descendants before ancestors, and an ancestor that is never emitted.
+        let mut builder = OutputScopeTableBuilder::new();
+        let emitted = [deep_leaf, depths[0], sibling, depths[2], root];
+        let refs = emitted.map(|stack| builder.intern_engine_stack(stack));
+        let mut cache = OutputScopeTableCache::default();
+        let table = builder.finish(&scope_stacks, &scope_names, &mut cache);
+
+        for (stack, output) in emitted.iter().zip(refs) {
+            let expected = scope_stacks.resolve(*stack, &scope_names);
+            assert_eq!(
+                table.stack_names(output).collect::<Vec<_>>(),
+                expected.iter().map(String::as_str).collect::<Vec<_>>()
+            );
+        }
+        // Atoms keep first-appearance order across the emitted stacks.
+        assert_eq!(table.atom_count(), 4);
+        assert_eq!(
+            table.stack(refs[0]).unwrap(),
+            &[
+                ScopeAtomId(0),
+                ScopeAtomId(1),
+                ScopeAtomId(1),
+                ScopeAtomId(1),
+                ScopeAtomId(2)
+            ]
         );
     }
 
