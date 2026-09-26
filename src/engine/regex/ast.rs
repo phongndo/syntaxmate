@@ -345,17 +345,22 @@ fn is_regex_syntax(ch: char) -> bool {
     )
 }
 
-/// ASCII bytes that stand for themselves outside a class when the extended
-/// (`x`) option is off: everything except regex syntax. Quantifier starts are
-/// syntax, so a run of these bytes never contains a quantifier.
-static PLAIN_LITERAL_BYTE: [bool; 256] = {
-    let mut table = [false; 256];
+/// ASCII bytes that stand for themselves outside a class: everything except
+/// regex syntax and, under the extended `x` option, whitespace and `#`.
+/// Quantifier starts are syntax, so a run of these bytes never contains a
+/// quantifier. Indexed by `extended` then byte.
+static PLAIN_LITERAL_BYTE: [[bool; 256]; 2] = {
+    let mut table = [[false; 256]; 2];
     let mut byte = 0;
     while byte < 128 {
-        table[byte] = !matches!(
+        let plain = !matches!(
             byte as u8,
             b'(' | b'[' | b'.' | b'^' | b'$' | b'\\' | b')' | b'|' | b'*' | b'+' | b'?' | b'{'
         );
+        // `char::is_whitespace` for ASCII scalars.
+        let extended_syntax = matches!(byte as u8, b'\t'..=b'\r' | b' ' | b'#');
+        table[0][byte] = plain;
+        table[1][byte] = plain && !extended_syntax;
         byte += 1;
     }
     table
@@ -363,9 +368,10 @@ static PLAIN_LITERAL_BYTE: [bool; 256] = {
 
 /// End of the run of plain literal bytes starting at `pos`.
 #[inline]
-fn plain_literal_end(bytes: &[u8], mut pos: usize) -> usize {
+fn plain_literal_end(bytes: &[u8], mut pos: usize, extended: bool) -> usize {
+    let table = &PLAIN_LITERAL_BYTE[usize::from(extended)];
     while let Some(&byte) = bytes.get(pos) {
-        if !PLAIN_LITERAL_BYTE[usize::from(byte)] {
+        if !table[usize::from(byte)] {
             break;
         }
         pos += 1;
@@ -461,7 +467,12 @@ impl<'a> Parser<'a> {
         self.nodes.push(first);
         while self.peek() == Some('|') {
             self.bump();
-            let branch = self.parse_concat(terminator);
+            // Keyword inventories are thousands of plain words; build each
+            // directly in the branch list.
+            let branch = match self.parse_plain_literal_branch(terminator) {
+                Some(literal) => literal,
+                None => self.parse_concat(terminator),
+            };
             self.nodes.push(branch);
         }
         let branches = self.nodes.drain(base..).collect();
@@ -501,12 +512,10 @@ impl<'a> Parser<'a> {
     /// a branch or group boundary. Such a sequence parses to the single
     /// literal (under the active option snapshot) that the general path
     /// would build scalar run by scalar run, so take it in one scan.
+    #[inline(always)]
     fn parse_plain_literal_branch(&mut self, terminator: Option<char>) -> Option<Ast> {
-        if self.flags.ignore_whitespace {
-            return None;
-        }
         let start = self.pos;
-        let end = plain_literal_end(self.bytes, start);
+        let end = plain_literal_end(self.bytes, start, self.flags.ignore_whitespace);
         if end == start {
             return None;
         }
@@ -664,10 +673,10 @@ impl<'a> Parser<'a> {
         let mut escaped = start < self.pos && self.bytes[start] == b'\\';
         let extended = self.flags.ignore_whitespace;
         while let Some(&byte) = self.bytes.get(self.pos) {
-            if !extended && PLAIN_LITERAL_BYTE[usize::from(byte)] {
+            if PLAIN_LITERAL_BYTE[usize::from(extended)][usize::from(byte)] {
                 // A plain byte is followed by a quantifier only where the run
                 // of plain bytes stops; that final scalar then binds alone.
-                self.pos = plain_literal_end(self.bytes, self.pos);
+                self.pos = plain_literal_end(self.bytes, self.pos, extended);
                 if self
                     .bytes
                     .get(self.pos)
