@@ -83,6 +83,7 @@ impl RegexAnalysis {
             parsed,
             uniform_effective_flags,
             has_case_insensitive_scope,
+            start_bytes.is_some() && !start_nullable,
         );
 
         Self {

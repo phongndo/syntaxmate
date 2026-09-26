@@ -22,7 +22,7 @@
 //! match, but must never skip one that has any.
 
 use super::AnchorContext;
-use super::ast::{AnchorKind, Ast, LookKind, ParsedRegex, PerlClassKind};
+use super::ast::{AnchorKind, Ast, ClassAtom, LookKind, ParsedRegex, PerlClassKind};
 use super::backtrack::{
     StartByteSet, class_start_bytes, expand_case_insensitive_start_bytes,
     is_cpp_space_comment_separator, is_perl_class, strip_nonsemantic_group,
@@ -43,8 +43,9 @@ struct SkipGateParts {
     rest: Option<RestGate>,
 }
 
-/// Disjunction of zero-width facts about a match start position, derived
-/// from leading `^` / `\A` / `\G` anchors and single-character lookbehinds.
+/// Disjunction of facts about a match start position, derived from leading
+/// `^` / `\A` / `\G` anchors, single-character lookbehinds, and tokens that
+/// must start exactly at the position.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StartAssert {
     /// `^` / `\A`: only byte offset 0.
@@ -54,31 +55,50 @@ struct StartAssert {
     /// Lookbehind: the previous byte (always a whole ASCII character) is in
     /// this set.
     prev_bytes: StartByteSet,
+    /// The byte at the position is in this set.
+    cur_bytes: StartByteSet,
 }
 
 impl StartAssert {
+    fn never() -> Self {
+        Self {
+            line_start: false,
+            continuation: false,
+            prev_bytes: StartByteSet::empty(),
+            cur_bytes: StartByteSet::empty(),
+        }
+    }
+
     fn line_start() -> Self {
         Self {
             line_start: true,
-            continuation: false,
-            prev_bytes: StartByteSet::empty(),
+            ..Self::never()
         }
     }
 
     fn continuation() -> Self {
         Self {
-            line_start: false,
             continuation: true,
-            prev_bytes: StartByteSet::empty(),
+            ..Self::never()
         }
     }
 
     fn prev_bytes(prev_bytes: StartByteSet) -> Self {
         Self {
-            line_start: false,
-            continuation: false,
             prev_bytes,
+            ..Self::never()
         }
+    }
+
+    fn cur_bytes(cur_bytes: StartByteSet) -> Self {
+        Self {
+            cur_bytes,
+            ..Self::never()
+        }
+    }
+
+    fn only_cur_bytes(&self) -> bool {
+        !self.line_start && !self.continuation && self.prev_bytes.is_empty()
     }
 
     /// Either condition may hold; `None` is "no constraint".
@@ -87,6 +107,7 @@ impl StartAssert {
         left.line_start |= right.line_start;
         left.continuation |= right.continuation;
         left.prev_bytes.extend(&right.prev_bytes);
+        left.cur_bytes.extend(&right.cur_bytes);
         Some(left)
     }
 
@@ -97,6 +118,9 @@ impl StartAssert {
                 .checked_sub(1)
                 .and_then(|prev| bytes.get(prev))
                 .is_some_and(|byte| self.prev_bytes.contains(*byte))
+            || bytes
+                .get(start)
+                .is_some_and(|byte| self.cur_bytes.contains(*byte))
     }
 }
 
@@ -136,10 +160,14 @@ impl SkipGate {
         parsed.analysis().skip_gate().cloned()
     }
 
+    /// `start_restricted` reports that the candidate scan already requires
+    /// the pattern's first byte, making a current-byte-only condition
+    /// redundant.
     pub(crate) fn analyze_with_effective_flags(
         parsed: &ParsedRegex,
         uniform_flags: Option<super::ast::RegexFlags>,
         has_case_insensitive_scope: bool,
+        start_restricted: bool,
     ) -> Option<Self> {
         let mut walk = PrefixWalk {
             bytes: StartByteSet::empty(),
@@ -148,10 +176,9 @@ impl SkipGate {
             allow_whitespace: false,
             allow_comment: false,
             stopped: None,
-            // Lookbehind byte sets are not case-expanded.
-            lookbehind_bytes: !has_case_insensitive_scope
-                && !parsed.flags.case_insensitive
-                && !uniform_flags.is_some_and(|flags| flags.case_insensitive),
+            case_folding: has_case_insensitive_scope
+                || parsed.flags.case_insensitive
+                || uniform_flags.is_some_and(|flags| flags.case_insensitive),
         };
         let continuing = walk.visit(&parsed.ast, PathState::START);
         let all_stopped = continuing.is_none();
@@ -160,7 +187,8 @@ impl SkipGate {
             (Some(stopped), None) => stopped,
             (None, Some(path)) => path.assert,
             (None, None) => None,
-        };
+        }
+        .filter(|start| !(start_restricted && start.only_cur_bytes()));
         let rest = if all_stopped {
             walk.rest_gate(parsed, uniform_flags, has_case_insensitive_scope)
         } else {
@@ -275,6 +303,7 @@ impl PathState {
 /// C-family comment separator, zero-width assertions) are stepped over, and
 /// the first consuming element on each path contributes its first bytes as
 /// a token. Every union is an over-approximation of where a token can start.
+#[derive(Clone)]
 struct PrefixWalk {
     bytes: StartByteSet,
     /// A token's first byte is unknown (dot, `\w`, backreference, ...).
@@ -285,8 +314,9 @@ struct PrefixWalk {
     /// Union of the start conditions of every path that reached a token;
     /// `None` until one does.
     stopped: Option<Option<StartAssert>>,
-    /// Whether lookbehind byte sets may be used (no case folding).
-    lookbehind_bytes: bool,
+    /// Some scope folds case. Start conditions (lookbehind and current
+    /// bytes) are then not derived, and class ranges are not trusted.
+    case_folding: bool,
 }
 
 impl PrefixWalk {
@@ -297,9 +327,17 @@ impl PrefixWalk {
             None => self.unbounded = true,
         }
         self.allow_empty |= path.at_start;
+        let mut assert = path.assert;
+        if assert.is_none()
+            && path.pristine
+            && !self.case_folding
+            && let Some(bytes) = bytes
+        {
+            assert = Some(StartAssert::cur_bytes(bytes.clone()));
+        }
         self.stopped = Some(match self.stopped.take() {
-            Some(stopped) => StartAssert::union(stopped, path.assert),
-            None => path.assert,
+            Some(stopped) => StartAssert::union(stopped, assert),
+            None => assert,
         });
         None
     }
@@ -333,10 +371,27 @@ impl PrefixWalk {
             Ast::Look {
                 kind: LookKind::Behind,
                 child,
-            } if path.pristine && self.lookbehind_bytes => match behind_assert(child) {
+            } if path.pristine && !self.case_folding => match behind_assert(child) {
                 Some(assert) => Some(path.assume(assert)),
                 None => Some(path),
             },
+            // The lookahead body must match at this position, so when every
+            // path through it reaches a known token, that token gates this
+            // path too. Unknown tokens keep the lookahead transparent.
+            Ast::Look {
+                kind: LookKind::Ahead,
+                child,
+            } => {
+                let mut inner = self.clone();
+                if inner.visit(child, path.clone()).is_none()
+                    && (self.unbounded || !inner.unbounded)
+                {
+                    *self = inner;
+                    None
+                } else {
+                    Some(path)
+                }
+            }
             Ast::Look { .. } => Some(path),
             Ast::Literal(literal) => match literal.chars().next() {
                 None => Some(path),
@@ -348,7 +403,14 @@ impl PrefixWalk {
                 Some(_) => self.token(path, None),
             },
             Ast::Class(class) => {
-                let bytes = class_start_bytes(class);
+                // Case-insensitive ranges fold their bounds, which can admit
+                // non-letters that ASCII case-pair expansion would miss.
+                let folded_range = self.case_folding
+                    && class
+                        .atoms
+                        .iter()
+                        .any(|atom| matches!(atom, ClassAtom::Range(..)));
+                let bytes = (!folded_range).then(|| class_start_bytes(class)).flatten();
                 self.token(path, bytes.as_ref())
             }
             Ast::Dot | Ast::Grapheme => self.token(path, None),

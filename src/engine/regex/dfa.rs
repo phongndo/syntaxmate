@@ -2750,6 +2750,14 @@ mod tests {
             r"(?:^|x)\s*y".to_owned(),
             r"(?:(?<=;)|\s)\s*y".to_owned(),
             r"(?:(?<=;)|a?)\s*y".to_owned(),
+            r"}|(?=\s*#\s*(?:elif|else|endif)\b)".to_owned(),
+            r"(?<=}|%>|\?\?>)|(?=[];=>\[])".to_owned(),
+            r"(?=\s*#)x?".to_owned(),
+            r"(?i)(?=\s*select)\w+|;".to_owned(),
+            r"(?=[ab])\s*|c".to_owned(),
+            r"(?=\w)\s*x|;".to_owned(),
+            // Case-insensitive ranges fold their bounds: `a-{` admits `\`.
+            r"(?i)(?<=^|[(\s]|,@|,\.?)(([]!$%\&*+\--9<-\[^_a-{}~]+?)|(#))(?=::?)".to_owned(),
         ];
         let texts = [
             "unsigned x; long y;",
@@ -2777,6 +2785,10 @@ mod tests {
             "{:: [( (::",
             ";;} }x ;",
             "ax y a y; ;y  y",
+            "} x  #elif #else\t#  endif # x",
+            "a}b%>c??>d]e;f=g>h[",
+            "  SELECT x Select;cab",
+            "\\*intint><::} (\\x::",
             "",
             "\n",
         ];
@@ -2806,8 +2818,10 @@ mod tests {
                 }
             }
         }
-        // Only the backreference pattern stays ungated.
-        assert_eq!(gated_count, patterns.len() - 1);
+        // The backreference pattern stays ungated, and so do the one whose
+        // start bytes the candidate buckets already restrict and the one
+        // whose only token is a case-folded range.
+        assert_eq!(gated_count, patterns.len() - 3);
     }
 
     #[test]
