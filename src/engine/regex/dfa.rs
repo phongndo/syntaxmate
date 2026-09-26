@@ -1,4 +1,4 @@
-use std::{collections::HashSet, fmt, sync::Arc};
+use std::{borrow::Cow, collections::HashSet, fmt, sync::Arc};
 
 use super::ast::{AnchorKind, Ast, ClassAtom, LookKind, PerlClassKind, RegexFlags};
 use super::backtrack::{FallbackMatcher, char_at, is_line_end_position, previous_char};
@@ -226,7 +226,16 @@ enum NativeEngine {
 
 #[derive(Debug, Clone)]
 struct SymbolSetMatcher {
-    buckets: Vec<SymbolBucket>,
+    /// Every symbol's bytes, concatenated.
+    arena: Box<[u8]>,
+    /// Symbols in alternative order.
+    entries: Box<[SymbolEntry]>,
+    /// Open-addressed hash table of `entries` indexes (`EMPTY_SLOT` when
+    /// free). Linear probing never displaces an earlier insertion, so the
+    /// first match along a probe sequence is the earliest alternative.
+    slots: Box<[u32]>,
+    /// Distinct symbol lengths, ascending.
+    lengths: Box<[usize]>,
     start_bytes: Vec<u8>,
     start_bitmap: [u64; 4],
     left: Separator,
@@ -237,10 +246,69 @@ struct SymbolSetMatcher {
     capture_count: usize,
 }
 
-#[derive(Debug, Clone)]
-struct SymbolBucket {
-    len: usize,
-    symbols: FastMap<Vec<u8>, usize>,
+#[derive(Debug, Clone, Copy)]
+struct SymbolEntry {
+    hash: u64,
+    offset: u32,
+    len: u32,
+}
+
+const EMPTY_SLOT: u32 = u32::MAX;
+const SYMBOL_HASH_SEED: u64 = 0x243f_6a88_85a3_08d3;
+
+/// Symbol hashes consume whole eight-byte words and finish with the
+/// zero-padded tail and the length. Matching extends one running word state
+/// across every candidate length, so each length costs one finishing step.
+#[inline]
+fn symbol_hash_word(state: u64, word: u64) -> u64 {
+    (state ^ word)
+        .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        .rotate_left(29)
+}
+
+#[inline]
+fn symbol_hash_finish(state: u64, tail: &[u8], len: usize) -> u64 {
+    let mut padded = [0u8; 8];
+    padded[..tail.len()].copy_from_slice(tail);
+    let hash = symbol_hash_word(state ^ len as u64, u64::from_le_bytes(padded));
+    hash ^ (hash >> 32)
+}
+
+#[inline]
+fn symbol_word(bytes: &[u8]) -> u64 {
+    u64::from_le_bytes(bytes[..8].try_into().expect("eight-byte word"))
+}
+
+fn symbol_hash(bytes: &[u8]) -> u64 {
+    let (words, tail) = bytes.as_chunks::<8>();
+    let state = words.iter().fold(SYMBOL_HASH_SEED, |state, word| {
+        symbol_hash_word(state, u64::from_le_bytes(*word))
+    });
+    symbol_hash_finish(state, tail, bytes.len())
+}
+
+/// `symbol_variants` of a symbol-set body, borrowing plain literal branches
+/// from the AST instead of copying each one.
+fn symbol_set_variants(ast: &Ast, limit: usize) -> Option<Vec<Cow<'_, str>>> {
+    let Ast::Alternation(branches) = ast else {
+        return Some(
+            symbol_variants(ast, limit)?
+                .into_iter()
+                .map(Cow::Owned)
+                .collect(),
+        );
+    };
+    let mut variants = Vec::with_capacity(branches.len());
+    for branch in branches {
+        match branch {
+            Ast::Literal(literal) => variants.push(Cow::Borrowed(literal.as_str())),
+            branch => variants.extend(symbol_variants(branch, limit)?.into_iter().map(Cow::Owned)),
+        }
+        if variants.len() > limit {
+            return None;
+        }
+    }
+    Some(variants)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -295,40 +363,44 @@ impl SymbolSetMatcher {
             return None;
         }
 
-        let variants = symbol_variants(child, 131_072)?;
-        if variants.len() < 32 || variants.iter().any(String::is_empty) {
+        let variants = symbol_set_variants(child, 131_072)?;
+        if variants.len() < 32 || variants.iter().any(|symbol| symbol.is_empty()) {
             return None;
         }
-        // Size every length bucket up front: symbol inventories hold
-        // thousands of entries, and growing the tables rehashes each key
-        // several times.
-        let mut lengths = Vec::<(usize, usize)>::new();
-        for symbol in &variants {
-            match lengths.binary_search_by_key(&symbol.len(), |&(len, _)| len) {
-                Ok(index) => lengths[index].1 += 1,
-                Err(index) => lengths.insert(index, (symbol.len(), 1)),
-            }
-        }
-        let mut buckets = lengths
-            .into_iter()
-            .map(|(len, count)| SymbolBucket {
-                len,
-                symbols: FastMap::with_capacity_and_hasher(count, Default::default()),
-            })
-            .collect::<Vec<_>>();
+        // One arena and one flat hash table instead of an owned key per
+        // symbol: inventories hold thousands of entries.
+        let mut arena = Vec::with_capacity(variants.iter().map(|symbol| symbol.len()).sum());
+        let mut entries = Vec::with_capacity(variants.len());
+        let mut lengths = Vec::new();
         let mut start_bitmap = [0u64; 4];
-        for (order, symbol) in variants.into_iter().enumerate() {
-            let bytes = symbol.into_bytes();
-            if let Some(first) = bytes.first().copied() {
-                start_bitmap[first as usize >> 6] |= 1u64 << (first & 63);
+        let mask = (variants.len() * 2).next_power_of_two() - 1;
+        let mut slots = vec![EMPTY_SLOT; mask + 1];
+        for symbol in &variants {
+            let bytes = symbol.as_bytes();
+            let first = bytes[0];
+            start_bitmap[first as usize >> 6] |= 1u64 << (first & 63);
+            if let Err(index) = lengths.binary_search(&bytes.len()) {
+                lengths.insert(index, bytes.len());
             }
-            let index = buckets
-                .binary_search_by_key(&bytes.len(), |bucket| bucket.len)
-                .expect("every symbol length has a bucket");
-            buckets[index].symbols.entry(bytes).or_insert(order);
+            let hash = symbol_hash(bytes);
+            let mut slot = hash as usize & mask;
+            while slots[slot] != EMPTY_SLOT {
+                slot = (slot + 1) & mask;
+            }
+            slots[slot] = u32::try_from(entries.len()).ok()?;
+            entries.push(SymbolEntry {
+                hash,
+                offset: u32::try_from(arena.len()).ok()?,
+                len: u32::try_from(bytes.len()).ok()?,
+            });
+            arena.extend_from_slice(bytes);
         }
+        u32::try_from(arena.len()).ok()?;
         Some(Self {
-            buckets,
+            arena: arena.into_boxed_slice(),
+            entries: entries.into_boxed_slice(),
+            slots: slots.into_boxed_slice(),
+            lengths: lengths.into_boxed_slice(),
             start_bytes: (0u8..=u8::MAX)
                 .filter(|byte| start_bitmap[*byte as usize >> 6] & (1u64 << (*byte & 63)) != 0)
                 .collect(),
@@ -351,12 +423,20 @@ impl SymbolSetMatcher {
         }
         let bytes = line.as_bytes();
         let mut selected = None;
-        for bucket in &self.buckets {
-            let end = start.checked_add(bucket.len)?;
+        let mut state = SYMBOL_HASH_SEED;
+        let mut words = 0;
+        for &len in &self.lengths {
+            let end = start.checked_add(len)?;
             let Some(candidate) = bytes.get(start..end) else {
-                continue;
+                // Lengths ascend, so no longer symbol fits either.
+                break;
             };
-            let Some(&order) = bucket.symbols.get(candidate) else {
+            while words < len / 8 {
+                state = symbol_hash_word(state, symbol_word(&candidate[words * 8..]));
+                words += 1;
+            }
+            let hash = symbol_hash_finish(state, &candidate[words * 8..], len);
+            let Some(order) = self.symbol_order(hash, candidate) else {
                 continue;
             };
             if line.is_char_boundary(end)
@@ -368,6 +448,28 @@ impl SymbolSetMatcher {
             }
         }
         selected.map(|(_, end)| end)
+    }
+
+    /// Earliest alternative whose symbol is exactly `candidate`.
+    #[inline]
+    fn symbol_order(&self, hash: u64, candidate: &[u8]) -> Option<u32> {
+        let mask = self.slots.len() - 1;
+        let mut slot = hash as usize & mask;
+        loop {
+            let index = self.slots[slot];
+            if index == EMPTY_SLOT {
+                return None;
+            }
+            let entry = self.entries[index as usize];
+            let offset = entry.offset as usize;
+            if entry.hash == hash
+                && entry.len as usize == candidate.len()
+                && &self.arena[offset..offset + candidate.len()] == candidate
+            {
+                return Some(index);
+            }
+            slot = (slot + 1) & mask;
+        }
     }
 
     fn match_at(&self, line: &str, start: usize) -> Option<MatchResult> {
