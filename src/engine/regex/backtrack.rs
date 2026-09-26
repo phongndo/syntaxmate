@@ -555,6 +555,23 @@ impl FallbackMatcher {
             .map(|selection| Arc::clone(&selection.program))
     }
 
+    /// Whether the required-literal prefilter still admits a match starting
+    /// at `start` or later on this line. The prefilter searches the suffix
+    /// from `start`, so `false` also holds for every later start.
+    pub(crate) fn selection_prefilter_viable(
+        &self,
+        line: &str,
+        start: usize,
+        scratch: &mut BytecodeScratch,
+    ) -> bool {
+        scratch.prefilter_cursors().may_match(
+            self.prefilter_slot(),
+            self.parsed.prefilter(),
+            line,
+            start,
+        )
+    }
+
     fn bytecode(&self) -> Option<&Program> {
         self.bytecode
             .get_or_init(|| self.compile_bytecode())
@@ -859,8 +876,14 @@ impl FallbackMatcher {
             });
         }
         let mut budget = StepBudget::new(self.budget);
-        let mut local_scratch = BytecodeScratch::default();
-        let scratch = scratch.unwrap_or(&mut local_scratch);
+        let mut local_scratch;
+        let scratch = match scratch {
+            Some(scratch) => scratch,
+            None => {
+                local_scratch = BytecodeScratch::default();
+                &mut local_scratch
+            }
+        };
         let result = if capture_count == 0
             && let Some(program) = self.active_bytecode()
         {
