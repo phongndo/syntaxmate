@@ -419,6 +419,7 @@ pub struct TokenizerOptions {
     /// Maximum source-line size accepted by the tokenizer.
     pub max_line_bytes: usize,
     /// Maximum number of tokenized lines retained in the tokenizer-local cache.
+    /// Set to zero to disable line-result caching.
     pub line_cache_entries: usize,
 }
 

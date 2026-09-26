@@ -3288,7 +3288,7 @@ impl TextMateTokenizer {
     }
 
     pub fn configure_options(&mut self, options: crate::TokenizerOptions) {
-        self.set_line_cache_capacity(options.line_cache_entries.max(1));
+        self.set_line_cache_capacity(options.line_cache_entries);
         self.set_max_line_bytes(Some(options.max_line_bytes));
     }
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Honor `TokenizerOptions::line_cache_entries = 0` by disabling line-result
+  caching completely.
 - Raise the MSRV from Rust 1.88 to 1.98; this requires a minor release.
 - Refresh bundled grammars from `@shikijs/langs` 3.23.0 to 4.4.3. Highlighting
   changes for 52 upstream-updated grammars, including a rewritten C++ grammar
