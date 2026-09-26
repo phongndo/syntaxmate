@@ -261,7 +261,7 @@ pub fn repository_walk_skeleton(grammar: &CompiledGrammar) -> CompiledGrammar {
     skeleton
 }
 
-fn for_each_rule_ref(grammar: &CompiledGrammar, mut visit: impl FnMut(&RuleRef)) {
+pub(crate) fn for_each_rule_ref(grammar: &CompiledGrammar, mut visit: impl FnMut(&RuleRef)) {
     let mut refs = |rule_refs: &[RuleRef]| rule_refs.iter().for_each(&mut visit);
     refs(&grammar.top_level);
     for rule_ref in grammar.repository.values() {

@@ -1428,13 +1428,22 @@ impl GrammarSet {
     /// not change the first-visit order of walked grammars. `$base` is the only
     /// edge out of that subtree besides external includes; under the root base
     /// it targets the root top level, which the walk visits first.
-    fn skips_repository_context_walk(&self, id: GrammarId, base_is_root: bool) -> bool {
-        self.grammars
-            .get(id.0 as usize)
-            .and_then(|slot| slot.lazy)
-            .is_some_and(|lazy| {
-                !lazy.traits.repository_contexts && (base_is_root || !lazy.traits.base_reference)
-            })
+    fn skips_repository_context_walk(
+        &self,
+        id: GrammarId,
+        base_is_root: bool,
+        loaded: &mut LoadedWalkTraits,
+    ) -> bool {
+        let Some(slot) = self.grammars.get(id.0 as usize) else {
+            return false;
+        };
+        let traits = match slot.lazy {
+            Some(lazy) => Some(lazy.traits),
+            None => loaded.traits(self, id),
+        };
+        traits.is_some_and(|traits| {
+            !traits.repository_contexts && (base_is_root || !traits.base_reference)
+        })
     }
 
     pub fn grammar_by_scope(&self, scope: &str) -> Option<&CompiledGrammar> {
@@ -2529,9 +2538,9 @@ pub struct TextMateTokenizer {
     unprepared_static_matcher_generation: usize,
     prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
     prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
-    dynamic_matcher_cache: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
+    dynamic_matcher_cache: MatcherSourceTable,
     /// Source-keyed view of `matcher_cache`; see `shared_static_matcher`.
-    static_matcher_sources: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
+    static_matcher_sources: MatcherSourceTable,
     scope_names: ScopeInterner,
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
@@ -2638,8 +2647,8 @@ impl TextMateTokenizer {
             unprepared_static_matcher_generation: 0,
             prepared_pattern_cache,
             prepared_blueprint_cache,
-            dynamic_matcher_cache: hashing::fast_map(),
-            static_matcher_sources: hashing::fast_map(),
+            dynamic_matcher_cache: MatcherSourceTable::default(),
+            static_matcher_sources: MatcherSourceTable::default(),
             scope_names: ScopeInterner::default(),
             scope_templates: ScopeTemplateInterner::default(),
             scope_stacks: ScopeStackInterner::default(),
@@ -4294,40 +4303,10 @@ impl TextMateTokenizer {
                 outcome
             };
         let source = CandidateSourceKey::for_state(self.root, state);
-        let blueprint_key = CandidateBlueprintKey {
-            source: source.clone(),
-            injection_outcome: injection_outcome_id,
-        };
         let blueprint =
-            if let Some(blueprint) = self.candidate_blueprint_cache.get(&blueprint_key).cloned() {
-                blueprint
-            } else {
-                let prepared = self.prepared_blueprint_key(
-                    source,
-                    injection_outcome_id,
-                    injection_outcome.as_ref(),
-                );
-                let blueprint = match prepared {
-                    Some((cache, key)) => {
-                        let shared = cache.get_or_insert_with(key, || {
-                            let candidates = self.candidates_for_state(state, &injection_outcome);
-                            self.build_shareable_candidate_blueprint(candidates)
-                        });
-                        self.bind_shared_candidate_blueprint(shared)
-                    }
-                    None => {
-                        let candidates = self.candidates_for_state(state, &injection_outcome);
-                        let owned = self.build_candidate_blueprint(candidates);
-                        self.bind_owned_candidate_blueprint(owned)
-                    }
-                };
-                if self.candidate_blueprint_cache.len() >= MAX_CANDIDATE_BLUEPRINTS {
-                    self.candidate_blueprint_cache.clear();
-                }
-                self.candidate_blueprint_cache
-                    .insert(blueprint_key, blueprint.clone());
-                blueprint
-            };
+            self.candidate_blueprint(source, injection_outcome_id, &injection_outcome, |this| {
+                this.candidates_for_state(state, &injection_outcome)
+            });
         let candidate_set = Arc::new(CandidateSet {
             blueprint,
             active_stack_id,
@@ -4340,29 +4319,50 @@ impl TextMateTokenizer {
         candidate_set
     }
 
-    fn build_candidate_set(
+    /// Bound blueprint for one candidate source under one injection outcome.
+    ///
+    /// Candidates are a pure function of that pair, so every state and
+    /// capture retokenization that reaches it shares one blueprint (and its
+    /// compiled pattern set) for this tokenizer's lifetime.
+    fn candidate_blueprint(
         &mut self,
-        prepared: Option<(Arc<PreparedBlueprintCache>, PreparedBlueprintKey)>,
-        active_stack_id: ScopeStackId,
-        end_stack_id: ScopeStackId,
+        source: CandidateSourceKey,
+        injection_outcome_id: InjectionOutcomeId,
+        injection_outcome: &Arc<InjectionOutcome>,
         candidates: impl FnOnce(&mut Self) -> Vec<Candidate>,
-    ) -> CandidateSet {
-        let blueprint = if let Some((cache, key)) = prepared {
-            let shared = cache.get_or_insert_with(key, || {
-                let candidates = candidates(self);
-                self.build_shareable_candidate_blueprint(candidates)
-            });
-            self.bind_shared_candidate_blueprint(shared)
-        } else {
-            let candidates = candidates(self);
-            let blueprint = self.build_candidate_blueprint(candidates);
-            self.bind_owned_candidate_blueprint(blueprint)
+    ) -> BoundCandidateBlueprint {
+        let blueprint_key = CandidateBlueprintKey {
+            source,
+            injection_outcome: injection_outcome_id,
         };
-        CandidateSet {
-            blueprint,
-            active_stack_id,
-            end_stack_id,
+        if let Some(blueprint) = self.candidate_blueprint_cache.get(&blueprint_key) {
+            return blueprint.clone();
         }
+        let prepared = self.prepared_blueprint_key(
+            blueprint_key.source.clone(),
+            injection_outcome_id,
+            injection_outcome.as_ref(),
+        );
+        let blueprint = match prepared {
+            Some((cache, key)) => {
+                let shared = cache.get_or_insert_with(key, || {
+                    let candidates = candidates(self);
+                    self.build_shareable_candidate_blueprint(candidates)
+                });
+                self.bind_shared_candidate_blueprint(shared)
+            }
+            None => {
+                let candidates = candidates(self);
+                let owned = self.build_candidate_blueprint(candidates);
+                self.bind_owned_candidate_blueprint(owned)
+            }
+        };
+        if self.candidate_blueprint_cache.len() >= MAX_CANDIDATE_BLUEPRINTS {
+            self.candidate_blueprint_cache.clear();
+        }
+        self.candidate_blueprint_cache
+            .insert(blueprint_key, blueprint.clone());
+        blueprint
     }
 
     fn bind_owned_candidate_blueprint(
@@ -4548,19 +4548,20 @@ impl TextMateTokenizer {
         pattern: &str,
         live_captures: Option<Vec<u32>>,
     ) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: live_captures.clone().unwrap_or_else(|| vec![u32::MAX]),
-        };
-        if let Some(matcher) = self.static_matcher_sources.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) =
+            self.static_matcher_sources
+                .get(hash, pattern, live_captures.as_deref())
+        {
             return Arc::clone(matcher);
         }
+        let key_captures = live_captures.as_deref().map(Box::from);
         let matcher = Arc::new(match live_captures {
             Some(live_captures) => CompiledPattern::new_with_live_captures(pattern, live_captures),
             None => CompiledPattern::new(pattern),
         });
         self.static_matcher_sources
-            .insert(key, Arc::clone(&matcher));
+            .insert(hash, key_captures, Arc::clone(&matcher));
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
         }
@@ -4568,11 +4569,8 @@ impl TextMateTokenizer {
     }
 
     fn cached_dynamic_matcher(&mut self, pattern: &str) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: vec![u32::MAX],
-        };
-        if let Some(matcher) = self.dynamic_matcher_cache.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) = self.dynamic_matcher_cache.get(hash, pattern, None) {
             return matcher.clone();
         }
         // Dynamic begin/end substitutions are source-derived and potentially
@@ -4582,7 +4580,8 @@ impl TextMateTokenizer {
             self.dynamic_matcher_cache.clear();
         }
         let matcher = Arc::new(CompiledPattern::new(pattern));
-        self.dynamic_matcher_cache.insert(key, matcher.clone());
+        self.dynamic_matcher_cache
+            .insert(hash, None, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(None, None, pattern);
         }
@@ -4594,21 +4593,23 @@ impl TextMateTokenizer {
         pattern: &str,
         live_captures: Vec<u32>,
     ) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: live_captures.clone(),
-        };
-        if let Some(matcher) = self.dynamic_matcher_cache.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) = self
+            .dynamic_matcher_cache
+            .get(hash, pattern, Some(&live_captures))
+        {
             return matcher.clone();
         }
         if self.dynamic_matcher_cache.len() >= MAX_DYNAMIC_MATCHERS {
             self.dynamic_matcher_cache.clear();
         }
+        let key_captures = Some(Box::from(live_captures.as_slice()));
         let matcher = Arc::new(CompiledPattern::new_with_live_captures(
             pattern,
             live_captures,
         ));
-        self.dynamic_matcher_cache.insert(key, matcher.clone());
+        self.dynamic_matcher_cache
+            .insert(hash, key_captures, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(None, None, pattern);
         }
@@ -5576,15 +5577,10 @@ impl TextMateTokenizer {
                             patterns: Arc::from(patterns),
                             compound_patterns,
                         };
-                        let prepared = self.prepared_blueprint_key(
+                        let blueprint = self.candidate_blueprint(
                             source,
                             injection_outcome_id,
-                            injection_outcome.as_ref(),
-                        );
-                        self.build_candidate_set(
-                            prepared,
-                            base_stack_id,
-                            base_stack_id,
+                            &injection_outcome,
                             |tokenizer| {
                                 let mut candidates = Vec::new();
                                 let mut order = 0usize;
@@ -5599,7 +5595,12 @@ impl TextMateTokenizer {
                                 );
                                 candidates
                             },
-                        )
+                        );
+                        CandidateSet {
+                            blueprint,
+                            active_stack_id: base_stack_id,
+                            end_stack_id: base_stack_id,
+                        }
                     } else {
                         let stacks = self.current_scope_stack_ids(&state, Some(base_stack_id));
                         let (injection_outcome_id, injection_outcome) =
@@ -5611,17 +5612,17 @@ impl TextMateTokenizer {
                                 self.injection_outcome(active_scopes.as_ref())
                             };
                         let source = CandidateSourceKey::for_state(self.root, &state);
-                        let prepared = self.prepared_blueprint_key(
+                        let blueprint = self.candidate_blueprint(
                             source,
                             injection_outcome_id,
-                            injection_outcome.as_ref(),
-                        );
-                        self.build_candidate_set(
-                            prepared,
-                            stacks.active_stack_id,
-                            stacks.end_stack_id,
+                            &injection_outcome,
                             |tokenizer| tokenizer.candidates_for_state(&state, &injection_outcome),
-                        )
+                        );
+                        CandidateSet {
+                            blueprint,
+                            active_stack_id: stacks.active_stack_id,
+                            end_stack_id: stacks.end_stack_id,
+                        }
                     };
                     let candidate_set = Arc::new(candidate_set);
                     if self.inline_candidate_cache.len() >= MAX_INLINE_CANDIDATE_SETS {
@@ -6306,10 +6307,76 @@ impl CandidateSourceKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DynamicMatcherKey {
-    pattern: String,
-    live_captures: Vec<u32>,
+/// Compiled matchers keyed by regex source and live-capture layout (`None`
+/// keeps every group live).
+///
+/// Grammar regexes can be kilobytes long, and a byte-wise hash of the full
+/// source recomputed on every probe, insert, and table growth was a visible
+/// share of first-use cost. Each source is hashed once, word at a time, and
+/// buckets keep the compiled matcher, whose own source text settles equality,
+/// so the table stores no second copy of the pattern.
+type MatcherSourceEntry = (Option<Box<[u32]>>, Arc<CompiledPattern>);
+
+#[derive(Debug, Clone, Default)]
+struct MatcherSourceTable {
+    buckets: FastMap<u64, Vec<MatcherSourceEntry>>,
+    len: usize,
+}
+
+impl MatcherSourceTable {
+    fn get(
+        &self,
+        hash: u64,
+        pattern: &str,
+        live_captures: Option<&[u32]>,
+    ) -> Option<&Arc<CompiledPattern>> {
+        self.buckets
+            .get(&hash)?
+            .iter()
+            .find(|(captures, matcher)| {
+                captures.as_deref() == live_captures && matcher.source() == pattern
+            })
+            .map(|(_, matcher)| matcher)
+    }
+
+    fn insert(
+        &mut self,
+        hash: u64,
+        live_captures: Option<Box<[u32]>>,
+        matcher: Arc<CompiledPattern>,
+    ) {
+        self.buckets
+            .entry(hash)
+            .or_default()
+            .push((live_captures, matcher));
+        self.len += 1;
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn clear(&mut self) {
+        self.buckets.clear();
+        self.len = 0;
+    }
+}
+
+/// Word-at-a-time hash of a regex source for `MatcherSourceTable`.
+fn matcher_source_hash(pattern: &str) -> u64 {
+    const K: u64 = 0xf135_7aea_2e62_a9c5;
+    let bytes = pattern.as_bytes();
+    let mut hash = (bytes.len() as u64).wrapping_mul(K);
+    let (words, remainder) = bytes.as_chunks::<8>();
+    for word in words {
+        hash = (hash ^ u64::from_le_bytes(*word))
+            .wrapping_mul(K)
+            .rotate_left(26);
+    }
+    let mut tail = [0u8; 8];
+    tail[..remainder.len()].copy_from_slice(remainder);
+    hash = (hash ^ u64::from_le_bytes(tail)).wrapping_mul(K);
+    hash ^ (hash >> 32)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -6833,6 +6900,86 @@ fn scoped_repository_rules(grammar: &CompiledGrammar) -> FastSet<RuleId> {
     reached
 }
 
+/// Closure-member traits of already-loaded grammars, derived during one
+/// unbounded repository-context walk.
+///
+/// Bundled members carry these traits precomputed; grammars loaded from
+/// source (custom assets) otherwise force the walk through every embedded
+/// grammar. The traits are exactly `grammar_closure::closure_member_traits`
+/// restricted to the member's external-include reach under this set's scope
+/// table, so the walk skips the same grammars it would skip for an equivalent
+/// bundled closure. A reach that includes a lazily decoded member is never
+/// skipped here (its recorded traits describe the bundle's scope table, which
+/// a mixed set may override). Nothing outlives the walk.
+#[derive(Default)]
+struct LoadedWalkTraits {
+    /// Per grammar: local-repository flag, `$base` flag, and external targets.
+    edges: Vec<Option<(bool, bool, Vec<GrammarId>)>>,
+    traits: Vec<Option<Option<ClosureMemberTraits>>>,
+}
+
+impl LoadedWalkTraits {
+    fn traits(&mut self, grammars: &GrammarSet, id: GrammarId) -> Option<ClosureMemberTraits> {
+        let index = id.0 as usize;
+        if self.traits.len() < grammars.len() {
+            self.traits.resize(grammars.len(), None);
+            self.edges.resize_with(grammars.len(), || None);
+        }
+        if let Some(traits) = self.traits.get(index).copied().flatten() {
+            return traits;
+        }
+        let traits = self.compute(grammars, id);
+        if let Some(slot) = self.traits.get_mut(index) {
+            *slot = Some(traits);
+        }
+        traits
+    }
+
+    fn compute(&mut self, grammars: &GrammarSet, id: GrammarId) -> Option<ClosureMemberTraits> {
+        let mut traits = ClosureMemberTraits::default();
+        let mut seen = vec![false; grammars.len()];
+        let mut pending = vec![id];
+        while let Some(member) = pending.pop() {
+            let index = member.0 as usize;
+            if !std::mem::replace(seen.get_mut(index)?, true) {
+                let slot = grammars.grammars.get(index)?;
+                if slot.lazy.is_some() {
+                    return None;
+                }
+                let (local, base, targets) = self.edges[index].get_or_insert_with(|| {
+                    let Some(grammar) = grammars.grammar(member) else {
+                        return (false, false, Vec::new());
+                    };
+                    let mut base = false;
+                    let mut targets = Vec::new();
+                    super::grammar_closure::for_each_rule_ref(grammar, |rule_ref| match rule_ref {
+                        RuleRef::BaseRef => base = true,
+                        RuleRef::External { scope, .. } => {
+                            if let Some(target) = grammar
+                                .scope(*scope)
+                                .and_then(|scope| grammars.grammar_id_by_scope(scope))
+                                && !targets.contains(&target)
+                            {
+                                targets.push(target);
+                            }
+                        }
+                        RuleRef::Rule(_) | RuleRef::Repository(_) | RuleRef::SelfRef => {}
+                    });
+                    let local = grammar
+                        .rules
+                        .iter()
+                        .any(|rule| !rule.local_repository.is_empty());
+                    (local, base, targets)
+                });
+                traits.repository_contexts |= *local;
+                traits.base_reference |= *base;
+                pending.extend(targets.iter().copied());
+            }
+        }
+        Some(traits)
+    }
+}
+
 /// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
 ///
 /// Raw rules receive an id the first time they are reached. That first walk's
@@ -6917,6 +7064,7 @@ fn compile_rule_repository_contexts<'a>(
     let mut compiled_top_levels = hashing::fast_set();
     let mut repository_names = RepositoryNameInterner::default();
     let mut visiting_repositories = hashing::fast_set();
+    let mut loaded_traits = LoadedWalkTraits::default();
     let mut work = Vec::new();
     for injection in injections.iter().rev() {
         push_refs(
@@ -7109,8 +7257,11 @@ fn compile_rule_repository_contexts<'a>(
                         };
                         // Bounded preparation keeps its exact budget accounting.
                         if !bounded
-                            && grammars
-                                .skips_repository_context_walk(external_id, base_grammar_id == root)
+                            && grammars.skips_repository_context_walk(
+                                external_id,
+                                base_grammar_id == root,
+                                &mut loaded_traits,
+                            )
                         {
                             continue;
                         }
@@ -9828,6 +9979,62 @@ mod tests {
     }
 
     #[test]
+    fn capture_retokenization_shares_blueprints_across_outer_scopes() {
+        let grammar = r##"{
+            "scopeName": "source.inline-share",
+            "patterns": [
+                {"begin":"<", "end":">", "name":"meta.angle.inline-share",
+                 "patterns":[{"include":"#pair"}]},
+                {"begin":"\\[", "end":"\\]", "name":"meta.square.inline-share",
+                 "patterns":[{"include":"#pair"}]}
+            ],
+            "repository": {
+                "pair": {
+                    "match":"(\\w+)=(\\w+)",
+                    "captures": {
+                        "1": {"patterns":[{"include":"#word"}]},
+                        "2": {"patterns":[{"include":"#word"}]}
+                    }
+                },
+                "word": {"patterns":[
+                    {"match":"[a-z]+", "name":"word.lower.inline-share"},
+                    {"match":"[0-9]+", "name":"word.digit.inline-share"}
+                ]}
+            }
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        tokenizer.set_counters_enabled(true);
+        let line = tokenizer.tokenize_line_scopes("<a=1> [b=2]", TokenizerState::default());
+        let scopes_at = |text: &str| {
+            line.tokens
+                .iter()
+                .find(|token| &"<a=1> [b=2]"[token.range.clone()] == text)
+                .map(|token| token.scopes.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            scopes_at("a"),
+            [
+                "source.inline-share",
+                "meta.angle.inline-share",
+                "word.lower.inline-share"
+            ]
+        );
+        assert_eq!(
+            scopes_at("2"),
+            [
+                "source.inline-share",
+                "meta.square.inline-share",
+                "word.digit.inline-share"
+            ]
+        );
+        // Root, the two containers, and one capture set shared by all four
+        // captures even though they retokenize under different outer scopes.
+        let counters = tokenizer.counters();
+        assert_eq!(counters.pattern_set_construction_count, 4, "{counters:#?}");
+    }
+
+    #[test]
     fn warm_candidate_entry_does_not_recompile_or_rebuild_pattern_set() {
         let grammar = r##"{
             "scopeName": "source.warm-candidates",
@@ -10747,12 +10954,25 @@ mod lazy_bundle_tests {
                 compile_rule_repository_contexts(&lazy, root, &lazy_injections, false);
             let (eager_contexts, _) =
                 compile_rule_repository_contexts(&eager, root, &eager_injections, false);
+            // The bounded walk never skips a grammar, so it is the reference
+            // for the unbounded walk's trait-based skips of loaded grammars.
+            let (full_contexts, full_complete) =
+                compile_rule_repository_contexts(&eager, root, &eager_injections, true);
+            assert!(full_complete, "{name}");
             for grammar in eager.iter() {
                 for rule in &grammar.rules {
+                    let eager_bindings = bindings(eager_contexts.get(grammar.id, rule.id));
                     assert_eq!(
                         bindings(lazy_contexts.get(grammar.id, rule.id)),
-                        bindings(eager_contexts.get(grammar.id, rule.id)),
+                        eager_bindings,
                         "{name}: {} rule {}",
+                        grammar.scope_name,
+                        rule.id.0
+                    );
+                    assert_eq!(
+                        eager_bindings,
+                        bindings(full_contexts.get(grammar.id, rule.id)),
+                        "{name}: {} rule {} (full walk)",
                         grammar.scope_name,
                         rule.id.0
                     );
