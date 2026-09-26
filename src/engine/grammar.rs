@@ -111,7 +111,8 @@ pub struct CompiledGrammar {
     pub scope_name: String,
     pub metadata: GrammarMetadata,
     pub string_names: Vec<Arc<str>>,
-    pub patterns: Vec<String>,
+    /// Regex sources, sharing the grammar's interned string allocations.
+    pub patterns: Vec<Arc<str>>,
     pub rules: Vec<Rule>,
     pub repository: BTreeMap<String, RuleRef>,
     pub top_level: Vec<RuleRef>,
@@ -153,7 +154,11 @@ impl CompiledGrammar {
     }
 
     pub fn pattern(&self, id: PatternId) -> Option<&str> {
-        self.patterns.get(id.0 as usize).map(String::as_str)
+        self.patterns.get(id.0 as usize).map(AsRef::as_ref)
+    }
+
+    pub(crate) fn shared_pattern(&self, id: PatternId) -> Option<&Arc<str>> {
+        self.patterns.get(id.0 as usize)
     }
 
     pub fn scope(&self, id: ScopeId) -> Option<&str> {
@@ -692,7 +697,7 @@ struct DevCompiler {
     next_rule: u32,
     strings: BTreeMap<Arc<str>, StringId>,
     string_names: Vec<Arc<str>>,
-    patterns: Vec<String>,
+    patterns: Vec<Arc<str>>,
     scopes: BTreeMap<Arc<str>, ScopeId>,
     scope_names: Vec<Arc<str>>,
     rules: Vec<Rule>,
@@ -976,14 +981,11 @@ impl DevCompiler {
         }
     }
 
-    fn pattern_id(&mut self, mut pattern: String) -> PatternId {
-        self.string_id(&pattern);
-        // Direct serde_json string decoding grows escaped regexes geometrically.
-        // Grammar patterns live for the tokenizer's lifetime, so release that
-        // transient spare capacity before retaining them.
-        pattern.shrink_to_fit();
+    fn pattern_id(&mut self, pattern: String) -> PatternId {
+        let string_id = self.string_id(&pattern);
         let id = PatternId(self.patterns.len() as u32);
-        self.patterns.push(pattern);
+        self.patterns
+            .push(Arc::clone(&self.string_names[string_id.0 as usize]));
         id
     }
 

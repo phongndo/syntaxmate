@@ -1189,7 +1189,7 @@ mod tests {
         let mut registry = BundleGrammarRegistry::new(parsed);
         let grammar = registry.grammar("fx").unwrap();
         assert_eq!(grammar.scope_name, "source.fixture");
-        assert_eq!(grammar.patterns, vec!["true".to_owned()]);
+        assert_eq!(grammar.patterns, vec![std::sync::Arc::<str>::from("true")]);
     }
 
     #[test]

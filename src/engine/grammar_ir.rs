@@ -110,8 +110,13 @@ pub(crate) fn encode_compiled_grammar(
 
     write_string(&mut out, &strings, &grammar.scope_name);
     write_metadata(&mut out, &strings, &grammar.metadata)?;
-    write_string_vec(&mut out, &strings, &grammar.patterns)?;
-    write_arc_string_vec(&mut out, &strings, &grammar.scope_names)?;
+    write_arc_string_vec(&mut out, &strings, &grammar.patterns, "string vector count")?;
+    write_arc_string_vec(
+        &mut out,
+        &strings,
+        &grammar.scope_names,
+        "scope vector count",
+    )?;
 
     write_len(&mut out, grammar.rules.len(), "rule count")?;
     for rule in &grammar.rules {
@@ -158,8 +163,8 @@ pub(crate) fn decode_compiled_grammar(
 
     let scope_name = read_string(&mut cursor, &strings)?;
     let metadata = read_metadata(&mut cursor, &strings)?;
-    let patterns = read_string_vec(&mut cursor, &strings)?;
-    let scope_names = read_arc_string_vec(&mut cursor, &strings)?;
+    let patterns = read_arc_string_vec(&mut cursor, &strings, "string vector")?;
+    let scope_names = read_arc_string_vec(&mut cursor, &strings, "scope vector")?;
     let pattern_count = patterns.len();
     let scope_count = scope_names.len();
 
@@ -254,7 +259,9 @@ fn collect_grammar_strings(grammar: &CompiledGrammar, out: &mut BTreeSet<String>
     collect_optional_string(grammar.metadata.first_line_match.as_deref(), out);
     collect_optional_string(grammar.metadata.injection_selector.as_deref(), out);
     collect_strings(&grammar.metadata.inject_to, out);
-    collect_strings(&grammar.patterns, out);
+    for value in &grammar.patterns {
+        collect_string(value, out);
+    }
     for value in &grammar.scope_names {
         collect_string(value, out);
     }
@@ -755,8 +762,9 @@ fn write_arc_string_vec(
     out: &mut Vec<u8>,
     strings: &StringTable,
     values: &[Arc<str>],
+    label: &'static str,
 ) -> Result<(), GrammarIrError> {
-    write_len(out, values.len(), "scope vector count")?;
+    write_len(out, values.len(), label)?;
     for value in values {
         write_string(out, strings, value);
     }
@@ -766,8 +774,9 @@ fn write_arc_string_vec(
 fn read_arc_string_vec(
     cursor: &mut Cursor<'_>,
     strings: &[Arc<str>],
+    label: &'static str,
 ) -> Result<Vec<Arc<str>>, GrammarIrError> {
-    let count = cursor.count(1, "scope vector")?;
+    let count = cursor.count(1, label)?;
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         let id = cursor.u32()?;

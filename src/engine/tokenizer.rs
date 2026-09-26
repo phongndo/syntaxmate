@@ -3757,9 +3757,9 @@ impl TextMateTokenizer {
             .rule_repository_contexts
             .get(grammar_id, rule_id)
             .map(Arc::as_ref);
-        let candidate = |pattern: &str, pattern_id: PatternId, kind: CandidateKind| {
+        let candidate = |pattern: &Arc<str>, pattern_id: PatternId, kind: CandidateKind| {
             Arc::new(CandidateRule {
-                pattern: Arc::from(pattern),
+                pattern: Arc::clone(pattern),
                 pattern_id: Some((grammar_id, pattern_id)),
                 kind,
             })
@@ -3770,7 +3770,7 @@ impl TextMateTokenizer {
                 captures,
                 name,
             } => {
-                let text = grammar.pattern(*pattern)?;
+                let text = grammar.shared_pattern(*pattern)?;
                 Some(RuleCandidateTemplate::Candidate(candidate(
                     text,
                     *pattern,
@@ -3791,11 +3791,11 @@ impl TextMateTokenizer {
                 apply_end_pattern_last,
                 patterns,
             } => {
-                let text = grammar.pattern(*begin)?;
+                let text = grammar.shared_pattern(*begin)?;
                 let end_static = grammar
-                    .pattern(*end)
+                    .shared_pattern(*end)
                     .filter(|pattern| !pattern_has_backreference(pattern))
-                    .map(Arc::from);
+                    .cloned();
                 Some(RuleCandidateTemplate::Candidate(candidate(
                     text,
                     *begin,
@@ -3825,11 +3825,11 @@ impl TextMateTokenizer {
                 content_name,
                 patterns,
             } => {
-                let text = grammar.pattern(*begin)?;
+                let text = grammar.shared_pattern(*begin)?;
                 let while_static = grammar
-                    .pattern(*while_pattern)
+                    .shared_pattern(*while_pattern)
                     .filter(|pattern| !pattern_has_backreference(pattern))
-                    .map(Arc::from);
+                    .cloned();
                 Some(RuleCandidateTemplate::Candidate(candidate(
                     text,
                     *begin,

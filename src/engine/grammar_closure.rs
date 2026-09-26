@@ -215,7 +215,10 @@ pub fn repository_walk_skeleton(grammar: &CompiledGrammar) -> CompiledGrammar {
     let mut skeleton = grammar.clone();
     skeleton.metadata = GrammarMetadata::default();
     skeleton.string_names.clear();
-    skeleton.patterns.iter_mut().for_each(String::clear);
+    skeleton
+        .patterns
+        .iter_mut()
+        .for_each(|pattern| *pattern = Arc::clone(&empty));
     for (index, scope) in skeleton.scope_names.iter_mut().enumerate() {
         if !external_scopes.contains(&index) {
             *scope = Arc::clone(&empty);
