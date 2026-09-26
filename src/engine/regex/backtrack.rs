@@ -66,13 +66,23 @@ pub struct FallbackReport {
 #[derive(Debug, Clone)]
 pub struct FallbackMatcher {
     parsed: Arc<ParsedRegex>,
-    bytecode: OnceLock<Option<Arc<Program>>>,
+    bytecode: OnceLock<Option<SelectionProgram>>,
+    /// Groups the owning pattern replays after selection. When present,
+    /// selection may compile with these capture slots so that one program
+    /// also serves capture replay instead of compiling the pattern twice.
+    shared_captures: Option<Box<[u32]>>,
     special: Option<SpecialFallbackMatcher>,
     start_hint: StartHint,
     budget: usize,
     /// Process-unique id keying scan-local prefilter cursors. Assigned on
     /// first execution so construction does not build the prefilter.
     prefilter_slot: OnceLock<u32>,
+}
+
+#[derive(Debug, Clone)]
+struct SelectionProgram {
+    program: Arc<Program>,
+    shares_captures: bool,
 }
 
 /// Capture layout requested for one anchored attempt. Selection defers the
@@ -494,6 +504,7 @@ impl FallbackMatcher {
         Self {
             parsed,
             bytecode: OnceLock::new(),
+            shared_captures: None,
             special,
             start_hint,
             budget,
@@ -517,54 +528,90 @@ impl FallbackMatcher {
         &self.parsed
     }
 
+    /// Takes ownership of the owning pattern's live capture layout when it
+    /// replays captures, returning an empty layout in that case and `live`
+    /// otherwise.
+    pub(crate) fn share_capture_layout(&mut self, live: Box<[u32]>) -> Box<[u32]> {
+        if live.iter().any(|group| *group != 0) {
+            self.shared_captures = Some(live);
+            Box::default()
+        } else {
+            live
+        }
+    }
+
+    pub(crate) fn shared_capture_layout(&self) -> Option<&[u32]> {
+        self.shared_captures.as_deref()
+    }
+
+    /// The selection program when it was compiled with the shared capture
+    /// layout and so can replay captures directly.
+    pub(crate) fn shared_capture_program(&self) -> Option<Arc<Program>> {
+        self.bytecode.get_or_init(|| self.compile_bytecode());
+        self.bytecode
+            .get()?
+            .as_ref()
+            .filter(|selection| selection.shares_captures)
+            .map(|selection| Arc::clone(&selection.program))
+    }
+
     fn bytecode(&self) -> Option<&Program> {
         self.bytecode
-            .get_or_init(|| {
-                self.parsed
-                    .analysis()
-                    .bytecode_beneficial()
-                    .then(|| {
-                        // Subroutine calls need capture slots and routine
-                        // entries even for position selection; compile with
-                        // the minimal internal layout so those patterns still
-                        // avoid the recursive VM. Selection discards captures.
-                        // Backreference patterns need only the referenced
-                        // groups for position selection. Keeping them on the
-                        // bytecode path lets hot C/C++ declaration patterns
-                        // use the deterministic separator and literal-trie
-                        // specializations before replaying winner captures.
-                        // The position-only layout has no capture slots,
-                        // so these features can never compile there. Skip
-                        // the doomed attempt instead of discarding a partial
-                        // compile of a large pattern.
-                        let features = &self.parsed.features;
-                        let position = if features.backreference
-                            || features.subroutine
-                            || features.conditional
-                        {
-                            Err(CompileError::Subroutine)
-                        } else {
-                            Program::compile(&self.parsed)
-                        };
-                        position
-                            .or_else(|error| match error {
-                                CompileError::Backreference
-                                | CompileError::Subroutine
-                                | CompileError::Conditional => {
-                                    Program::compile_captures_with_analysis(
-                                        &self.parsed,
-                                        self.parsed.analysis(),
-                                        &[],
-                                    )
-                                }
-                                other => Err(other),
-                            })
-                            .ok()
-                            .map(Arc::new)
-                    })
-                    .flatten()
+            .get_or_init(|| self.compile_bytecode())
+            .as_ref()
+            .map(|selection| selection.program.as_ref())
+    }
+
+    fn compile_bytecode(&self) -> Option<SelectionProgram> {
+        if !self.parsed.analysis().bytecode_beneficial() {
+            return None;
+        }
+        // One program can serve both selection and capture replay when the
+        // replayed groups do not change its selection shape. Patterns whose
+        // matching reads capture state keep their dedicated selection layout.
+        let features = &self.parsed.features;
+        let reads_captures = features.backreference || features.subroutine || features.conditional;
+        if !reads_captures
+            && let Some(live) = self.shared_captures.as_deref()
+            && let Some(Ok(program)) =
+                Program::compile_selection_captures(&self.parsed, self.parsed.analysis(), live)
+        {
+            return Some(SelectionProgram {
+                program: Arc::new(program),
+                shares_captures: true,
+            });
+        }
+        // Subroutine calls need capture slots and routine entries even for
+        // position selection; compile with the minimal internal layout so
+        // those patterns still avoid the recursive VM. Selection discards
+        // captures. Backreference patterns need only the referenced groups
+        // for position selection. Keeping them on the bytecode path lets hot
+        // C/C++ declaration patterns use the deterministic separator and
+        // literal-trie specializations before replaying winner captures.
+        // The position-only layout has no capture slots, so these features
+        // can never compile there. Skip the doomed attempt instead of
+        // discarding a partial compile of a large pattern.
+        let position = if reads_captures {
+            Err(CompileError::Subroutine)
+        } else {
+            Program::compile(&self.parsed)
+        };
+        position
+            .or_else(|error| match error {
+                CompileError::Backreference
+                | CompileError::Subroutine
+                | CompileError::Conditional => Program::compile_captures_with_analysis(
+                    &self.parsed,
+                    self.parsed.analysis(),
+                    &[],
+                ),
+                other => Err(other),
             })
-            .as_deref()
+            .ok()
+            .map(|program| SelectionProgram {
+                program: Arc::new(program),
+                shares_captures: false,
+            })
     }
 
     fn active_bytecode(&self) -> Option<&Program> {

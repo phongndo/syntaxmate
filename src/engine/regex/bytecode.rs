@@ -1177,6 +1177,29 @@ impl Program {
         analysis: &RegexAnalysis,
         live_captures: &[u32],
     ) -> Result<Self, CompileError> {
+        Self::compile_capture_layout(parsed, analysis, live_captures, None)
+    }
+
+    /// Compiles capture replay bytecode that also serves position selection,
+    /// or `None` when a live capture sits under an alternation or repeat.
+    /// Such captures would block the literal tries and possessive scans that
+    /// selection relies on; otherwise the program differs from the
+    /// position-only one only by its save instructions.
+    pub(crate) fn compile_selection_captures(
+        parsed: &ParsedRegex,
+        analysis: &RegexAnalysis,
+        live_captures: &[u32],
+    ) -> Option<Result<Self, CompileError>> {
+        live_captures_keep_selection_shape(&parsed.ast, live_captures)
+            .then(|| Self::compile_capture_layout(parsed, analysis, live_captures, Some(false)))
+    }
+
+    fn compile_capture_layout(
+        parsed: &ParsedRegex,
+        analysis: &RegexAnalysis,
+        live_captures: &[u32],
+        captures_under_choice: Option<bool>,
+    ) -> Result<Self, CompileError> {
         if !analysis.capture().capture_bytecode_supported() {
             return Err(CompileError::Unsupported);
         }
@@ -1196,7 +1219,12 @@ impl Program {
         layout.extend_from_slice(analysis.capture().referenced_groups());
         layout.sort_unstable();
         layout.dedup();
-        Compiler::with_captures(layout).compile(parsed)
+        let mut compiler = Compiler::with_captures(layout);
+        // Referenced groups join the layout only for backreferences, which
+        // `compile_selection_captures` callers never share.
+        compiler.captures_under_choice =
+            captures_under_choice.filter(|_| analysis.capture().referenced_groups().is_empty());
+        compiler.compile(parsed)
     }
 
     #[allow(dead_code)] // Vertical-slice API; backtrack/tokenizer integration follows.

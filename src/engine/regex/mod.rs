@@ -278,6 +278,8 @@ pub struct CompiledPattern {
     restricted_start_bytes: Option<Vec<u8>>,
     /// Also owns the pattern source.
     parsed: Arc<ParsedRegex>,
+    /// Empty when a fallback `matcher` owns the layout instead, so its lazily
+    /// compiled selection program can double as the capture program.
     live_captures: Box<[u32]>,
     capture_program: std::sync::OnceLock<Option<Arc<bytecode::Program>>>,
 }
@@ -301,7 +303,12 @@ impl CompiledPattern {
     ) -> Self {
         let parsed = Arc::clone(&translation.parsed);
         debug_assert_eq!(parsed.source, pattern);
-        let (matcher, translated_pattern) = RegexMatcher::from_translation(pattern, translation);
+        let (mut matcher, translated_pattern) =
+            RegexMatcher::from_translation(pattern, translation);
+        let mut live_captures = live_captures.into_boxed_slice();
+        if let RegexMatcher::Fallback(fallback) = &mut matcher {
+            live_captures = fallback.share_capture_layout(live_captures);
+        }
         let unanchored_literal = matcher.unanchored_literal().map(str::to_owned);
         let restricted_start_bytes = matcher.restricted_start_bytes();
         Self {
@@ -311,13 +318,22 @@ impl CompiledPattern {
             unanchored_literal,
             restricted_start_bytes,
             parsed,
-            live_captures: live_captures.into_boxed_slice(),
+            live_captures,
             capture_program: std::sync::OnceLock::new(),
         }
     }
 
     pub fn source(&self) -> &str {
         &self.parsed.source
+    }
+
+    fn live_captures(&self) -> &[u32] {
+        match &self.matcher {
+            RegexMatcher::Fallback(matcher) => matcher
+                .shared_capture_layout()
+                .unwrap_or(&self.live_captures),
+            RegexMatcher::Automata(_) => &self.live_captures,
+        }
     }
 
     pub fn id(&self) -> CompiledPatternId {
@@ -337,7 +353,7 @@ impl CompiledPattern {
             .saturating_add(FIXED_ALLOCATION_CHARGE)
             .saturating_add(self.source().len().saturating_mul(SOURCE_EXPANSION_CHARGE))
             .saturating_add(
-                self.live_captures
+                self.live_captures()
                     .len()
                     .saturating_mul(std::mem::size_of::<u32>()),
             )
@@ -382,25 +398,22 @@ impl CompiledPattern {
     }
 
     pub(crate) fn needs_capture_replay_after_selection(&self) -> bool {
-        self.live_captures.iter().any(|group| *group != 0)
+        self.live_captures().iter().any(|group| *group != 0)
     }
 
     pub(crate) fn has_live_captures(&self, requested: Option<&[u32]>) -> bool {
         match requested {
-            Some(requested) => self.live_captures.as_ref() == requested,
+            Some(requested) => self.live_captures() == requested,
             None => {
-                self.live_captures.len() == self.parsed.capture_count as usize + 1
-                    && self
-                        .live_captures
-                        .iter()
-                        .copied()
-                        .eq(0..=self.parsed.capture_count)
+                let live = self.live_captures();
+                live.len() == self.parsed.capture_count as usize + 1
+                    && live.iter().copied().eq(0..=self.parsed.capture_count)
             }
         }
     }
 
     pub(crate) fn has_same_live_captures(&self, other: &Self) -> bool {
-        self.live_captures == other.live_captures
+        self.live_captures() == other.live_captures()
     }
 
     pub(crate) fn find_live_captures_at_into(
@@ -419,10 +432,15 @@ impl CompiledPattern {
         let program = self
             .capture_program
             .get_or_init(|| {
+                if let RegexMatcher::Fallback(matcher) = &self.matcher
+                    && let Some(program) = matcher.shared_capture_program()
+                {
+                    return Some(program);
+                }
                 bytecode::Program::compile_captures_with_analysis(
                     &self.parsed,
                     self.parsed.analysis(),
-                    &self.live_captures,
+                    self.live_captures(),
                 )
                 .ok()
                 .map(Arc::new)
@@ -482,6 +500,57 @@ mod tests {
         assert_eq!(matched.captures[0], Some(0..line.len()));
         assert_eq!(matched.captures[1], Some(0.."🛰".len()));
         assert_eq!(matched.captures[2], Some("🛰".len()..line.len()));
+    }
+
+    #[test]
+    fn fallback_selection_program_doubles_as_capture_program() {
+        fn replay(pattern: &CompiledPattern, line: &str, start: usize) -> MatchResult {
+            let mut scratch = bytecode::BytecodeScratch::default();
+            let mut captures = Vec::new();
+            let (result, _) = pattern
+                .find_live_captures_at_into(
+                    line,
+                    start,
+                    AnchorContext::line_start(),
+                    &mut scratch,
+                    &mut captures,
+                )
+                .expect("bytecode capture replay")
+                .expect("within budget");
+            result.expect("pattern matches")
+        }
+
+        // Replayed groups outside choice points share one compiled program.
+        let shared = CompiledPattern::new_with_live_captures(
+            r"(&)(?=[a-z])(amp|lt|gt|quot|nbsp)(;)",
+            vec![0, 1, 2, 3],
+        );
+        let RegexMatcher::Fallback(matcher) = shared.matcher() else {
+            panic!("lookahead should route to the fallback matcher");
+        };
+        assert_eq!(
+            replay(&shared, "x &lt; y", 2).captures,
+            vec![Some(2..6), Some(2..3), Some(3..5), Some(5..6)]
+        );
+        let selection = matcher
+            .shared_capture_program()
+            .expect("selection program carries the live capture slots");
+        let replayed = shared.capture_program.get().cloned().flatten();
+        assert!(replayed.is_some_and(|program| Arc::ptr_eq(&program, &selection)));
+        assert!(shared.has_live_captures(Some(&[0, 1, 2, 3])));
+
+        // A replayed group under an alternation would block the selection
+        // trie, so capture replay keeps its own program.
+        let separate =
+            CompiledPattern::new_with_live_captures(r"(?:(amp)|lt|gt|quot)(?=;)", vec![0, 1]);
+        let RegexMatcher::Fallback(matcher) = separate.matcher() else {
+            panic!("lookahead should route to the fallback matcher");
+        };
+        assert!(matcher.shared_capture_program().is_none());
+        assert_eq!(
+            replay(&separate, "amp;", 0).captures,
+            vec![Some(0..3), Some(0..3)]
+        );
     }
 
     #[test]
