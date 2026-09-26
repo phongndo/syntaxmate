@@ -3428,7 +3428,7 @@ impl<'a> Compiler<'a> {
             }
             Instruction::LiteralTrie { id, flags, next } => {
                 let trie = &self.literal_tries[id.0 as usize];
-                let mut first = trie.first_chars(flags.case_insensitive())?;
+                let mut first = trie.non_empty_first_chars(flags.case_insensitive())?;
                 if trie.nodes[0].terminal_order.is_some() {
                     first.union(&self.first_chars_from(*next, steps, visited)?);
                 }
@@ -3574,7 +3574,7 @@ impl LiteralTrie {
 
     /// First characters of the non-empty literals of a byte trie; `None` for
     /// the scalar (Unicode case-folding) trie.
-    fn first_chars(&self, case_insensitive: bool) -> Option<FirstChars> {
+    fn non_empty_first_chars(&self, case_insensitive: bool) -> Option<FirstChars> {
         if !self.unicode_nodes.is_empty() {
             return None;
         }
