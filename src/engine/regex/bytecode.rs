@@ -1557,19 +1557,36 @@ impl Program {
                     alternate,
                     guard,
                 } => {
-                    if !self.split_guards[arena_index(*guard)]
-                        .allows(self, *preferred, line, position)
-                    {
-                        pc = *alternate;
-                        continue;
+                    let (mut preferred, mut alternate, mut guard) =
+                        (*preferred, *alternate, *guard);
+                    loop {
+                        if self.split_guards[arena_index(guard)]
+                            .allows(self, preferred, line, position)
+                        {
+                            scratch.backtrack.push(backtrack_frame(
+                                scratch,
+                                alternate,
+                                position,
+                                ResumeAction::None,
+                            )?);
+                            pc = preferred;
+                            break;
+                        }
+                        // Walk a rejected alternation chain in place, still
+                        // charging one step per `Split` visited.
+                        pc = alternate;
+                        let Instruction::Split {
+                            preferred: next_preferred,
+                            alternate: next_alternate,
+                            guard: next_guard,
+                        } = self.instructions[arena_index(pc)]
+                        else {
+                            break;
+                        };
+                        budget.step()?;
+                        (preferred, alternate, guard) =
+                            (next_preferred, next_alternate, next_guard);
                     }
-                    scratch.backtrack.push(backtrack_frame(
-                        scratch,
-                        *alternate,
-                        position,
-                        ResumeAction::None,
-                    )?);
-                    pc = *preferred;
                 }
                 Instruction::RepeatInit { slot, next } => {
                     set_repeat(
@@ -1581,54 +1598,17 @@ impl Program {
                             stalled: Stall::Advanced,
                         },
                     );
+                    // Always continues at its loop's `Repeat`; run it here
+                    // (charging its step) instead of re-dispatching.
                     pc = *next;
+                    budget.step()?;
+                    if !self.repeat(line, scratch, &mut pc, &mut position)? {
+                        return Ok(None);
+                    }
                 }
-                Instruction::Repeat {
-                    slot,
-                    bounds,
-                    greedy,
-                    body,
-                    next,
-                } => {
-                    let repeat = scratch.repeats[arena_index(*slot)];
-                    let count = repeat.count;
-                    let can_exit = count >= bounds.min;
-                    // An iteration whose body cannot start here would fail
-                    // before consuming anything; skip it and its frame.
-                    let can_repeat = bounds.max().is_none_or(|max| count < max)
-                        && (repeat.stalled == Stall::Advanced || count < bounds.min)
-                        && self.repeat_guards[arena_index(*slot)]
-                            .allows(self, *body, line, position);
-                    match (can_repeat, can_exit, greedy) {
-                        (true, true, true) => {
-                            scratch.backtrack.push(backtrack_frame(
-                                scratch,
-                                *next,
-                                position,
-                                ResumeAction::None,
-                            )?);
-                            enter_repeat(scratch, *slot, position);
-                            pc = *body;
-                        }
-                        (true, true, false) => {
-                            scratch.backtrack.push(backtrack_frame(
-                                scratch,
-                                *body,
-                                position,
-                                ResumeAction::EnterRepeat(*slot),
-                            )?);
-                            pc = *next;
-                        }
-                        (true, false, _) => {
-                            enter_repeat(scratch, *slot, position);
-                            pc = *body;
-                        }
-                        (false, true, _) => pc = *next,
-                        (false, false, _) => {
-                            if !self.backtrack_or_resolve(line, scratch, &mut pc, &mut position)? {
-                                return Ok(None);
-                            }
-                        }
+                Instruction::Repeat { .. } => {
+                    if !self.repeat(line, scratch, &mut pc, &mut position)? {
+                        return Ok(None);
                     }
                 }
                 Instruction::RepeatEnd { slot, repeat } => {
@@ -1639,6 +1619,10 @@ impl Program {
                         set_repeat(scratch, *slot, value);
                     }
                     pc = *repeat;
+                    budget.step()?;
+                    if !self.repeat(line, scratch, &mut pc, &mut position)? {
+                        return Ok(None);
+                    }
                 }
                 Instruction::SaveStart { slot, next } => {
                     set_capture(scratch, *slot, CaptureState::Open(position));
@@ -1841,6 +1825,64 @@ impl Program {
                 }
             }
         }
+    }
+
+    /// Executes the `Repeat` instruction at `pc`. Returns false when
+    /// failing out of it exhausts every alternative.
+    #[inline(always)]
+    fn repeat(
+        &self,
+        line: &str,
+        scratch: &mut BytecodeScratch,
+        pc: &mut ProgramCounter,
+        position: &mut usize,
+    ) -> Result<bool, BudgetExceeded> {
+        let Instruction::Repeat {
+            slot,
+            bounds,
+            greedy,
+            body,
+            next,
+        } = self.instructions[arena_index(*pc)]
+        else {
+            unreachable!("loop entry and end always target their Repeat")
+        };
+        let repeat = scratch.repeats[arena_index(slot)];
+        let count = repeat.count;
+        let can_exit = count >= bounds.min;
+        // An iteration whose body cannot start here would fail before
+        // consuming anything; skip it and its frame.
+        let can_repeat = bounds.max().is_none_or(|max| count < max)
+            && (repeat.stalled == Stall::Advanced || count < bounds.min)
+            && self.repeat_guards[arena_index(slot)].allows(self, body, line, *position);
+        match (can_repeat, can_exit, greedy) {
+            (true, true, true) => {
+                scratch.backtrack.push(backtrack_frame(
+                    scratch,
+                    next,
+                    *position,
+                    ResumeAction::None,
+                )?);
+                enter_repeat(scratch, slot, *position);
+                *pc = body;
+            }
+            (true, true, false) => {
+                scratch.backtrack.push(backtrack_frame(
+                    scratch,
+                    body,
+                    *position,
+                    ResumeAction::EnterRepeat(slot),
+                )?);
+                *pc = next;
+            }
+            (true, false, _) => {
+                enter_repeat(scratch, slot, *position);
+                *pc = body;
+            }
+            (false, true, _) => *pc = next,
+            (false, false, _) => return self.backtrack_or_resolve(line, scratch, pc, position),
+        }
+        Ok(true)
     }
 
     #[inline]
