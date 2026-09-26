@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reduce first-use tokenization costs for complex and embedded grammars through
+  lower-allocation regex parsing, deferred matcher construction, and reuse within
+  each tokenizer. Refresh the [catalog reference measurements](benchmarks/textmate/catalog-performance.json).
 - Honor `TokenizerOptions::line_cache_entries = 0` by disabling line-result
   caching completely.
 - Raise the MSRV from Rust 1.88 to 1.98; this requires a minor release.
