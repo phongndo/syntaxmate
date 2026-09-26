@@ -141,24 +141,34 @@ pub enum RegexMatcher {
 impl RegexMatcher {
     pub fn new(pattern: &str) -> Self {
         let translation = translate(pattern);
-        Self::from_translation(pattern, translation)
+        Self::from_translation(pattern, translation).0
     }
 
-    fn from_translation(pattern: &str, translation: Translation) -> Self {
+    /// Builds the matcher for a translation. An automata matcher retains the
+    /// translation; otherwise its translated spelling is handed back so the
+    /// caller can keep it without copying.
+    fn from_translation(pattern: &str, translation: Translation) -> (Self, Option<String>) {
         if matches!(&translation.route, Route::Dfa) {
-            match AutomataMatcher::from_translation(translation) {
-                Ok(matcher) => Self::Automata(Box::new(matcher)),
-                Err(_) => Self::Fallback(Box::new(FallbackMatcher::new(pattern))),
-            }
-        } else if let Some(matcher) =
-            AutomataMatcher::from_specialized_translation(translation.clone())
-        {
-            Self::Automata(Box::new(matcher))
-        } else {
-            Self::Fallback(Box::new(FallbackMatcher::from_parsed(
-                Arc::clone(&translation.parsed),
-                backtrack::DEFAULT_STEP_BUDGET,
-            )))
+            return match AutomataMatcher::from_translation(translation) {
+                Ok(matcher) => (Self::Automata(Box::new(matcher)), None),
+                Err(_) => {
+                    let translated = translate(pattern).pattern;
+                    (
+                        Self::Fallback(Box::new(FallbackMatcher::new(pattern))),
+                        Some(translated),
+                    )
+                }
+            };
+        }
+        match AutomataMatcher::from_specialized_translation(translation) {
+            Ok(matcher) => (Self::Automata(Box::new(matcher)), None),
+            Err(translation) => (
+                Self::Fallback(Box::new(FallbackMatcher::from_parsed(
+                    translation.parsed,
+                    backtrack::DEFAULT_STEP_BUDGET,
+                ))),
+                Some(translation.pattern),
+            ),
         }
     }
 
@@ -261,13 +271,14 @@ impl RegexMatcher {
 #[derive(Debug)]
 pub struct CompiledPattern {
     id: CompiledPatternId,
-    source: Arc<str>,
-    translated_pattern: String,
+    /// Present when `matcher` does not retain its translation.
+    translated_pattern: Option<String>,
     matcher: RegexMatcher,
     unanchored_literal: Option<String>,
     restricted_start_bytes: Option<Vec<u8>>,
+    /// Also owns the pattern source.
     parsed: Arc<ParsedRegex>,
-    live_captures: Arc<[u32]>,
+    live_captures: Box<[u32]>,
     capture_program: std::sync::OnceLock<Option<Arc<bytecode::Program>>>,
 }
 
@@ -288,26 +299,25 @@ impl CompiledPattern {
         translation: Translation,
         live_captures: Vec<u32>,
     ) -> Self {
-        let translated_pattern = translation.pattern.clone();
         let parsed = Arc::clone(&translation.parsed);
-        let matcher = RegexMatcher::from_translation(pattern, translation);
+        debug_assert_eq!(parsed.source, pattern);
+        let (matcher, translated_pattern) = RegexMatcher::from_translation(pattern, translation);
         let unanchored_literal = matcher.unanchored_literal().map(str::to_owned);
         let restricted_start_bytes = matcher.restricted_start_bytes();
         Self {
             id: CompiledPatternId(NEXT_COMPILED_PATTERN_ID.fetch_add(1, Ordering::Relaxed)),
-            source: Arc::from(pattern),
             translated_pattern,
             matcher,
             unanchored_literal,
             restricted_start_bytes,
             parsed,
-            live_captures: live_captures.into(),
+            live_captures: live_captures.into_boxed_slice(),
             capture_program: std::sync::OnceLock::new(),
         }
     }
 
     pub fn source(&self) -> &str {
-        &self.source
+        &self.parsed.source
     }
 
     pub fn id(&self) -> CompiledPatternId {
@@ -325,7 +335,7 @@ impl CompiledPattern {
 
         std::mem::size_of::<Self>()
             .saturating_add(FIXED_ALLOCATION_CHARGE)
-            .saturating_add(self.source.len().saturating_mul(SOURCE_EXPANSION_CHARGE))
+            .saturating_add(self.source().len().saturating_mul(SOURCE_EXPANSION_CHARGE))
             .saturating_add(
                 self.live_captures
                     .len()
@@ -338,7 +348,13 @@ impl CompiledPattern {
     }
 
     pub(crate) fn translated_pattern(&self) -> &str {
-        &self.translated_pattern
+        match (&self.translated_pattern, &self.matcher) {
+            (Some(translated), _) => translated,
+            (None, RegexMatcher::Automata(matcher)) => &matcher.translation().pattern,
+            (None, RegexMatcher::Fallback(_)) => {
+                unreachable!("fallback matchers keep their spelling")
+            }
+        }
     }
 
     pub(crate) fn unanchored_literal(&self) -> Option<&str> {
