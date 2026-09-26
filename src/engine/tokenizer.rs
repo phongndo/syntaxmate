@@ -1428,13 +1428,22 @@ impl GrammarSet {
     /// not change the first-visit order of walked grammars. `$base` is the only
     /// edge out of that subtree besides external includes; under the root base
     /// it targets the root top level, which the walk visits first.
-    fn skips_repository_context_walk(&self, id: GrammarId, base_is_root: bool) -> bool {
-        self.grammars
-            .get(id.0 as usize)
-            .and_then(|slot| slot.lazy)
-            .is_some_and(|lazy| {
-                !lazy.traits.repository_contexts && (base_is_root || !lazy.traits.base_reference)
-            })
+    fn skips_repository_context_walk(
+        &self,
+        id: GrammarId,
+        base_is_root: bool,
+        loaded: &mut LoadedWalkTraits,
+    ) -> bool {
+        let Some(slot) = self.grammars.get(id.0 as usize) else {
+            return false;
+        };
+        let traits = match slot.lazy {
+            Some(lazy) => Some(lazy.traits),
+            None => loaded.traits(self, id),
+        };
+        traits.is_some_and(|traits| {
+            !traits.repository_contexts && (base_is_root || !traits.base_reference)
+        })
     }
 
     pub fn grammar_by_scope(&self, scope: &str) -> Option<&CompiledGrammar> {
@@ -6833,6 +6842,86 @@ fn scoped_repository_rules(grammar: &CompiledGrammar) -> FastSet<RuleId> {
     reached
 }
 
+/// Closure-member traits of already-loaded grammars, derived during one
+/// unbounded repository-context walk.
+///
+/// Bundled members carry these traits precomputed; grammars loaded from
+/// source (custom assets) otherwise force the walk through every embedded
+/// grammar. The traits are exactly `grammar_closure::closure_member_traits`
+/// restricted to the member's external-include reach under this set's scope
+/// table, so the walk skips the same grammars it would skip for an equivalent
+/// bundled closure. A reach that includes a lazily decoded member is never
+/// skipped here (its recorded traits describe the bundle's scope table, which
+/// a mixed set may override). Nothing outlives the walk.
+#[derive(Default)]
+struct LoadedWalkTraits {
+    /// Per grammar: local-repository flag, `$base` flag, and external targets.
+    edges: Vec<Option<(bool, bool, Vec<GrammarId>)>>,
+    traits: Vec<Option<Option<ClosureMemberTraits>>>,
+}
+
+impl LoadedWalkTraits {
+    fn traits(&mut self, grammars: &GrammarSet, id: GrammarId) -> Option<ClosureMemberTraits> {
+        let index = id.0 as usize;
+        if self.traits.len() < grammars.len() {
+            self.traits.resize(grammars.len(), None);
+            self.edges.resize_with(grammars.len(), || None);
+        }
+        if let Some(traits) = self.traits.get(index).copied().flatten() {
+            return traits;
+        }
+        let traits = self.compute(grammars, id);
+        if let Some(slot) = self.traits.get_mut(index) {
+            *slot = Some(traits);
+        }
+        traits
+    }
+
+    fn compute(&mut self, grammars: &GrammarSet, id: GrammarId) -> Option<ClosureMemberTraits> {
+        let mut traits = ClosureMemberTraits::default();
+        let mut seen = vec![false; grammars.len()];
+        let mut pending = vec![id];
+        while let Some(member) = pending.pop() {
+            let index = member.0 as usize;
+            if !std::mem::replace(seen.get_mut(index)?, true) {
+                let slot = grammars.grammars.get(index)?;
+                if slot.lazy.is_some() {
+                    return None;
+                }
+                let (local, base, targets) = self.edges[index].get_or_insert_with(|| {
+                    let Some(grammar) = grammars.grammar(member) else {
+                        return (false, false, Vec::new());
+                    };
+                    let mut base = false;
+                    let mut targets = Vec::new();
+                    super::grammar_closure::for_each_rule_ref(grammar, |rule_ref| match rule_ref {
+                        RuleRef::BaseRef => base = true,
+                        RuleRef::External { scope, .. } => {
+                            if let Some(target) = grammar
+                                .scope(*scope)
+                                .and_then(|scope| grammars.grammar_id_by_scope(scope))
+                                && !targets.contains(&target)
+                            {
+                                targets.push(target);
+                            }
+                        }
+                        RuleRef::Rule(_) | RuleRef::Repository(_) | RuleRef::SelfRef => {}
+                    });
+                    let local = grammar
+                        .rules
+                        .iter()
+                        .any(|rule| !rule.local_repository.is_empty());
+                    (local, base, targets)
+                });
+                traits.repository_contexts |= *local;
+                traits.base_reference |= *base;
+                pending.extend(targets.iter().copied());
+            }
+        }
+        Some(traits)
+    }
+}
+
 /// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
 ///
 /// Raw rules receive an id the first time they are reached. That first walk's
@@ -6917,6 +7006,7 @@ fn compile_rule_repository_contexts<'a>(
     let mut compiled_top_levels = hashing::fast_set();
     let mut repository_names = RepositoryNameInterner::default();
     let mut visiting_repositories = hashing::fast_set();
+    let mut loaded_traits = LoadedWalkTraits::default();
     let mut work = Vec::new();
     for injection in injections.iter().rev() {
         push_refs(
@@ -7109,8 +7199,11 @@ fn compile_rule_repository_contexts<'a>(
                         };
                         // Bounded preparation keeps its exact budget accounting.
                         if !bounded
-                            && grammars
-                                .skips_repository_context_walk(external_id, base_grammar_id == root)
+                            && grammars.skips_repository_context_walk(
+                                external_id,
+                                base_grammar_id == root,
+                                &mut loaded_traits,
+                            )
                         {
                             continue;
                         }
@@ -10747,12 +10840,25 @@ mod lazy_bundle_tests {
                 compile_rule_repository_contexts(&lazy, root, &lazy_injections, false);
             let (eager_contexts, _) =
                 compile_rule_repository_contexts(&eager, root, &eager_injections, false);
+            // The bounded walk never skips a grammar, so it is the reference
+            // for the unbounded walk's trait-based skips of loaded grammars.
+            let (full_contexts, full_complete) =
+                compile_rule_repository_contexts(&eager, root, &eager_injections, true);
+            assert!(full_complete, "{name}");
             for grammar in eager.iter() {
                 for rule in &grammar.rules {
+                    let eager_bindings = bindings(eager_contexts.get(grammar.id, rule.id));
                     assert_eq!(
                         bindings(lazy_contexts.get(grammar.id, rule.id)),
-                        bindings(eager_contexts.get(grammar.id, rule.id)),
+                        eager_bindings,
                         "{name}: {} rule {}",
+                        grammar.scope_name,
+                        rule.id.0
+                    );
+                    assert_eq!(
+                        eager_bindings,
+                        bindings(full_contexts.get(grammar.id, rule.id)),
+                        "{name}: {} rule {} (full walk)",
                         grammar.scope_name,
                         rule.id.0
                     );
