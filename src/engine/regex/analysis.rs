@@ -140,12 +140,15 @@ fn analyze_start_bytes(
     uniform_flags: Option<RegexFlags>,
     has_case_insensitive_scope: bool,
 ) -> (Option<StartByteSet>, bool) {
-    if has_case_insensitive_scope && uniform_flags.is_none() {
-        return (None, false);
-    }
+    // With mixed case scopes, fold the whole set: case-insensitive expansion
+    // only adds candidates, so it stays a superset for case-sensitive parts.
+    let case_insensitive = match uniform_flags {
+        Some(flags) => flags.case_insensitive,
+        None => has_case_insensitive_scope || parsed.flags.case_insensitive,
+    };
     match first_start_bytes(&parsed.ast) {
         Some(mut info) if !info.bytes.is_empty() => {
-            if uniform_flags.unwrap_or(parsed.flags).case_insensitive {
+            if case_insensitive {
                 expand_case_insensitive_start_bytes(&mut info.bytes);
             }
             if info.bytes.len() < 128 {
@@ -168,13 +171,10 @@ fn prefilter_case_policy(parsed: &ParsedRegex, flags: &EffectiveFlagsAnalysis) -
     if let Some(root_flags) = flags.root_flags_without_nested_scope {
         return Some(root_flags.case_insensitive);
     }
-    if parsed.flags.case_insensitive {
-        Some(true)
-    } else if flags.has_case_insensitive_scope {
-        None
-    } else {
-        Some(false)
-    }
+    // Mixed case scopes search every required literal case-insensitively:
+    // that finds a superset of the case-sensitive occurrences, so the
+    // rejection gate stays free of false negatives.
+    Some(parsed.flags.case_insensitive || flags.has_case_insensitive_scope)
 }
 
 #[derive(Clone, Copy)]
@@ -409,12 +409,33 @@ mod tests {
     }
 
     #[test]
-    fn mixed_case_scopes_disable_shared_byte_and_literal_gates() {
+    fn mixed_case_scopes_use_case_folded_byte_and_literal_gates() {
         let parsed = parse(r"(?i:foo)(?-i:bar)");
         let analysis = parsed.analysis();
 
         assert!(analysis.uniform_effective_flags().is_none());
-        assert!(analysis.start_bytes().is_none());
-        assert!(!analysis.prefilter(&parsed).is_enabled());
+        let start_bytes = analysis.start_bytes().expect("folded start bytes");
+        for byte in [b'f', b'F', 0xc5, 0xe2] {
+            assert!(start_bytes.contains(byte), "{byte:#x}");
+        }
+        assert!(!start_bytes.contains(b'b'));
+        let prefilter = analysis.prefilter(&parsed);
+        assert!(prefilter.is_enabled());
+        for line in ["FOObar", "xfOobar", "fooBAR"] {
+            assert!(prefilter.may_match(line, 0), "{line:?}");
+        }
+        assert!(!prefilter.may_match("fo obar", 0));
+
+        // A case-sensitive literal behind a case-insensitive scope keeps a
+        // (folded) gate instead of none.
+        let parsed = parse(r"(?<!@)@@(?i)\b(error|rowcount)");
+        let analysis = parsed.analysis();
+        assert!(
+            analysis
+                .start_bytes()
+                .is_some_and(|bytes| bytes.contains(b'@'))
+        );
+        assert!(!analysis.prefilter(&parsed).may_match("select 1", 0));
+        assert!(analysis.prefilter(&parsed).may_match("x @@ERROR", 0));
     }
 }

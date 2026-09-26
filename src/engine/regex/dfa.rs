@@ -1930,7 +1930,7 @@ impl PatternSetMatcher {
             if bound.is_some_and(|(bound_start, _)| start > bound_start) {
                 break;
             }
-            let position_class = position_class_bit(line.as_bytes(), start);
+            let position_class = position_class_bit(line, start);
             let restricted = line
                 .as_bytes()
                 .get(start)
@@ -2319,11 +2319,19 @@ fn frontier_min_regular_per_opaque() -> usize {
 /// cur_word)`, with line edges counting as non-word. Any non-ASCII neighbor
 /// returns all classes so masks are only authoritative over ASCII text.
 #[inline]
-fn position_class_bit(bytes: &[u8], position: usize) -> u8 {
+/// Start-class bit of a scan position (see `start_class`). Positions with a
+/// non-ASCII neighbor classify both neighbors with the Unicode `\w`
+/// predicate and select the Unicode-sound nibble of the packed masks.
+fn position_class_bit(line: &str, position: usize) -> u8 {
+    let bytes = line.as_bytes();
     let prev = position.checked_sub(1).and_then(|prev| bytes.get(prev));
     let cur = bytes.get(position);
     if prev.is_some_and(|byte| !byte.is_ascii()) || cur.is_some_and(|byte| !byte.is_ascii()) {
-        return super::start_class::START_CLASS_ALL;
+        let prev_word = previous_char(line, position).is_some_and(is_unicode_word_char);
+        let cur_word = char_at(line, position).is_some_and(|(ch, _)| is_unicode_word_char(ch));
+        return 1
+            << (super::start_class::UNICODE_SHIFT
+                + ((u8::from(prev_word) << 1) | u8::from(cur_word)));
     }
     let prev_word = prev.copied().is_some_and(is_ascii_word_byte);
     let cur_word = cur.copied().is_some_and(is_ascii_word_byte);
@@ -2686,6 +2694,58 @@ mod tests {
                             .as_ref()
                             .map(|(idx, result)| (*idx, result.start, result.end)),
                         "text={text:?} from={from}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unicode_start_class_gate_is_selection_neutral() {
+        // Each pattern alone, so an earlier winner cannot hide a wrong skip.
+        let patterns = [
+            r"(?i:(?<=[^.а-яё\w]|^)(Если|If|ВЫБРАТЬ|ꟓx)(?=[^.а-яё\w]|$))",
+            r"(?<=[^A-Za-z0-9_])x",
+            r"(?<![A-Za-z0-9_])é",
+            r"(?i)(?<![a-z])k",
+            r"(?i)(?<=^|\W)[a-z]+",
+            r"(?i)ꟓ",
+            r"(?<=ꟓ)x",
+            r"[[:alpha:]]+",
+            r"(?<=[[:upper:]])x",
+            r"(?<!\w)ё\w*",
+            r"\bπ\b",
+            r"(?<=\s|^)Σ",
+        ];
+        let texts = [
+            "Если если ЕСЛИ ifЕсли .Если xЕсли Еслиx Если_ if",
+            "выбрать ВЫБРАТЬ Выбрать; вЫбРаТь.",
+            "éx x ÿx ßx _x 7x Ⓐx ⓐx x",
+            "éé é _é aé Ⓐé",
+            "k K Kk aK ſk",
+            "Ⓐbc ⓐbc ǅx ꟒x ꟓx ꟓ ꟒",
+            "ёж ёж_ёё аё ё",
+            "π aπ πa (π) σπ",
+            "Σ aΣ \tΣ ς Σ",
+            "x\u{301}x e\u{301}k",
+        ];
+        for pattern in patterns {
+            let compiled = [Arc::new(super::super::CompiledPattern::new(pattern))];
+            let gated = PatternSetMatcher::from_compiled(&compiled);
+            let mut ungated = gated.clone();
+            ungated
+                .start_class_masks
+                .iter_mut()
+                .for_each(|mask| *mask = super::super::start_class::START_CLASS_ALL);
+            for text in texts {
+                for from in (0..=text.len()).filter(|from| text.is_char_boundary(*from)) {
+                    let got = gated.find_with_context(text, from, AnchorContext::line_start());
+                    let expected =
+                        ungated.find_with_context(text, from, AnchorContext::line_start());
+                    assert_eq!(
+                        got.map(|(idx, result)| (idx, result.start, result.end)),
+                        expected.map(|(idx, result)| (idx, result.start, result.end)),
+                        "pattern={pattern:?} text={text:?} from={from}"
                     );
                 }
             }

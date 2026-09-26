@@ -63,10 +63,10 @@ impl Prefilter {
                 })
             });
             return Self::Any {
+                finder: MultiLiteralFinder::for_literals_ignore_ascii_case(&literals),
                 literals,
                 ascii_case_insensitive: true,
                 mixed_width_fold_mask,
-                finder: None,
             };
         }
         match required {
@@ -131,12 +131,16 @@ impl Prefilter {
                 literals,
                 ascii_case_insensitive: true,
                 mixed_width_fold_mask,
-                ..
+                finder,
             } => {
-                literals
-                    .iter()
-                    .any(|literal| contains_ignore_ascii_case(slice, literal))
-                    || first_ascii_case_fold_candidate(slice, *mixed_width_fold_mask).is_some()
+                finder.as_ref().map_or_else(
+                    || {
+                        literals
+                            .iter()
+                            .any(|literal| contains_ignore_ascii_case(slice, literal))
+                    },
+                    |finder| finder.find(slice.as_bytes()).is_some(),
+                ) || first_ascii_case_fold_candidate(slice, *mixed_width_fold_mask).is_some()
             }
         }
     }
@@ -175,16 +179,24 @@ impl Prefilter {
                 literals,
                 ascii_case_insensitive: true,
                 mixed_width_fold_mask,
-                ..
-            } => literals
-                .iter()
-                .filter_map(|literal| find_ignore_ascii_case(slice, literal))
-                .chain(first_ascii_case_fold_candidate(
-                    slice,
-                    *mixed_width_fold_mask,
-                ))
-                .min()
-                .map(|pos| from + pos),
+                finder,
+            } => {
+                let literal = match finder {
+                    Some(finder) => finder.find(slice.as_bytes()),
+                    None => literals
+                        .iter()
+                        .filter_map(|literal| find_ignore_ascii_case(slice, literal))
+                        .min(),
+                };
+                literal
+                    .into_iter()
+                    .chain(first_ascii_case_fold_candidate(
+                        slice,
+                        *mixed_width_fold_mask,
+                    ))
+                    .min()
+                    .map(|pos| from + pos)
+            }
         }
     }
 
@@ -200,10 +212,13 @@ impl Prefilter {
     }
 }
 
-/// Compact failure-linked trie for large case-sensitive required-literal
-/// sets. Small sets retain the standard library's highly tuned two-way
-/// search; the trie is reserved for cases where rebuilding and running one
-/// searcher per alternative dominates (notably C/C++ keyword inventories).
+/// Compact failure-linked trie for large required-literal sets. Small sets
+/// retain the standard library's highly tuned two-way search; the trie is
+/// reserved for cases where rebuilding and running one searcher per
+/// alternative dominates (notably C/C++ keyword inventories and
+/// case-insensitive keyword lists such as ABAP's). An ASCII case-insensitive
+/// finder stores lowercased literals and lowercases each input byte, which
+/// matches `eq_ignore_ascii_case` windows exactly for ASCII literals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct MultiLiteralFinder {
@@ -213,11 +228,12 @@ pub struct MultiLiteralFinder {
     /// deeper, usually tiny transition sets compact.
     root_edges: Box<[u32; 256]>,
     max_literal_len: usize,
+    fold_ascii_case: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct FinderNode {
-    edges: Vec<(u8, u32)>,
+    edges: FinderEdges,
     failure: u32,
     /// Longest literal ending in this state or one of its failure states.
     /// The longest output has the earliest start for a fixed end position.
@@ -226,50 +242,72 @@ struct FinderNode {
 
 impl MultiLiteralFinder {
     fn for_literals(literals: &[String]) -> Option<Self> {
-        let total_bytes = literals.iter().map(String::len).sum::<usize>();
-        (literals.len() >= multi_literal_min_literals()
-            && total_bytes >= multi_literal_min_total_bytes())
-        .then(|| Self::new(literals))
+        Self::worthwhile(literals).then(|| Self::new(literals, false))
     }
 
-    fn new(literals: &[String]) -> Self {
-        let mut nodes = vec![FinderNode::default()];
+    fn for_literals_ignore_ascii_case(literals: &[String]) -> Option<Self> {
+        Self::worthwhile(literals).then(|| Self::new(literals, true))
+    }
+
+    fn worthwhile(literals: &[String]) -> bool {
+        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+        literals.len() >= multi_literal_min_literals()
+            && total_bytes >= multi_literal_min_total_bytes()
+    }
+
+    fn new(literals: &[String], fold_ascii_case: bool) -> Self {
+        let total_bytes = literals.iter().map(String::len).sum::<usize>();
+        let mut nodes = Vec::with_capacity(total_bytes.saturating_add(1));
+        nodes.push(FinderNode::default());
+        // Root transitions are dense from the start: keyword inventories give
+        // the root a wide fanout that every insertion and failure walk probes.
+        let mut root_edges = Box::new([u32::MAX; 256]);
         let mut max_literal_len = 0usize;
         for literal in literals {
             debug_assert!(!literal.is_empty());
             max_literal_len = max_literal_len.max(literal.len());
             let mut state = 0usize;
-            for byte in literal.bytes() {
-                let next = edge(&nodes[state], byte);
+            for mut byte in literal.bytes() {
+                if fold_ascii_case {
+                    byte.make_ascii_lowercase();
+                }
+                let next = if state == 0 {
+                    Some(root_edges[byte as usize]).filter(|next| *next != u32::MAX)
+                } else {
+                    nodes[state].edges.get(byte)
+                };
                 state = if let Some(next) = next {
                     next as usize
                 } else {
                     let next = u32::try_from(nodes.len()).expect("prefilter trie exceeds u32");
                     nodes.push(FinderNode::default());
                     nodes[state].edges.push((byte, next));
+                    if state == 0 {
+                        root_edges[byte as usize] = next;
+                    }
                     next as usize
                 };
             }
             nodes[state].output_len = nodes[state].output_len.max(literal.len());
         }
 
-        let mut queue = VecDeque::new();
-        let root_children = nodes[0]
-            .edges
-            .iter()
-            .map(|(_, child)| *child)
-            .collect::<Vec<_>>();
-        for child in root_children {
-            queue.push_back(child);
-        }
+        let goto = |nodes: &[FinderNode], state: u32, byte: u8| {
+            if state == 0 {
+                Some(root_edges[byte as usize]).filter(|next| *next != u32::MAX)
+            } else {
+                nodes[state as usize].edges.get(byte)
+            }
+        };
+        let mut queue = VecDeque::with_capacity(nodes.len());
+        queue.extend(nodes[0].edges.iter().map(|(_, child)| child));
         while let Some(state) = queue.pop_front() {
-            let transitions = nodes[state as usize].edges.clone();
-            for (byte, child) in transitions {
+            for index in 0..nodes[state as usize].edges.len() {
+                let (byte, child) = nodes[state as usize].edges.nth(index);
                 let mut failure = nodes[state as usize].failure;
-                while failure != 0 && edge(&nodes[failure as usize], byte).is_none() {
+                while failure != 0 && goto(&nodes, failure, byte).is_none() {
                     failure = nodes[failure as usize].failure;
                 }
-                if let Some(next) = edge(&nodes[failure as usize], byte)
+                if let Some(next) = goto(&nodes, failure, byte)
                     && next != child
                 {
                     failure = next;
@@ -281,14 +319,11 @@ impl MultiLiteralFinder {
                 queue.push_back(child);
             }
         }
-        let mut root_edges = Box::new([u32::MAX; 256]);
-        for (byte, child) in &nodes[0].edges {
-            root_edges[*byte as usize] = *child;
-        }
         Self {
             nodes,
             root_edges,
             max_literal_len,
+            fold_ascii_case,
         }
     }
 
@@ -298,6 +333,11 @@ impl MultiLiteralFinder {
         let mut state = 0u32;
         let mut best = None;
         for (index, byte) in haystack.iter().copied().enumerate() {
+            let byte = if self.fold_ascii_case {
+                byte.to_ascii_lowercase()
+            } else {
+                byte
+            };
             state = self.step(state, byte);
             let output_len = self.nodes[state as usize].output_len;
             if output_len != 0 {
@@ -319,7 +359,7 @@ impl MultiLiteralFinder {
                 let next = self.root_edges[byte as usize];
                 return if next == u32::MAX { 0 } else { next };
             }
-            if let Some(next) = edge(&self.nodes[state as usize], byte) {
+            if let Some(next) = self.nodes[state as usize].edges.get(byte) {
                 return next;
             }
             state = self.nodes[state as usize].failure;
@@ -335,14 +375,53 @@ fn multi_literal_min_total_bytes() -> usize {
     32
 }
 
-fn edge(node: &FinderNode, byte: u8) -> Option<u32> {
-    let edges = &node.edges;
-    match edges.len() {
-        0 => None,
-        1 => (edges[0].0 == byte).then_some(edges[0].1),
-        _ => edges
-            .iter()
-            .find_map(|(candidate, next)| (*candidate == byte).then_some(*next)),
+/// Finder transitions. Most trie nodes have exactly one child, so that edge
+/// stays inline and only branching nodes allocate.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+enum FinderEdges {
+    #[default]
+    Empty,
+    One(u8, u32),
+    Many(Vec<(u8, u32)>),
+}
+
+impl FinderEdges {
+    fn get(&self, byte: u8) -> Option<u32> {
+        match self {
+            Self::Empty => None,
+            Self::One(edge, next) => (*edge == byte).then_some(*next),
+            Self::Many(edges) => edges
+                .iter()
+                .find_map(|(candidate, next)| (*candidate == byte).then_some(*next)),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match self {
+            Self::Empty => 0,
+            Self::One(..) => 1,
+            Self::Many(edges) => edges.len(),
+        }
+    }
+
+    fn nth(&self, index: usize) -> (u8, u32) {
+        match self {
+            Self::One(byte, next) if index == 0 => (*byte, *next),
+            Self::Many(edges) => edges[index],
+            _ => unreachable!("finder edge index out of range"),
+        }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (u8, u32)> + '_ {
+        (0..self.len()).map(|index| self.nth(index))
+    }
+
+    fn push(&mut self, edge: (u8, u32)) {
+        match self {
+            Self::Empty => *self = Self::One(edge.0, edge.1),
+            Self::One(byte, next) => *self = Self::Many(vec![(*byte, *next), edge]),
+            Self::Many(edges) => edges.push(edge),
+        }
     }
 }
 
@@ -997,7 +1076,7 @@ mod tests {
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-        let finder = MultiLiteralFinder::new(&literals);
+        let finder = MultiLiteralFinder::new(&literals, false);
         // `bc` ends before `abcd`, but the longer literal starts earlier.
         assert_eq!(finder.find(b"zabcd"), Some(1));
         // `he` is reached through the failure link after scanning `she`.
@@ -1058,6 +1137,74 @@ mod tests {
         assert!(prefilter.may_match("xx keyword_long alpha", 3));
         assert!(!prefilter.may_match("xx keyword_long alpha", 4));
         assert!(!prefilter.may_match("unrelated", 0));
+    }
+
+    #[test]
+    fn case_insensitive_finder_matches_per_literal_search() {
+        let literals: Vec<String> = [
+            "abstract",
+            "accept",
+            "accepting",
+            "add",
+            "add-corresponding",
+            "Alias",
+            "SELECT",
+            "sKip",
+            "kind",
+            "he",
+            "she",
+            "hers",
+            "Z_9",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let prefilter = Prefilter::from_required(RequiredLiterals::Any(literals.clone()), true);
+        let Prefilter::Any {
+            finder,
+            mixed_width_fold_mask,
+            ..
+        } = &prefilter
+        else {
+            panic!("expected Any prefilter");
+        };
+        assert!(finder.is_some());
+        let reference = |slice: &str| {
+            literals
+                .iter()
+                .filter_map(|literal| find_ignore_ascii_case(slice, literal))
+                .chain(first_ascii_case_fold_candidate(
+                    slice,
+                    *mixed_width_fold_mask,
+                ))
+                .min()
+        };
+        for text in [
+            "",
+            "nothing here",
+            "  ADD-CORRESPONDING x",
+            "xaccEPTing",
+            "uSHErs",
+            "ſkip and \u{212a}ind",
+            "Ä add é SELECT",
+            "z_9 Z_9",
+            "ACCEPT",
+            "aDd",
+        ] {
+            for from in (0..=text.len()).filter(|from| text.is_char_boundary(*from)) {
+                let expected = reference(&text[from..]).map(|pos| from + pos);
+                assert_eq!(
+                    prefilter.next_occurrence(text, from),
+                    expected,
+                    "{text:?} from {from}"
+                );
+                assert_eq!(
+                    prefilter.may_match(text, from),
+                    expected.is_some(),
+                    "{text:?} from {from}"
+                );
+            }
+        }
     }
 
     #[test]
