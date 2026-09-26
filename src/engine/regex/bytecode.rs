@@ -17,7 +17,7 @@ use super::{AnchorContext, is_unicode_word_char};
 use std::{
     borrow::Cow,
     ops::Range,
-    sync::atomic::{AtomicU8, AtomicU64, Ordering},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,10 +46,10 @@ pub(crate) struct Program {
     /// Regex group numbers indexed by their compact VM slot. Position-only
     /// programs leave this empty. Group zero is always slot zero when present.
     capture_layout: Vec<u32>,
-    /// First-character guards for each `Split`'s preferred branch.
-    split_guards: Box<[GuardCell]>,
-    /// First-character guards for each repeat slot's loop body.
-    repeat_guards: Box<[GuardCell]>,
+    /// First-character guards: one per `Split` (indexed by its `guard`
+    /// operand) followed by one per repeat slot (from `repeat_guard_base`).
+    guards: Box<[GuardCell]>,
+    repeat_guard_base: u32,
 }
 
 /// Lazily derived first-character guard for a branch entry (a `Split`'s
@@ -61,23 +61,25 @@ pub(crate) struct Program {
 /// guard is derived from the bytecode on the first execution that reaches
 /// it rather than at compile time, because large grammars compile thousands
 /// of branches that never run in a cold process. Racing threads derive the
-/// same value, so plain release/acquire publication suffices.
+/// same value, so release/acquire publication suffices.
+///
+/// The two words are an ASCII byte mask whose bits for bytes 0x00 and 0x01
+/// are repurposed as the derivation state; those two bytes are always
+/// allowed, which only forgoes skipping on them.
 #[derive(Debug, Default)]
-struct GuardCell {
-    ascii: [AtomicU64; 2],
-    state: AtomicU8,
-}
+struct GuardCell([AtomicU64; 2]);
 
 impl GuardCell {
-    const UNKNOWN: u8 = 0;
+    const STATE_MASK: u64 = 0b11;
+    const UNKNOWN: u64 = 0;
     /// The entry may succeed without consuming, or starts with anything.
-    const OPEN: u8 = 1;
+    const OPEN: u64 = 1;
     /// Must consume an ASCII byte from the mask.
-    const ASCII: u8 = 2;
+    const ASCII: u64 = 2;
     /// Must consume an ASCII byte from the mask or some non-ASCII scalar.
-    const ASCII_OR_NON_ASCII: u8 = 3;
+    const ASCII_OR_NON_ASCII: u64 = 3;
 
-    fn cells(count: u32) -> Box<[Self]> {
+    fn cells(count: usize) -> Box<[Self]> {
         (0..count).map(|_| Self::default()).collect()
     }
 
@@ -91,17 +93,18 @@ impl GuardCell {
         line: &str,
         position: usize,
     ) -> bool {
-        let mut state = self.state.load(Ordering::Acquire);
-        if state == Self::UNKNOWN {
-            state = self.derive(program, entry);
+        let mut low = self.0[0].load(Ordering::Acquire);
+        if low & Self::STATE_MASK == Self::UNKNOWN {
+            low = self.derive(program, entry);
         }
+        let state = low & Self::STATE_MASK;
         if state == Self::OPEN {
             return true;
         }
         match line.as_bytes().get(position).copied() {
-            Some(byte) if byte.is_ascii() => {
-                self.ascii[usize::from(byte >> 6)].load(Ordering::Relaxed) & (1 << (byte & 63)) != 0
-            }
+            Some(0..=1) => true,
+            Some(byte @ 2..64) => low & (1 << byte) != 0,
+            Some(byte @ 64..128) => self.0[1].load(Ordering::Relaxed) & (1 << (byte - 64)) != 0,
             Some(_) => state == Self::ASCII_OR_NON_ASCII,
             // A path that must consume cannot succeed at the end of the line.
             None => false,
@@ -110,34 +113,36 @@ impl GuardCell {
 
     #[cold]
     #[inline(never)]
-    fn derive(&self, program: &Program, entry: ProgramCounter) -> u8 {
+    fn derive(&self, program: &Program, entry: ProgramCounter) -> u64 {
         let mut steps = GUARD_WALK_STEPS;
-        let state = match program.must_consume_first_chars(entry, &mut steps) {
+        let low = match program.must_consume_first_chars(entry, &mut steps) {
             Some(first) if first != FirstChars::ALL => {
-                self.ascii[0].store(first.ascii[0], Ordering::Relaxed);
-                self.ascii[1].store(first.ascii[1], Ordering::Relaxed);
-                if first.non_ascii == 0 {
+                self.0[1].store(first.ascii[1], Ordering::Relaxed);
+                let state = if first.non_ascii == 0 {
                     Self::ASCII
                 } else {
                     Self::ASCII_OR_NON_ASCII
-                }
+                };
+                (first.ascii[0] & !Self::STATE_MASK) | state
             }
             _ => Self::OPEN,
         };
-        self.state.store(state, Ordering::Release);
-        state
+        self.0[0].store(low, Ordering::Release);
+        low
+    }
+
+    fn state(&self) -> u64 {
+        self.0[0].load(Ordering::Acquire) & Self::STATE_MASK
     }
 }
 
 impl Clone for GuardCell {
     fn clone(&self) -> Self {
-        Self {
-            ascii: [
-                AtomicU64::new(self.ascii[0].load(Ordering::Relaxed)),
-                AtomicU64::new(self.ascii[1].load(Ordering::Relaxed)),
-            ],
-            state: AtomicU8::new(self.state.load(Ordering::Acquire)),
-        }
+        let low = self.0[0].load(Ordering::Acquire);
+        Self([
+            AtomicU64::new(low),
+            AtomicU64::new(self.0[1].load(Ordering::Relaxed)),
+        ])
     }
 }
 
@@ -866,7 +871,7 @@ enum Instruction {
         next: ProgramCounter,
     },
     Return,
-    /// Ordered choice; `guard` indexes `Program::split_guards`.
+    /// Ordered choice; `guard` indexes `Program::guards`.
     Split {
         preferred: ProgramCounter,
         alternate: ProgramCounter,
@@ -1124,6 +1129,7 @@ const _: () = {
     assert!(std::mem::size_of::<CallFrame>() == 8);
     assert!(std::mem::size_of::<RepeatState>() == 16);
     assert!(std::mem::size_of::<RepeatUndo>() == 16);
+    assert!(std::mem::size_of::<GuardCell>() == 16);
     assert!(std::mem::size_of::<ResumeAction>() == 8);
     assert!(std::mem::size_of::<AssertDirection>() == 8);
 };
@@ -1560,9 +1566,7 @@ impl Program {
                     let (mut preferred, mut alternate, mut guard) =
                         (*preferred, *alternate, *guard);
                     loop {
-                        if self.split_guards[arena_index(guard)]
-                            .allows(self, preferred, line, position)
-                        {
+                        if self.guards[arena_index(guard)].allows(self, preferred, line, position) {
                             scratch.backtrack.push(backtrack_frame(
                                 scratch,
                                 alternate,
@@ -1854,7 +1858,8 @@ impl Program {
         // consuming anything; skip it and its frame.
         let can_repeat = bounds.max().is_none_or(|max| count < max)
             && (repeat.stalled == Stall::Advanced || count < bounds.min)
-            && self.repeat_guards[arena_index(slot)].allows(self, body, line, *position);
+            && self.guards[arena_index(self.repeat_guard_base) + arena_index(slot)]
+                .allows(self, body, line, *position);
         match (can_repeat, can_exit, greedy) {
             (true, true, true) => {
                 scratch.backtrack.push(backtrack_frame(
@@ -2429,8 +2434,10 @@ impl<'a> Compiler<'a> {
             entry,
             repeat_slots: self.repeat_slots,
             capture_layout: self.capture_layout,
-            split_guards: GuardCell::cells(self.split_guards),
-            repeat_guards: GuardCell::cells(self.repeat_slots),
+            guards: GuardCell::cells(
+                arena_index(self.split_guards) + arena_index(self.repeat_slots),
+            ),
+            repeat_guard_base: self.split_guards,
         })
     }
 
@@ -4279,10 +4286,9 @@ mod tests {
         }
         assert!(
             program
-                .split_guards
+                .guards
                 .iter()
-                .chain(program.repeat_guards.iter())
-                .any(|guard| guard.state.load(Ordering::Relaxed) == GuardCell::ASCII),
+                .any(|guard| guard.state() == GuardCell::ASCII),
             "an executed alternation should derive an ASCII guard"
         );
     }
