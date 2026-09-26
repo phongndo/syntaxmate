@@ -252,17 +252,6 @@ impl Prefilter {
     pub fn is_enabled(&self) -> bool {
         !matches!(self, Self::None)
     }
-
-    pub fn literals(&self) -> &[String] {
-        match self {
-            Self::Any { literals, .. } => literals,
-            Self::None
-            | Self::Byte(_)
-            | Self::ByteSet { .. }
-            | Self::Literal(_)
-            | Self::Factor { .. } => &[],
-        }
-    }
 }
 
 /// Leftmost search over a large required-literal set, built in tiers.
@@ -1119,9 +1108,14 @@ impl RequiredFactor {
             .sum()
     }
 
-    /// Leftmost start of a run occurrence in `haystack`.
+    /// Leftmost start of a run occurrence in `haystack`, or an earlier
+    /// candidate start once verification exceeds a linear budget.
     fn find(&self, haystack: &[u8]) -> Option<usize> {
         let first = self.items.first()?;
+        // Each candidate can rescan the bytes after it (`<[^>]*>` over a run
+        // of `<`). An earlier position is always a sound prefilter answer, so
+        // stop verifying instead of going quadratic.
+        let mut budget = haystack.len().saturating_mul(4).saturating_add(64);
         let mut from = 0usize;
         while from < haystack.len() {
             let rest = &haystack[from..];
@@ -1130,15 +1124,19 @@ impl RequiredFactor {
                 None => find_byte_set_bitmap(rest, &first.set)?,
             };
             let start = from + relative;
-            if self.matches_at(haystack, start) {
+            let (matched, scanned) = self.matches_at(haystack, start);
+            if matched || scanned >= budget {
                 return Some(start);
             }
+            budget -= scanned;
             from = start + 1;
         }
         None
     }
 
-    fn matches_at(&self, haystack: &[u8], start: usize) -> bool {
+    /// Whether a run occurrence starts at `start`, and how many bytes the
+    /// check examined.
+    fn matches_at(&self, haystack: &[u8], start: usize) -> (bool, usize) {
         let mut position = start;
         for item in &self.items {
             let mut count = 0u32;
@@ -1151,10 +1149,10 @@ impl RequiredFactor {
                 position += 1;
             }
             if count < item.min {
-                return false;
+                return (false, position - start + 1);
             }
         }
-        true
+        (true, position - start)
     }
 }
 
@@ -1726,6 +1724,16 @@ mod tests {
         // A variable item followed by an optional one also ends the run.
         assert_eq!(required_factor(&parse("x *y?z").ast), None);
         assert!(required_factor(&parse(r"x *\(").ast).is_some());
+    }
+
+    #[test]
+    fn required_factor_search_stays_linear() {
+        let factor = required_factor(&parse("<[^>]*>").ast).expect("byte-run factor");
+        // Every `<` starts a candidate whose check scans to the line end;
+        // past the linear budget the search reports a possible occurrence.
+        assert!(factor.find("<".repeat(100_000).as_bytes()).is_some());
+        assert_eq!(factor.find(b"x<y>"), Some(1));
+        assert_eq!(factor.find(b"x<y"), None);
     }
 
     /// Every start where the pattern matches must remain viable under its
