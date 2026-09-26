@@ -927,11 +927,15 @@ enum Instruction {
     CutEnd {
         next: ProgramCounter,
     },
-    /// Possessive repeat of a single-consumer node (`\s*+`, `[^x]++`, …):
-    /// consume greedily in place with no backtrack frames or cut bookkeeping.
+    /// Repeat of a single-consumer node (`\s*+`, `[^x]++`, `.*`, …):
+    /// consume greedily in place. A possessive scan pushes no backtrack
+    /// frames or cut bookkeeping; with `give_back` (plain greedy repeats) it
+    /// pushes one `ResumeAction::GiveBack` frame that later returns one
+    /// iteration at a time instead of a frame and undo entries per iteration.
     ScanRepeat {
         node: ScanNode,
         flags: InstructionFlags,
+        give_back: bool,
         bounds: RepeatBounds,
         next: ProgramCounter,
     },
@@ -1081,6 +1085,9 @@ enum ResumeAction {
     /// Landing pad for an atomic region: the region failed outright, so pop
     /// its cut mark and keep failing outward.
     PopCut,
+    /// A give-back `ScanRepeat` at `pc` ended at `position` and may still
+    /// return this many iterations.
+    GiveBack(u32),
 }
 
 /// Hot DFS frame. Positions remain native-width because they index caller
@@ -1758,40 +1765,18 @@ impl Program {
                 Instruction::ScanRepeat {
                     node,
                     flags,
+                    give_back,
                     bounds,
                     next,
                 } => {
-                    let mut count = 0u32;
-                    let mut cursor = position;
-                    while bounds.max().is_none_or(|max| count < max) {
-                        let advanced = match node {
-                            ScanNode::Literal(id) => {
-                                let value = &self.literals[id.0 as usize];
-                                match_literal_end(line, cursor, value, flags.regex())
-                            }
-                            ScanNode::Class(id) => {
-                                let class = &self.classes[id.0 as usize];
-                                match line.as_bytes().get(cursor).copied() {
-                                    Some(byte) if byte.is_ascii() => class
-                                        .matches_ascii(byte, flags.case_insensitive())
-                                        .then_some(cursor + 1),
-                                    Some(_) => char_at(line, cursor).and_then(|(ch, end)| {
-                                        class.matches_char(ch, flags.regex()).then_some(end)
-                                    }),
-                                    None => None,
-                                }
-                            }
-                            ScanNode::Any => char_at(line, cursor).and_then(|(ch, end)| {
-                                (ch != '\n' || flags.dot_matches_new_line()).then_some(end)
-                            }),
-                        };
-                        match advanced {
-                            Some(end) if end > cursor => {
-                                cursor = end;
-                                count += 1;
-                            }
-                            _ => break,
-                        }
+                    let (count, cursor) = self.scan_forward(*node, *flags, *bounds, line, position);
+                    if *give_back && count > bounds.min {
+                        scratch.backtrack.push(backtrack_frame(
+                            scratch,
+                            pc,
+                            cursor,
+                            ResumeAction::GiveBack(count - bounds.min),
+                        )?);
                     }
                     if count >= bounds.min {
                         position = cursor;
@@ -1888,6 +1873,58 @@ impl Program {
             (false, false, _) => return self.backtrack_or_resolve(line, scratch, pc, position),
         }
         Ok(true)
+    }
+
+    /// Greedily matches `node` from `position`, at most `bounds.max` times.
+    /// Returns the iteration count and end position.
+    #[inline]
+    fn scan_forward(
+        &self,
+        node: ScanNode,
+        flags: InstructionFlags,
+        bounds: RepeatBounds,
+        line: &str,
+        position: usize,
+    ) -> (u32, usize) {
+        let mut count = 0u32;
+        let mut cursor = position;
+        while bounds.max().is_none_or(|max| count < max) {
+            let advanced = match node {
+                ScanNode::Literal(id) => {
+                    let value = &self.literals[id.0 as usize];
+                    match_literal_end(line, cursor, value, flags.regex())
+                }
+                ScanNode::Class(id) => self.class_end(id, flags, line, cursor),
+                ScanNode::Any => char_at(line, cursor).and_then(|(ch, end)| {
+                    (ch != '\n' || flags.dot_matches_new_line()).then_some(end)
+                }),
+            };
+            match advanced {
+                Some(end) if end > cursor => {
+                    cursor = end;
+                    count += 1;
+                }
+                _ => break,
+            }
+        }
+        (count, cursor)
+    }
+
+    /// Start of the last iteration of a give-back scan ending at `end`.
+    /// Classes and `.` consume exactly one scalar; give-back literals are
+    /// case-sensitive, so each iteration is exactly the literal's bytes.
+    fn give_back_one(&self, node: ScanNode, line: &str, end: usize) -> usize {
+        match node {
+            ScanNode::Literal(id) => end - self.literals[id.0 as usize].len(),
+            ScanNode::Class(_) | ScanNode::Any => {
+                let width = line[..end]
+                    .chars()
+                    .next_back()
+                    .expect("a scanned iteration precedes the give-back position")
+                    .len_utf8();
+                end - width
+            }
+        }
     }
 
     #[inline]
@@ -1998,6 +2035,7 @@ impl Program {
                 flags,
                 bounds,
                 next,
+                ..
             } => {
                 let mut first = match node {
                     ScanNode::Literal(id) => FirstChars::of_literal(
@@ -2086,6 +2124,25 @@ impl Program {
                     ResumeAction::None => {
                         *pc = frame.pc;
                         *position = frame.position;
+                    }
+                    ResumeAction::GiveBack(remaining) => {
+                        let Instruction::ScanRepeat { node, next, .. } =
+                            self.instructions[arena_index(frame.pc)]
+                        else {
+                            unreachable!("give-back frames belong to a ScanRepeat")
+                        };
+                        let back = self.give_back_one(node, line, frame.position);
+                        if remaining > 1 {
+                            // The undo logs were just truncated to this
+                            // frame's marks, so the re-pushed frame keeps them.
+                            scratch.backtrack.push(BacktrackFrame {
+                                position: back,
+                                action: ResumeAction::GiveBack(remaining - 1),
+                                ..frame
+                            });
+                        }
+                        *pc = next;
+                        *position = back;
                     }
                 }
                 return Ok(true);
@@ -2574,6 +2631,7 @@ impl<'a> Compiler<'a> {
                     return Ok(self.push(Instruction::ScanRepeat {
                         node: scan,
                         flags: scan_flags.into(),
+                        give_back: false,
                         bounds: RepeatBounds::new(*min, *max)?,
                         next,
                     }));
@@ -2596,6 +2654,26 @@ impl<'a> Compiler<'a> {
                     return Ok(self.push(Instruction::ScanRepeat {
                         node: scan,
                         flags: scan_flags.into(),
+                        give_back: false,
+                        bounds: RepeatBounds::new(*min, *max)?,
+                        next,
+                    }));
+                }
+                // Any other greedy single-consumer repeat still scans in
+                // place, keeping one give-back frame instead of a loop slot,
+                // frame, and undo entries per iteration. Case-insensitive
+                // literals are excluded because their iterations can differ
+                // in width.
+                if !*possessive
+                    && *greedy
+                    && *max != Some(0)
+                    && let Some((scan, scan_flags)) = self.scan_node(node, flags)
+                    && !(matches!(scan, ScanNode::Literal(_)) && scan_flags.case_insensitive)
+                {
+                    return Ok(self.push(Instruction::ScanRepeat {
+                        node: scan,
+                        flags: scan_flags.into(),
+                        give_back: true,
                         bounds: RepeatBounds::new(*min, *max)?,
                         next,
                     }));
@@ -2855,6 +2933,7 @@ impl<'a> Compiler<'a> {
                     flags,
                     bounds,
                     next,
+                    ..
                 } => {
                     let rejects = match node {
                         ScanNode::Class(id) => class_rejects(*id, *flags),
@@ -2988,6 +3067,7 @@ impl<'a> Compiler<'a> {
                 flags,
                 bounds,
                 next,
+                ..
             } => {
                 let mut first = self.scan_first_chars(*node, flags.regex());
                 if bounds.min == 0 {
@@ -4220,6 +4300,59 @@ mod tests {
     }
 
     #[test]
+    fn give_back_scans_match_recursive_engine() {
+        let patterns = [
+            r"(.*)x",
+            r"a.*b",
+            r"([a-z]*)ab",
+            r"(?:ab)*abc",
+            r"é*é",
+            r"[^,]{2,4}+?,|[^,]{1,3},",
+            r"\s*\s\S",
+            r"(=)(?!\s*.*=>\s*$)",
+            r"(?:(x*)y)*z",
+            r"(?i)[k]*k",
+            r"(?s:.*)\n",
+            r"(?:\w{2,}?)(\w*)\w",
+        ];
+        let lines = [
+            "",
+            "axbx",
+            "a..b..b",
+            "xyzab abab",
+            "ababababc",
+            "ééé é",
+            "aa,bbbbb,c,",
+            "   x  ",
+            "x = y => z",
+            "x = y =>",
+            "xyxxyz",
+            "kK\u{212a}k",
+            "a\nb\n",
+            "hello world",
+        ];
+        for pattern in patterns {
+            let parsed = parse(pattern);
+            let live = (1..=parsed.capture_count).collect::<Vec<_>>();
+            for line in lines {
+                for start in line
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(line.len()))
+                {
+                    let recursive = recursive_position_span(&parsed, line, start, context());
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive,
+                        "pattern {pattern:?}, line {line:?}, start {start}"
+                    );
+                    assert_capture_replay(pattern, line, start, &live);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn single_consumer_assertions_match_recursive_engine() {
         let patterns = [
             r"(?<![$_[:alnum:]])[a-z]+(?![$_[:alnum:]])",
@@ -4325,7 +4458,15 @@ mod tests {
             .expect("supported bytecode pattern")
             .instructions
             .iter()
-            .filter(|instruction| matches!(instruction, Instruction::ScanRepeat { .. }))
+            .filter(|instruction| {
+                matches!(
+                    instruction,
+                    Instruction::ScanRepeat {
+                        give_back: false,
+                        ..
+                    }
+                )
+            })
             .count()
     }
 
