@@ -3776,7 +3776,7 @@ impl TextMateTokenizer {
                     *pattern,
                     CandidateKind::Match {
                         grammar_id,
-                        name: scope_name(grammar, *name).map(Arc::from),
+                        name: scope_name(grammar, *name),
                         captures: contextualize_capture_spec(captures, repository_context),
                     },
                 )))
@@ -3808,8 +3808,8 @@ impl TextMateTokenizer {
                             repository_context,
                         ),
                         end_captures: contextualize_capture_spec(end_captures, repository_context),
-                        name: scope_name(grammar, *name).map(Arc::from),
-                        content_name: scope_name(grammar, *content_name).map(Arc::from),
+                        name: scope_name(grammar, *name),
+                        content_name: scope_name(grammar, *content_name),
                         patterns: contextualized_ref_list(patterns, repository_context),
                         apply_end_pattern_last: *apply_end_pattern_last,
                         end_static,
@@ -3845,8 +3845,8 @@ impl TextMateTokenizer {
                             while_captures,
                             repository_context,
                         ),
-                        name: scope_name(grammar, *name).map(Arc::from),
-                        content_name: scope_name(grammar, *content_name).map(Arc::from),
+                        name: scope_name(grammar, *name),
+                        content_name: scope_name(grammar, *content_name),
                         patterns: contextualized_ref_list(patterns, repository_context),
                         while_static,
                     },
@@ -7523,16 +7523,19 @@ pub fn tokenize_json_string_smoke(line: &str) -> Vec<ScopeSpan> {
     spans
 }
 
-fn scope_name(grammar: &CompiledGrammar, id: Option<super::state::ScopeId>) -> Option<String> {
-    id.and_then(|id| grammar.scope(id).map(str::to_owned))
+/// Shares the grammar's interned scope text.
+fn scope_name(grammar: &CompiledGrammar, id: Option<super::state::ScopeId>) -> Option<Arc<str>> {
+    id.and_then(|id| grammar.scope_names.get(id.0 as usize).cloned())
 }
 
 /// Mirrors `substitute_end_pattern`'s escape handling: a backslash consumes
 /// the next character, and only `\1`..`\9` starts a backreference.
 fn pattern_has_backreference(pattern: &str) -> bool {
-    let mut chars = pattern.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' && matches!(chars.next(), Some('1'..='9')) {
+    // Bytewise: an escaped multi-byte character leaves only continuation
+    // bytes behind, which are neither a backslash nor a digit.
+    let mut bytes = pattern.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'\\' && matches!(bytes.next(), Some(b'1'..=b'9')) {
             return true;
         }
     }
