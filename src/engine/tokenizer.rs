@@ -23,7 +23,8 @@ use super::checkpoint::CheckpointTable;
 use super::counters::{EngineCounters, PatternHotspot};
 use super::grammar::{
     CaptureEntry, CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError,
-    InjectionPriority, RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
+    GrammarWalkSummary, InjectionPriority, RuleBody, RuleRef, load_dev_grammar_from_str,
+    normalize_injection_selectors,
 };
 use super::grammar_closure::{AvailabilityStep, ClosureMemberTraits};
 use super::grammar_ir::decode_compiled_grammar;
@@ -6954,26 +6955,25 @@ impl LoadedWalkTraits {
                     let Some(grammar) = grammars.grammar(member) else {
                         return (false, false, Vec::new());
                     };
-                    let mut base = false;
-                    let mut targets = Vec::new();
-                    super::grammar_closure::for_each_rule_ref(grammar, |rule_ref| match rule_ref {
-                        RuleRef::BaseRef => base = true,
-                        RuleRef::External { scope, .. } => {
-                            if let Some(target) = grammar
-                                .scope(*scope)
-                                .and_then(|scope| grammars.grammar_id_by_scope(scope))
-                                && !targets.contains(&target)
-                            {
-                                targets.push(target);
-                            }
+                    let scanned;
+                    let summary = match &grammar.walk_summary {
+                        Some(summary) => summary,
+                        None => {
+                            scanned = scan_walk_summary(grammar);
+                            &scanned
                         }
-                        RuleRef::Rule(_) | RuleRef::Repository(_) | RuleRef::SelfRef => {}
-                    });
-                    let local = grammar
-                        .rules
-                        .iter()
-                        .any(|rule| !rule.local_repository.is_empty());
-                    (local, base, targets)
+                    };
+                    let mut targets = Vec::new();
+                    for scope in &summary.external_scopes {
+                        if let Some(target) = grammar
+                            .scope(*scope)
+                            .and_then(|scope| grammars.grammar_id_by_scope(scope))
+                            && !targets.contains(&target)
+                        {
+                            targets.push(target);
+                        }
+                    }
+                    (summary.local_repository, summary.base_reference, targets)
                 });
                 traits.repository_contexts |= *local;
                 traits.base_reference |= *base;
@@ -6982,6 +6982,28 @@ impl LoadedWalkTraits {
         }
         Some(traits)
     }
+}
+
+/// Recomputes `CompiledGrammar::walk_summary` for grammars that were not
+/// compiled from source.
+fn scan_walk_summary(grammar: &CompiledGrammar) -> GrammarWalkSummary {
+    let mut summary = GrammarWalkSummary {
+        local_repository: grammar
+            .rules
+            .iter()
+            .any(|rule| !rule.local_repository.is_empty()),
+        ..GrammarWalkSummary::default()
+    };
+    super::grammar_closure::for_each_rule_ref(grammar, |rule_ref| match rule_ref {
+        RuleRef::BaseRef => summary.base_reference = true,
+        RuleRef::External { scope, .. } => {
+            if !summary.external_scopes.contains(scope) {
+                summary.external_scopes.push(*scope);
+            }
+        }
+        RuleRef::Rule(_) | RuleRef::Repository(_) | RuleRef::SelfRef => {}
+    });
+    summary
 }
 
 /// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
@@ -9329,6 +9351,7 @@ mod tests {
             top_level: vec![RuleRef::Rule(RuleId(0))],
             injections: Vec::new(),
             scope_names: Vec::new(),
+            walk_summary: None,
         });
 
         let (contexts, complete) = compile_rule_repository_contexts(&grammars, root, &[], true);
@@ -9423,6 +9446,7 @@ mod tests {
             top_level: vec![RuleRef::Rule(RuleId(0)); MAX_PREPARED_GRAMMAR_PENDING_REFS + 1],
             injections: Vec::new(),
             scope_names: Vec::new(),
+            walk_summary: None,
         });
 
         assert!(PreparedLanguage::try_new(grammars, root).is_err());
@@ -10720,6 +10744,36 @@ mod tests {
             "{:?}",
             line.tokens
         );
+    }
+
+    #[test]
+    fn source_walk_summaries_match_a_full_rule_ref_scan() {
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/grammars/languages");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            let grammar = load_dev_grammar_from_str(GrammarId(0), &source).unwrap();
+            // External order only affects traversal order of a set union.
+            let sorted = |mut summary: GrammarWalkSummary| {
+                summary
+                    .external_scopes
+                    .sort_unstable_by_key(|scope| scope.0);
+                summary
+            };
+            assert_eq!(
+                grammar.walk_summary.clone().map(sorted),
+                Some(sorted(scan_walk_summary(&grammar))),
+                "{}",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(checked > 100);
     }
 
     fn core_tokenizer(language: &str) -> TextMateTokenizer {

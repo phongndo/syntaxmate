@@ -204,6 +204,7 @@ pub(crate) fn decode_compiled_grammar(
         top_level,
         injections,
         scope_names,
+        walk_summary: None,
     })
 }
 
@@ -984,6 +985,7 @@ mod tests {
         let decoded = decode_compiled_grammar(GrammarId(42), &bytes).unwrap();
         let mut expected = grammar;
         expected.id = GrammarId(42);
+        expected.walk_summary = None;
         assert_eq!(decoded, expected);
     }
 
