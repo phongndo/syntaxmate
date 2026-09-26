@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cell::RefCell,
     collections::BTreeMap,
     collections::HashMap,
@@ -1852,12 +1853,10 @@ fn contextualize_pending_refs<'a>(
     let Some(context) = context.filter(|context| !context.is_empty()) else {
         return PreparedPendingRefs::Borrowed(refs);
     };
-    if !refs.iter().any(
-        |rule_ref| matches!(rule_ref, RuleRef::Repository(name) if context.get(name).is_some()),
-    ) {
-        return PreparedPendingRefs::Borrowed(refs);
+    match contextualize_refs(refs, Some(context)) {
+        Cow::Borrowed(refs) => PreparedPendingRefs::Borrowed(refs),
+        Cow::Owned(refs) => PreparedPendingRefs::Owned(refs),
     }
-    PreparedPendingRefs::Owned(contextualize_refs(refs, Some(context)))
 }
 
 struct PreparedGrammarWalker<'a> {
@@ -3650,7 +3649,7 @@ impl TextMateTokenizer {
                 (
                     frame.grammar_id,
                     frame.base_grammar_id,
-                    frame.patterns.to_vec(),
+                    &*frame.patterns,
                     end,
                     frame.apply_end_pattern_last,
                 )
@@ -3658,7 +3657,13 @@ impl TextMateTokenizer {
                 let Some(grammar) = self.grammars.grammar(self.root) else {
                     return candidates;
                 };
-                (self.root, self.root, grammar.top_level.clone(), None, false)
+                (
+                    self.root,
+                    self.root,
+                    grammar.top_level.as_slice(),
+                    None,
+                    false,
+                )
             };
 
         for injection in &injections.left {
@@ -3681,7 +3686,7 @@ impl TextMateTokenizer {
         self.flatten_refs(
             grammar_id,
             base_grammar_id,
-            &refs,
+            refs,
             None,
             &mut candidates,
             &mut order,
@@ -3800,7 +3805,7 @@ impl TextMateTokenizer {
                         end_captures: contextualize_capture_spec(end_captures, repository_context),
                         name: scope_name(grammar, *name).map(Arc::from),
                         content_name: scope_name(grammar, *content_name).map(Arc::from),
-                        patterns: contextualize_refs(patterns, repository_context).into(),
+                        patterns: contextualized_ref_list(patterns, repository_context),
                         apply_end_pattern_last: *apply_end_pattern_last,
                         end_static,
                     },
@@ -3837,13 +3842,13 @@ impl TextMateTokenizer {
                         ),
                         name: scope_name(grammar, *name).map(Arc::from),
                         content_name: scope_name(grammar, *content_name).map(Arc::from),
-                        patterns: contextualize_refs(patterns, repository_context).into(),
+                        patterns: contextualized_ref_list(patterns, repository_context),
                         while_static,
                     },
                 )))
             }
             RuleBody::IncludeOnly { patterns } => Some(RuleCandidateTemplate::IncludeOnly(
-                contextualize_refs(patterns, repository_context).into(),
+                contextualized_ref_list(patterns, repository_context),
             )),
         }
     }
@@ -6635,19 +6640,44 @@ fn resolve_repository_in_context<'a>(
     grammar.repository.get(bound_name)
 }
 
-fn contextualize_refs(refs: &[RuleRef], context: Option<&RepositoryBindings>) -> Vec<RuleRef> {
+fn rebinds_any_ref(refs: &[RuleRef], context: &RepositoryBindings) -> bool {
+    refs.iter().any(
+        |rule_ref| matches!(rule_ref, RuleRef::Repository(name) if context.get(name).is_some()),
+    )
+}
+
+/// Borrows `refs` unless `context` rebinds one of their repository names.
+fn contextualize_refs<'a>(
+    refs: &'a [RuleRef],
+    context: Option<&RepositoryBindings>,
+) -> Cow<'a, [RuleRef]> {
     let Some(context) = context.filter(|context| !context.is_empty()) else {
-        return refs.to_vec();
+        return Cow::Borrowed(refs);
     };
-    refs.iter()
-        .map(|rule_ref| match rule_ref {
-            RuleRef::Repository(name) => context
-                .get(name)
-                .map(|bound_name| RuleRef::Repository(bound_name.clone()))
-                .unwrap_or_else(|| rule_ref.clone()),
-            _ => rule_ref.clone(),
-        })
-        .collect()
+    if !rebinds_any_ref(refs, context) {
+        return Cow::Borrowed(refs);
+    }
+    Cow::Owned(
+        refs.iter()
+            .map(|rule_ref| match rule_ref {
+                RuleRef::Repository(name) => context
+                    .get(name)
+                    .map(|bound_name| RuleRef::Repository(bound_name.clone()))
+                    .unwrap_or_else(|| rule_ref.clone()),
+                _ => rule_ref.clone(),
+            })
+            .collect(),
+    )
+}
+
+fn contextualized_ref_list(
+    refs: &[RuleRef],
+    context: Option<&RepositoryBindings>,
+) -> Arc<[RuleRef]> {
+    match contextualize_refs(refs, context) {
+        Cow::Borrowed(refs) => Arc::from(refs),
+        Cow::Owned(refs) => Arc::from(refs),
+    }
 }
 
 fn contextualize_capture_spec(
@@ -6657,9 +6687,16 @@ fn contextualize_capture_spec(
     let Some(context) = context.filter(|context| !context.is_empty()) else {
         return Arc::clone(captures);
     };
+    if !captures
+        .entries
+        .values()
+        .any(|entry| rebinds_any_ref(&entry.patterns, context))
+    {
+        return Arc::clone(captures);
+    }
     let mut contextualized = captures.as_ref().clone();
     for entry in contextualized.entries.values_mut() {
-        entry.patterns = contextualize_refs(&entry.patterns, Some(context));
+        entry.patterns = contextualize_refs(&entry.patterns, Some(context)).into_owned();
     }
     Arc::new(contextualized)
 }
@@ -9676,7 +9713,7 @@ mod tests {
                     RuleBody::IncludeOnly { patterns } => (patterns, Vec::new()),
                 };
                 assert_eq!(
-                    contextualize_refs(patterns, Some(context)),
+                    contextualize_refs(patterns, Some(context)).as_ref(),
                     patterns,
                     "{} rule {:?}",
                     grammar.scope_name,
