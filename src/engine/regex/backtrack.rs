@@ -3529,6 +3529,22 @@ mod tests {
     }
 
     #[test]
+    fn plus_after_an_interval_repeats_it() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, expected) in [
+            (r"^a{1,2}+a$", "aa", true),
+            (r"^a{2}+$", "aaaa", true),
+            (r"^a{2}+$", "aaa", false),
+            (r"^a{1,}+a$", "aa", true),
+            (r"^a{,2}+a$", "aa", true),
+            (r"^a++a$", "aa", false),
+        ] {
+            let found = FallbackMatcher::new(pattern).find(line, 0, ctx()).is_some();
+            assert_eq!(found, expected, "{pattern} on {line:?}");
+        }
+    }
+
+    #[test]
     fn duplicate_names_in_backrefs_and_conditionals_follow_oniguruma() {
         // Expectations checked against vscode-oniguruma.
         for (pattern, line, expected) in [

@@ -720,6 +720,7 @@ impl<'a> Parser<'a> {
             };
         }
         while let Some(ch) = self.peek() {
+            let braced = ch == '{';
             let quantifier = match ch {
                 '*' => {
                     self.bump();
@@ -768,7 +769,9 @@ impl<'a> Parser<'a> {
             if self.peek() == Some('?') {
                 self.bump();
                 greedy = false;
-            } else if self.peek() == Some('+') {
+            } else if self.peek() == Some('+') && !braced {
+                // After an interval, Oniguruma reads `+` as another
+                // quantifier: `a{1,2}+` is `(?:a{1,2})+`, not possessive.
                 self.bump();
                 possessive = true;
                 self.features.possessive_or_atomic = true;
