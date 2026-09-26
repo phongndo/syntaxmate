@@ -14,7 +14,11 @@ use super::backtrack::{
     unicode_case_eq,
 };
 use super::{AnchorContext, is_unicode_word_char};
-use std::{borrow::Cow, ops::Range};
+use std::{
+    borrow::Cow,
+    ops::Range,
+    sync::atomic::{AtomicU8, AtomicU64, Ordering},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum CompileError {
@@ -42,7 +46,104 @@ pub(crate) struct Program {
     /// Regex group numbers indexed by their compact VM slot. Position-only
     /// programs leave this empty. Group zero is always slot zero when present.
     capture_layout: Vec<u32>,
+    /// First-character guards for each `Split`'s preferred branch.
+    split_guards: Box<[GuardCell]>,
+    /// First-character guards for each repeat slot's loop body.
+    repeat_guards: Box<[GuardCell]>,
 }
+
+/// Lazily derived first-character guard for a branch entry (a `Split`'s
+/// preferred branch or a loop body).
+///
+/// Most alternation branches and optional/repeated groups fail on their
+/// first character; without a guard each such attempt costs a backtrack
+/// frame push, the failing instruction(s), and a pop with undo replay. The
+/// guard is derived from the bytecode on the first execution that reaches
+/// it rather than at compile time, because large grammars compile thousands
+/// of branches that never run in a cold process. Racing threads derive the
+/// same value, so plain release/acquire publication suffices.
+#[derive(Debug, Default)]
+struct GuardCell {
+    ascii: [AtomicU64; 2],
+    state: AtomicU8,
+}
+
+impl GuardCell {
+    const UNKNOWN: u8 = 0;
+    /// The entry may succeed without consuming, or starts with anything.
+    const OPEN: u8 = 1;
+    /// Must consume an ASCII byte from the mask.
+    const ASCII: u8 = 2;
+    /// Must consume an ASCII byte from the mask or some non-ASCII scalar.
+    const ASCII_OR_NON_ASCII: u8 = 3;
+
+    fn cells(count: u32) -> Box<[Self]> {
+        (0..count).map(|_| Self::default()).collect()
+    }
+
+    /// False only when the guarded entry provably fails at `position`
+    /// before consuming anything.
+    #[inline]
+    fn allows(
+        &self,
+        program: &Program,
+        entry: ProgramCounter,
+        line: &str,
+        position: usize,
+    ) -> bool {
+        let mut state = self.state.load(Ordering::Acquire);
+        if state == Self::UNKNOWN {
+            state = self.derive(program, entry);
+        }
+        if state == Self::OPEN {
+            return true;
+        }
+        match line.as_bytes().get(position).copied() {
+            Some(byte) if byte.is_ascii() => {
+                self.ascii[usize::from(byte >> 6)].load(Ordering::Relaxed) & (1 << (byte & 63)) != 0
+            }
+            Some(_) => state == Self::ASCII_OR_NON_ASCII,
+            // A path that must consume cannot succeed at the end of the line.
+            None => false,
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn derive(&self, program: &Program, entry: ProgramCounter) -> u8 {
+        let mut steps = GUARD_WALK_STEPS;
+        let state = match program.must_consume_first_chars(entry, &mut steps) {
+            Some(first) if first != FirstChars::ALL => {
+                self.ascii[0].store(first.ascii[0], Ordering::Relaxed);
+                self.ascii[1].store(first.ascii[1], Ordering::Relaxed);
+                if first.non_ascii == 0 {
+                    Self::ASCII
+                } else {
+                    Self::ASCII_OR_NON_ASCII
+                }
+            }
+            _ => Self::OPEN,
+        };
+        self.state.store(state, Ordering::Release);
+        state
+    }
+}
+
+impl Clone for GuardCell {
+    fn clone(&self) -> Self {
+        Self {
+            ascii: [
+                AtomicU64::new(self.ascii[0].load(Ordering::Relaxed)),
+                AtomicU64::new(self.ascii[1].load(Ordering::Relaxed)),
+            ],
+            state: AtomicU8::new(self.state.load(Ordering::Acquire)),
+        }
+    }
+}
+
+/// Bounds the bytecode walked when deriving a guard; giving up only leaves
+/// the entry unguarded.
+const GUARD_WALK_STEPS: u32 = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // Vertical-slice API; backtrack/tokenizer integration follows.
@@ -765,9 +866,11 @@ enum Instruction {
         next: ProgramCounter,
     },
     Return,
+    /// Ordered choice; `guard` indexes `Program::split_guards`.
     Split {
         preferred: ProgramCounter,
         alternate: ProgramCounter,
+        guard: u32,
     },
     RepeatInit {
         slot: VmSlot,
@@ -1462,7 +1565,14 @@ impl Program {
                 Instruction::Split {
                     preferred,
                     alternate,
+                    guard,
                 } => {
+                    if !self.split_guards[arena_index(*guard)]
+                        .allows(self, *preferred, line, position)
+                    {
+                        pc = *alternate;
+                        continue;
+                    }
                     scratch.backtrack.push(backtrack_frame(
                         scratch,
                         *alternate,
@@ -1493,8 +1603,12 @@ impl Program {
                     let repeat = scratch.repeats[arena_index(*slot)];
                     let count = repeat.count;
                     let can_exit = count >= bounds.min;
+                    // An iteration whose body cannot start here would fail
+                    // before consuming anything; skip it and its frame.
                     let can_repeat = bounds.max().is_none_or(|max| count < max)
-                        && (repeat.stalled == Stall::Advanced || count < bounds.min);
+                        && (repeat.stalled == Stall::Advanced || count < bounds.min)
+                        && self.repeat_guards[arena_index(*slot)]
+                            .allows(self, *body, line, position);
                     match (can_repeat, can_exit, greedy) {
                         (true, true, true) => {
                             scratch.backtrack.push(backtrack_frame(
@@ -1721,6 +1835,89 @@ impl Program {
                     }
                 }
             }
+        }
+    }
+
+    /// Characters one of which every successful path from `pc` must consume
+    /// at the current position. `None` when a path may succeed without
+    /// consuming (reaching `Accept`, a loop end, or a subroutine boundary)
+    /// or the walk gives up.
+    fn must_consume_first_chars(&self, pc: ProgramCounter, steps: &mut u32) -> Option<FirstChars> {
+        *steps = steps.checked_sub(1)?;
+        match &self.instructions[arena_index(pc)] {
+            Instruction::Literal { id, flags, next } => {
+                let literal = &self.literals[id.0 as usize];
+                if literal.is_empty() {
+                    self.must_consume_first_chars(*next, steps)
+                } else {
+                    Some(FirstChars::of_literal(literal, flags.case_insensitive()))
+                }
+            }
+            Instruction::LiteralTrie { id, flags, .. } => {
+                self.literal_tries[id.0 as usize].first_chars(flags.case_insensitive())
+            }
+            Instruction::Class { id, flags, .. } => Some(FirstChars::of_class(
+                &self.classes[id.0 as usize],
+                flags.case_insensitive(),
+            )),
+            Instruction::ScanRepeat {
+                node,
+                flags,
+                bounds,
+                next,
+            } => {
+                let mut first = match node {
+                    ScanNode::Literal(id) => FirstChars::of_literal(
+                        &self.literals[id.0 as usize],
+                        flags.case_insensitive(),
+                    ),
+                    ScanNode::Class(id) => {
+                        FirstChars::of_class(&self.classes[id.0 as usize], flags.case_insensitive())
+                    }
+                    ScanNode::Any => FirstChars::ALL,
+                };
+                if bounds.min == 0 {
+                    first.union(&self.must_consume_first_chars(*next, steps)?);
+                }
+                Some(first)
+            }
+            // Zero-width steps: the continuation consumes at this position.
+            Instruction::Anchor { next, .. }
+            | Instruction::RepeatInit { next, .. }
+            | Instruction::SaveStart { next, .. }
+            | Instruction::SaveEnd { next, .. }
+            | Instruction::CutStart { next }
+            | Instruction::CutEnd { next }
+            | Instruction::Assert { next, .. } => self.must_consume_first_chars(*next, steps),
+            Instruction::Jump { target } => self.must_consume_first_chars(*target, steps),
+            Instruction::Split {
+                preferred,
+                alternate,
+                ..
+            } => {
+                let mut first = self.must_consume_first_chars(*preferred, steps)?;
+                first.union(&self.must_consume_first_chars(*alternate, steps)?);
+                Some(first)
+            }
+            // Only reached through `RepeatInit` here, so the count is zero.
+            Instruction::Repeat {
+                bounds, body, next, ..
+            } => {
+                let mut first = self.must_consume_first_chars(*body, steps)?;
+                if bounds.min == 0 {
+                    first.union(&self.must_consume_first_chars(*next, steps)?);
+                }
+                Some(first)
+            }
+            Instruction::Any { .. }
+            | Instruction::Call { .. }
+            | Instruction::Return
+            | Instruction::RepeatEnd { .. }
+            | Instruction::Backref { .. }
+            | Instruction::Conditional { .. }
+            | Instruction::CppSpaceCommentSeparator { .. }
+            | Instruction::Accept
+            | Instruction::Fail => None,
         }
     }
 
@@ -2020,6 +2217,8 @@ struct Compiler<'a> {
     /// still a placeholder, so continuation analysis reads the loop's exit
     /// and body from here instead.
     open_repeats: Vec<OpenRepeat<'a>>,
+    /// Number of `Split` instructions, each owning one guard cell.
+    split_guards: u32,
     literal_ids: crate::engine::hashing::FastMap<&'a str, LiteralId>,
 }
 
@@ -2049,6 +2248,7 @@ impl<'a> Compiler<'a> {
             named_captures: std::collections::BTreeMap::new(),
             routine_entries: std::collections::BTreeMap::new(),
             open_repeats: Vec::new(),
+            split_guards: 0,
             literal_ids: crate::engine::hashing::fast_map(),
         }
     }
@@ -2101,6 +2301,8 @@ impl<'a> Compiler<'a> {
             entry,
             repeat_slots: self.repeat_slots,
             capture_layout: self.capture_layout,
+            split_guards: GuardCell::cells(self.split_guards),
+            repeat_guards: GuardCell::cells(self.repeat_slots),
         })
     }
 
@@ -2199,9 +2401,12 @@ impl<'a> Compiler<'a> {
                 }
                 let mut entry = entries.pop().unwrap_or(next);
                 for preferred in entries.into_iter().rev() {
+                    let guard = self.split_guards;
+                    self.split_guards = guard.checked_add(1).ok_or(CompileError::TableOverflow)?;
                     entry = self.push(Instruction::Split {
                         preferred,
                         alternate: entry,
+                        guard,
                     });
                 }
                 entry
@@ -2446,6 +2651,7 @@ impl<'a> Compiler<'a> {
                 Instruction::Split {
                     preferred,
                     alternate,
+                    ..
                 } => pending.extend([*preferred, *alternate]),
                 Instruction::Conditional {
                     matched, unmatched, ..
@@ -2664,6 +2870,7 @@ impl<'a> Compiler<'a> {
             Instruction::Split {
                 preferred,
                 alternate,
+                ..
             } => {
                 let mut first = self.first_chars_from(*preferred, steps, visited)?;
                 first.union(&self.first_chars_from(*alternate, steps, visited)?);
@@ -2907,6 +3114,32 @@ impl LiteralTrie {
             }
         }
         Ok(trie)
+    }
+
+    /// Characters a non-empty match must start with; `None` when the empty
+    /// literal is a member or the trie is Unicode case-folded.
+    fn first_chars(&self, case_insensitive: bool) -> Option<FirstChars> {
+        let root = self.nodes.first()?;
+        if !self.unicode_nodes.is_empty() || root.terminal_order.is_some() {
+            return None;
+        }
+        let start = root.edge_start as usize;
+        let mut first = FirstChars::NONE;
+        for &byte in &self.edge_bytes[start..start + root.edge_len as usize] {
+            if byte.is_ascii() {
+                ascii_mask_set(&mut first.ascii, byte);
+                if case_insensitive {
+                    ascii_mask_set(&mut first.ascii, byte.to_ascii_uppercase());
+                }
+            } else {
+                first.non_ascii = FirstChars::NON_ASCII_ANY;
+            }
+        }
+        if case_insensitive {
+            // U+017F and U+212A fold onto `s` and `k`.
+            first.non_ascii = FirstChars::NON_ASCII_ANY;
+        }
+        Some(first)
     }
 
     fn edge(&self, node: usize, byte: u8) -> Option<u32> {
@@ -3793,6 +4026,93 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn first_char_guards_match_recursive_engine() {
+        let patterns = [
+            r"(?:foo|[0-9]+|\s*x|(?=a)ab|bar)y?",
+            r"(?:(async\s+)?(?:function|[a-z]+\s*=>)|\()",
+            r"(?:(?:a|b)c|(?:d|)e|f)",
+            r"(?:alpha|beta|gamma|delta|epsilon|[0-9])+z",
+            r"(?i:kelvin|sigma|psi|omega|x)",
+            r"(?i:(?:k|s)x|q)",
+            r"(?:é|ß|a)+",
+            r"(?:\bab|(?<=a)b|$|c)",
+            r"(?:[a-z]\d){2,3}?b",
+            r"(ab|cd)*?c",
+            r"(?:(a)|b)*c?",
+            r"(?:x(?:y|z)|(?:q))++w",
+        ];
+        let lines = [
+            "",
+            "fooy",
+            "123y bary",
+            "  xy",
+            "aby",
+            "async  foo=>(",
+            "function(",
+            "ace de e f",
+            "alphabeta12z",
+            "\u{212a}elvin \u{17f}igma PSI",
+            "\u{212a}x sx Q",
+            "éßaé ß",
+            "ab b c",
+            "a1b2c3b",
+            "abcdc",
+            "aab",
+            "xyxzqw",
+        ];
+        for pattern in patterns {
+            let parsed = parse(pattern);
+            let live = (1..=parsed.capture_count).collect::<Vec<_>>();
+            for line in lines {
+                for start in line
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(line.len()))
+                {
+                    let recursive = recursive_position_span(&parsed, line, start, context());
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive,
+                        "pattern {pattern:?}, line {line:?}, start {start}"
+                    );
+                    assert_capture_replay(pattern, line, start, &live);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn first_char_guards_persist_across_executions() {
+        let parsed = parse(r"(?:ab|cd|[0-9])+x");
+        let program = Program::compile(&parsed).expect("compile");
+        let mut scratch = BytecodeScratch::default();
+        for (line, expected) in [
+            ("zz", None),
+            ("abx", Some(3)),
+            ("", None),
+            ("cd9abx", Some(6)),
+            ("é", None),
+        ] {
+            let mut budget = StepBudget::new(10_000);
+            assert_eq!(
+                program
+                    .execute(line, 0, context(), &mut budget, &mut scratch)
+                    .expect("budget"),
+                expected,
+                "line {line:?}"
+            );
+        }
+        assert!(
+            program
+                .split_guards
+                .iter()
+                .chain(program.repeat_guards.iter())
+                .any(|guard| guard.state.load(Ordering::Relaxed) == GuardCell::ASCII),
+            "an executed alternation should derive an ASCII guard"
+        );
     }
 
     #[test]
