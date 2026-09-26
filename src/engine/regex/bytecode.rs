@@ -139,7 +139,11 @@ fn program_counter(index: usize) -> Result<ProgramCounter, CompileError> {
 }
 
 fn vm_slot(index: usize) -> Result<VmSlot, CompileError> {
-    u32::try_from(index).map_err(|_| CompileError::TableOverflow)
+    // The top bit is reserved for `RepeatUndo`'s stalled flag.
+    u32::try_from(index)
+        .ok()
+        .filter(|slot| *slot < REPEAT_UNDO_STALLED)
+        .ok_or(CompileError::TableOverflow)
 }
 
 fn arena_mark(index: usize) -> Result<u32, BudgetExceeded> {
@@ -891,11 +895,67 @@ impl AssertDirection {
     }
 }
 
+/// Live repeat counter. Every field is a full scalar with no padding bytes:
+/// a `bool` here made copies split into byte-sized stores that the following
+/// wide load of the same slot could not store-forward, stalling the hot
+/// `Repeat`/`RepeatEnd` sequence.
 #[derive(Debug, Clone, Copy, Default)]
 struct RepeatState {
-    count: u32,
     last_position: usize,
-    stalled: bool,
+    count: u32,
+    stalled: Stall,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[repr(u32)]
+enum Stall {
+    #[default]
+    Advanced = 0,
+    Stalled = 1,
+}
+
+/// Repeat undo-log entry. Kept at 16 bytes with scalar fields (the stalled
+/// flag rides in the top bit of the slot) so the hot push is two plain stores
+/// instead of a padded tuple copy that defeats store forwarding.
+#[derive(Debug, Clone, Copy)]
+struct RepeatUndo {
+    last_position: usize,
+    count: u32,
+    slot_and_stalled: u32,
+}
+
+const REPEAT_UNDO_STALLED: u32 = 1 << 31;
+
+impl RepeatUndo {
+    fn new(slot: VmSlot, state: RepeatState) -> Self {
+        debug_assert!(slot < REPEAT_UNDO_STALLED);
+        Self {
+            last_position: state.last_position,
+            count: state.count,
+            slot_and_stalled: slot
+                | if state.stalled == Stall::Stalled {
+                    REPEAT_UNDO_STALLED
+                } else {
+                    0
+                },
+        }
+    }
+
+    fn slot(self) -> usize {
+        arena_index(self.slot_and_stalled & !REPEAT_UNDO_STALLED)
+    }
+
+    fn state(self) -> RepeatState {
+        RepeatState {
+            count: self.count,
+            last_position: self.last_position,
+            stalled: if self.slot_and_stalled & REPEAT_UNDO_STALLED != 0 {
+                Stall::Stalled
+            } else {
+                Stall::Advanced
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -960,6 +1020,7 @@ const _: () = {
     assert!(std::mem::size_of::<AssertionFrame>() == 64);
     assert!(std::mem::size_of::<CallFrame>() == 8);
     assert!(std::mem::size_of::<RepeatState>() == 16);
+    assert!(std::mem::size_of::<RepeatUndo>() == 16);
     assert!(std::mem::size_of::<ResumeAction>() == 8);
     assert!(std::mem::size_of::<AssertDirection>() == 8);
 };
@@ -972,7 +1033,7 @@ pub(crate) struct BytecodeScratch {
     assertions: Vec<AssertionFrame>,
     repeats: Vec<RepeatState>,
     captures: Vec<CaptureState>,
-    repeat_undo: Vec<(VmSlot, RepeatState)>,
+    repeat_undo: Vec<RepeatUndo>,
     capture_undo: Vec<(VmSlot, CaptureState)>,
     calls: Vec<CallFrame>,
     call_depth: u32,
@@ -1417,7 +1478,7 @@ impl Program {
                         RepeatState {
                             count: 0,
                             last_position: position,
-                            stalled: false,
+                            stalled: Stall::Advanced,
                         },
                     );
                     pc = *next;
@@ -1433,7 +1494,7 @@ impl Program {
                     let count = repeat.count;
                     let can_exit = count >= bounds.min;
                     let can_repeat = bounds.max().is_none_or(|max| count < max)
-                        && (!repeat.stalled || count < bounds.min);
+                        && (repeat.stalled == Stall::Advanced || count < bounds.min);
                     match (can_repeat, can_exit, greedy) {
                         (true, true, true) => {
                             scratch.backtrack.push(backtrack_frame(
@@ -1470,7 +1531,7 @@ impl Program {
                     let index = arena_index(*slot);
                     if scratch.repeats[index].last_position == position {
                         let mut value = scratch.repeats[index];
-                        value.stalled = true;
+                        value.stalled = Stall::Stalled;
                         set_repeat(scratch, *slot, value);
                     }
                     pc = *repeat;
@@ -1862,7 +1923,7 @@ impl BytecodeScratch {
 fn set_repeat(scratch: &mut BytecodeScratch, slot: VmSlot, value: RepeatState) {
     let index = arena_index(slot);
     let old = scratch.repeats[index];
-    scratch.repeat_undo.push((slot, old));
+    scratch.repeat_undo.push(RepeatUndo::new(slot, old));
     scratch.repeats[index] = value;
 }
 
@@ -1876,14 +1937,14 @@ fn enter_repeat(scratch: &mut BytecodeScratch, slot: VmSlot, position: usize) {
     let mut value = scratch.repeats[arena_index(slot)];
     value.count = value.count.saturating_add(1);
     value.last_position = position;
-    value.stalled = false;
+    value.stalled = Stall::Advanced;
     set_repeat(scratch, slot, value);
 }
 
 fn undo_repeats_to(scratch: &mut BytecodeScratch, mark: u32) {
     while scratch.repeat_undo.len() > arena_index(mark) {
-        let (slot, value) = scratch.repeat_undo.pop().expect("repeat undo above mark");
-        scratch.repeats[arena_index(slot)] = value;
+        let undo = scratch.repeat_undo.pop().expect("repeat undo above mark");
+        scratch.repeats[undo.slot()] = undo.state();
     }
 }
 
