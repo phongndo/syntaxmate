@@ -710,8 +710,12 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             (mask, mask)
         }
         ClassAtom::Posix { name, negated } => {
-            let contains = super::backtrack::posix_class_predicate(name);
-            let mask = ascii_predicate_mask(|ch| contains(ch) != *negated);
+            let mask = posix_ascii_mask(name);
+            let mask = if *negated {
+                ascii_mask_complement(mask)
+            } else {
+                mask
+            };
             (mask, mask)
         }
         ClassAtom::Unicode { name, negated } => {
@@ -819,6 +823,50 @@ const ASCII_WORD_MASK: AsciiMask = ascii_mask_union(
     ascii_mask_union(ASCII_DIGIT_MASK, ascii_range_mask(b'_', b'_')),
     ascii_mask_union(ascii_range_mask(b'A', b'Z'), ascii_range_mask(b'a', b'z')),
 );
+const ASCII_ALPHA_MASK: AsciiMask =
+    ascii_mask_union(ascii_range_mask(b'A', b'Z'), ascii_range_mask(b'a', b'z'));
+const ASCII_CONTROL_MASK: AsciiMask =
+    ascii_mask_union(ascii_range_mask(0, 0x1f), ascii_range_mask(0x7f, 0x7f));
+/// ASCII members of each POSIX bracket class, in the order and with the
+/// predicates of `backtrack::posix_class_predicate`.
+const POSIX_ASCII_MASKS: [(&str, AsciiMask); 14] = [
+    (
+        "alnum",
+        ascii_mask_union(ASCII_ALPHA_MASK, ASCII_DIGIT_MASK),
+    ),
+    ("alpha", ASCII_ALPHA_MASK),
+    ("ascii", [u64::MAX; 2]),
+    (
+        "blank",
+        ascii_mask_union(ascii_range_mask(b'\t', b'\t'), ascii_range_mask(b' ', b' ')),
+    ),
+    ("cntrl", ASCII_CONTROL_MASK),
+    ("digit", ASCII_DIGIT_MASK),
+    ("graph", ascii_range_mask(b'!', b'~')),
+    ("lower", ascii_range_mask(b'a', b'z')),
+    ("print", ascii_range_mask(b' ', b'~')),
+    (
+        "punct",
+        ascii_mask_union(
+            ascii_mask_union(ascii_range_mask(b'!', b'/'), ascii_range_mask(b':', b'@')),
+            ascii_mask_union(ascii_range_mask(b'[', b'`'), ascii_range_mask(b'{', b'~')),
+        ),
+    ),
+    ("space", ASCII_SPACE_MASK),
+    ("upper", ascii_range_mask(b'A', b'Z')),
+    ("word", ASCII_WORD_MASK),
+    ("xdigit", ASCII_HEX_DIGIT_MASK),
+];
+
+/// ASCII members of a POSIX class, resolving names like
+/// `posix_class_predicate`: unknown names match nothing.
+fn posix_ascii_mask(name: &str) -> AsciiMask {
+    POSIX_ASCII_MASKS
+        .iter()
+        .find(|(class, _)| class.eq_ignore_ascii_case(name))
+        .map_or([0; 2], |(_, mask)| *mask)
+}
+
 const ASCII_VERTICAL_SPACE_MASK: AsciiMask = ascii_mask_union(
     ascii_range_mask(b'\n', b'\x0c'),
     ascii_range_mask(b'\r', b'\r'),
@@ -3781,6 +3829,23 @@ mod tests {
                 "{kind:?}"
             );
         }
+    }
+
+    #[test]
+    fn posix_ascii_masks_match_the_predicates() {
+        for (name, mask) in POSIX_ASCII_MASKS {
+            for spelling in [name.to_owned(), name.to_ascii_uppercase()] {
+                let contains = super::super::backtrack::posix_class_predicate(&spelling);
+                assert_eq!(
+                    posix_ascii_mask(&spelling),
+                    ascii_predicate_mask(contains),
+                    "{spelling}"
+                );
+            }
+            assert_eq!(posix_ascii_mask(name), mask);
+        }
+        let unknown = super::super::backtrack::posix_class_predicate("nope");
+        assert_eq!(posix_ascii_mask("nope"), ascii_predicate_mask(unknown));
     }
 
     #[test]
