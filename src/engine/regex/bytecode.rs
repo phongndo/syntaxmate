@@ -984,6 +984,9 @@ pub(crate) struct BytecodeScratch {
     line_len: usize,
     line_is_ascii: bool,
     line_block_comment: Option<bool>,
+    /// Bumped whenever the line identity changes; keys per-line memos.
+    line_generation: u64,
+    exhausted_entries: super::dfa::ExhaustedEntryMemo,
 }
 
 impl BytecodeScratch {
@@ -993,6 +996,16 @@ impl BytecodeScratch {
         self.line_len = line.len();
         self.line_is_ascii = line.is_ascii();
         self.line_block_comment = None;
+        self.line_generation = self.line_generation.wrapping_add(1).max(1);
+    }
+
+    pub(crate) fn line_generation(&mut self, line: &str) -> u64 {
+        self.refresh_line_identity(line);
+        self.line_generation
+    }
+
+    pub(crate) fn exhausted_entries(&mut self) -> &mut super::dfa::ExhaustedEntryMemo {
+        &mut self.exhausted_entries
     }
 
     pub(crate) fn line_is_ascii(&mut self, line: &str) -> bool {
@@ -1016,6 +1029,7 @@ impl BytecodeScratch {
             self.line_len = line.len();
             self.line_is_ascii = line.is_ascii();
             self.line_block_comment = None;
+            self.line_generation = self.line_generation.wrapping_add(1).max(1);
         }
     }
 

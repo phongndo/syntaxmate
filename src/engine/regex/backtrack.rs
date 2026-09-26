@@ -526,9 +526,12 @@ impl FallbackMatcher {
         start: usize,
         scratch: &mut BytecodeScratch,
     ) -> bool {
-        scratch
-            .prefilter_cursors()
-            .may_match(self.prefilter_slot(), self.parsed.prefilter(), line, start)
+        scratch.prefilter_cursors().may_match(
+            self.prefilter_slot(),
+            self.parsed.prefilter(),
+            line,
+            start,
+        )
     }
 
     fn bytecode(&self) -> Option<&Program> {
