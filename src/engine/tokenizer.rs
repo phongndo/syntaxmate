@@ -4303,40 +4303,10 @@ impl TextMateTokenizer {
                 outcome
             };
         let source = CandidateSourceKey::for_state(self.root, state);
-        let blueprint_key = CandidateBlueprintKey {
-            source: source.clone(),
-            injection_outcome: injection_outcome_id,
-        };
         let blueprint =
-            if let Some(blueprint) = self.candidate_blueprint_cache.get(&blueprint_key).cloned() {
-                blueprint
-            } else {
-                let prepared = self.prepared_blueprint_key(
-                    source,
-                    injection_outcome_id,
-                    injection_outcome.as_ref(),
-                );
-                let blueprint = match prepared {
-                    Some((cache, key)) => {
-                        let shared = cache.get_or_insert_with(key, || {
-                            let candidates = self.candidates_for_state(state, &injection_outcome);
-                            self.build_shareable_candidate_blueprint(candidates)
-                        });
-                        self.bind_shared_candidate_blueprint(shared)
-                    }
-                    None => {
-                        let candidates = self.candidates_for_state(state, &injection_outcome);
-                        let owned = self.build_candidate_blueprint(candidates);
-                        self.bind_owned_candidate_blueprint(owned)
-                    }
-                };
-                if self.candidate_blueprint_cache.len() >= MAX_CANDIDATE_BLUEPRINTS {
-                    self.candidate_blueprint_cache.clear();
-                }
-                self.candidate_blueprint_cache
-                    .insert(blueprint_key, blueprint.clone());
-                blueprint
-            };
+            self.candidate_blueprint(source, injection_outcome_id, &injection_outcome, |this| {
+                this.candidates_for_state(state, &injection_outcome)
+            });
         let candidate_set = Arc::new(CandidateSet {
             blueprint,
             active_stack_id,
@@ -4349,29 +4319,50 @@ impl TextMateTokenizer {
         candidate_set
     }
 
-    fn build_candidate_set(
+    /// Bound blueprint for one candidate source under one injection outcome.
+    ///
+    /// Candidates are a pure function of that pair, so every state and
+    /// capture retokenization that reaches it shares one blueprint (and its
+    /// compiled pattern set) for this tokenizer's lifetime.
+    fn candidate_blueprint(
         &mut self,
-        prepared: Option<(Arc<PreparedBlueprintCache>, PreparedBlueprintKey)>,
-        active_stack_id: ScopeStackId,
-        end_stack_id: ScopeStackId,
+        source: CandidateSourceKey,
+        injection_outcome_id: InjectionOutcomeId,
+        injection_outcome: &Arc<InjectionOutcome>,
         candidates: impl FnOnce(&mut Self) -> Vec<Candidate>,
-    ) -> CandidateSet {
-        let blueprint = if let Some((cache, key)) = prepared {
-            let shared = cache.get_or_insert_with(key, || {
-                let candidates = candidates(self);
-                self.build_shareable_candidate_blueprint(candidates)
-            });
-            self.bind_shared_candidate_blueprint(shared)
-        } else {
-            let candidates = candidates(self);
-            let blueprint = self.build_candidate_blueprint(candidates);
-            self.bind_owned_candidate_blueprint(blueprint)
+    ) -> BoundCandidateBlueprint {
+        let blueprint_key = CandidateBlueprintKey {
+            source,
+            injection_outcome: injection_outcome_id,
         };
-        CandidateSet {
-            blueprint,
-            active_stack_id,
-            end_stack_id,
+        if let Some(blueprint) = self.candidate_blueprint_cache.get(&blueprint_key) {
+            return blueprint.clone();
         }
+        let prepared = self.prepared_blueprint_key(
+            blueprint_key.source.clone(),
+            injection_outcome_id,
+            injection_outcome.as_ref(),
+        );
+        let blueprint = match prepared {
+            Some((cache, key)) => {
+                let shared = cache.get_or_insert_with(key, || {
+                    let candidates = candidates(self);
+                    self.build_shareable_candidate_blueprint(candidates)
+                });
+                self.bind_shared_candidate_blueprint(shared)
+            }
+            None => {
+                let candidates = candidates(self);
+                let owned = self.build_candidate_blueprint(candidates);
+                self.bind_owned_candidate_blueprint(owned)
+            }
+        };
+        if self.candidate_blueprint_cache.len() >= MAX_CANDIDATE_BLUEPRINTS {
+            self.candidate_blueprint_cache.clear();
+        }
+        self.candidate_blueprint_cache
+            .insert(blueprint_key, blueprint.clone());
+        blueprint
     }
 
     fn bind_owned_candidate_blueprint(
@@ -5585,15 +5576,10 @@ impl TextMateTokenizer {
                             patterns: Arc::from(patterns),
                             compound_patterns,
                         };
-                        let prepared = self.prepared_blueprint_key(
+                        let blueprint = self.candidate_blueprint(
                             source,
                             injection_outcome_id,
-                            injection_outcome.as_ref(),
-                        );
-                        self.build_candidate_set(
-                            prepared,
-                            base_stack_id,
-                            base_stack_id,
+                            &injection_outcome,
                             |tokenizer| {
                                 let mut candidates = Vec::new();
                                 let mut order = 0usize;
@@ -5608,7 +5594,12 @@ impl TextMateTokenizer {
                                 );
                                 candidates
                             },
-                        )
+                        );
+                        CandidateSet {
+                            blueprint,
+                            active_stack_id: base_stack_id,
+                            end_stack_id: base_stack_id,
+                        }
                     } else {
                         let stacks = self.current_scope_stack_ids(&state, Some(base_stack_id));
                         let (injection_outcome_id, injection_outcome) =
@@ -5620,17 +5611,17 @@ impl TextMateTokenizer {
                                 self.injection_outcome(active_scopes.as_ref())
                             };
                         let source = CandidateSourceKey::for_state(self.root, &state);
-                        let prepared = self.prepared_blueprint_key(
+                        let blueprint = self.candidate_blueprint(
                             source,
                             injection_outcome_id,
-                            injection_outcome.as_ref(),
-                        );
-                        self.build_candidate_set(
-                            prepared,
-                            stacks.active_stack_id,
-                            stacks.end_stack_id,
+                            &injection_outcome,
                             |tokenizer| tokenizer.candidates_for_state(&state, &injection_outcome),
-                        )
+                        );
+                        CandidateSet {
+                            blueprint,
+                            active_stack_id: stacks.active_stack_id,
+                            end_stack_id: stacks.end_stack_id,
+                        }
                     };
                     let candidate_set = Arc::new(candidate_set);
                     if self.inline_candidate_cache.len() >= MAX_INLINE_CANDIDATE_SETS {
@@ -9918,6 +9909,62 @@ mod tests {
         let counters = tokenizer.counters();
         assert_eq!(counters.regex_compile_count, 2, "{counters:#?}");
         assert_eq!(counters.pattern_set_construction_count, 2, "{counters:#?}");
+    }
+
+    #[test]
+    fn capture_retokenization_shares_blueprints_across_outer_scopes() {
+        let grammar = r##"{
+            "scopeName": "source.inline-share",
+            "patterns": [
+                {"begin":"<", "end":">", "name":"meta.angle.inline-share",
+                 "patterns":[{"include":"#pair"}]},
+                {"begin":"\\[", "end":"\\]", "name":"meta.square.inline-share",
+                 "patterns":[{"include":"#pair"}]}
+            ],
+            "repository": {
+                "pair": {
+                    "match":"(\\w+)=(\\w+)",
+                    "captures": {
+                        "1": {"patterns":[{"include":"#word"}]},
+                        "2": {"patterns":[{"include":"#word"}]}
+                    }
+                },
+                "word": {"patterns":[
+                    {"match":"[a-z]+", "name":"word.lower.inline-share"},
+                    {"match":"[0-9]+", "name":"word.digit.inline-share"}
+                ]}
+            }
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        tokenizer.set_counters_enabled(true);
+        let line = tokenizer.tokenize_line_scopes("<a=1> [b=2]", TokenizerState::default());
+        let scopes_at = |text: &str| {
+            line.tokens
+                .iter()
+                .find(|token| &"<a=1> [b=2]"[token.range.clone()] == text)
+                .map(|token| token.scopes.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            scopes_at("a"),
+            [
+                "source.inline-share",
+                "meta.angle.inline-share",
+                "word.lower.inline-share"
+            ]
+        );
+        assert_eq!(
+            scopes_at("2"),
+            [
+                "source.inline-share",
+                "meta.square.inline-share",
+                "word.digit.inline-share"
+            ]
+        );
+        // Root, the two containers, and one capture set shared by all four
+        // captures even though they retokenize under different outer scopes.
+        let counters = tokenizer.counters();
+        assert_eq!(counters.pattern_set_construction_count, 4, "{counters:#?}");
     }
 
     #[test]
