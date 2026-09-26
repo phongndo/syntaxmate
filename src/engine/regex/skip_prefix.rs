@@ -402,17 +402,7 @@ impl PrefixWalk {
                 }
                 Some(_) => self.token(path, None),
             },
-            Ast::Class(class) => {
-                // Case-insensitive ranges fold their bounds, which can admit
-                // non-letters that ASCII case-pair expansion would miss.
-                let folded_range = self.case_folding
-                    && class
-                        .atoms
-                        .iter()
-                        .any(|atom| matches!(atom, ClassAtom::Range(..)));
-                let bytes = (!folded_range).then(|| class_start_bytes(class)).flatten();
-                self.token(path, bytes.as_ref())
-            }
+            Ast::Class(class) => self.token(path, class_start_bytes(class).as_ref()),
             Ast::Dot | Ast::Grapheme => self.token(path, None),
             Ast::Concat(nodes) => {
                 let mut path = path;

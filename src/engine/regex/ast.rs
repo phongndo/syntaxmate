@@ -124,6 +124,9 @@ pub enum ClassAtom {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CharClass {
     pub negated: bool,
+    /// Written in brackets. Oniguruma folds case for bracketed classes as a
+    /// whole but leaves escapes such as `\p{Lu}` and `\w` unfolded.
+    pub bracketed: bool,
     /// Additional union terms intersected with `atoms` by Oniguruma's `&&`
     /// operator. Each inner vector is a union, so `[ab&&bc&&cd]` is stored as
     /// `ab AND bc AND cd`.
@@ -1170,7 +1173,10 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_body_inner(&mut self) -> CharClass {
-        let mut class = CharClass::default();
+        let mut class = CharClass {
+            bracketed: true,
+            ..CharClass::default()
+        };
         if self.peek() == Some('^') {
             self.bump();
             class.negated = true;
@@ -1312,6 +1318,7 @@ impl<'a> Parser<'a> {
                 match chars.as_deref() {
                     Some([ch]) => ClassAtom::Char(*ch),
                     Some(chars) if !chars.is_empty() => ClassAtom::Nested(Box::new(CharClass {
+                        bracketed: true,
                         negated: false,
                         intersections: Vec::new(),
                         atoms: chars.iter().copied().map(ClassAtom::Char).collect(),
@@ -1345,56 +1352,67 @@ impl<'a> Parser<'a> {
             'b' if !in_class => Ast::Anchor(AnchorKind::WordBoundary),
             'B' if !in_class => Ast::Anchor(AnchorKind::NotWordBoundary),
             'd' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Digit)],
             }),
             'D' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotDigit)],
             }),
             's' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Space)],
             }),
             'S' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotSpace)],
             }),
             'w' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Word)],
             }),
             'W' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotWord)],
             }),
             'h' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::HorizontalSpace)],
             }),
             'H' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotHorizontalSpace)],
             }),
             'v' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::VerticalSpace)],
             }),
             'V' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotVerticalSpace)],
             }),
             'N' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotNewline)],
@@ -1406,6 +1424,7 @@ impl<'a> Parser<'a> {
                 self.expect('}');
                 self.features.unicode_or_posix_class = true;
                 Ast::Class(CharClass {
+                    bracketed: false,
                     negated: false,
                     intersections: Vec::new(),
                     atoms: vec![ClassAtom::Unicode {
@@ -1473,6 +1492,7 @@ impl<'a> Parser<'a> {
             'R' => Ast::Alternation(vec![
                 Ast::Literal("\r\n".into()),
                 Ast::Class(CharClass {
+                    bracketed: false,
                     negated: false,
                     intersections: Vec::new(),
                     atoms: vec![
@@ -1903,6 +1923,7 @@ mod tests {
         assert_eq!(
             parsed.ast,
             Ast::Class(CharClass {
+                bracketed: true,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![
@@ -1927,6 +1948,7 @@ mod tests {
         assert_eq!(
             class.atoms[2],
             ClassAtom::Nested(Box::new(CharClass {
+                bracketed: true,
                 negated: true,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Range('\0', '\u{7f}')],
@@ -2116,9 +2138,11 @@ mod tests {
             parse("[é&&[^ß]x]y").ast,
             Ast::Concat(vec![
                 Ast::Class(CharClass {
+                    bracketed: true,
                     negated: false,
                     intersections: vec![vec![
                         ClassAtom::Nested(Box::new(CharClass {
+                            bracketed: true,
                             negated: true,
                             intersections: Vec::new(),
                             atoms: vec![ClassAtom::Char('ß')],

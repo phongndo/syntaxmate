@@ -9,9 +9,9 @@ use super::ast::{
     Ast, Backref, CharClass, ClassAtom, LookKind, ParsedRegex, PerlClassKind, RegexFlags,
 };
 use super::backtrack::{
-    BudgetExceeded, CaseFoldKey, FoldedClass, StepBudget, anchor_matches, char_at, class_contains,
-    is_cpp_space_comment_separator, literal_byte_width, match_literal_end, previous_char,
-    unicode_case_eq,
+    BudgetExceeded, CaseFoldKey, StepBudget, anchor_matches, char_at, class_contains,
+    class_positive_contains, is_cpp_space_comment_separator, literal_byte_width, match_literal_end,
+    previous_char, unicode_case_eq,
 };
 use super::{AnchorContext, is_unicode_word_char};
 use std::{
@@ -506,9 +506,6 @@ pub(crate) struct CompiledClass {
     pub(crate) source: CharClass,
     ascii_sensitive: [u64; 2],
     ascii_insensitive: [u64; 2],
-    /// Case-insensitive evaluator for non-ASCII probes, prepared only when a
-    /// case-insensitive instruction uses the class.
-    folded: Option<FoldedClass>,
 }
 
 impl CompiledClass {
@@ -527,17 +524,13 @@ impl CompiledClass {
             source,
             ascii_sensitive,
             ascii_insensitive,
-            folded: None,
         }
     }
 
     /// Membership of a non-ASCII scalar under `flags`.
     #[inline]
     fn matches_char(&self, ch: char, flags: RegexFlags) -> bool {
-        match &self.folded {
-            Some(folded) if flags.case_insensitive => folded.contains(ch),
-            _ => class_contains(&self.source, ch, flags),
-        }
+        class_contains(&self.source, ch, flags)
     }
 
     #[inline]
@@ -783,117 +776,85 @@ fn ascii_mask_set(mask: &mut AsciiMask, byte: u8) {
 /// Exact ASCII membership bitmaps (case-sensitive, case-insensitive) for a
 /// class, mirroring `class_contains` on `0..=127`.
 pub(crate) fn ascii_class_masks(class: &CharClass) -> (AsciiMask, AsciiMask) {
-    let (mut sensitive, mut insensitive) = ascii_union_masks(&class.atoms);
-    for union in &class.intersections {
-        let (term_sensitive, term_insensitive) = ascii_union_masks(union);
-        sensitive[0] &= term_sensitive[0];
-        sensitive[1] &= term_sensitive[1];
-        insensitive[0] &= term_insensitive[0];
-        insensitive[1] &= term_insensitive[1];
+    let positive = ascii_positive_mask(class);
+    if !class.bracketed {
+        let mask = if class.negated {
+            ascii_mask_complement(positive)
+        } else {
+            positive
+        };
+        return (mask, mask);
+    }
+    // Folding admits a probe when a case variant is in the literal set: its
+    // other-case letter, or the Kelvin sign and long s for `k` and `s`.
+    let mut folded = [
+        // Word 0 holds no letters.
+        positive[0],
+        // 'a'..='z' sit exactly 32 bits above 'A'..='Z' in word 1.
+        positive[1]
+            | ((positive[1] & ASCII_LOWER_MASK[1]) >> 32)
+            | ((positive[1] & ASCII_UPPER_MASK[1]) << 32),
+    ];
+    for (variant, letter) in [('\u{212a}', b'k'), ('\u{17f}', b's')] {
+        if class_positive_contains(class, variant) {
+            ascii_mask_set(&mut folded, letter);
+            ascii_mask_set(&mut folded, letter.to_ascii_uppercase());
+        }
     }
     if class.negated {
-        // Negation is exact within the ASCII range: membership of an ASCII
-        // character depends only on the (complete) positive masks.
-        sensitive = [!sensitive[0], !sensitive[1]];
-        insensitive = [!insensitive[0], !insensitive[1]];
+        (
+            ascii_mask_complement(positive),
+            ascii_mask_complement(folded),
+        )
+    } else {
+        (positive, folded)
     }
-    (sensitive, insensitive)
 }
 
-fn ascii_union_masks(atoms: &[ClassAtom]) -> (AsciiMask, AsciiMask) {
-    let mut sensitive = [0u64; 2];
-    let mut insensitive = [0u64; 2];
-    for atom in atoms {
-        let (atom_sensitive, atom_insensitive) = ascii_atom_masks(atom);
-        sensitive[0] |= atom_sensitive[0];
-        sensitive[1] |= atom_sensitive[1];
-        insensitive[0] |= atom_insensitive[0];
-        insensitive[1] |= atom_insensitive[1];
-    }
-    (sensitive, insensitive)
+/// Case-sensitive ASCII members of `class` ignoring its top-level negation.
+fn ascii_positive_mask(class: &CharClass) -> AsciiMask {
+    let union = |atoms: &[ClassAtom]| {
+        atoms
+            .iter()
+            .map(ascii_atom_mask)
+            .fold([0u64; 2], |mask, atom| {
+                [mask[0] | atom[0], mask[1] | atom[1]]
+            })
+    };
+    class
+        .intersections
+        .iter()
+        .fold(union(&class.atoms), |mask, atoms| {
+            let term = union(atoms);
+            [mask[0] & term[0], mask[1] & term[1]]
+        })
 }
 
-fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
+fn ascii_atom_mask(atom: &ClassAtom) -> AsciiMask {
     match atom {
         ClassAtom::Char(ch) if ch.is_ascii() => {
-            let byte = *ch as u8;
-            let mut sensitive = [0u64; 2];
-            ascii_mask_set(&mut sensitive, byte);
-            let mut insensitive = sensitive;
-            ascii_mask_set(&mut insensitive, byte.to_ascii_lowercase());
-            ascii_mask_set(&mut insensitive, byte.to_ascii_uppercase());
-            (sensitive, insensitive)
+            let mut mask = [0u64; 2];
+            ascii_mask_set(&mut mask, *ch as u8);
+            mask
         }
-        ClassAtom::Range(start, end) => {
-            // The ASCII probes a range covers directly: its part below 0x80.
-            let sensitive = if start.is_ascii() {
-                ascii_bounded_range_mask(*start as u8, (*end).min('\x7f') as u8)
-            } else {
-                [0; 2]
-            };
-            // A probe also matches when a case variant lies in the range: its
-            // other-case letter, or the Kelvin sign and long s for `k` and `s`
-            // (see `case_fold::range_contains_ignore_case`).
-            let mut insensitive = [
-                // Word 0 holds no letters.
-                sensitive[0],
-                // 'a'..='z' sit exactly 32 bits above 'A'..='Z' in word 1.
-                sensitive[1]
-                    | ((sensitive[1] & ASCII_LOWER_MASK[1]) >> 32)
-                    | ((sensitive[1] & ASCII_UPPER_MASK[1]) << 32),
-            ];
-            for (variant, letter) in [('\u{212a}', b'k'), ('\u{17f}', b's')] {
-                if (*start..=*end).contains(&variant) {
-                    ascii_mask_set(&mut insensitive, letter);
-                    ascii_mask_set(&mut insensitive, letter.to_ascii_uppercase());
-                }
-            }
-            (sensitive, insensitive)
+        ClassAtom::Char(_) => [0; 2],
+        ClassAtom::Range(start, end) if start.is_ascii() => {
+            ascii_bounded_range_mask(*start as u8, (*end).min('\x7f') as u8)
         }
-        // Perl, POSIX, and Unicode-property atoms ignore the case flag, so
-        // one cheap per-character pass fills both masks without any Unicode
-        // case conversion.
-        ClassAtom::Perl(kind) => {
-            let mask = perl_ascii_mask(*kind);
-            (mask, mask)
-        }
+        ClassAtom::Range(..) => [0; 2],
+        ClassAtom::Perl(kind) => perl_ascii_mask(*kind),
         ClassAtom::Posix { name, negated } => {
             let mask = posix_ascii_mask(name);
-            let mask = if *negated {
+            if *negated {
                 ascii_mask_complement(mask)
             } else {
                 mask
-            };
-            (mask, mask)
-        }
-        ClassAtom::Unicode { name, negated } => {
-            let mask = ascii_predicate_mask(|ch| {
-                super::backtrack::unicode_class_contains(name, ch) != *negated
-            });
-            (mask, mask)
-        }
-        ClassAtom::Nested(class) => ascii_class_masks(class),
-        // A non-ASCII scalar never equals an ASCII one, and under
-        // `unicode_case_eq` it matches an ASCII probe only through a
-        // single-scalar ASCII lower- or uppercase mapping (e.g. the Kelvin
-        // sign). Derive those few probes from its two case maps instead of
-        // evaluating the Unicode fold against all 128 ASCII scalars.
-        ClassAtom::Char(expected) => {
-            let mut insensitive = [0u64; 2];
-            if *expected != '\u{131}' {
-                if let Some(lower) = single_ascii_mapping(expected.to_lowercase()) {
-                    ascii_mask_set_where(&mut insensitive, |byte| {
-                        byte.to_ascii_lowercase() == lower
-                    });
-                }
-                if let Some(upper) = single_ascii_mapping(expected.to_uppercase()) {
-                    ascii_mask_set_where(&mut insensitive, |byte| {
-                        byte.to_ascii_uppercase() == upper
-                    });
-                }
             }
-            ([0u64; 2], insensitive)
         }
+        ClassAtom::Unicode { name, negated } => ascii_predicate_mask(|ch| {
+            super::backtrack::unicode_class_contains(name, ch) != *negated
+        }),
+        ClassAtom::Nested(class) => ascii_class_masks(class).0,
     }
 }
 
@@ -2800,7 +2761,7 @@ impl<'a> Compiler<'a> {
                 next,
             }),
             Ast::Class(class) => {
-                let id = self.intern_class(class, flags)?;
+                let id = self.intern_class(class)?;
                 self.push(Instruction::Class {
                     id,
                     flags: flags.into(),
@@ -3271,7 +3232,7 @@ impl<'a> Compiler<'a> {
                 Some((ScanNode::Literal(id), flags))
             }
             Ast::Class(class) => {
-                let id = self.intern_class(class, flags).ok()?;
+                let id = self.intern_class(class).ok()?;
                 Some((ScanNode::Class(id), flags))
             }
             Ast::Dot => Some((ScanNode::Any, flags)),
@@ -3456,11 +3417,7 @@ impl<'a> Compiler<'a> {
         Ok(id)
     }
 
-    fn intern_class(
-        &mut self,
-        class: &CharClass,
-        flags: RegexFlags,
-    ) -> Result<ClassId, CompileError> {
+    fn intern_class(&mut self, class: &CharClass) -> Result<ClassId, CompileError> {
         let index = match self.classes.iter().position(|value| value.source == *class) {
             Some(index) => index,
             None => {
@@ -3468,9 +3425,6 @@ impl<'a> Compiler<'a> {
                 self.classes.len() - 1
             }
         };
-        if flags.case_insensitive && self.classes[index].folded.is_none() {
-            self.classes[index].folded = Some(FoldedClass::new(class));
-        }
         u32::try_from(index)
             .map(ClassId)
             .map_err(|_| CompileError::TableOverflow)
@@ -4444,6 +4398,7 @@ mod tests {
         for low in 0u8..128 {
             for high in 0u8..128 {
                 let class = CharClass {
+                    bracketed: true,
                     negated: false,
                     intersections: Vec::new(),
                     atoms: vec![ClassAtom::Range(low as char, high as char)],

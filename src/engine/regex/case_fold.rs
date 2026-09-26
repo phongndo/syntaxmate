@@ -1,9 +1,9 @@
-//! Case-insensitive membership for class ranges.
+//! Case variants for case-insensitive character classes.
 //!
-//! Oniguruma adds every case variant of a class's members, so under `(?i)` a
-//! scalar matches `[a-{]` when it or one of its variants lies in the literal
-//! range: `A` matches, `\` does not. Variants are the scalars that
-//! `unicode_case_eq` equates with the probe.
+//! Oniguruma folds a bracketed class by adding the case variants of its
+//! members, so under `(?i)` a scalar matches `[a-{]` when it or one of its
+//! variants lies in the literal set: `A` matches, `\` does not. Variants are
+//! the scalars that `unicode_case_eq` equates with the probe.
 
 /// Case variants other than a probe's single-scalar lower- and uppercase
 /// mappings (the Kelvin sign for `k`, final sigma for `σ`), sorted by probe.
@@ -53,7 +53,7 @@ const CASE_PARTNERS: &[(char, char)] = &[
 ];
 
 /// Scalars that `unicode_case_eq` equates with one probe, including the
-/// probe itself. Compute once per probe when testing several ranges.
+/// probe itself.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CaseVariants {
     // The probe, its two case mappings, and at most two table partners.
@@ -62,80 +62,61 @@ pub(crate) struct CaseVariants {
 }
 
 impl CaseVariants {
+    #[inline]
     pub(crate) fn new(ch: char) -> Self {
-        Self::from_mappings(ch, single(ch.to_lowercase()), single(ch.to_uppercase()))
+        if ch.is_ascii() {
+            // Besides the other ASCII case, only `k` and `s` have variants:
+            // the Kelvin sign and long s.
+            let mut this = Self {
+                variants: [ch; 5],
+                len: 1,
+            };
+            if ch.is_ascii_alphabetic() {
+                this.push((ch as u8 ^ 0x20) as char);
+                match ch.to_ascii_lowercase() {
+                    'k' => this.push('\u{212a}'),
+                    's' => this.push('\u{17f}'),
+                    _ => {}
+                }
+            }
+            return this;
+        }
+        Self::from_tables(ch)
     }
 
-    /// Variants of `ch` given its single-scalar lower- and uppercase
-    /// mappings, `None` where the mapping has several scalars.
-    pub(crate) fn from_mappings(ch: char, lower: Option<char>, upper: Option<char>) -> Self {
+    fn from_tables(ch: char) -> Self {
         let mut this = Self {
             variants: [ch; 5],
             len: 1,
         };
-        let mut push = |variant: char| {
-            this.variants[usize::from(this.len)] = variant;
-            this.len += 1;
-        };
         // Oniguruma's default fold keeps dotless i out of the I/i class.
         if ch != '\u{131}' {
-            lower.into_iter().chain(upper).for_each(&mut push);
+            for mapped in [single(ch.to_lowercase()), single(ch.to_uppercase())]
+                .into_iter()
+                .flatten()
+            {
+                this.push(mapped);
+            }
         }
         let first = CASE_PARTNERS.partition_point(|(probe, _)| *probe < ch);
-        CASE_PARTNERS[first..]
+        for (_, partner) in CASE_PARTNERS[first..]
             .iter()
             .take_while(|(probe, _)| *probe == ch)
-            .for_each(|(_, partner)| push(*partner));
+        {
+            this.push(*partner);
+        }
         this
+    }
+
+    fn push(&mut self, variant: char) {
+        self.variants[usize::from(self.len)] = variant;
+        self.len += 1;
     }
 
     /// May repeat a scalar.
     pub(crate) fn iter(&self) -> impl Iterator<Item = char> + '_ {
         self.variants[..usize::from(self.len)].iter().copied()
     }
-
-    pub(crate) fn any_in(&self, start: char, end: char) -> bool {
-        self.iter()
-            .any(|variant| start <= variant && variant <= end)
-    }
-}
-
-/// Whether `ch` matches the class range `start..=end` case-insensitively.
-#[inline]
-pub(crate) fn range_contains_ignore_case(start: char, end: char, ch: char) -> bool {
-    range_contains_ignore_case_fast(start, end, ch)
-        .unwrap_or_else(|| CaseVariants::new(ch).any_in(start, end))
-}
-
-/// Decides `range_contains_ignore_case` without Unicode case tables where
-/// possible; `None` means the answer needs the probe's `CaseVariants`.
-#[inline]
-pub(crate) fn range_contains_ignore_case_fast(start: char, end: char, ch: char) -> Option<bool> {
-    let within = |candidate: char| start <= candidate && candidate <= end;
-    if within(ch) {
-        return Some(true);
-    }
-    if ch.is_ascii() {
-        // Besides the other ASCII case, only `k` and `s` have variants: the
-        // Kelvin sign and long s.
-        return Some(
-            (ch.is_ascii_alphabetic() && within((ch as u8 ^ 0x20) as char))
-                || match ch.to_ascii_lowercase() {
-                    'k' => within('\u{212a}'),
-                    's' => within('\u{17f}'),
-                    _ => false,
-                },
-        );
-    }
-    if end.is_ascii() {
-        // Only the Kelvin sign and long s have ASCII variants.
-        return Some(match ch {
-            '\u{212a}' => within('k') || within('K'),
-            '\u{17f}' => within('s') || within('S'),
-            _ => false,
-        });
-    }
-    None
 }
 
 fn single(mut mapped: impl Iterator<Item = char>) -> Option<char> {
@@ -184,53 +165,15 @@ mod tests {
     }
 
     #[test]
-    fn ascii_probes_have_only_kelvin_and_long_s_as_non_ascii_variants() {
+    fn ascii_fast_path_matches_the_tables() {
         for ch in (0..=0x7f).map(char::from) {
-            for variant in CaseVariants::new(ch).iter() {
-                assert!(
-                    range_contains_ignore_case(variant, variant, ch),
-                    "{ch:?} and {variant:?}"
-                );
+            let mut fast = CaseVariants::new(ch).iter().collect::<Vec<_>>();
+            let mut tables = CaseVariants::from_tables(ch).iter().collect::<Vec<_>>();
+            for variants in [&mut fast, &mut tables] {
+                variants.sort_unstable();
+                variants.dedup();
             }
-        }
-    }
-
-    #[test]
-    fn only_kelvin_and_long_s_have_ascii_variants() {
-        for ch in (0x80..=0x10_ffff).filter_map(char::from_u32) {
-            for variant in CaseVariants::new(ch).iter().filter(char::is_ascii) {
-                assert!(
-                    range_contains_ignore_case(variant, variant, ch),
-                    "{ch:?} and {variant:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn ranges_match_case_variants_of_their_members() {
-        // Expectations checked against vscode-oniguruma.
-        for (start, end, ch, expected) in [
-            ('a', '{', '\\', false),
-            ('a', '{', '[', false),
-            ('a', '{', '`', false),
-            ('a', '{', 'A', true),
-            ('Z', 'a', '_', true),
-            ('Z', 'a', 'z', true),
-            ('Z', 'a', 'A', true),
-            ('Z', 'a', 'b', false),
-            ('@', 'C', 'c', true),
-            ('@', 'C', 'd', false),
-            ('a', 'z', '\u{212a}', true),
-            ('\u{2100}', '\u{2200}', 'k', true),
-            ('\u{3c3}', '\u{3c3}', '\u{3c2}', true),
-            ('h', 'j', '\u{131}', false),
-        ] {
-            assert_eq!(
-                range_contains_ignore_case(start, end, ch),
-                expected,
-                "[{start:?}-{end:?}] on {ch:?}"
-            );
+            assert_eq!(fast, tables, "{ch:?}");
         }
     }
 }

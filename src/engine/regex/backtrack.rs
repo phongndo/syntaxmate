@@ -9,7 +9,7 @@ use super::ast::{
     PerlClassKind, RegexFlags, parse,
 };
 use super::bytecode::{BytecodeScratch, CompileError, Program};
-use super::case_fold::{CaseVariants, range_contains_ignore_case, range_contains_ignore_case_fast};
+use super::case_fold::CaseVariants;
 use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
 
 pub(crate) const DEFAULT_STEP_BUDGET: usize = 100_000;
@@ -1099,6 +1099,12 @@ pub(crate) struct StartBytes {
 }
 
 pub(crate) fn expand_case_insensitive_start_bytes(bytes: &mut StartByteSet) {
+    // The Kelvin sign (E2 84 AA) and long s (C5 BF) fold to `k` and `s`.
+    for (lead, letter) in [(0xe2, b'k'), (0xc5, b's')] {
+        if bytes.contains(lead) {
+            bytes.insert(letter);
+        }
+    }
     for byte in b'a'..=b'z' {
         if bytes.contains(byte) || bytes.contains(byte.to_ascii_uppercase()) {
             bytes.insert(byte);
@@ -2613,26 +2619,34 @@ fn push_limited(out: &mut VmStates, states: VmStates) {
 }
 
 pub(crate) fn class_contains(class: &CharClass, ch: char, flags: RegexFlags) -> bool {
-    let union_contains =
-        |atoms: &[ClassAtom]| atoms.iter().any(|atom| atom_contains(atom, ch, flags));
-    let matched = union_contains(&class.atoms)
+    let matched = if flags.case_insensitive && class.bracketed {
+        // Oniguruma folds a bracketed class once: it builds the literal set,
+        // nested classes and intersections included, and admits a scalar
+        // when one of its case variants is in that set. Only the top-level
+        // negation applies afterwards.
+        CaseVariants::new(ch)
+            .iter()
+            .any(|variant| class_positive_contains(class, variant))
+    } else {
+        class_positive_contains(class, ch)
+    };
+    matched != class.negated
+}
+
+/// Case-sensitive membership in `class` ignoring its top-level negation.
+pub(crate) fn class_positive_contains(class: &CharClass, ch: char) -> bool {
+    let union_contains = |atoms: &[ClassAtom]| atoms.iter().any(|atom| atom_contains(atom, ch));
+    union_contains(&class.atoms)
         && class
             .intersections
             .iter()
-            .all(|atoms| union_contains(atoms));
-    if class.negated { !matched } else { matched }
+            .all(|atoms| union_contains(atoms))
 }
 
-pub(crate) fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bool {
+fn atom_contains(atom: &ClassAtom, ch: char) -> bool {
     match atom {
-        ClassAtom::Char(expected) => char_eq(*expected, ch, flags),
-        ClassAtom::Range(start, end) => {
-            if flags.case_insensitive {
-                range_contains_ignore_case(*start, *end, ch)
-            } else {
-                start <= &ch && &ch <= end
-            }
-        }
+        ClassAtom::Char(expected) => *expected == ch,
+        ClassAtom::Range(start, end) => start <= &ch && &ch <= end,
         ClassAtom::Perl(kind) => perl_class_contains(*kind, ch),
         ClassAtom::Posix { name, negated } => {
             let contains = posix_class_contains(name, ch);
@@ -2642,7 +2656,7 @@ pub(crate) fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bo
             let contains = unicode_class_contains(name, ch);
             if *negated { !contains } else { contains }
         }
-        ClassAtom::Nested(class) => class_contains(class, ch, flags),
+        ClassAtom::Nested(class) => class_positive_contains(class, ch) != class.negated,
     }
 }
 
@@ -3032,14 +3046,6 @@ pub(crate) struct CaseFoldKey {
 }
 
 impl CaseFoldKey {
-    fn single_lower(&self) -> Option<char> {
-        (self.lower[1] == '\0').then_some(self.lower[0])
-    }
-
-    fn single_upper(&self) -> Option<char> {
-        (self.upper[1] == '\0').then_some(self.upper[0])
-    }
-
     #[inline]
     pub(crate) fn new(ch: char) -> Self {
         if ch.is_ascii() {
@@ -3070,97 +3076,6 @@ impl CaseFoldKey {
             return false;
         }
         self.lower == other.lower || self.upper == other.upper
-    }
-}
-
-/// Case-insensitive class membership with pattern-side case mappings
-/// prepared once. Mirrors `class_contains(.., case_insensitive: true)`
-/// exactly; the input scalar's mappings are computed at most once per probe.
-#[derive(Debug, Clone)]
-pub(crate) struct FoldedClass {
-    negated: bool,
-    atoms: Box<[FoldedAtom]>,
-    intersections: Box<[Box<[FoldedAtom]>]>,
-}
-
-#[derive(Debug, Clone)]
-enum FoldedAtom {
-    Char(CaseFoldKey),
-    Range(char, char),
-    /// Atoms whose membership ignores the case flag.
-    Plain(ClassAtom),
-    Nested(FoldedClass),
-}
-
-impl FoldedClass {
-    pub(crate) fn new(class: &CharClass) -> Self {
-        Self {
-            negated: class.negated,
-            atoms: Self::fold_atoms(&class.atoms),
-            intersections: class
-                .intersections
-                .iter()
-                .map(|atoms| Self::fold_atoms(atoms))
-                .collect(),
-        }
-    }
-
-    fn fold_atoms(atoms: &[ClassAtom]) -> Box<[FoldedAtom]> {
-        atoms
-            .iter()
-            .map(|atom| match atom {
-                ClassAtom::Char(ch) => FoldedAtom::Char(CaseFoldKey::new(*ch)),
-                ClassAtom::Range(start, end) => FoldedAtom::Range(*start, *end),
-                ClassAtom::Nested(class) => FoldedAtom::Nested(Self::new(class)),
-                ClassAtom::Perl(_) | ClassAtom::Posix { .. } | ClassAtom::Unicode { .. } => {
-                    FoldedAtom::Plain(atom.clone())
-                }
-            })
-            .collect()
-    }
-
-    #[inline]
-    pub(crate) fn contains(&self, ch: char) -> bool {
-        self.contains_with(ch, &mut ProbeKeys::default())
-    }
-
-    fn contains_with(&self, ch: char, keys: &mut ProbeKeys) -> bool {
-        let matched = Self::union_contains(&self.atoms, ch, keys)
-            && self
-                .intersections
-                .iter()
-                .all(|atoms| Self::union_contains(atoms, ch, keys));
-        matched != self.negated
-    }
-
-    fn union_contains(atoms: &[FoldedAtom], ch: char, keys: &mut ProbeKeys) -> bool {
-        atoms.iter().any(|atom| match atom {
-            FoldedAtom::Char(expected) => {
-                expected.ch == ch
-                    || expected.case_eq(keys.key.get_or_insert_with(|| CaseFoldKey::new(ch)))
-            }
-            FoldedAtom::Range(start, end) => range_contains_ignore_case_fast(*start, *end, ch)
-                .unwrap_or_else(|| keys.variants(ch).any_in(*start, *end)),
-            FoldedAtom::Plain(atom) => atom_contains(atom, ch, RegexFlags::default()),
-            FoldedAtom::Nested(class) => class.contains_with(ch, keys),
-        })
-    }
-}
-
-/// Case data for one probe, computed on first use and shared by every atom
-/// of a folded class.
-#[derive(Default)]
-struct ProbeKeys {
-    key: Option<CaseFoldKey>,
-    variants: Option<CaseVariants>,
-}
-
-impl ProbeKeys {
-    fn variants(&mut self, ch: char) -> &CaseVariants {
-        let key = self.key.get_or_insert_with(|| CaseFoldKey::new(ch));
-        self.variants.get_or_insert_with(|| {
-            CaseVariants::from_mappings(ch, key.single_lower(), key.single_upper())
-        })
     }
 }
 
@@ -3764,39 +3679,36 @@ mod tests {
     }
 
     #[test]
-    fn folded_classes_agree_with_case_insensitive_class_evaluation() {
-        let insensitive = RegexFlags {
-            case_insensitive: true,
-            ..RegexFlags::default()
-        };
-        for pattern in [
-            r"[^.а-яё\w]",
-            r"[а-яА-ЯёЁ]",
-            r"[A-Z]",
-            r"[a-z0-9_]",
-            r"[^a-z]",
-            r"[ſK]",
-            r"[ßẞ]",
-            r"[ıİi]",
-            r"[σςΣ]",
-            r"[\x{100}-\x{17f}]",
-            r"[À-ÿ&&[^×÷]]",
-            r"[[:upper:][:digit:]]",
-            r"[\p{Greek}[x-z]]",
-            r"[^[^a-f]\d]",
+    fn case_insensitive_classes_fold_their_literal_set_once() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, expected) in [
+            (r"(?i)[a-{]", "A", true),
+            (r"(?i)[a-{]", "\\", false),
+            (r"(?i)[a-{]", "`", false),
+            (r"(?i)[Z-a]", "_", true),
+            (r"(?i)[Z-a]", "b", false),
+            (r"(?i)[@-C]", "c", true),
+            (r"(?i)[a-z]", "\u{212a}", true),
+            (r"(?i)[\x{2100}-\x{2200}]", "k", true),
+            (r"(?i)[σ-σ]", "ς", true),
+            (r"(?i)[h-j]", "\u{131}", false),
+            (r"(?i)[A-Z&&a-z]", "a", false),
+            (r"(?i)[^A-Z&&a-z]", "a", true),
+            (r"(?i)[\x{2120}-\x{2130}&&k]", "K", false),
+            (r"(?i)[^[^a]]", "A", false),
+            (r"(?i)[\w&&[^a]]", "A", true),
+            (r"(?i)[^a-z]", "K", false),
+            (r"(?i)[^k]", "\u{212a}", false),
+            (r"(?i)[\p{Lu}]", "a", true),
+            (r"(?i)[^\p{Lu}]", "a", false),
+            (r"(?i)[[:upper:]]", "a", true),
+            (r"(?i)[^[:upper:]]", "a", false),
+            // Escapes outside brackets are not folded.
+            (r"(?i)\p{Lu}", "a", false),
+            (r"(?i)\P{Lu}", "A", false),
         ] {
-            let parsed = parse(pattern);
-            let Ast::Class(class) = &parsed.ast else {
-                panic!("{pattern} did not parse as one class: {:?}", parsed.ast);
-            };
-            let folded = FoldedClass::new(class);
-            for ch in case_probe_scalars() {
-                assert_eq!(
-                    folded.contains(ch),
-                    class_contains(class, ch, insensitive),
-                    "{pattern} with {ch:?}"
-                );
-            }
+            let found = FallbackMatcher::new(pattern).find(line, 0, ctx()).is_some();
+            assert_eq!(found, expected, "{pattern} on {line:?}");
         }
     }
 
