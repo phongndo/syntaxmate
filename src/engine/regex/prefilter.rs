@@ -1,4 +1,6 @@
 use std::borrow::Cow;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::ast::{Ast, CharClass, ClassAtom, LookKind, ParsedRegex};
 
@@ -53,10 +55,8 @@ impl Prefilter {
         if ascii_case_insensitive {
             let literals = match required {
                 RequiredLiterals::None => return Self::None,
-                RequiredLiterals::One(literal) => vec![literal.into_owned()],
-                RequiredLiterals::Any(literals) => {
-                    literals.into_iter().map(Cow::into_owned).collect()
-                }
+                RequiredLiterals::One(literal) => vec![literal],
+                RequiredLiterals::Any(literals) => literals,
             };
             if literals.is_empty()
                 || literals
@@ -71,8 +71,16 @@ impl Prefilter {
                         | (u8::from(byte.eq_ignore_ascii_case(&b'k')) << 1)
                 })
             });
+            // A finder answers every query itself; only per-literal searches
+            // need owned copies.
+            let finder = MultiLiteralFinder::for_literals_ignore_ascii_case(&literals);
+            let literals = if finder.is_some() {
+                Vec::new()
+            } else {
+                literals.into_iter().map(Cow::into_owned).collect()
+            };
             return Self::Any {
-                finder: MultiLiteralFinder::for_literals_ignore_ascii_case(&literals),
+                finder,
                 literals,
                 ascii_case_insensitive: true,
                 mixed_width_fold_mask,
@@ -233,41 +241,50 @@ impl Prefilter {
     }
 }
 
-/// Compact failure-linked trie for large required-literal sets. Small sets
-/// retain the standard library's highly tuned two-way search; the trie is
-/// reserved for cases where rebuilding and running one searcher per
+/// Leftmost search over a large required-literal set, built in tiers.
+///
+/// Small sets retain the standard library's highly tuned per-literal search;
+/// this finder is reserved for cases where running one searcher per
 /// alternative dominates (notably C/C++ keyword inventories and
 /// case-insensitive keyword lists such as ABAP's). An ASCII case-insensitive
 /// finder stores lowercased literals and lowercases each input byte, which
 /// matches `eq_ignore_ascii_case` windows exactly for ASCII literals.
 ///
-/// Each node's outgoing edges occupy one contiguous, byte-sorted run of the
-/// shared edge arrays. Large keyword inventories produce tens of thousands of
-/// trie states; flat storage keeps construction and teardown to a handful of
-/// allocations instead of one or more per state.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Most large inventories (HTML entities, CSS properties, Wolfram symbols)
+/// are queried only a few times over a few hundred bytes per tokenizer, while
+/// a failure-linked automaton costs tens of nanoseconds per literal byte to
+/// build. Construction therefore only flattens the sorted literals and a
+/// first-byte index; queries walk that sorted array as an implicit trie. Once
+/// accumulated query work would have paid for it, the automaton is built and
+/// answers every later query. Both tiers report the exact leftmost literal
+/// start, so the tier in use never changes an answer.
 #[doc(hidden)]
+#[derive(Debug)]
 pub struct MultiLiteralFinder {
-    nodes: Vec<FinderNode>,
-    edge_bytes: Vec<u8>,
-    edge_targets: Vec<u32>,
-    /// Every input byte probes the root at least once. A dense root table
-    /// avoids a linear scan over the large first-byte fanout while keeping
-    /// deeper, usually tiny transition sets compact.
-    root_edges: Box<[u32; 256]>,
-    max_literal_len: usize,
-    fold_ascii_case: bool,
+    literals: SortedLiterals,
+    /// Query work performed by the sorted tier, in comparable units.
+    work: AtomicUsize,
+    automaton: OnceLock<LiteralAutomaton>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct FinderNode {
-    edge_start: u32,
-    edge_len: u32,
-    failure: u32,
-    /// Longest literal ending in this state or one of its failure states.
-    /// The longest output has the earliest start for a fixed end position.
-    output_len: u32,
+impl Clone for MultiLiteralFinder {
+    fn clone(&self) -> Self {
+        Self {
+            literals: self.literals.clone(),
+            work: AtomicUsize::new(self.work.load(Ordering::Relaxed)),
+            automaton: self.automaton.clone(),
+        }
+    }
 }
+
+/// Tier state is a cache: finders over the same literals are equal.
+impl PartialEq for MultiLiteralFinder {
+    fn eq(&self, other: &Self) -> bool {
+        self.literals == other.literals
+    }
+}
+
+impl Eq for MultiLiteralFinder {}
 
 impl MultiLiteralFinder {
     fn for_literals<S: AsRef<str>>(literals: &[S]) -> Option<Self> {
@@ -288,25 +305,249 @@ impl MultiLiteralFinder {
     }
 
     fn new<S: AsRef<str>>(literals: &[S], fold_ascii_case: bool) -> Self {
-        // Required-literal sets arrive sorted; sort a borrowed view otherwise.
-        // A case-folding finder stores lowercased literals, which can reorder
-        // them, so it always owns and sorts its copies.
-        let mut sorted = literals
-            .iter()
-            .map(|literal| {
-                let bytes = literal.as_ref().as_bytes();
-                if fold_ascii_case {
-                    Cow::Owned(bytes.to_ascii_lowercase())
-                } else {
-                    Cow::Borrowed(bytes)
-                }
-            })
-            .collect::<Vec<Cow<'_, [u8]>>>();
-        if !sorted.is_sorted() {
-            sorted.sort_unstable();
+        Self {
+            literals: SortedLiterals::new(literals, fold_ascii_case),
+            work: AtomicUsize::new(0),
+            automaton: OnceLock::new(),
         }
-        let total_bytes = sorted.iter().map(|literal| literal.len()).sum::<usize>();
-        let capacity = total_bytes.saturating_add(1);
+    }
+
+    /// Returns the leftmost literal start.
+    fn find(&self, haystack: &[u8]) -> Option<usize> {
+        if let Some(automaton) = self.automaton.get() {
+            return automaton.find(haystack, self.literals.fold_ascii_case);
+        }
+        let mut work = 0usize;
+        let found = self.literals.find(haystack, &mut work);
+        let total = self
+            .work
+            .fetch_add(work, Ordering::Relaxed)
+            .saturating_add(work);
+        if total >= self.automaton_work_threshold() {
+            self.automaton
+                .get_or_init(|| LiteralAutomaton::new(&self.literals));
+        }
+        found
+    }
+
+    /// Sorted-tier work after which building the automaton pays back: its
+    /// construction cost is roughly proportional to the literal bytes.
+    fn automaton_work_threshold(&self) -> usize {
+        self.literals
+            .bytes
+            .len()
+            .saturating_mul(multi_literal_automaton_work_per_byte())
+    }
+
+    #[cfg(test)]
+    fn find_with_automaton(&self, haystack: &[u8]) -> Option<usize> {
+        self.automaton
+            .get_or_init(|| LiteralAutomaton::new(&self.literals))
+            .find(haystack, self.literals.fold_ascii_case)
+    }
+
+    #[cfg(test)]
+    fn find_sorted(&self, haystack: &[u8]) -> Option<usize> {
+        self.literals.find(haystack, &mut 0)
+    }
+}
+
+/// Deduplicated literals in ascending byte order, stored in one buffer.
+/// Literals sharing a prefix occupy a contiguous run, so a range of indices
+/// stands for one implicit trie state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SortedLiterals {
+    bytes: Box<[u8]>,
+    /// Exclusive end offset of each literal in `bytes`.
+    ends: Box<[u32]>,
+    /// `first[byte]..first[byte + 1]` is the run of literals starting with
+    /// `byte`, so every search starts one level below the root.
+    first: Box<[u32; 257]>,
+    fold_ascii_case: bool,
+}
+
+impl SortedLiterals {
+    fn new<S: AsRef<str>>(literals: &[S], fold_ascii_case: bool) -> Self {
+        let already_sorted = !fold_ascii_case
+            && literals
+                .windows(2)
+                .all(|pair| pair[0].as_ref().as_bytes() < pair[1].as_ref().as_bytes());
+        let total_bytes = literals
+            .iter()
+            .map(|literal| literal.as_ref().len())
+            .sum::<usize>();
+        let mut bytes = Vec::with_capacity(total_bytes);
+        let mut ends = Vec::with_capacity(literals.len());
+        if already_sorted {
+            // Required-literal sets arrive sorted and deduplicated.
+            for literal in literals {
+                bytes.extend_from_slice(literal.as_ref().as_bytes());
+                ends.push(u32::try_from(bytes.len()).expect("prefilter literals exceed u32"));
+            }
+        } else {
+            // Fold into one scratch buffer and sort spans of it, rather than
+            // allocating a lowercased copy per literal.
+            let mut folded = Vec::with_capacity(total_bytes);
+            let mut spans = Vec::with_capacity(literals.len());
+            for literal in literals {
+                let start = folded.len();
+                folded.extend_from_slice(literal.as_ref().as_bytes());
+                if fold_ascii_case {
+                    folded[start..].make_ascii_lowercase();
+                }
+                spans.push(start..folded.len());
+            }
+            spans.sort_unstable_by(|left, right| folded[left.clone()].cmp(&folded[right.clone()]));
+            spans.dedup_by(|right, left| folded[right.clone()] == folded[left.clone()]);
+            for span in spans {
+                bytes.extend_from_slice(&folded[span]);
+                ends.push(u32::try_from(bytes.len()).expect("prefilter literals exceed u32"));
+            }
+        }
+        let mut first = Box::new([0u32; 257]);
+        let mut start = 0usize;
+        for (index, &end) in ends.iter().enumerate() {
+            debug_assert!(end as usize > start, "prefilter literals are non-empty");
+            first[bytes[start] as usize + 1] = index as u32 + 1;
+            start = end as usize;
+        }
+        // Bytes without literals inherit the end of the previous run.
+        for byte in 1..first.len() {
+            first[byte] = first[byte].max(first[byte - 1]);
+        }
+        Self {
+            bytes: bytes.into_boxed_slice(),
+            ends: ends.into_boxed_slice(),
+            first,
+            fold_ascii_case,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.ends.len()
+    }
+
+    fn start(&self, index: usize) -> usize {
+        index
+            .checked_sub(1)
+            .map_or(0, |previous| self.ends[previous] as usize)
+    }
+
+    fn get(&self, index: usize) -> &[u8] {
+        &self.bytes[self.start(index)..self.ends[index] as usize]
+    }
+
+    #[inline]
+    fn fold(&self, byte: u8) -> u8 {
+        if self.fold_ascii_case {
+            byte.to_ascii_lowercase()
+        } else {
+            byte
+        }
+    }
+
+    /// Leftmost start of any literal in `haystack`; adds the positions and
+    /// comparisons examined to `work`.
+    fn find(&self, haystack: &[u8], work: &mut usize) -> Option<usize> {
+        for (start, &byte) in haystack.iter().enumerate() {
+            let byte = self.fold(byte) as usize;
+            let (low, high) = (self.first[byte] as usize, self.first[byte + 1] as usize);
+            if low != high && self.matches_at(haystack, start, low, high, work) {
+                *work = work.saturating_add(start + 1);
+                return Some(start);
+            }
+        }
+        *work = work.saturating_add(haystack.len());
+        None
+    }
+
+    /// Whether a literal in `low..high`, all of which start with
+    /// `haystack[start]`, is a prefix of `haystack[start..]`.
+    fn matches_at(
+        &self,
+        haystack: &[u8],
+        start: usize,
+        mut low: usize,
+        mut high: usize,
+        work: &mut usize,
+    ) -> bool {
+        let mut depth = 1usize;
+        loop {
+            // Every literal in the run shares `depth` bytes with the input.
+            // A literal of exactly that length equals the shared prefix and,
+            // being a prefix of the others, sorts first.
+            if self.ends[low] as usize - self.start(low) == depth {
+                return true;
+            }
+            let Some(&input) = haystack.get(start + depth) else {
+                return false;
+            };
+            let input = self.fold(input);
+            // All remaining literals are longer than `depth`, so their byte
+            // at `depth` is ascending across the run.
+            let byte_at = |index: usize| self.bytes[self.start(index) + depth];
+            let mut lower = low;
+            let mut upper = high;
+            while lower < upper {
+                *work += 1;
+                let middle = lower + (upper - lower) / 2;
+                if byte_at(middle) < input {
+                    lower = middle + 1;
+                } else {
+                    upper = middle;
+                }
+            }
+            if lower == high || byte_at(lower) != input {
+                return false;
+            }
+            low = lower;
+            upper = high;
+            while lower < upper {
+                *work += 1;
+                let middle = lower + (upper - lower) / 2;
+                if byte_at(middle) <= input {
+                    lower = middle + 1;
+                } else {
+                    upper = middle;
+                }
+            }
+            high = lower;
+            depth += 1;
+        }
+    }
+}
+
+/// Compact failure-linked trie over [`SortedLiterals`].
+///
+/// Each node's outgoing edges occupy one contiguous, byte-sorted run of the
+/// shared edge arrays. Large keyword inventories produce tens of thousands of
+/// trie states; flat storage keeps construction and teardown to a handful of
+/// allocations instead of one or more per state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LiteralAutomaton {
+    nodes: Vec<FinderNode>,
+    edge_bytes: Vec<u8>,
+    edge_targets: Vec<u32>,
+    /// Every input byte probes the root at least once. A dense root table
+    /// avoids a linear scan over the large first-byte fanout while keeping
+    /// deeper, usually tiny transition sets compact.
+    root_edges: Box<[u32; 256]>,
+    max_literal_len: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct FinderNode {
+    edge_start: u32,
+    edge_len: u32,
+    failure: u32,
+    /// Longest literal ending in this state or one of its failure states.
+    /// The longest output has the earliest start for a fixed end position.
+    output_len: u32,
+}
+
+impl LiteralAutomaton {
+    fn new(literals: &SortedLiterals) -> Self {
+        let capacity = literals.bytes.len().saturating_add(1);
         let mut nodes = Vec::with_capacity(capacity);
         let mut parents = Vec::with_capacity(capacity);
         let mut node_bytes = Vec::with_capacity(capacity);
@@ -321,8 +562,8 @@ impl MultiLiteralFinder {
         let mut path = vec![0u32];
         let mut previous: &[u8] = &[];
         let mut max_literal_len = 0usize;
-        for literal in &sorted {
-            let literal: &[u8] = literal;
+        for index in 0..literals.len() {
+            let literal = literals.get(index);
             debug_assert!(!literal.is_empty());
             max_literal_len = max_literal_len.max(literal.len());
             let common = previous
@@ -370,59 +611,59 @@ impl MultiLiteralFinder {
             node.failure = 0;
         }
 
-        let mut finder = Self {
+        let mut automaton = Self {
             nodes,
             edge_bytes,
             edge_targets,
             root_edges: Box::new([u32::MAX; 256]),
             max_literal_len,
-            fold_ascii_case,
         };
-        let root = finder.nodes[0];
+        let root = automaton.nodes[0];
         for index in root.edge_start as usize..(root.edge_start + root.edge_len) as usize {
-            finder.root_edges[finder.edge_bytes[index] as usize] = finder.edge_targets[index];
+            automaton.root_edges[automaton.edge_bytes[index] as usize] =
+                automaton.edge_targets[index];
         }
         // Failure targets are strictly shallower, so a breadth-first sweep
         // finalizes each one before any state that depends on it.
-        let mut queue = Vec::with_capacity(finder.nodes.len());
+        let mut queue = Vec::with_capacity(automaton.nodes.len());
         queue.push(0u32);
         let mut cursor = 0usize;
         while let Some(&state) = queue.get(cursor) {
             cursor += 1;
-            let node = finder.nodes[state as usize];
+            let node = automaton.nodes[state as usize];
             for index in node.edge_start as usize..(node.edge_start + node.edge_len) as usize {
-                let byte = finder.edge_bytes[index];
-                let child = finder.edge_targets[index];
+                let byte = automaton.edge_bytes[index];
+                let child = automaton.edge_targets[index];
                 queue.push(child);
                 if state == 0 {
                     continue;
                 }
                 let mut failure = node.failure;
                 let target = loop {
-                    if let Some(next) = finder.goto(failure, byte) {
+                    if let Some(next) = automaton.goto(failure, byte) {
                         break next;
                     }
                     if failure == 0 {
                         break 0;
                     }
-                    failure = finder.nodes[failure as usize].failure;
+                    failure = automaton.nodes[failure as usize].failure;
                 };
-                let failure_output = finder.nodes[target as usize].output_len;
-                let child = &mut finder.nodes[child as usize];
+                let failure_output = automaton.nodes[target as usize].output_len;
+                let child = &mut automaton.nodes[child as usize];
                 child.failure = target;
                 child.output_len = child.output_len.max(failure_output);
             }
         }
-        finder
+        automaton
     }
 
     /// Returns the leftmost literal start. Scanning may stop once the maximum
     /// literal length proves that no future match can begin earlier.
-    fn find(&self, haystack: &[u8]) -> Option<usize> {
+    fn find(&self, haystack: &[u8], fold_ascii_case: bool) -> Option<usize> {
         let mut state = 0u32;
         let mut best = None;
         for (index, byte) in haystack.iter().copied().enumerate() {
-            let byte = if self.fold_ascii_case {
+            let byte = if fold_ascii_case {
                 byte.to_ascii_lowercase()
             } else {
                 byte
@@ -479,6 +720,10 @@ fn multi_literal_min_literals() -> usize {
 
 fn multi_literal_min_total_bytes() -> usize {
     32
+}
+
+fn multi_literal_automaton_work_per_byte() -> usize {
+    8
 }
 
 fn prefilter_one(literal: String) -> Prefilter {
@@ -759,19 +1004,36 @@ pub fn required_literal(pattern: &str) -> Option<String> {
     }
 }
 
+/// Literals one of which every match of `ast` contains; `Any` sets are
+/// sorted and deduplicated.
 pub fn required_literals(ast: &Ast) -> RequiredLiterals<'_> {
+    match collect_required_literals(ast) {
+        RequiredLiterals::Any(mut literals) => {
+            literals.sort_unstable();
+            literals.dedup();
+            RequiredLiterals::Any(literals)
+        }
+        required => required,
+    }
+}
+
+/// [`required_literals`] before normalization: `Any` sets are unordered and
+/// may repeat a literal. Sorting at every level of a nested alternation (HTML
+/// entity and keyword tries) dominated extraction; only the outermost set
+/// needs it, and selection counts distinct literals on demand.
+fn collect_required_literals(ast: &Ast) -> RequiredLiterals<'_> {
     if let Some(literal) = exact_literal(ast).filter(|literal| !literal.is_empty()) {
         return RequiredLiterals::One(literal);
     }
     match ast {
         Ast::Concat(nodes) => sequence_required_literals(nodes),
         Ast::Alternation(branches) => alternation_required_literals(branches),
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => required_literals(child),
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => collect_required_literals(child),
         Ast::Look {
             kind: LookKind::Ahead,
             child,
-        } => required_literals(child),
-        Ast::Repeat { node, min, .. } if *min > 0 => required_literals(node),
+        } => collect_required_literals(child),
+        Ast::Repeat { node, min, .. } if *min > 0 => collect_required_literals(node),
         Ast::Class(class) => class_required_literals(class),
         _ => RequiredLiterals::None,
     }
@@ -779,26 +1041,33 @@ pub fn required_literals(ast: &Ast) -> RequiredLiterals<'_> {
 
 fn sequence_required_literals(nodes: &[Ast]) -> RequiredLiterals<'_> {
     let mut best = RequiredLiterals::None;
-    let mut run = String::new();
+    let mut run = Cow::Borrowed("");
     for node in nodes {
         let run_len = run.len();
         if append_exact_literal(node, &mut run) {
             continue;
         }
-        run.truncate(run_len);
+        truncate_run(&mut run, run_len);
         if !run.is_empty() {
             best = choose_more_selective(
                 best,
-                RequiredLiterals::One(Cow::Owned(std::mem::take(&mut run))),
+                RequiredLiterals::One(std::mem::replace(&mut run, Cow::Borrowed(""))),
             );
         }
-        let candidate = required_literals(node);
+        let candidate = collect_required_literals(node);
         best = choose_more_selective(best, candidate);
     }
     if !run.is_empty() {
-        best = choose_more_selective(best, RequiredLiterals::One(Cow::Owned(run)));
+        best = choose_more_selective(best, RequiredLiterals::One(run));
     }
     best
+}
+
+fn truncate_run(run: &mut Cow<'_, str>, len: usize) {
+    match run {
+        Cow::Borrowed(literal) => *literal = &literal[..len],
+        Cow::Owned(literal) => literal.truncate(len),
+    }
 }
 
 /// The exact string `ast` matches, if it is one. A single literal (possibly
@@ -811,11 +1080,11 @@ fn exact_literal(ast: &Ast) -> Option<Cow<'_, str>> {
             if !nodes.iter().all(is_exact_literal) {
                 return None;
             }
-            let mut out = String::new();
+            let mut out = Cow::Borrowed("");
             for node in nodes {
                 append_exact_literal(node, &mut out);
             }
-            Some(Cow::Owned(out))
+            Some(out)
         }
         Ast::Group { child, .. } | Ast::Flags { child, .. } => exact_literal(child),
         _ => None,
@@ -832,12 +1101,16 @@ fn is_exact_literal(ast: &Ast) -> bool {
 }
 
 /// Appends the exact string `ast` matches; on `false` the caller discards
-/// whatever was appended.
-fn append_exact_literal(ast: &Ast, out: &mut String) -> bool {
+/// whatever was appended. A run of one literal stays borrowed.
+fn append_exact_literal<'a>(ast: &'a Ast, out: &mut Cow<'a, str>) -> bool {
     match ast {
         Ast::Empty => true,
         Ast::Literal(literal) => {
-            out.push_str(literal);
+            if out.is_empty() {
+                *out = Cow::Borrowed(literal);
+            } else {
+                out.to_mut().push_str(literal);
+            }
             true
         }
         Ast::Concat(nodes) => nodes.iter().all(|node| append_exact_literal(node, out)),
@@ -849,14 +1122,12 @@ fn append_exact_literal(ast: &Ast, out: &mut String) -> bool {
 fn alternation_required_literals(branches: &[Ast]) -> RequiredLiterals<'_> {
     let mut literals = Vec::new();
     for branch in branches {
-        match required_literals(branch) {
+        match collect_required_literals(branch) {
             RequiredLiterals::One(literal) => literals.push(literal),
             RequiredLiterals::Any(mut branch_literals) => literals.append(&mut branch_literals),
             RequiredLiterals::None => return RequiredLiterals::None,
         }
     }
-    literals.sort();
-    literals.dedup();
     RequiredLiterals::Any(literals)
 }
 
@@ -897,11 +1168,20 @@ fn max_literal_len(literals: &RequiredLiterals) -> usize {
     }
 }
 
+/// Number of distinct literals.
 fn literal_cardinality(literals: &RequiredLiterals) -> usize {
     match literals {
         RequiredLiterals::None => usize::MAX,
         RequiredLiterals::One(_) => 1,
-        RequiredLiterals::Any(literals) => literals.len(),
+        RequiredLiterals::Any(literals) => {
+            let mut distinct = literals
+                .iter()
+                .map(|literal| &**literal)
+                .collect::<Vec<_>>();
+            distinct.sort_unstable();
+            distinct.dedup();
+            distinct.len()
+        }
     }
 }
 
@@ -1214,25 +1494,72 @@ mod tests {
                 // A wide interior fanout exercises binary-searched edges.
                 literals.extend(alphabet.iter().map(|byte| format!("a{}", *byte as char)));
             }
-            let finder = MultiLiteralFinder::new(&literals, false);
+            let fold = round % 2 == 1;
+            if fold {
+                // Mixed-case literals and input exercise the folded tiers.
+                for literal in literals.iter_mut().step_by(2) {
+                    literal.make_ascii_uppercase();
+                }
+            }
+            let finder = MultiLiteralFinder::new(&literals, fold);
+            let tiered = MultiLiteralFinder::new(&literals, fold);
             for _ in 0..20 {
                 let len = next(24) as usize;
-                let haystack = (0..len)
+                let mut haystack = (0..len)
                     .map(|_| alphabet[next(alphabet.len() as u64) as usize])
                     .collect::<Vec<_>>();
+                if fold {
+                    for byte in haystack.iter_mut().step_by(3) {
+                        byte.make_ascii_uppercase();
+                    }
+                }
                 let naive = (0..=haystack.len()).find(|&start| {
-                    literals
-                        .iter()
-                        .any(|literal| haystack[start..].starts_with(literal.as_bytes()))
+                    literals.iter().any(|literal| {
+                        haystack[start..]
+                            .get(..literal.len())
+                            .is_some_and(|window| {
+                                if fold {
+                                    window.eq_ignore_ascii_case(literal.as_bytes())
+                                } else {
+                                    window == literal.as_bytes()
+                                }
+                            })
+                    })
                 });
-                assert_eq!(
-                    finder.find(&haystack),
-                    naive,
+                let context = format!(
                     "literals {literals:?} haystack {:?}",
                     String::from_utf8_lossy(&haystack)
                 );
+                assert_eq!(finder.find_sorted(&haystack), naive, "{context}");
+                assert_eq!(finder.find_with_automaton(&haystack), naive, "{context}");
+                // The production entry point switches tiers mid-sequence.
+                assert_eq!(tiered.find(&haystack), naive, "{context}");
             }
         }
+    }
+
+    #[test]
+    fn multi_literal_finder_builds_its_automaton_only_after_enough_queries() {
+        let literals = (0..64)
+            .map(|index| format!("keyword_{index:02}"))
+            .collect::<Vec<_>>();
+        let finder = MultiLiteralFinder::new(&literals, false);
+        assert!(finder.automaton.get().is_none(), "construction stays lazy");
+        let line = format!("{} keyword_42", "x".repeat(40));
+        assert_eq!(finder.find(line.as_bytes()), Some(41));
+        assert!(
+            finder.automaton.get().is_none(),
+            "one short query stays sorted"
+        );
+        let mut queries = 0;
+        while finder.automaton.get().is_none() {
+            assert_eq!(finder.find(line.as_bytes()), Some(41));
+            queries += 1;
+            assert!(queries < 10_000, "automaton threshold is reachable");
+        }
+        assert_eq!(finder.find(line.as_bytes()), Some(41));
+        assert_eq!(finder.find(b"keyword_4 keyword_7"), None);
+        assert_eq!(finder, MultiLiteralFinder::new(&literals, false));
     }
 
     #[test]
@@ -1376,5 +1703,131 @@ mod tests {
         let set = LiteralSet::new(vec!["".into(), "é".into()]);
         assert_eq!(set.find("é", 0), Some((0, 0, 0)));
         assert_eq!(set.find("é", 1), None);
+    }
+
+    /// Per-level normalizing extraction that `required_literals` replaced.
+    pub(super) fn reference_required_literals(ast: &Ast) -> RequiredLiterals<'_> {
+        fn exact(ast: &Ast, out: &mut String) -> bool {
+            match ast {
+                Ast::Empty => true,
+                Ast::Literal(literal) => {
+                    out.push_str(literal);
+                    true
+                }
+                Ast::Concat(nodes) => nodes.iter().all(|node| exact(node, out)),
+                Ast::Group { child, .. } | Ast::Flags { child, .. } => exact(child, out),
+                _ => false,
+            }
+        }
+        fn more_selective<'a>(
+            left: RequiredLiterals<'a>,
+            right: RequiredLiterals<'a>,
+        ) -> RequiredLiterals<'a> {
+            let len = |literals: &RequiredLiterals| match literals {
+                RequiredLiterals::None => 0,
+                RequiredLiterals::One(literal) => literal.len(),
+                RequiredLiterals::Any(literals) => literals
+                    .iter()
+                    .map(|literal| literal.len())
+                    .max()
+                    .unwrap_or(0),
+            };
+            let count = |literals: &RequiredLiterals| match literals {
+                RequiredLiterals::None => usize::MAX,
+                RequiredLiterals::One(_) => 1,
+                RequiredLiterals::Any(literals) => literals.len(),
+            };
+            if left.is_empty() {
+                return right;
+            }
+            if right.is_empty() || len(&right) < len(&left) {
+                return left;
+            }
+            if len(&right) > len(&left) || count(&right) < count(&left) {
+                right
+            } else {
+                left
+            }
+        }
+        let mut whole = String::new();
+        if exact(ast, &mut whole) && !whole.is_empty() {
+            return RequiredLiterals::One(Cow::Owned(whole));
+        }
+        match ast {
+            Ast::Concat(nodes) => {
+                let mut best = RequiredLiterals::None;
+                let mut run = String::new();
+                for node in nodes {
+                    let run_len = run.len();
+                    if exact(node, &mut run) {
+                        continue;
+                    }
+                    run.truncate(run_len);
+                    if !run.is_empty() {
+                        best = more_selective(
+                            best,
+                            RequiredLiterals::One(Cow::Owned(std::mem::take(&mut run))),
+                        );
+                    }
+                    best = more_selective(best, reference_required_literals(node));
+                }
+                if !run.is_empty() {
+                    best = more_selective(best, RequiredLiterals::One(Cow::Owned(run)));
+                }
+                best
+            }
+            Ast::Alternation(branches) => {
+                let mut literals = Vec::new();
+                for branch in branches {
+                    match reference_required_literals(branch) {
+                        RequiredLiterals::One(literal) => literals.push(literal),
+                        RequiredLiterals::Any(mut nested) => literals.append(&mut nested),
+                        RequiredLiterals::None => return RequiredLiterals::None,
+                    }
+                }
+                literals.sort();
+                literals.dedup();
+                RequiredLiterals::Any(literals)
+            }
+            Ast::Group { child, .. } | Ast::Flags { child, .. } => {
+                reference_required_literals(child)
+            }
+            Ast::Look {
+                kind: LookKind::Ahead,
+                child,
+            } => reference_required_literals(child),
+            Ast::Repeat { node, min, .. } if *min > 0 => reference_required_literals(node),
+            Ast::Class(class) => class_required_literals(class),
+            _ => RequiredLiterals::None,
+        }
+    }
+
+    #[test]
+    fn required_literals_match_per_level_normalization() {
+        use crate::engine::grammar::load_dev_grammar_from_str;
+        use crate::engine::state::GrammarId;
+        use crate::grammars::registry::CORE_ASSETS;
+
+        let mut patterns = vec![
+            // Nested tries whose levels repeat literals and tie on length.
+            r"(&)(?=[A-Za-z])((a(s(ymp(eq)?|cr|t)|n(d|g)?)|A(s(sign|cr)|nd|MP))|(b(s|ig)|B(e|scr)))"
+                .to_owned(),
+            r"x(?:ab|cd|ab)y(?:ab|cd)z(?:e|f|e|f)".to_owned(),
+            r"(?:(?:ab|ab)|cd)(?:ef|gh|ef)".to_owned(),
+            r"(?i)k(?:ey|ind)|(?=[;)])s(?:ab|ab)+".to_owned(),
+        ];
+        for (index, asset) in CORE_ASSETS.iter().enumerate() {
+            let grammar = load_dev_grammar_from_str(GrammarId(index as u16), asset.source)
+                .expect("core grammar parses");
+            patterns.extend(grammar.patterns.iter().cloned());
+        }
+        for pattern in &patterns {
+            let parsed = parse(pattern);
+            assert_eq!(
+                required_literals(&parsed.ast),
+                reference_required_literals(&parsed.ast),
+                "{pattern:?}"
+            );
+        }
     }
 }
