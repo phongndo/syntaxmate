@@ -145,5 +145,18 @@
     "sources": [
       "int __a(v)\n"
     ]
+  },
+  {
+    "name": "empty-match-lookahead-capture",
+    "grammars": [
+      {
+        "scopeName": "source.emptycap",
+        "patterns": [
+          {"match": "(?=(zz))", "captures": {"1": {"name": "empty.look"}}},
+          {"match": "b", "name": "letter.b"}
+        ]
+      }
+    ],
+    "sources": ["zz", "a zz b", "zzb"]
   }
 ]

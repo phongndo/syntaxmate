@@ -6661,15 +6661,6 @@ fn empty_repository_context() -> &'static Arc<RepositoryBindings> {
     EMPTY.get_or_init(|| Arc::new(RepositoryBindings::default()))
 }
 
-fn resolve_repository_in_context<'a>(
-    grammar: &'a CompiledGrammar,
-    name: &'a str,
-    context: &RepositoryBindings,
-) -> Option<&'a RuleRef> {
-    let bound_name = context.get(name).map_or(name, String::as_str);
-    grammar.repository.get(bound_name)
-}
-
 fn rebinds_any_ref(refs: &[RuleRef], context: &RepositoryBindings) -> bool {
     refs.iter().any(
         |rule_ref| matches!(rule_ref, RuleRef::Repository(name) if context.get(name).is_some()),
@@ -6776,7 +6767,7 @@ impl RepositoryContextBudget {
     fn charge_rule_table(&mut self, rule_count: usize) -> bool {
         self.charge(
             std::mem::size_of::<GrammarRuleRepositoryContexts>().saturating_add(
-                rule_count.saturating_mul(std::mem::size_of::<Option<Arc<RepositoryBindings>>>()),
+                rule_count.saturating_mul(std::mem::size_of::<RepositoryContextId>()),
             ),
         )
     }
@@ -6790,8 +6781,7 @@ impl RepositoryContextBudget {
         if sparse {
             // A public, hand-built grammar can have out-of-range IDs. Charge
             // conservatively for Vec growth in the uncommon fallback table.
-            bytes =
-                bytes.saturating_add(2 * std::mem::size_of::<(RuleId, Arc<RepositoryBindings>)>());
+            bytes = bytes.saturating_add(2 * std::mem::size_of::<(RuleId, RepositoryContextId)>());
         }
         for (name, binding) in local {
             let entry_bytes = (4 * std::mem::size_of::<usize>())
