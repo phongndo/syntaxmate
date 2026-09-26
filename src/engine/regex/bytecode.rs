@@ -320,6 +320,177 @@ struct LiteralTrieNode {
 /// Sentinel for an absent child while a byte trie is being built.
 const NO_TRIE_NODE: u32 = u32::MAX;
 
+/// Construction-only child links of one byte-trie node.
+#[derive(Clone, Copy)]
+struct TrieBuildLink {
+    first_child: u32,
+    next_sibling: u32,
+    byte: u8,
+}
+
+impl Default for TrieBuildLink {
+    fn default() -> Self {
+        Self {
+            first_child: NO_TRIE_NODE,
+            next_sibling: NO_TRIE_NODE,
+            byte: 0,
+        }
+    }
+}
+
+/// Incremental byte-trie construction. Children are linked first-child /
+/// next-sibling (with a dense root table) so that no node owns an edge
+/// allocation; `finish` lays every node's children out as one sorted run of
+/// the shared edge arrays.
+struct ByteTrieBuilder {
+    nodes: Vec<LiteralTrieNode>,
+    links: Vec<TrieBuildLink>,
+    root_children: [u32; 256],
+    case_insensitive: bool,
+    /// Order of the next string emitted through [`FiniteSink`].
+    next_order: u32,
+    /// Nodes along the previous [`Self::insert`]ed literal and its folded
+    /// bytes. Keyword inventories are usually sorted, so each literal resumes
+    /// below its common prefix with the previous one instead of re-walking
+    /// sibling lists from the root.
+    path: Vec<u32>,
+    previous: Vec<u8>,
+    current: Vec<u8>,
+}
+
+impl ByteTrieBuilder {
+    fn new(node_capacity: usize, case_insensitive: bool) -> Self {
+        let node_capacity = node_capacity.min(LITERAL_TRIE_NODE_RESERVE_LIMIT);
+        let mut nodes = Vec::with_capacity(node_capacity);
+        let mut links = Vec::with_capacity(node_capacity);
+        nodes.push(LiteralTrieNode::default());
+        links.push(TrieBuildLink::default());
+        Self {
+            nodes,
+            links,
+            root_children: [NO_TRIE_NODE; 256],
+            case_insensitive,
+            next_order: 0,
+            path: vec![0],
+            previous: Vec::new(),
+            current: Vec::new(),
+        }
+    }
+
+    /// The node reached by `literal`, created as needed.
+    fn insert(&mut self, literal: &str) -> Result<u32, CompileError> {
+        let mut current = std::mem::take(&mut self.current);
+        current.clear();
+        current.extend_from_slice(literal.as_bytes());
+        if self.case_insensitive {
+            current.make_ascii_lowercase();
+        }
+        let common = current
+            .iter()
+            .zip(&self.previous)
+            .take_while(|(current, previous)| current == previous)
+            .count();
+        self.path.truncate(common + 1);
+        let mut node = self.path[common];
+        for &byte in &current[common..] {
+            node = self.child(node, byte)?;
+            self.path.push(node);
+        }
+        self.current = std::mem::replace(&mut self.previous, current);
+        Ok(node)
+    }
+
+    /// The child of `node` along `byte`, created when missing.
+    fn child(&mut self, node: u32, mut byte: u8) -> Result<u32, CompileError> {
+        if self.case_insensitive {
+            byte.make_ascii_lowercase();
+        }
+        let parent = node as usize;
+        let existing = if parent == 0 {
+            self.root_children[byte as usize]
+        } else {
+            let mut child = self.links[parent].first_child;
+            while child != NO_TRIE_NODE && self.links[child as usize].byte != byte {
+                child = self.links[child as usize].next_sibling;
+            }
+            child
+        };
+        if existing != NO_TRIE_NODE {
+            return Ok(existing);
+        }
+        let child = u32::try_from(self.nodes.len()).map_err(|_| CompileError::TableOverflow)?;
+        if child == NO_TRIE_NODE {
+            return Err(CompileError::TableOverflow);
+        }
+        self.nodes.push(LiteralTrieNode::default());
+        self.links.push(TrieBuildLink {
+            first_child: NO_TRIE_NODE,
+            next_sibling: self.links[parent].first_child,
+            byte,
+        });
+        self.links[parent].first_child = child;
+        self.nodes[parent].edge_len += 1;
+        if parent == 0 {
+            self.root_children[byte as usize] = child;
+        }
+        Ok(child)
+    }
+
+    /// Duplicate strings keep their earliest (preferred) order.
+    fn mark_terminal(&mut self, node: u32, order: u32) {
+        let terminal = &mut self.nodes[node as usize].terminal_order;
+        if terminal.is_none_or(|existing| order < existing) {
+            *terminal = Some(order);
+        }
+    }
+
+    fn finish(self) -> LiteralTrie {
+        let Self {
+            mut nodes, links, ..
+        } = self;
+        let mut edge_start = 0u32;
+        for node in &mut nodes {
+            node.edge_start = edge_start;
+            edge_start += node.edge_len;
+        }
+        let mut edge_bytes = vec![0; edge_start as usize];
+        let mut edge_targets = vec![0; edge_start as usize];
+        for (node, link) in nodes.iter().zip(&links) {
+            let start = node.edge_start as usize;
+            let end = start + node.edge_len as usize;
+            // Sibling links run newest first; fill the run from its end so
+            // children created in ascending byte order need no sort.
+            let mut child = link.first_child;
+            let mut sorted = true;
+            for slot in (start..end).rev() {
+                let byte = links[child as usize].byte;
+                sorted &= slot + 1 == end || byte < edge_bytes[slot + 1];
+                edge_bytes[slot] = byte;
+                edge_targets[slot] = child;
+                child = links[child as usize].next_sibling;
+            }
+            if !sorted {
+                let mut run = edge_bytes[start..end]
+                    .iter()
+                    .copied()
+                    .zip(edge_targets[start..end].iter().copied())
+                    .collect::<Vec<_>>();
+                run.sort_unstable_by_key(|(byte, _)| *byte);
+                for (slot, (byte, target)) in (start..).zip(run) {
+                    edge_bytes[slot] = byte;
+                    edge_targets[slot] = target;
+                }
+            }
+        }
+        LiteralTrie {
+            nodes,
+            edge_bytes,
+            edge_targets,
+            unicode_nodes: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 struct UnicodeLiteralTrieNode {
     // Edge scalars carry their case mappings so a lookup maps the input
@@ -655,26 +826,24 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
         }
         ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => {
             let (low, high) = (*start as u8, *end as u8);
-            let mut sensitive = [0u64; 2];
-            let mut insensitive = [0u64; 2];
-            for byte in 0u8..=127 {
-                let ch = byte as char;
-                if low <= byte && byte <= high {
-                    ascii_mask_set(&mut sensitive, byte);
-                }
-                // Mirror the evaluator's folded-range semantics with ASCII
-                // case maps (exact for ASCII probes and bounds).
-                let folded_low = ch.to_ascii_lowercase() as u8;
-                let folded_up = ch.to_ascii_uppercase() as u8;
-                if (low.to_ascii_lowercase() <= folded_low
-                    && folded_low <= high.to_ascii_lowercase())
-                    || (low.to_ascii_uppercase() <= folded_up
-                        && folded_up <= high.to_ascii_uppercase())
-                {
-                    ascii_mask_set(&mut insensitive, byte);
-                }
-            }
-            (sensitive, insensitive)
+            // Mirror the evaluator's folded-range semantics with ASCII case
+            // maps (exact for ASCII probes and bounds): a byte matches when its
+            // lowercase map lies in the lowercased bounds or its uppercase map
+            // lies in the uppercased bounds.
+            let lowered =
+                ascii_bounded_range_mask(low.to_ascii_lowercase(), high.to_ascii_lowercase());
+            let uppered =
+                ascii_bounded_range_mask(low.to_ascii_uppercase(), high.to_ascii_uppercase());
+            let insensitive = [
+                // Word 0 holds no letters, so both case maps are the identity.
+                lowered[0] | uppered[0],
+                (lowered[1] & !ASCII_UPPER_MASK[1])
+                    | (uppered[1] & !ASCII_LOWER_MASK[1])
+                    // 'a'..='z' sit exactly 32 bits above 'A'..='Z' in word 1.
+                    | ((lowered[1] & ASCII_LOWER_MASK[1]) >> 32)
+                    | ((uppered[1] & ASCII_UPPER_MASK[1]) << 32),
+            ];
+            (ascii_bounded_range_mask(low, high), insensitive)
         }
         // Perl, POSIX, and Unicode-property atoms ignore the case flag, so
         // one cheap per-character pass fills both masks without any Unicode
@@ -684,8 +853,12 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             (mask, mask)
         }
         ClassAtom::Posix { name, negated } => {
-            let contains = super::backtrack::posix_class_predicate(name);
-            let mask = ascii_predicate_mask(|ch| contains(ch) != *negated);
+            let mask = posix_ascii_mask(name);
+            let mask = if *negated {
+                ascii_mask_complement(mask)
+            } else {
+                mask
+            };
             (mask, mask)
         }
         ClassAtom::Unicode { name, negated } => {
@@ -763,6 +936,25 @@ const fn ascii_mask_complement(mask: AsciiMask) -> AsciiMask {
 }
 
 const ASCII_DIGIT_MASK: AsciiMask = ascii_range_mask(b'0', b'9');
+const ASCII_UPPER_MASK: AsciiMask = ascii_range_mask(b'A', b'Z');
+const ASCII_LOWER_MASK: AsciiMask = ascii_range_mask(b'a', b'z');
+
+/// `low..=high` as a mask, empty when the bounds are reversed.
+fn ascii_bounded_range_mask(low: u8, high: u8) -> AsciiMask {
+    if low > high {
+        return [0; 2];
+    }
+    let bits = |word: u8| {
+        let (start, end) = (u32::from(word) * 64, u32::from(word) * 64 + 63);
+        let (from, to) = (u32::from(low).max(start), u32::from(high).min(end));
+        if from > to {
+            0
+        } else {
+            (u64::MAX >> (63 - (to - from))) << (from - start)
+        }
+    };
+    [bits(0), bits(1)]
+}
 const ASCII_HEX_DIGIT_MASK: AsciiMask = ascii_mask_union(
     ASCII_DIGIT_MASK,
     ascii_mask_union(ascii_range_mask(b'A', b'F'), ascii_range_mask(b'a', b'f')),
@@ -774,6 +966,50 @@ const ASCII_WORD_MASK: AsciiMask = ascii_mask_union(
     ascii_mask_union(ASCII_DIGIT_MASK, ascii_range_mask(b'_', b'_')),
     ascii_mask_union(ascii_range_mask(b'A', b'Z'), ascii_range_mask(b'a', b'z')),
 );
+const ASCII_ALPHA_MASK: AsciiMask =
+    ascii_mask_union(ascii_range_mask(b'A', b'Z'), ascii_range_mask(b'a', b'z'));
+const ASCII_CONTROL_MASK: AsciiMask =
+    ascii_mask_union(ascii_range_mask(0, 0x1f), ascii_range_mask(0x7f, 0x7f));
+/// ASCII members of each POSIX bracket class, in the order and with the
+/// predicates of `backtrack::posix_class_predicate`.
+const POSIX_ASCII_MASKS: [(&str, AsciiMask); 14] = [
+    (
+        "alnum",
+        ascii_mask_union(ASCII_ALPHA_MASK, ASCII_DIGIT_MASK),
+    ),
+    ("alpha", ASCII_ALPHA_MASK),
+    ("ascii", [u64::MAX; 2]),
+    (
+        "blank",
+        ascii_mask_union(ascii_range_mask(b'\t', b'\t'), ascii_range_mask(b' ', b' ')),
+    ),
+    ("cntrl", ASCII_CONTROL_MASK),
+    ("digit", ASCII_DIGIT_MASK),
+    ("graph", ascii_range_mask(b'!', b'~')),
+    ("lower", ascii_range_mask(b'a', b'z')),
+    ("print", ascii_range_mask(b' ', b'~')),
+    (
+        "punct",
+        ascii_mask_union(
+            ascii_mask_union(ascii_range_mask(b'!', b'/'), ascii_range_mask(b':', b'@')),
+            ascii_mask_union(ascii_range_mask(b'[', b'`'), ascii_range_mask(b'{', b'~')),
+        ),
+    ),
+    ("space", ASCII_SPACE_MASK),
+    ("upper", ascii_range_mask(b'A', b'Z')),
+    ("word", ASCII_WORD_MASK),
+    ("xdigit", ASCII_HEX_DIGIT_MASK),
+];
+
+/// ASCII members of a POSIX class, resolving names like
+/// `posix_class_predicate`: unknown names match nothing.
+fn posix_ascii_mask(name: &str) -> AsciiMask {
+    POSIX_ASCII_MASKS
+        .iter()
+        .find(|(class, _)| class.eq_ignore_ascii_case(name))
+        .map_or([0; 2], |(_, mask)| *mask)
+}
+
 const ASCII_VERTICAL_SPACE_MASK: AsciiMask = ascii_mask_union(
     ascii_range_mask(b'\n', b'\x0c'),
     ascii_range_mask(b'\r', b'\r'),
@@ -1319,6 +1555,29 @@ impl Program {
         analysis: &RegexAnalysis,
         live_captures: &[u32],
     ) -> Result<Self, CompileError> {
+        Self::compile_capture_layout(parsed, analysis, live_captures, None)
+    }
+
+    /// Compiles capture replay bytecode that also serves position selection,
+    /// or `None` when a live capture sits under an alternation or repeat.
+    /// Such captures would block the literal tries and possessive scans that
+    /// selection relies on; otherwise the program differs from the
+    /// position-only one only by its save instructions.
+    pub(crate) fn compile_selection_captures(
+        parsed: &ParsedRegex,
+        analysis: &RegexAnalysis,
+        live_captures: &[u32],
+    ) -> Option<Result<Self, CompileError>> {
+        live_captures_keep_selection_shape(&parsed.ast, live_captures)
+            .then(|| Self::compile_capture_layout(parsed, analysis, live_captures, Some(false)))
+    }
+
+    fn compile_capture_layout(
+        parsed: &ParsedRegex,
+        analysis: &RegexAnalysis,
+        live_captures: &[u32],
+        captures_under_choice: Option<bool>,
+    ) -> Result<Self, CompileError> {
         if !analysis.capture().capture_bytecode_supported() {
             return Err(CompileError::Unsupported);
         }
@@ -1338,7 +1597,12 @@ impl Program {
         layout.extend_from_slice(analysis.capture().referenced_groups());
         layout.sort_unstable();
         layout.dedup();
-        Compiler::with_captures(layout).compile(parsed)
+        let mut compiler = Compiler::with_captures(layout);
+        // Referenced groups join the layout only for backreferences, which
+        // `compile_selection_captures` callers never share.
+        compiler.captures_under_choice =
+            captures_under_choice.filter(|_| analysis.capture().referenced_groups().is_empty());
+        compiler.compile(parsed)
     }
 
     #[allow(dead_code)] // Vertical-slice API; backtrack/tokenizer integration follows.
@@ -2410,6 +2674,10 @@ struct Compiler<'a> {
     /// Number of `Split` instructions, each owning one guard cell.
     split_guards: u32,
     literal_ids: crate::engine::hashing::FastMap<&'a str, LiteralId>,
+    /// Whether any live capture sits under an alternation or repeat. When
+    /// not, no alternation needs its branches searched for live captures.
+    /// Computed by `compile` unless the caller already knows.
+    captures_under_choice: Option<bool>,
 }
 
 struct OpenRepeat<'a> {
@@ -2440,6 +2708,7 @@ impl<'a> Compiler<'a> {
             open_repeats: Vec::new(),
             split_guards: 0,
             literal_ids: crate::engine::hashing::fast_map(),
+            captures_under_choice: None,
         }
     }
 
@@ -2452,6 +2721,12 @@ impl<'a> Compiler<'a> {
 
     fn compile(mut self, parsed: &'a ParsedRegex) -> Result<Program, CompileError> {
         self.named_captures.clone_from(&parsed.named_captures);
+        if self.captures_under_choice.is_none() {
+            self.captures_under_choice = Some(
+                !self.capture_layout.is_empty()
+                    && !live_captures_keep_selection_shape(&parsed.ast, &self.capture_layout),
+            );
+        }
         self.instructions
             .reserve(parsed.analysis().instruction_capacity_hint());
         if !self.capture_layout.is_empty() && parsed.features.subroutine {
@@ -2535,58 +2810,53 @@ impl<'a> Compiler<'a> {
                 entry
             }
             Ast::Alternation(branches) => {
-                let captures_can_be_elided =
-                    !branches_contain_live_capture(branches, &self.capture_layout);
+                let captures_can_be_elided = self.captures_under_choice == Some(false)
+                    || !branches_contain_live_capture(branches, &self.capture_layout);
                 if captures_can_be_elided && is_cpp_space_comment_separator(branches) {
                     return Ok(self.push(Instruction::CppSpaceCommentSeparator { next }));
-                }
-                if captures_can_be_elided
-                    && let Some(literals) = exact_literal_branches(branches, flags)
-                {
-                    let id = self.intern_literal_trie(&literals, flags)?;
-                    return Ok(self.push(Instruction::LiteralTrie {
-                        id,
-                        flags: flags.into(),
-                        next,
-                    }));
                 }
                 let mut entries = Vec::with_capacity(branches.len());
                 let mut branch = 0;
                 while branch < branches.len() {
                     // Large grammar closures often contain a mostly-literal
                     // keyword alternation with a few structured variants
-                    // (`foo|bar|create( or alter)?|...`). Treating one such
-                    // variant as a reason to compile every literal into a
-                    // Split chain makes each negative probe walk the full
-                    // closure. Compact contiguous literal runs into the same
-                    // reusable trie used by all-literal alternations. Keeping
-                    // runs contiguous preserves ordered-alternation priority
-                    // around the structured branches.
-                    if captures_can_be_elided
-                        && exact_literal_ast(&branches[branch], flags).is_some()
-                    {
+                    // (`foo|bar|create( or alter)?|...`), and entity or
+                    // attribute inventories spelled as nested prefix trees
+                    // (`a(s(ymp(eq)?|cr)|nd)|...`). Every capture-free branch
+                    // that denotes a finite set of strings expands, in
+                    // backtracking priority order, into one reusable trie
+                    // instead of a Split chain whose negative probes walk the
+                    // whole closure. Keeping runs contiguous preserves
+                    // ordered-alternation priority around structured
+                    // branches.
+                    if captures_can_be_elided {
                         let run_start = branch;
-                        let mut literals = Vec::new();
-                        while branch < branches.len() {
-                            let Some(literal) = exact_literal_ast(&branches[branch], flags) else {
-                                break;
-                            };
-                            literals.push(literal);
+                        let mut run = FiniteSize::NONE;
+                        while let Some(size) = branches.get(branch).and_then(|branch| {
+                            finite_language_size(branch, flags, run.remaining_limits())
+                        }) {
+                            run = run.union(size);
                             branch += 1;
                         }
-                        if literals.len() >= 4 {
-                            let id = self.intern_literal_trie(&literals, flags)?;
-                            entries.push(self.push(Instruction::LiteralTrie {
-                                id,
-                                flags: flags.into(),
-                                next,
-                            }));
-                        } else {
-                            for branch in &branches[run_start..branch] {
-                                entries.push(self.compile_node(branch, flags, next)?);
+                        if branch > run_start {
+                            if run.worth_a_trie() {
+                                let id = self.intern_finite_trie(
+                                    &branches[run_start..branch],
+                                    flags,
+                                    run,
+                                )?;
+                                entries.push(self.push(Instruction::LiteralTrie {
+                                    id,
+                                    flags: flags.into(),
+                                    next,
+                                }));
+                            } else {
+                                for branch in &branches[run_start..branch] {
+                                    entries.push(self.compile_node(branch, flags, next)?);
+                                }
                             }
+                            continue;
                         }
-                        continue;
                     }
                     entries.push(self.compile_node(&branches[branch], flags, next)?);
                     branch += 1;
@@ -3142,7 +3412,15 @@ impl<'a> Compiler<'a> {
                     (None, None) => None,
                 }
             }
-            // Accepting, calls, backreferences, conditionals, tries, the
+            Instruction::LiteralTrie { id, flags, next } => {
+                let trie = &self.literal_tries[id.0 as usize];
+                let mut first = trie.first_chars(flags.case_insensitive())?;
+                if trie.nodes[0].terminal_order.is_some() {
+                    first.union(&self.first_chars_from(*next, steps, visited)?);
+                }
+                Some(first)
+            }
+            // Accepting, calls, backreferences, conditionals, the
             // specialized separator, and placeholders are not analyzed.
             Instruction::Accept
             | Instruction::Fail
@@ -3150,7 +3428,6 @@ impl<'a> Compiler<'a> {
             | Instruction::Return
             | Instruction::Backref { .. }
             | Instruction::Conditional { .. }
-            | Instruction::LiteralTrie { .. }
             | Instruction::CppSpaceCommentSeparator { .. } => None,
         }
     }
@@ -3188,51 +3465,68 @@ impl<'a> Compiler<'a> {
             .map_err(|_| CompileError::TableOverflow)
     }
 
-    fn intern_literal_trie(
+    /// Builds one trie from alternation branches that
+    /// [`finite_language_size`] admitted with combined size `size`.
+    fn intern_finite_trie(
         &mut self,
-        literals: &[Cow<'_, str>],
+        branches: &'a [Ast],
         flags: RegexFlags,
+        size: FiniteSize,
     ) -> Result<LiteralTrieId, CompileError> {
         let id =
             u32::try_from(self.literal_tries.len()).map_err(|_| CompileError::TableOverflow)?;
-        self.literal_tries.push(LiteralTrie::new(literals, flags)?);
+        let mut pending = Vec::new();
+        let trie = if flags.case_insensitive && size.non_ascii {
+            // Unicode case-insensitive inventories need the scalar trie.
+            let mut strings = FiniteStrings::default();
+            for branch in branches {
+                enumerate_finite_language(branch, flags, &mut pending, &mut strings)?;
+            }
+            LiteralTrie::new(&strings.strings(), flags)?
+        } else {
+            // Byte tries are built while enumerating, so a shared prefix is
+            // walked once rather than once per expanded string.
+            let mut builder =
+                ByteTrieBuilder::new(size.bytes.saturating_add(1), flags.case_insensitive);
+            for branch in branches {
+                if let Ast::Literal(literal) = branch {
+                    let node = builder.insert(literal)?;
+                    builder.emit(node)?;
+                } else {
+                    enumerate_finite_language(branch, flags, &mut pending, &mut builder)?;
+                }
+            }
+            builder.finish()
+        };
+        self.literal_tries.push(trie);
         Ok(LiteralTrieId(id))
     }
 }
 
 impl LiteralTrie {
-    fn new(literals: &[Cow<'_, str>], flags: RegexFlags) -> Result<Self, CompileError> {
-        let unicode = flags.case_insensitive && literals.iter().any(|literal| !literal.is_ascii());
+    fn new<S: AsRef<str>>(literals: &[S], flags: RegexFlags) -> Result<Self, CompileError> {
+        let unicode =
+            flags.case_insensitive && literals.iter().any(|literal| !literal.as_ref().is_ascii());
         let node_capacity = literals
             .iter()
             .fold(1usize, |nodes, literal| {
                 nodes.saturating_add(if unicode {
-                    literal.chars().count()
+                    literal.as_ref().chars().count()
                 } else {
-                    literal.len()
+                    literal.as_ref().len()
                 })
             })
             .min(LITERAL_TRIE_NODE_RESERVE_LIMIT);
-        let mut trie = Self {
-            nodes: if unicode {
-                Vec::new()
-            } else {
-                Vec::with_capacity(node_capacity)
-            },
-            edge_bytes: Vec::new(),
-            edge_targets: Vec::new(),
-            unicode_nodes: if unicode {
-                Vec::with_capacity(node_capacity)
-            } else {
-                Vec::new()
-            },
-        };
         if unicode {
+            let mut trie = Self {
+                unicode_nodes: Vec::with_capacity(node_capacity),
+                ..Self::default()
+            };
             trie.unicode_nodes.push(UnicodeLiteralTrieNode::default());
             for (order, literal) in literals.iter().enumerate() {
                 let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
                 let mut node = 0usize;
-                for ch in literal.chars() {
+                for ch in literal.as_ref().chars() {
                     let ch = CaseFoldKey::new(ch);
                     let edge = trie.unicode_nodes[node]
                         .edges
@@ -3256,79 +3550,34 @@ impl LiteralTrie {
             }
             return Ok(trie);
         }
-        // Insert through first-child/next-sibling links (with a dense root
-        // table) so that no node owns an edge allocation, then lay every
-        // node's children out as one sorted run of the shared edge arrays.
-        let mut first_child = Vec::with_capacity(node_capacity);
-        let mut next_sibling = Vec::with_capacity(node_capacity);
-        let mut node_bytes = Vec::with_capacity(node_capacity);
-        let mut root_children = [NO_TRIE_NODE; 256];
-        trie.nodes.push(LiteralTrieNode::default());
-        first_child.push(NO_TRIE_NODE);
-        next_sibling.push(NO_TRIE_NODE);
-        node_bytes.push(0u8);
-        for (order, literal) in literals.iter().enumerate() {
-            let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
-            let mut node = 0usize;
-            for mut byte in literal.bytes() {
-                if flags.case_insensitive {
-                    byte.make_ascii_lowercase();
-                }
-                let mut child = if node == 0 {
-                    root_children[byte as usize]
-                } else {
-                    let mut child = first_child[node];
-                    while child != NO_TRIE_NODE && node_bytes[child as usize] != byte {
-                        child = next_sibling[child as usize];
-                    }
-                    child
-                };
-                if child == NO_TRIE_NODE {
-                    child =
-                        u32::try_from(trie.nodes.len()).map_err(|_| CompileError::TableOverflow)?;
-                    if child == NO_TRIE_NODE {
-                        return Err(CompileError::TableOverflow);
-                    }
-                    trie.nodes.push(LiteralTrieNode::default());
-                    first_child.push(NO_TRIE_NODE);
-                    next_sibling.push(first_child[node]);
-                    node_bytes.push(byte);
-                    first_child[node] = child;
-                    trie.nodes[node].edge_len += 1;
-                    if node == 0 {
-                        root_children[byte as usize] = child;
-                    }
-                }
-                node = child as usize;
-            }
-            let terminal = &mut trie.nodes[node].terminal_order;
-            if terminal.is_none_or(|existing| order < existing) {
-                *terminal = Some(order);
+        let mut builder = ByteTrieBuilder::new(node_capacity, flags.case_insensitive);
+        for literal in literals {
+            let node = builder.insert(literal.as_ref())?;
+            builder.emit(node)?;
+        }
+        Ok(builder.finish())
+    }
+
+    /// First characters of the non-empty literals of a byte trie; `None` for
+    /// the scalar (Unicode case-folding) trie.
+    fn first_chars(&self, case_insensitive: bool) -> Option<FirstChars> {
+        if !self.unicode_nodes.is_empty() {
+            return None;
+        }
+        let root = self.nodes[0];
+        let start = root.edge_start as usize;
+        let mut first = FirstChars::NONE;
+        for &byte in &self.edge_bytes[start..start + root.edge_len as usize] {
+            if byte.is_ascii() {
+                first.union(&FirstChars::of_literal(
+                    char::from(byte).encode_utf8(&mut [0; 4]),
+                    case_insensitive,
+                ));
+            } else {
+                first.non_ascii = FirstChars::NON_ASCII_ANY;
             }
         }
-        let mut edge_start = 0u32;
-        for node in &mut trie.nodes {
-            node.edge_start = edge_start;
-            edge_start += node.edge_len;
-        }
-        trie.edge_bytes = vec![0; edge_start as usize];
-        trie.edge_targets = vec![0; edge_start as usize];
-        let mut run = Vec::new();
-        for (node, &first) in trie.nodes.iter().zip(&first_child) {
-            let start = node.edge_start as usize;
-            run.clear();
-            let mut child = first;
-            while child != NO_TRIE_NODE {
-                run.push((node_bytes[child as usize], child));
-                child = next_sibling[child as usize];
-            }
-            run.sort_unstable_by_key(|(byte, _)| *byte);
-            for (slot, &(byte, target)) in (start..).zip(&run) {
-                trie.edge_bytes[slot] = byte;
-                trie.edge_targets[slot] = target;
-            }
-        }
-        Ok(trie)
+        Some(first)
     }
 
     /// Characters a non-empty match must start with; `None` when the empty
@@ -3492,16 +3741,33 @@ fn ascii_mask_contains(mask: &AsciiMask, byte: u8) -> bool {
     byte < 128 && mask[byte as usize / 64] & (1u64 << (byte % 64)) != 0
 }
 
-fn exact_literal_branches(branches: &[Ast], flags: RegexFlags) -> Option<Vec<Cow<'_, str>>> {
-    // Small alternations do not amortize a second table and already execute
-    // cheaply as ordered `Split`s.
-    if branches.len() < 4 {
-        return None;
+/// True when no live capture group sits inside an alternation or repeat.
+fn live_captures_keep_selection_shape(ast: &Ast, live: &[u32]) -> bool {
+    fn visit(ast: &Ast, live: &[u32], under_choice: bool) -> bool {
+        match ast {
+            Ast::Group { index, child, .. } => {
+                !(under_choice && index.is_some_and(|index| index != 0 && live.contains(&index)))
+                    && visit(child, live, under_choice)
+            }
+            Ast::Concat(nodes) => nodes.iter().all(|node| visit(node, live, under_choice)),
+            Ast::Alternation(nodes) => nodes.iter().all(|node| visit(node, live, true)),
+            Ast::Repeat { node, .. } => visit(node, live, true),
+            Ast::Look { child, .. } | Ast::Flags { child, .. } => visit(child, live, under_choice),
+            Ast::Conditional {
+                matched, unmatched, ..
+            } => visit(matched, live, true) && visit(unmatched, live, true),
+            Ast::Empty
+            | Ast::Literal(_)
+            | Ast::Dot
+            | Ast::Grapheme
+            | Ast::Class(_)
+            | Ast::Anchor(_)
+            | Ast::Backref(_)
+            | Ast::Subroutine(_)
+            | Ast::Unsupported(_) => true,
+        }
     }
-    branches
-        .iter()
-        .map(|branch| exact_literal_ast(branch, flags))
-        .collect::<Option<Vec<_>>>()
+    visit(ast, live, false)
 }
 
 fn branches_contain_live_capture(branches: &[Ast], capture_layout: &[u32]) -> bool {
@@ -3541,26 +3807,448 @@ fn ast_contains_live_capture(ast: &Ast, capture_layout: &[u32]) -> bool {
     }
 }
 
-// Borrow the overwhelmingly common literal/group case. Only concatenations
-// need a temporary string; the finished trie retains no AST references.
-fn exact_literal_ast(ast: &Ast, flags: RegexFlags) -> Option<Cow<'_, str>> {
-    match ast {
-        Ast::Empty => Some(Cow::Borrowed("")),
-        Ast::Literal(literal) => Some(Cow::Borrowed(literal)),
-        Ast::Concat(nodes) => {
-            let mut literal = String::new();
-            for node in nodes {
-                literal.push_str(&exact_literal_ast(node, flags)?);
-            }
-            Some(Cow::Owned(literal))
+/// Most strings one alternation run may expand into before it keeps its
+/// structured form. HTML's named-entity inventory (about 2,200 names) is the
+/// largest bundled nested literal tree.
+const FINITE_LANGUAGE_LIMIT: usize = 4096;
+/// Bounds the expanded text so a long literal repeated across many
+/// alternatives cannot inflate compilation.
+const FINITE_LANGUAGE_BYTE_LIMIT: usize = 64 * 1024;
+/// Largest bounded repeat expanded into literals (`(eq)?`, `x{2}`).
+const FINITE_REPEAT_LIMIT: usize = 4;
+/// Largest character class expanded into single-character literals.
+const FINITE_CLASS_LIMIT: u32 = 16;
+/// Most expanded strings per literal or class leaf a trie may replace.
+/// Nested inventories expand to about one string per leaf.
+const FINITE_EXPANSION_RATIO: usize = 2;
+
+/// Upper bounds for an expandable finite language: how many strings it
+/// denotes and their total length, whether it matches empty, and whether any
+/// literal is non-ASCII.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FiniteSize {
+    strings: usize,
+    bytes: usize,
+    /// Literal and class leaves: roughly the instructions the structured
+    /// form would compile to.
+    atoms: usize,
+    nullable: bool,
+    non_ascii: bool,
+}
+
+impl FiniteSize {
+    const NONE: Self = Self {
+        strings: 0,
+        bytes: 0,
+        atoms: 0,
+        nullable: false,
+        non_ascii: false,
+    };
+    const EMPTY: Self = Self {
+        strings: 1,
+        bytes: 0,
+        atoms: 0,
+        nullable: true,
+        non_ascii: false,
+    };
+
+    /// Whether a trie is worth building. Products of small classes (such
+    /// as `[Ii][Nn][Ff]`) multiply into far more strings than the
+    /// instructions they replace, which costs more to build on first use
+    /// than a short Split chain costs to run.
+    fn worth_a_trie(self) -> bool {
+        self.strings >= 4 && self.strings <= self.atoms.saturating_mul(FINITE_EXPANSION_RATIO)
+    }
+
+    fn remaining_limits(self) -> FiniteLimits {
+        FiniteLimits {
+            strings: FINITE_LANGUAGE_LIMIT - self.strings,
+            bytes: FINITE_LANGUAGE_BYTE_LIMIT - self.bytes,
         }
-        Ast::Group { child, .. } => exact_literal_ast(child, flags),
+    }
+
+    /// Either language (alternation).
+    fn union(self, other: Self) -> Self {
+        Self {
+            strings: self.strings.saturating_add(other.strings),
+            bytes: self.bytes.saturating_add(other.bytes),
+            atoms: self.atoms.saturating_add(other.atoms),
+            nullable: self.nullable || other.nullable,
+            non_ascii: self.non_ascii || other.non_ascii,
+        }
+    }
+
+    /// Every string of `self` followed by every string of `other`.
+    fn product(self, other: Self) -> Self {
+        Self {
+            strings: self.strings.saturating_mul(other.strings),
+            bytes: self
+                .bytes
+                .saturating_mul(other.strings)
+                .saturating_add(other.bytes.saturating_mul(self.strings)),
+            atoms: self.atoms.saturating_add(other.atoms),
+            nullable: self.nullable && other.nullable,
+            non_ascii: self.non_ascii || other.non_ascii,
+        }
+    }
+
+    fn within(self, limits: FiniteLimits) -> Option<Self> {
+        (self.strings <= limits.strings && self.bytes <= limits.bytes).then_some(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FiniteLimits {
+    strings: usize,
+    bytes: usize,
+}
+
+/// Sizes `ast` when it denotes a finite set of strings within `limits` built
+/// only from literals, small case-sensitive ASCII classes, groups,
+/// alternations, and small bounded repeats. Callers must already know that no
+/// live capture is inside. The walk allocates nothing, so a failed attempt is
+/// cheap to retry at each nested alternation of a structured subtree.
+///
+/// Trying the expanded strings in order at the same position, and resuming
+/// the continuation after each, is exactly what the ordered VM does for such a
+/// subtree: it has no anchors, assertions, or state other than the consumed
+/// text. Duplicate strings are harmless because the trie keeps the earliest
+/// order, and a later duplicate would only retry the same continuation.
+fn finite_language_size(ast: &Ast, flags: RegexFlags, limits: FiniteLimits) -> Option<FiniteSize> {
+    let size = match ast {
+        Ast::Empty => FiniteSize::EMPTY,
+        Ast::Literal(literal) => FiniteSize {
+            strings: 1,
+            bytes: literal.len(),
+            atoms: 1,
+            nullable: literal.is_empty(),
+            non_ascii: !literal.is_ascii(),
+        },
+        // Counting atoms bounds the members without building class masks;
+        // overlapping atoms only make the bound conservative.
+        Ast::Class(class) => {
+            if flags.case_insensitive || class.negated || !class.intersections.is_empty() {
+                return None;
+            }
+            let mut members = 0usize;
+            for atom in &class.atoms {
+                members += match atom {
+                    ClassAtom::Char(ch) if ch.is_ascii() => 1,
+                    ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => {
+                        (*end as usize + 1).saturating_sub(*start as usize)
+                    }
+                    _ => return None,
+                };
+            }
+            if members > FINITE_CLASS_LIMIT as usize {
+                return None;
+            }
+            FiniteSize {
+                strings: members,
+                bytes: members,
+                atoms: 1,
+                nullable: false,
+                non_ascii: false,
+            }
+        }
+        Ast::Group { child, .. } => finite_language_size(child, flags, limits)?,
         Ast::Flags {
             flags: local,
             child,
-        } if *local == flags => exact_literal_ast(child, flags),
-        _ => None,
+        } if *local == flags => finite_language_size(child, flags, limits)?,
+        Ast::Alternation(branches) => {
+            let mut total = FiniteSize::NONE;
+            for branch in branches {
+                let remaining = FiniteLimits {
+                    strings: limits.strings - total.strings,
+                    bytes: limits.bytes - total.bytes,
+                };
+                total = total.union(finite_language_size(branch, flags, remaining)?);
+            }
+            total
+        }
+        Ast::Concat(nodes) => {
+            let mut total = FiniteSize::EMPTY;
+            for node in nodes {
+                total = total
+                    .product(finite_language_size(node, flags, limits)?)
+                    .within(limits)?;
+            }
+            total
+        }
+        Ast::Repeat {
+            node,
+            min,
+            max: Some(max),
+            possessive: false,
+            atomic: false,
+            ..
+        } if *max <= FINITE_REPEAT_LIMIT && min <= max => {
+            let body = finite_language_size(node, flags, limits)?;
+            // An iteration that can match empty is subject to the VM's
+            // empty-loop check, which plain enumeration does not model.
+            if body.nullable {
+                return None;
+            }
+            let mut exactly = FiniteSize::EMPTY;
+            let mut total = FiniteSize::NONE;
+            for iterations in 0..=*max {
+                if iterations >= *min {
+                    total = total.union(exactly);
+                }
+                exactly = exactly.product(body);
+            }
+            // The structured loop compiles its body once.
+            FiniteSize {
+                atoms: body.atoms,
+                ..total
+            }
+        }
+        _ => return None,
+    };
+    size.within(limits)
+}
+
+/// Receives expanded strings in priority order. `State` identifies the
+/// prefix consumed so far.
+trait FiniteSink {
+    type State: Copy;
+
+    fn root(&self) -> Self::State;
+    fn extend(&mut self, state: Self::State, text: &str) -> Result<Self::State, CompileError>;
+    fn emit(&mut self, state: Self::State) -> Result<(), CompileError>;
+}
+
+impl FiniteSink for ByteTrieBuilder {
+    type State = u32;
+
+    fn root(&self) -> u32 {
+        0
     }
+
+    fn extend(&mut self, mut node: u32, text: &str) -> Result<u32, CompileError> {
+        for &byte in text.as_bytes() {
+            node = self.child(node, byte)?;
+        }
+        Ok(node)
+    }
+
+    fn emit(&mut self, node: u32) -> Result<(), CompileError> {
+        self.mark_terminal(node, self.next_order);
+        self.next_order = self
+            .next_order
+            .checked_add(1)
+            .ok_or(CompileError::TableOverflow)?;
+        Ok(())
+    }
+}
+
+/// Expanded strings in one buffer, for the scalar (Unicode case-folding)
+/// trie. The state is the length of the current prefix in `prefix`.
+#[derive(Default)]
+struct FiniteStrings {
+    prefix: String,
+    text: String,
+    ends: Vec<usize>,
+}
+
+impl FiniteStrings {
+    fn strings(&self) -> Vec<&str> {
+        let mut start = 0;
+        self.ends
+            .iter()
+            .map(|&end| {
+                let string = &self.text[start..end];
+                start = end;
+                string
+            })
+            .collect()
+    }
+}
+
+impl FiniteSink for FiniteStrings {
+    type State = usize;
+
+    fn root(&self) -> usize {
+        0
+    }
+
+    fn extend(&mut self, len: usize, text: &str) -> Result<usize, CompileError> {
+        // Depth-first order never revisits a longer prefix after a shorter
+        // one was extended, so the bytes up to `len` are still current.
+        self.prefix.truncate(len);
+        self.prefix.push_str(text);
+        Ok(self.prefix.len())
+    }
+
+    fn emit(&mut self, len: usize) -> Result<(), CompileError> {
+        self.text.push_str(&self.prefix[..len]);
+        self.ends.push(self.text.len());
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Pending<'a> {
+    Node(&'a Ast),
+    /// A bounded repeat that has completed `done` iterations.
+    Repeat {
+        node: &'a Ast,
+        done: usize,
+        min: usize,
+        max: usize,
+        greedy: bool,
+    },
+}
+
+/// Emits every string of a subtree admitted by [`finite_language_size`]
+/// into `sink`, in the order the backtracking VM would try them.
+fn enumerate_finite_language<'a, S: FiniteSink>(
+    ast: &'a Ast,
+    flags: RegexFlags,
+    pending: &mut Vec<Pending<'a>>,
+    sink: &mut S,
+) -> Result<(), CompileError> {
+    pending.clear();
+    pending.push(Pending::Node(ast));
+    let root = sink.root();
+    enumerate_pending(pending, flags, root, sink)
+}
+
+/// Depth-first enumeration. `pending` is the remaining sequence, last item
+/// first; it is restored before returning.
+fn enumerate_pending<'a, S: FiniteSink>(
+    pending: &mut Vec<Pending<'a>>,
+    flags: RegexFlags,
+    state: S::State,
+    sink: &mut S,
+) -> Result<(), CompileError> {
+    let Some(item) = pending.pop() else {
+        return sink.emit(state);
+    };
+    let result = match item {
+        Pending::Node(ast) => match ast {
+            Ast::Empty => enumerate_pending(pending, flags, state, sink),
+            Ast::Literal(literal) => {
+                let state = sink.extend(state, literal)?;
+                enumerate_pending(pending, flags, state, sink)
+            }
+            Ast::Class(class) => {
+                let members =
+                    small_ascii_class_members(class, flags).ok_or(CompileError::Unsupported)?;
+                let mut result = Ok(());
+                for byte in (0u8..128).filter(|byte| ascii_mask_contains(&members, *byte)) {
+                    let mut buffer = [0; 4];
+                    result = sink
+                        .extend(state, char::from(byte).encode_utf8(&mut buffer))
+                        .and_then(|state| enumerate_pending(pending, flags, state, sink));
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                result
+            }
+            Ast::Group { child, .. } | Ast::Flags { child, .. } => {
+                pending.push(Pending::Node(child));
+                let result = enumerate_pending(pending, flags, state, sink);
+                pending.pop();
+                result
+            }
+            Ast::Concat(nodes) => {
+                let len = pending.len();
+                pending.extend(nodes.iter().rev().map(Pending::Node));
+                let result = enumerate_pending(pending, flags, state, sink);
+                pending.truncate(len);
+                result
+            }
+            Ast::Alternation(branches) => {
+                let mut result = Ok(());
+                for branch in branches {
+                    pending.push(Pending::Node(branch));
+                    result = enumerate_pending(pending, flags, state, sink);
+                    pending.pop();
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                result
+            }
+            Ast::Repeat {
+                node,
+                min,
+                max: Some(max),
+                greedy,
+                ..
+            } => {
+                pending.push(Pending::Repeat {
+                    node,
+                    done: 0,
+                    min: *min,
+                    max: *max,
+                    greedy: *greedy,
+                });
+                let result = enumerate_pending(pending, flags, state, sink);
+                pending.pop();
+                result
+            }
+            // `finite_language_size` admitted only the shapes above.
+            _ => Err(CompileError::Unsupported),
+        },
+        Pending::Repeat {
+            node,
+            done,
+            min,
+            max,
+            greedy,
+        } => {
+            // Greedy loops try another iteration before exiting; lazy loops
+            // the reverse.
+            let mut result = Ok(());
+            for iterate in [greedy, !greedy] {
+                if iterate {
+                    if done < max {
+                        pending.push(Pending::Repeat {
+                            node,
+                            done: done + 1,
+                            min,
+                            max,
+                            greedy,
+                        });
+                        pending.push(Pending::Node(node));
+                        result = enumerate_pending(pending, flags, state, sink);
+                        pending.truncate(pending.len() - 2);
+                    }
+                } else if done >= min {
+                    result = enumerate_pending(pending, flags, state, sink);
+                }
+                if result.is_err() {
+                    break;
+                }
+            }
+            result
+        }
+    };
+    pending.push(item);
+    result
+}
+
+/// Members of a small case-sensitive class built only from ASCII characters
+/// and ranges. Such a class matches exactly one of these bytes, so it is
+/// equivalent to an alternation of one-byte literals.
+fn small_ascii_class_members(class: &CharClass, flags: RegexFlags) -> Option<AsciiMask> {
+    if flags.case_insensitive
+        || class.negated
+        || !class.intersections.is_empty()
+        || !class.atoms.iter().all(|atom| match atom {
+            ClassAtom::Char(ch) => ch.is_ascii(),
+            ClassAtom::Range(start, end) => start.is_ascii() && end.is_ascii(),
+            _ => false,
+        })
+    {
+        return None;
+    }
+    let (members, _) = ascii_class_masks(class);
+    (members[0].count_ones() + members[1].count_ones() <= FINITE_CLASS_LIMIT).then_some(members)
 }
 
 #[cfg(test)]
@@ -3716,6 +4404,41 @@ mod tests {
                 )),
                 "{kind:?}"
             );
+        }
+    }
+
+    #[test]
+    fn posix_ascii_masks_match_the_predicates() {
+        for (name, mask) in POSIX_ASCII_MASKS {
+            for spelling in [name.to_owned(), name.to_ascii_uppercase()] {
+                let contains = super::super::backtrack::posix_class_predicate(&spelling);
+                assert_eq!(
+                    posix_ascii_mask(&spelling),
+                    ascii_predicate_mask(contains),
+                    "{spelling}"
+                );
+            }
+            assert_eq!(posix_ascii_mask(name), mask);
+        }
+        let unknown = super::super::backtrack::posix_class_predicate("nope");
+        assert_eq!(posix_ascii_mask("nope"), ascii_predicate_mask(unknown));
+    }
+
+    #[test]
+    fn every_ascii_range_mask_matches_class_evaluation() {
+        for low in 0u8..128 {
+            for high in 0u8..128 {
+                let class = CharClass {
+                    negated: false,
+                    intersections: Vec::new(),
+                    atoms: vec![ClassAtom::Range(low as char, high as char)],
+                };
+                assert_eq!(
+                    ascii_class_masks(&class),
+                    ascii_masks_by_evaluation(&class),
+                    "{low}..={high}"
+                );
+            }
         }
     }
 
@@ -3893,7 +4616,7 @@ mod tests {
     }
 
     #[test]
-    fn literal_inventory_and_subroutine_definitions_borrow_the_parsed_ast() {
+    fn literal_inventory_expands_and_subroutine_definitions_borrow_the_parsed_ast() {
         let parsed = parse(r"(?<word>alpha|beta|gamma|delta)");
         let mut definitions = std::collections::BTreeMap::new();
         let mut called = Vec::new();
@@ -3912,17 +4635,47 @@ mod tests {
         let Ast::Alternation(branches) = child.as_ref() else {
             panic!("literal alternation");
         };
-        let literals = exact_literal_branches(branches, parsed.flags).unwrap();
-        assert!(
-            literals
-                .iter()
-                .all(|literal| matches!(literal, Cow::Borrowed(_)))
+        assert_eq!(
+            expanded_strings(branches, parsed.flags),
+            ["alpha", "beta", "gamma", "delta"]
         );
-        for (branch, literal) in branches.iter().zip(&literals) {
-            let Ast::Literal(source) = branch else {
-                panic!("literal branch");
+    }
+
+    fn expanded_strings(branches: &[Ast], flags: RegexFlags) -> Vec<String> {
+        let mut strings = FiniteStrings::default();
+        let mut pending = Vec::new();
+        for branch in branches {
+            let limits = FiniteSize::NONE.remaining_limits();
+            assert!(finite_language_size(branch, flags, limits).is_some());
+            enumerate_finite_language(branch, flags, &mut pending, &mut strings).unwrap();
+        }
+        strings.strings().into_iter().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn finite_expansion_follows_backtracking_priority() {
+        for (pattern, expected) in [
+            (
+                r"a(s(ymp(eq)?|cr)|nd)|b",
+                &["asympeq", "asymp", "ascr", "and", "b"][..],
+            ),
+            (r"x(y)??z|w", &["xz", "xyz", "w"]),
+            (r"[db]|[c-d]x", &["b", "d", "cx", "dx"]),
+            (r"(?:a|b){2}|c", &["aa", "ab", "ba", "bb", "c"]),
+            (
+                r"(?:a|b){0,2}?c|d",
+                &["c", "ac", "aac", "abc", "bc", "bac", "bbc", "d"],
+            ),
+        ] {
+            let parsed = parse(pattern);
+            let Ast::Alternation(branches) = &parsed.ast else {
+                panic!("{pattern} is not an alternation");
             };
-            assert_eq!(source.as_ptr(), literal.as_ptr());
+            assert_eq!(
+                expanded_strings(branches, parsed.flags),
+                expected,
+                "{pattern}"
+            );
         }
     }
 
@@ -3991,7 +4744,7 @@ mod tests {
         let mut branches = (0..250)
             .map(|index| format!("kw{index:03}"))
             .collect::<Vec<_>>();
-        branches.push("special(?:ized)?".to_owned());
+        branches.push(r"special\w*".to_owned());
         branches.extend((250..500).map(|index| format!("kw{index:03}")));
         let pattern = format!("(?:{})", branches.join("|"));
         let program = Program::compile(&parse(&pattern)).expect("mixed literal inventory");
@@ -4022,6 +4775,108 @@ mod tests {
         // The structured branch remains ahead of the second literal run.
         let ordered = r"(?:foo|bar|baz|quux|x(?:y)?|xyz|xyzz|xyzzy)";
         assert_eq!(bytecode_span(ordered, "xyz", 0), Some(0..2));
+    }
+
+    #[test]
+    fn nested_finite_alternations_expand_in_priority_order() {
+        // Entity-style prefix trees, optional and counted suffixes, lazy
+        // repeats, small classes, and suffixes that force backtracking into
+        // later alternatives must all behave like the ordered Split chain.
+        let patterns = [
+            r"(?:a(s(ymp(eq)?|cr|t)|n(d(slope|[dv]|and)?|g(s(t|ph)|e)?))|b(e(ta)?|[12]))(?:;|!)",
+            r"(?:a(s(ymp(eq)?|cr|t)|n(d(slope|[dv]|and)?|g(s(t|ph)|e)?))|b(e(ta)?|[12]))",
+            r"(?:x(y)??|xy(z)?|w{2}|v[a-c]{1,2}|(?:p|q)(?:r|s))(?:z|$)",
+            r"(?:ab|a(b)?c|a(?:bc)??d|[ab][ab])(?:c|d|e)",
+            r"(?i:foo(bar)?|BAZ(qux)?|ab(c|d))(?:!|$)",
+        ];
+        let lines = [
+            "asympeq;",
+            "asymp;",
+            "asympeq!",
+            "ascr;",
+            "and;",
+            "andv;",
+            "andslope!",
+            "angst;",
+            "ange;",
+            "an;",
+            "beta;",
+            "be!",
+            "b2;",
+            "b3;",
+            "asy",
+            "xyz",
+            "xz",
+            "xyzz",
+            "ww",
+            "wwz",
+            "vabz",
+            "vcz",
+            "prz",
+            "qs",
+            "abce",
+            "abcd",
+            "abd",
+            "bac",
+            "FOOBAR!",
+            "baz",
+            "BaZQuX",
+            "abD!",
+            "",
+        ];
+        for pattern in patterns {
+            let program = Program::compile(&parse(pattern)).expect("finite pattern compiles");
+            assert!(
+                program
+                    .instructions
+                    .iter()
+                    .any(|instruction| matches!(instruction, Instruction::LiteralTrie { .. })),
+                "{pattern:?} should expand into a literal trie"
+            );
+            for line in lines {
+                for start in 0..=line.len() {
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive_position_span(&parse(pattern), line, start, context()),
+                        "{pattern:?} on {line:?} at {start}"
+                    );
+                }
+            }
+        }
+        // A live capture keeps its structured form; dead ones are elided.
+        let entity = r"(&)((a(s(ymp(eq)?|cr)|nd)|b(e(ta)?|[12])))(;)";
+        for line in ["&asympeq;", "&asymp;", "&beta;", "&be;", "&b2;", "&nd;"] {
+            assert_capture_replay(entity, line, 0, &[1, 2, 9]);
+            assert_capture_replay(entity, line, 0, &[1, 2, 7, 9]);
+        }
+        assert_capture_replay(r"(?:x(y)?|xy(z)?|w|v)(z)", "xyzz", 0, &[1, 2, 3]);
+    }
+
+    #[test]
+    fn finite_expansion_rejects_unbounded_and_nullable_repeats() {
+        for pattern in [
+            r"(?:a(b)*|c|d|e)",
+            r"(?:a(b?){2}|c|d|e)",
+            r"(?:a(?=b)|c|d|e)",
+        ] {
+            let program = Program::compile(&parse(pattern)).unwrap();
+            assert!(
+                !program
+                    .instructions
+                    .iter()
+                    .any(|instruction| matches!(instruction, Instruction::LiteralTrie { .. })),
+                "{pattern:?} must not expand"
+            );
+        }
+        // Expansion limits fall back to the structured form.
+        let wide = format!("(?:{})", vec!["[a-p][a-p][a-p][a-p]"; 4].join("|"));
+        let program = Program::compile(&parse(&wide)).unwrap();
+        assert!(
+            !program
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction, Instruction::LiteralTrie { .. }))
+        );
     }
 
     #[test]
@@ -4468,6 +5323,32 @@ mod tests {
                 )
             })
             .count()
+    }
+
+    #[test]
+    fn greedy_repeats_before_literal_tries_use_the_trie_first_bytes() {
+        // `\w` is not ASCII-only, so only the first-character analysis can
+        // prove these continuations exclusive; it must look into the trie.
+        let exclusive = r"\w+(?:;a|;b|;c|:d)";
+        let overlapping = r"\w+(?:;a|;b|;c|dd)";
+        let nullable = r"\w+(?:;a|;b|;c|)d";
+        assert_eq!(scan_repeat_count(exclusive), 1);
+        assert_eq!(scan_repeat_count(overlapping), 0);
+        assert_eq!(scan_repeat_count(nullable), 0);
+        for pattern in [exclusive, overlapping, nullable] {
+            for line in ["ab;a", "abdd", "abd", "ab:d", "λx;c", "ab"] {
+                for start in 0..line.len() {
+                    if !line.is_char_boundary(start) {
+                        continue;
+                    }
+                    assert_eq!(
+                        bytecode_span(pattern, line, start),
+                        recursive_position_span(&parse(pattern), line, start, context()),
+                        "{pattern:?} on {line:?} at {start}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
