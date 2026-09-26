@@ -1745,15 +1745,23 @@ fn match_node(
             matched,
             unmatched,
         } => {
+            let is_set = |group: u32| {
+                usize::try_from(group)
+                    .ok()
+                    .and_then(|group| state.captures.get(group))
+                    .is_some_and(Option::is_some)
+            };
             let group = match condition {
-                Backref::Number(group) => usize::try_from(*group).ok(),
-                Backref::Name(name) => parsed
-                    .named_captures
-                    .get(name)
-                    .and_then(|group| usize::try_from(*group).ok()),
-            }
-            .and_then(|group| state.captures.get(group))
-            .is_some_and(Option::is_some);
+                Backref::Number(group) => is_set(*group),
+                // A shared name holds when any group of that name matched.
+                Backref::Name(name) => match parsed.duplicate_names.get(name) {
+                    Some(groups) => groups.iter().any(|group| is_set(*group)),
+                    None => parsed
+                        .named_captures
+                        .get(name)
+                        .is_some_and(|group| is_set(*group)),
+                },
+            };
             match_node(
                 if group { matched } else { unmatched },
                 line,
@@ -3521,7 +3529,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_name_backrefs_commit_to_the_last_matching_group() {
+    fn duplicate_names_in_backrefs_and_conditionals_follow_oniguruma() {
         // Expectations checked against vscode-oniguruma.
         for (pattern, line, expected) in [
             (r"(?<x>a)(?<x>b)\k<x>", "abab", Some(0..3)),
@@ -3530,6 +3538,9 @@ mod tests {
             (r"(?<x>ab)(?<x>a)\k<x>b", "abaab", Some(0..5)),
             (r"(?:(?<x>a)|(?<x>b))\k<x>", "bb", Some(0..2)),
             (r"(?:(?<x>a)|(?<x>b))\k<x>", "ab", None),
+            (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "ax", Some(0..2)),
+            (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "bx", Some(0..2)),
+            (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "ay", None),
         ] {
             let matcher = FallbackMatcher::new(pattern);
             let found = matcher

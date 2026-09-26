@@ -3045,6 +3045,10 @@ impl<'a> Compiler<'a> {
             } => {
                 let group = match condition {
                     Backref::Number(group) => *group,
+                    // The evaluator checks every group of a shared name.
+                    Backref::Name(name) if self.duplicate_names.contains_key(name) => {
+                        return Err(CompileError::Conditional);
+                    }
                     Backref::Name(name) => self
                         .named_captures
                         .get(name)
