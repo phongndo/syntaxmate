@@ -345,6 +345,34 @@ fn is_regex_syntax(ch: char) -> bool {
     )
 }
 
+/// ASCII bytes that stand for themselves outside a class when the extended
+/// (`x`) option is off: everything except regex syntax. Quantifier starts are
+/// syntax, so a run of these bytes never contains a quantifier.
+static PLAIN_LITERAL_BYTE: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut byte = 0;
+    while byte < 128 {
+        table[byte] = !matches!(
+            byte as u8,
+            b'(' | b'[' | b'.' | b'^' | b'$' | b'\\' | b')' | b'|' | b'*' | b'+' | b'?' | b'{'
+        );
+        byte += 1;
+    }
+    table
+};
+
+/// End of the run of plain literal bytes starting at `pos`.
+#[inline]
+fn plain_literal_end(bytes: &[u8], mut pos: usize) -> usize {
+    while let Some(&byte) = bytes.get(pos) {
+        if !PLAIN_LITERAL_BYTE[usize::from(byte)] {
+            break;
+        }
+        pos += 1;
+    }
+    pos
+}
+
 struct Parser<'a> {
     source: &'a str,
     bytes: &'a [u8],
@@ -441,6 +469,9 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_concat(&mut self, terminator: Option<char>) -> Ast {
+        if let Some(literal) = self.parse_plain_literal_branch(terminator) {
+            return literal;
+        }
         let base = self.nodes.len();
         while let Some(ch) = self.peek() {
             if Some(ch) == terminator || ch == '|' {
@@ -464,6 +495,40 @@ impl<'a> Parser<'a> {
             1 => self.nodes.pop().expect("one node"),
             _ => Ast::Concat(self.nodes.drain(base..).collect()),
         }
+    }
+
+    /// Keyword inventories spell most sequences as bare ASCII words ending at
+    /// a branch or group boundary. Such a sequence parses to the single
+    /// literal (under the active option snapshot) that the general path
+    /// would build scalar run by scalar run, so take it in one scan.
+    fn parse_plain_literal_branch(&mut self, terminator: Option<char>) -> Option<Ast> {
+        if self.flags.ignore_whitespace {
+            return None;
+        }
+        let start = self.pos;
+        let end = plain_literal_end(self.bytes, start);
+        if end == start {
+            return None;
+        }
+        let ends_sequence = match self.bytes.get(end) {
+            None => true,
+            Some(b'|') => true,
+            Some(b')') => terminator == Some(')'),
+            Some(_) => false,
+        };
+        if !ends_sequence {
+            return None;
+        }
+        self.pos = end;
+        let literal = Ast::Literal(self.source[start..end].to_owned());
+        Some(if self.flags == RegexFlags::default() {
+            literal
+        } else {
+            Ast::Flags {
+                flags: self.flags,
+                child: Box::new(literal),
+            }
+        })
     }
 
     fn parse_repeat(&mut self) -> Ast {
@@ -599,6 +664,20 @@ impl<'a> Parser<'a> {
         let mut escaped = start < self.pos && self.bytes[start] == b'\\';
         let extended = self.flags.ignore_whitespace;
         while let Some(&byte) = self.bytes.get(self.pos) {
+            if !extended && PLAIN_LITERAL_BYTE[usize::from(byte)] {
+                // A plain byte is followed by a quantifier only where the run
+                // of plain bytes stops; that final scalar then binds alone.
+                self.pos = plain_literal_end(self.bytes, self.pos);
+                if self
+                    .bytes
+                    .get(self.pos)
+                    .is_some_and(|following| is_quantifier_start(char::from(*following)))
+                {
+                    self.pos -= 1;
+                    break;
+                }
+                continue;
+            }
             if byte == b'\\' {
                 // Punctuation escapes and quantifiers are ASCII, so byte
                 // lookahead cannot split a multi-byte scalar.
