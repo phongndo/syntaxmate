@@ -4883,7 +4883,7 @@ mod tests {
             );
         }
         // Expansion limits fall back to the structured form.
-        let wide = format!("(?:{})", vec!["[a-p][a-p][a-p][a-p]"; 4].join("|"));
+        let wide = format!("(?:{})", ["[a-p][a-p][a-p][a-p]"; 4].join("|"));
         let program = Program::compile(&parse(&wide)).unwrap();
         assert!(
             !program
