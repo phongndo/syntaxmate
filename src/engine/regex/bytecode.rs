@@ -824,11 +824,17 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
             ascii_mask_set(&mut insensitive, byte.to_ascii_uppercase());
             (sensitive, insensitive)
         }
-        ClassAtom::Range(start, end) if start.is_ascii() && end.is_ascii() => {
-            // An ASCII probe matches when it or its other-case letter lies in
-            // the range; its non-ASCII variants cannot lie in an ASCII range.
-            let sensitive = ascii_bounded_range_mask(*start as u8, *end as u8);
-            let insensitive = [
+        ClassAtom::Range(start, end) => {
+            // The ASCII probes a range covers directly: its part below 0x80.
+            let sensitive = if start.is_ascii() {
+                ascii_bounded_range_mask(*start as u8, (*end).min('\x7f') as u8)
+            } else {
+                [0; 2]
+            };
+            // A probe also matches when a case variant lies in the range: its
+            // other-case letter, or the Kelvin sign and long s for `k` and `s`
+            // (see `case_fold::range_contains_ignore_case`).
+            let mut insensitive = [
                 // Word 0 holds no letters.
                 sensitive[0],
                 // 'a'..='z' sit exactly 32 bits above 'A'..='Z' in word 1.
@@ -836,6 +842,12 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
                     | ((sensitive[1] & ASCII_LOWER_MASK[1]) >> 32)
                     | ((sensitive[1] & ASCII_UPPER_MASK[1]) << 32),
             ];
+            for (variant, letter) in [('\u{212a}', b'k'), ('\u{17f}', b's')] {
+                if (*start..=*end).contains(&variant) {
+                    ascii_mask_set(&mut insensitive, letter);
+                    ascii_mask_set(&mut insensitive, letter.to_ascii_uppercase());
+                }
+            }
             (sensitive, insensitive)
         }
         // Perl, POSIX, and Unicode-property atoms ignore the case flag, so
@@ -881,15 +893,6 @@ fn ascii_atom_masks(atom: &ClassAtom) -> (AsciiMask, AsciiMask) {
                 }
             }
             ([0u64; 2], insensitive)
-        }
-        // Ranges reaching past ASCII can admit ASCII probes through their
-        // non-ASCII case variants (the Kelvin sign for `k`).
-        ClassAtom::Range(start, end) => {
-            let sensitive = ascii_predicate_mask(|ch| *start <= ch && ch <= *end);
-            let insensitive = ascii_predicate_mask(|ch| {
-                super::case_fold::range_contains_ignore_case(*start, *end, ch)
-            });
-            (sensitive, insensitive)
         }
     }
 }
@@ -4368,6 +4371,10 @@ mod tests {
             "[a-\u{212a}]",
             "[\u{80}-\u{10ffff}]",
             "[^\u{212a}x]",
+            r"[+\--9<-\[^_a-{}~]",
+            "[@-C]",
+            "[Z-a]",
+            "[\u{7f}-\u{212a}]",
         ] {
             let parsed = parse(pattern);
             let Ast::Class(class) = &parsed.ast else {

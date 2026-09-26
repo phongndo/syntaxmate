@@ -9,7 +9,7 @@ use super::ast::{
     PerlClassKind, RegexFlags, parse,
 };
 use super::bytecode::{BytecodeScratch, CompileError, Program};
-use super::case_fold::range_contains_ignore_case;
+use super::case_fold::{CaseVariants, range_contains_ignore_case, range_contains_ignore_case_fast};
 use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
 
 pub(crate) const DEFAULT_STEP_BUDGET: usize = 100_000;
@@ -3032,6 +3032,14 @@ pub(crate) struct CaseFoldKey {
 }
 
 impl CaseFoldKey {
+    fn single_lower(&self) -> Option<char> {
+        (self.lower[1] == '\0').then_some(self.lower[0])
+    }
+
+    fn single_upper(&self) -> Option<char> {
+        (self.upper[1] == '\0').then_some(self.upper[0])
+    }
+
     #[inline]
     pub(crate) fn new(ch: char) -> Self {
         if ch.is_ascii() {
@@ -3113,28 +3121,45 @@ impl FoldedClass {
 
     #[inline]
     pub(crate) fn contains(&self, ch: char) -> bool {
-        let mut key = None;
-        self.contains_with(ch, &mut key)
+        self.contains_with(ch, &mut ProbeKeys::default())
     }
 
-    fn contains_with(&self, ch: char, key: &mut Option<CaseFoldKey>) -> bool {
-        let matched = Self::union_contains(&self.atoms, ch, key)
+    fn contains_with(&self, ch: char, keys: &mut ProbeKeys) -> bool {
+        let matched = Self::union_contains(&self.atoms, ch, keys)
             && self
                 .intersections
                 .iter()
-                .all(|atoms| Self::union_contains(atoms, ch, key));
+                .all(|atoms| Self::union_contains(atoms, ch, keys));
         matched != self.negated
     }
 
-    fn union_contains(atoms: &[FoldedAtom], ch: char, key: &mut Option<CaseFoldKey>) -> bool {
+    fn union_contains(atoms: &[FoldedAtom], ch: char, keys: &mut ProbeKeys) -> bool {
         atoms.iter().any(|atom| match atom {
             FoldedAtom::Char(expected) => {
                 expected.ch == ch
-                    || expected.case_eq(key.get_or_insert_with(|| CaseFoldKey::new(ch)))
+                    || expected.case_eq(keys.key.get_or_insert_with(|| CaseFoldKey::new(ch)))
             }
-            FoldedAtom::Range(start, end) => range_contains_ignore_case(*start, *end, ch),
+            FoldedAtom::Range(start, end) => range_contains_ignore_case_fast(*start, *end, ch)
+                .unwrap_or_else(|| keys.variants(ch).any_in(*start, *end)),
             FoldedAtom::Plain(atom) => atom_contains(atom, ch, RegexFlags::default()),
-            FoldedAtom::Nested(class) => class.contains_with(ch, key),
+            FoldedAtom::Nested(class) => class.contains_with(ch, keys),
+        })
+    }
+}
+
+/// Case data for one probe, computed on first use and shared by every atom
+/// of a folded class.
+#[derive(Default)]
+struct ProbeKeys {
+    key: Option<CaseFoldKey>,
+    variants: Option<CaseVariants>,
+}
+
+impl ProbeKeys {
+    fn variants(&mut self, ch: char) -> &CaseVariants {
+        let key = self.key.get_or_insert_with(|| CaseFoldKey::new(ch));
+        self.variants.get_or_insert_with(|| {
+            CaseVariants::from_mappings(ch, key.single_lower(), key.single_upper())
         })
     }
 }
