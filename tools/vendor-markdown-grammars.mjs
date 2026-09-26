@@ -7,6 +7,9 @@ import { execFileSync } from 'node:child_process'
 import { pathToFileURL } from 'node:url'
 
 const root = path.resolve(import.meta.dirname, '..')
+const shikiLangsVersion = JSON.parse(
+  await fs.readFile(path.join(root, 'tools/golden-oracle/package.json'), 'utf8'),
+).dependencies['@shikijs/langs']
 const source = path.resolve(root, '../tau/node_modules/.pnpm/@shikijs+langs@3.23.0/node_modules/@shikijs/langs/dist')
 const output = path.join(root, 'assets/grammars/languages')
 
@@ -50,7 +53,7 @@ for (const [name, scopeName] of assets) {
     path: relativePath,
     source: '@shikijs/langs dist',
     package: '@shikijs/langs',
-    version: '3.23.0',
+    version: shikiLangsVersion,
     license: 'MIT',
     privateDependency: true,
   })
@@ -102,7 +105,7 @@ for (const [name, scopeName, relativeSource] of vscodeAssets) {
   imported.push({
     language: 'twig-source', grammarName: grammar.name ?? 'twig', scopeName: 'source.twig',
     module: 'twig.mjs', path: relativePath, source: '@shikijs/langs dist (root-scope alias)',
-    package: '@shikijs/langs', version: '3.23.0', license: 'MIT', privateDependency: true,
+    package: '@shikijs/langs', version: shikiLangsVersion, license: 'MIT', privateDependency: true,
   })
 }
 
