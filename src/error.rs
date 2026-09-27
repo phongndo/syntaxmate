@@ -16,7 +16,7 @@ pub enum Error {
     Bundle(String),
     /// A feature-gated diagnostic operation failed.
     Diagnostic(String),
-    /// Highlighted byte ranges did not match the source supplied to a renderer.
+    /// Highlighted ranges or line counts did not match the source, or an output writer failed.
     Render(String),
     /// Incremental state was used with a tokenizer that did not create it.
     StateMismatch,

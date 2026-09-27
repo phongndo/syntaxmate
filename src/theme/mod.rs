@@ -390,6 +390,17 @@ impl TextMateTheme {
         self.default_style
     }
 
+    #[cfg(feature = "html")]
+    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = ResolvedSyntaxStyle> + '_ {
+        std::iter::once(self.default_style).chain(self.rules.iter().map(|rule| {
+            ResolvedSyntaxStyle {
+                foreground: rule.foreground,
+                background: rule.background,
+                modifiers: rule.modifiers.unwrap_or_default(),
+            }
+        }))
+    }
+
     pub fn color(&self, name: &str) -> Option<RgbColor> {
         self.colors.get(name).copied()
     }

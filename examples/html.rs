@@ -1,10 +1,18 @@
-use syntaxmate::Highlighter;
+use syntaxmate::{Highlighter, HtmlOptions, Theme, html_stylesheet, render_html_to};
 
 fn main() -> syntaxmate::Result<()> {
     let source = "fn main() { println!(\"<hello>\"); }";
     let mut highlighter = Highlighter::bundled()?;
-    let output = highlighter.highlight_html("rust", source, "github-dark")?;
-    assert!(output.status().is_complete());
-    println!("{}", output.as_str());
+    let theme = Theme::bundled("github-dark")?;
+    let document = highlighter.highlight_with_theme("rust", source, &theme)?;
+    let options = HtmlOptions {
+        class_prefix: Some("example".to_owned()),
+        ..HtmlOptions::default()
+    };
+    let css = html_stylesheet(&theme, "example");
+    let mut output = String::new();
+    let status = render_html_to(source, &document, &options, &mut output)?;
+    assert!(status.is_complete());
+    println!("<style>{css}</style>\n{output}");
     Ok(())
 }
