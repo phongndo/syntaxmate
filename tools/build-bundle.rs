@@ -517,7 +517,11 @@ fn collect_grammars(assets: &Path) -> Result<Vec<GrammarAsset>, String> {
             grammar_ir::decode_compiled_grammar(state::GrammarId(0), &bytes).map_err(|error| {
                 format!("{}: generated IR failed to decode: {error}", path.display())
             })?;
-        if decoded != compiled {
+        // The IR does not carry the derived walk summary; tokenizers rescan
+        // decoded grammars instead.
+        let mut expected = compiled.clone();
+        expected.walk_summary = None;
+        if decoded != expected {
             return Err(format!(
                 "{}: generated IR does not round-trip the compiled grammar",
                 path.display()
