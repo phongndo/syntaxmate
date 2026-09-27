@@ -14,6 +14,8 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(docsrs, doc(auto_cfg))]
 
 // Compile the actual guide snippets as doctests instead of maintaining copies.
 #[cfg(all(

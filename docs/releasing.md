@@ -20,6 +20,26 @@ the tag, package version, and changelog heading. It packages, checksums, publish
 attests, and creates the GitHub release. The workflow rejects an `Unreleased`
 heading; maintainers must review the date and release notes themselves.
 
+## Published package
+
+The [Cargo include list](../Cargo.toml) ships the compiled grammar bundle, bundled
+themes, their licenses and provenance notices, library sources, documentation,
+and the self-contained HTML/ANSI examples. Raw grammar JSON, test fixtures and
+targets, profiling examples, and the bundle-builder executable are checkout-only.
+Cargo removes excluded targets from the published manifest; the full test suite
+and bundle regeneration require a Git checkout.
+
+The [package CI job](../.github/workflows/ci.yml) verifies the archive, checks its
+contents and retained licenses, builds its examples and documentation, and runs
+separate default-feature and custom-asset consumers. Review `cargo package --list
+--locked` and run `cargo package --locked` when changing the include list.
+
+The docs.rs feature list in [Cargo.toml](../Cargo.toml) explicitly selects the
+user-facing features. It excludes `bundle-tools` and `diagnostics`: both support
+checkout maintenance and expose implementation details outside the stable public
+contract. Nightly rustdoc labels feature-gated items through `doc(auto_cfg)`;
+ordinary stable documentation builds do not require unstable compiler features.
+
 ## Publishing credentials
 
 The workflow uses crates.io OIDC trusted publishing through the `crates-io`
@@ -35,6 +55,13 @@ safety, or documentation fixes. Catalog refreshes and intentional highlighting
 changes use a minor release with the upstream pin and output impact recorded.
 Breaking API changes require a minor release during 0.x and a major release
 after 1.0, with migration notes.
+
+The minimum supported Rust version is declared in [Cargo.toml](../Cargo.toml)
+and checked by the [MSRV CI job](../.github/workflows/ci.yml) against `Cargo.lock`,
+with default features, no default features, and all development targets/features.
+Rust 1.88 is required by let chains and `slice::as_chunks` in the library; the
+locked dependencies do not raise that floor. The pinned development toolchain
+may be newer. Recheck the MSRV when updating dependencies.
 
 MSRV increases require a minor release and release notes. Feature flags remain
 additive within a release line. Diagnostic output, bundle encoding, and private

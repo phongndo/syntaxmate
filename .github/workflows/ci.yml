@@ -58,8 +58,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
-          toolchain: "1.98"
+          toolchain: "1.88"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo check --lib --locked
       - run: cargo check --all-targets --all-features --locked
       - run: cargo check --lib --no-default-features --locked
 
@@ -213,9 +214,39 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo package --locked
+      - name: Check package contents and licenses
+        run: |
+          cargo package --list --locked > target/package-files.txt
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import tomllib
+
+          root = Path.cwd()
+          manifest = tomllib.loads((root / "Cargo.toml").read_text())
+          package = root / "target/package" / f"syntaxmate-{manifest['package']['version']}"
+          files = set((root / "target/package-files.txt").read_text().splitlines())
+          assert not any(name.startswith(("assets/grammars/languages/", "tests/", "tools/")) for name in files)
+          notices = {"LICENSE", "THIRD_PARTY_LICENSES.md"}
+          for kind in ("grammars", "themes"):
+              notices.add(f"assets/{kind}/licenses.json")
+              notices.update(str(path) for path in Path(f"assets/{kind}/licenses").rglob("*") if path.is_file())
+          assert notices <= files, notices - files
+          for name in notices:
+              assert (package / name).read_bytes() == (root / name).read_bytes(), name
+          published = tomllib.loads((package / "Cargo.toml").read_text())
+          assert not published.get("test")
+          assert not published.get("bin")
+          assert {example["name"] for example in published["example"]} == {"html", "ansi"}
+          PYTHON
+      - name: Check packaged examples and docs
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[0].version')"
+          manifest="target/package/syntaxmate-${version}/Cargo.toml"
+          cargo check --manifest-path "$manifest" --examples --locked
+          cargo doc --manifest-path "$manifest" --lib --no-deps --locked
       - name: Check packaged default API
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          version="$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[0].version')"
           package_path="$(pwd)/target/package/syntaxmate-${version}"
           mkdir -p target/package-consumer/src
           cat > target/package-consumer/Cargo.toml <<TOML
@@ -240,7 +271,7 @@ jobs:
           cargo run --manifest-path target/package-consumer/Cargo.toml --quiet
       - name: Check packaged custom-assets API
         run: |
-          version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')"
+          version="$(cargo metadata --no-deps --format-version 1 --locked | jq -r '.packages[0].version')"
           package_path="$(pwd)/target/package/syntaxmate-${version}"
           mkdir -p target/package-custom-consumer/src
           cat > target/package-custom-consumer/Cargo.toml <<TOML
