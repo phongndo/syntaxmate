@@ -23,6 +23,8 @@ Mutable continuation state and source-dependent caches belong to a tokenizer
 or highlighting session. Independent instances must not affect one another's
 output. `TokenizerState` and `CheckpointTable` are tied to their originating
 tokenizer; cloning a state does not make it transferable to another tokenizer.
+See [`TokenizerState`](../src/tokenizer.rs) for continuation equality and an
+editor re-highlighting convergence example.
 
 `PreparedLanguage` is the explicit sharing boundary for repeated independent
 tokenizers. It retains bounded grammar and static matcher preparation, while

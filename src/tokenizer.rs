@@ -588,10 +588,64 @@ impl Tokenizer {
 /// [`Tokenizer::initial_state`] is document start, so `\A` may match on the
 /// next tokenized line. A successful incremental line call clears that
 /// document-start flag even when the rule stack stays empty.
-#[derive(Debug, Clone)]
+///
+/// Equality compares continuation context: equal states produce the same tokens
+/// and next state for any following line. It includes the rule stack, captured
+/// end/while delimiters, scopes, and document-start flag. States from different
+/// tokenizers always compare unequal, including those sharing a
+/// [`PreparedLanguage`]. Cloning preserves ownership.
+///
+/// Equality and hashing take constant time, independent of nesting depth, using
+/// exact tokenizer-local interned identities. Cache population does not affect
+/// equality. Hash values are not stable identifiers for storage or interchange.
+///
+/// An editor can retain the end-state of each line and stop re-highlighting once
+/// it converges with the old state. Update the changed line's tokens before
+/// stopping; only the unchanged suffix can reuse its old tokens. This example
+/// replaces one line; insertions and deletions also require aligning old and new
+/// line indices before comparing states.
+///
+/// ```
+/// use syntaxmate::{GrammarRegistry, Tokenizer, TokenizerOptions};
+///
+/// let mut registry = GrammarRegistry::new();
+/// let root = registry.add_json(r#"{
+///     "scopeName": "source.example",
+///     "patterns": [{"begin": "/\\*", "end": "\\*/", "name": "comment.block"}]
+/// }"#)?;
+/// let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default())?;
+/// let mut lines = ["/* comment", "inside", "*/", "unchanged"];
+/// let mut state = tokenizer.initial_state();
+/// let mut end_states = Vec::new();
+/// let mut highlighted = Vec::new();
+/// for line in &lines {
+///     highlighted.push(tokenizer.tokenize_line(line, &mut state)?);
+///     end_states.push(state.clone());
+/// }
+///
+/// let edited_line = 1;
+/// lines[edited_line] = "edited */";
+/// let mut state = if edited_line == 0 {
+///     tokenizer.initial_state()
+/// } else {
+///     end_states[edited_line - 1].clone()
+/// };
+/// for index in edited_line..lines.len() {
+///     highlighted[index] = tokenizer.tokenize_line(lines[index], &mut state)?;
+///     let converged = state == end_states[index];
+///     end_states[index] = state.clone();
+///     if converged {
+///         break;
+///     }
+/// }
+/// # Ok::<(), syntaxmate::Error>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TokenizerState {
+    // Owner qualifies all engine-local identities and immutable grammar/options.
     owner: u64,
     inner: EngineTokenizerState,
+    // Empty stacks before and after the first line differ for the \A anchor.
     at_document_start: bool,
 }
 
@@ -742,6 +796,157 @@ impl TokenizedDocument {
 mod tests {
     use super::*;
 
+    fn equality_tokenizer(grammar: &str, line_cache_entries: usize) -> Tokenizer {
+        let mut registry = GrammarRegistry::new();
+        let root = registry.add_json(grammar).unwrap();
+        Tokenizer::new(
+            &registry,
+            root,
+            TokenizerOptions {
+                line_cache_entries,
+                ..TokenizerOptions::default()
+            },
+        )
+        .unwrap()
+    }
+
+    fn state_hash(state: &TokenizerState) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        state.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn continuation_equality_includes_owner_and_document_start() {
+        let grammar = r#"{"scopeName":"source.test","patterns":[
+            {"match":"\\Afirst","name":"keyword.first"}
+        ]}"#;
+        let mut tokenizer = equality_tokenizer(grammar, 0);
+        let other = equality_tokenizer(grammar, 0);
+        let initial = tokenizer.initial_state();
+        assert_eq!(initial, initial.clone());
+        assert_ne!(initial, other.initial_state());
+        let mut later = initial.clone();
+        tokenizer.tokenize_line("", &mut later).unwrap();
+        assert!(initial.is_initial() && later.is_initial());
+        assert_ne!(initial, later);
+        let mut first = initial.clone();
+        assert_ne!(
+            tokenizer.tokenize_line("first", &mut first).unwrap(),
+            tokenizer.tokenize_line("first", &mut later).unwrap()
+        );
+        assert_eq!(first, later);
+        assert_eq!(state_hash(&first), state_hash(&later));
+    }
+
+    #[test]
+    fn continuation_equality_tracks_dynamic_end_and_while_delimiters() {
+        for condition in ["end", "while"] {
+            let grammar = format!(
+                r#"{{"scopeName":"source.test","patterns":[{{
+                    "begin":"^<<(.+)","{condition}":"^\\1$","name":"string.test"
+                }}]}}"#
+            );
+            for cache_entries in [0, 1] {
+                let mut tokenizer = equality_tokenizer(&grammar, cache_entries);
+                let mut first = tokenizer.initial_state();
+                let mut same = tokenizer.initial_state();
+                let mut different = tokenizer.initial_state();
+                tokenizer.tokenize_line("<<A.*[", &mut first).unwrap();
+                tokenizer.tokenize_line("<<B", &mut different).unwrap();
+                // Independently recreate the state after evicting the line cache.
+                tokenizer.tokenize_line("<<A.*[", &mut same).unwrap();
+                assert_eq!(first.depth(), 1);
+                assert_eq!(first, same);
+                assert_eq!(state_hash(&first), state_hash(&same));
+                assert_ne!(first, different, "{condition}");
+                let a = tokenizer.tokenize_line("A.*[", &mut first).unwrap();
+                let b = tokenizer.tokenize_line("A.*[", &mut same).unwrap();
+                tokenizer.tokenize_line("A.*[", &mut different).unwrap();
+                assert_eq!(a, b);
+                assert_eq!(first, same);
+                assert_eq!(first.is_initial(), condition == "end");
+                assert_eq!(different.is_initial(), condition == "while");
+                assert_ne!(first, different);
+                assert_ne!(
+                    tokenizer.tokenize_line("A.*[", &mut first).unwrap(),
+                    tokenizer.tokenize_line("A.*[", &mut different).unwrap(),
+                    "the captured delimiter is literal, not regex"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn continuation_equality_tracks_captured_scopes_and_injections() {
+        for scope_field in ["name", "contentName"] {
+            let grammar = format!(
+                r#"{{"scopeName":"source.test","patterns":[{{
+                    "begin":"<(a|b)>","end":"!","{scope_field}":"meta.$1"
+                }}],"injections":{{"L:meta.a":{{"patterns":[{{
+                    "match":"word","name":"keyword.injected"
+                }}]}}}}}}"#
+            );
+            let mut tokenizer = equality_tokenizer(&grammar, 0);
+            let mut a = tokenizer.initial_state();
+            let mut b = tokenizer.initial_state();
+            tokenizer.tokenize_line("<a>", &mut a).unwrap();
+            tokenizer.tokenize_line("<b>", &mut b).unwrap();
+            assert_ne!(a, b, "{scope_field}");
+            let a_line = tokenizer.tokenize_line("word", &mut a).unwrap();
+            let b_line = tokenizer.tokenize_line("word", &mut b).unwrap();
+            assert!(
+                a_line
+                    .tokens()
+                    .iter()
+                    .any(|token| { token.scopes().any(|scope| scope == "keyword.injected") })
+            );
+            assert!(
+                b_line
+                    .tokens()
+                    .iter()
+                    .all(|token| { token.scopes().all(|scope| scope != "keyword.injected") })
+            );
+            tokenizer.tokenize_line("!", &mut a).unwrap();
+            tokenizer.tokenize_line("!", &mut b).unwrap();
+            assert_eq!(a, b);
+        }
+    }
+
+    #[test]
+    fn edited_comment_converges_when_original_comment_closes() {
+        let mut tokenizer = equality_tokenizer(
+            r#"{"scopeName":"source.test","patterns":[
+                {"begin":"/\\*","end":"\\*/","name":"comment.block"}
+            ]}"#,
+            0,
+        );
+        let lines = ["/* open", "body", "*/", "suffix"];
+        let mut old_state = tokenizer.initial_state();
+        let mut old_states = Vec::new();
+        let mut old_tokens = Vec::new();
+        for line in lines {
+            old_tokens.push(tokenizer.tokenize_line(line, &mut old_state).unwrap());
+            old_states.push(old_state.clone());
+        }
+        let mut edited = old_states[0].clone();
+        tokenizer.tokenize_line("body */", &mut edited).unwrap();
+        assert_ne!(edited, old_states[1]);
+        let closing = tokenizer.tokenize_line(lines[2], &mut edited).unwrap();
+        assert_ne!(
+            closing, old_tokens[2],
+            "replace tokens even on the convergence line"
+        );
+        assert_eq!(edited, old_states[2]);
+        assert_eq!(
+            tokenizer.tokenize_line(lines[3], &mut edited).unwrap(),
+            old_tokens[3]
+        );
+        assert_eq!(edited, old_states[3]);
+        assert_eq!(state_hash(&edited), state_hash(&old_states[3]));
+    }
+
     #[test]
     fn prepared_language_creates_independent_equivalent_tokenizers() {
         let mut registry = GrammarRegistry::new();
@@ -779,6 +984,7 @@ mod tests {
         assert_eq!(first.tokenize("true false"), second.tokenize("true false"));
 
         let mut first_state = first.initial_state();
+        assert_ne!(first_state, second.initial_state());
         assert_eq!(
             second.tokenize_line("true", &mut first_state),
             Err(Error::StateMismatch)

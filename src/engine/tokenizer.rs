@@ -261,11 +261,12 @@ impl From<Vec<CompactScopedToken>> for CompactLineTokens {
 
 #[derive(Debug, Clone, Default)]
 pub struct TokenizerState {
-    // Parent-linked immutable chunks keep continuation updates bounded. Pushes
-    // copy at most one 32-frame tail chunk instead of cloning every frame
-    // pointer in a deep stack; a hash-consed stack id keeps equality exact and
-    // O(1) even when equal states were built independently.
+    // Parent-linked immutable nodes keep continuation updates bounded. Exact
+    // structural interning makes equality O(1), even for independently built
+    // stacks. Engine states must belong to the same tokenizer; the public
+    // wrapper checks ownership and compares the document-start anchor flag.
     frames: FrameStack,
+    // Derived from the stack identity; not a separate continuation field.
     interner_hash: u64,
 }
 
@@ -413,6 +414,16 @@ fn fnv64_mix_opt_str(hash: u64, value: Option<&str>) -> u64 {
     value.map_or(hash, |value| fnv64_mix(hash, value.as_bytes()))
 }
 
+// Continuation identity audit (FrameIdentityKey mirrors these semantic fields):
+// - grammar/base/rule select rules, repository context, and embedded $base;
+// - scope_prefix/name/content_name determine output and injection selection;
+// - end/while text includes begin-capture substitutions; optional pattern IDs
+//   select the corresponding static matcher and its capture layout;
+// - apply_end_pattern_last controls precedence; begin_captured_eol restores \G.
+// Capture specs and nested patterns are immutable rule payloads, determined by
+// grammar_id/rule_id within the owning tokenizer. Hashes and interned IDs are
+// derived accelerators, not additional semantics. Matcher, scope, candidate,
+// and line caches live on the tokenizer and do not add continuation context.
 #[derive(Debug, Clone)]
 struct Frame {
     grammar_id: GrammarId,
@@ -448,12 +459,21 @@ struct InternedFrameStackId(u32);
 struct InternedFrameId(u32);
 
 /// Precomputed identity of a fully static frame: the identity hash plus the
-/// globally interned frame id. Cached per candidate so repeat pushes of the
-/// same begin rule skip both string hashing and the intern-table mutex.
+/// tokenizer-local interned frame id. Cached per static rule and context so
+/// repeat pushes skip string hashing and structural interner lookup.
 #[derive(Debug, Clone, Copy)]
 struct StaticFrameIdentity {
     identity_hash: u64,
     frame_id: InternedFrameId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct StaticFrameKey {
+    grammar_id: GrammarId,
+    base_grammar_id: GrammarId,
+    rule_id: RuleId,
+    scope_prefix: Option<Arc<str>>,
+    begin_captured_eol: bool,
 }
 
 impl Frame {
@@ -666,7 +686,10 @@ impl FrameStackInternTable {
 #[derive(Clone, Default)]
 struct FrameStack {
     tail: Option<Arc<FrameNode>>,
+    // Length and FrameNode depth/while_frames are derived from the chain.
     len: usize,
+    // Exact identity of (parent identity, structural frame identity), retained
+    // for the tokenizer's lifetime. Hash collisions are resolved structurally.
     interned_id: InternedFrameStackId,
 }
 
@@ -2589,7 +2612,7 @@ pub struct TextMateTokenizer {
     /// Repeat pushes of a known (parent stack, frame) transition skip interner lookup.
     frame_edge_cache: FastMap<(InternedFrameStackId, InternedFrameId), InternedFrameStackId>,
     /// Precomputed identities for grammar-static frames, scoped to this interner.
-    static_frame_identities: FastMap<(GrammarId, RuleId, bool), StaticFrameIdentity>,
+    static_frame_identities: FastMap<StaticFrameKey, StaticFrameIdentity>,
     /// Immutable frame nodes from previous pushes, keyed by the same edge, so
     /// a repeated transition reuses one shared allocation instead of
     /// constructing and hashing a fresh `Frame`.
@@ -5178,7 +5201,13 @@ impl TextMateTokenizer {
                         )
                     };
                 let begin_captured_eol = result.end == line.len() && line.ends_with('\n');
-                let identity_key = (*grammar_id, *rule_id, begin_captured_eol);
+                let identity_key = StaticFrameKey {
+                    grammar_id: *grammar_id,
+                    base_grammar_id: candidate.base_grammar_id,
+                    rule_id: *rule_id,
+                    scope_prefix: candidate.scope_prefix.clone(),
+                    begin_captured_eol,
+                };
                 let cached = static_frame
                     .then(|| self.static_frame_identities.get(&identity_key).copied())
                     .flatten();
@@ -5304,7 +5333,13 @@ impl TextMateTokenizer {
                         )
                     };
                 let begin_captured_eol = result.end == line.len() && line.ends_with('\n');
-                let identity_key = (*grammar_id, *rule_id, begin_captured_eol);
+                let identity_key = StaticFrameKey {
+                    grammar_id: *grammar_id,
+                    base_grammar_id: candidate.base_grammar_id,
+                    rule_id: *rule_id,
+                    scope_prefix: candidate.scope_prefix.clone(),
+                    begin_captured_eol,
+                };
                 let cached = static_frame
                     .then(|| self.static_frame_identities.get(&identity_key).copied())
                     .flatten();
@@ -8713,6 +8748,75 @@ mod tests {
             .expect("second tokenizer bound nested static blueprint");
         assert!(Arc::ptr_eq(&first_nested, &second_nested));
         assert!(prepared.static_blueprint_count() <= MAX_CANDIDATE_BLUEPRINTS);
+    }
+
+    #[test]
+    fn frame_interning_compares_every_continuation_field_even_on_hash_collision() {
+        let original = continuation_frame(1);
+        let mut interner = FrameStackInternTable::new();
+        let original_id = interner.intern_frame(&original);
+        // Keep the same hash deliberately: interning must compare structure.
+        let changes: [fn(&mut Frame); 12] = [
+            |f| f.grammar_id = GrammarId(3),
+            |f| f.base_grammar_id = GrammarId(3),
+            |f| f.rule_id = RuleId(3),
+            |f| f.scope_prefix = Some(Arc::from("other.prefix")),
+            |f| f.name = Some(Arc::from("other.name")),
+            |f| f.content_name = Some(Arc::from("other.content")),
+            |f| f.end_pattern = Some(Arc::from("other-end")),
+            |f| f.end_pattern_id = None,
+            |f| f.while_pattern = Some(Arc::from("while")),
+            |f| f.while_pattern_id = Some(PatternId(3)),
+            |f| f.apply_end_pattern_last = !f.apply_end_pattern_last,
+            |f| f.begin_captured_eol = true,
+        ];
+        for change in changes {
+            let mut changed = original.clone();
+            change(&mut changed);
+            assert_ne!(interner.intern_frame(&changed), original_id);
+            assert_ne!(changed, original);
+        }
+        assert_eq!(interner.intern_frame(&original.clone()), original_id);
+    }
+
+    #[test]
+    fn static_frame_identity_preserves_base_after_capture_retokenization() {
+        for condition in [r#""end":">""#, r#""while":"^keep""#] {
+            let mut grammars = GrammarSet::new();
+            let root = grammars
+                .load_and_add(
+                    r#"{
+                "scopeName":"source.host",
+                "patterns":[
+                    {"match":"host","name":"keyword.host"},
+                    {"include":"source.embedded"}
+                ]
+            }"#,
+                )
+                .unwrap();
+            grammars
+                .load_and_add(&format!(
+                    r#"{{
+                "scopeName":"source.embedded",
+                "patterns":[
+                    {{"match":"capture:(<)","captures":{{"1":{{"patterns":[
+                        {{"include":"source.embedded"}}
+                    ]}}}}}},
+                    {{"begin":"<",{condition},"name":"meta.embedded",
+                        "patterns":[{{"include":"$base"}}]
+                    }}
+                ]
+            }}"#
+                ))
+                .unwrap();
+            let mut tokenizer = TextMateTokenizer::new(grammars, root);
+            tokenizer.tokenize_line_scopes("capture:<\n", TokenizerState::default());
+            let line = tokenizer.tokenize_line_scopes("<\n", TokenizerState::default());
+            assert_eq!(line.state.depth(), 1);
+            assert_eq!(line.state.frames.last().unwrap().base_grammar_id, root);
+            let next = tokenizer.tokenize_line_scopes("keep host\n", line.state);
+            assert!(line_has_scope(&next, "keyword.host"));
+        }
     }
 
     #[test]
