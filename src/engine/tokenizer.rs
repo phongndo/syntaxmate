@@ -3156,6 +3156,11 @@ impl TextMateTokenizer {
                 // MatchRule wins without consuming input. Advancing one scalar
                 // would let lower-priority rules color text that the oracle
                 // leaves in the active scope (and can skip byte zero entirely).
+                // It also pops the enclosing rule (`safePop`), for the rest
+                // of the line and for later lines.
+                if !state.frames.is_empty() {
+                    state.pop_frame();
+                }
                 let stack = self.current_scope_stack_id(&state, true, None);
                 self.push_token(&mut tokens, result_start..parse_text.len(), stack);
                 cursor = parse_text.len();
@@ -5733,11 +5738,12 @@ impl TextMateTokenizer {
                 return;
             }
             if zero_width_match_rule {
-                self.push_token(
-                    tokens,
-                    result_start..range.end,
-                    candidate_set.active_stack_id,
-                );
+                // See `tokenize_line`: stop and `safePop` the enclosing rule.
+                if !state.frames.is_empty() {
+                    state.pop_frame();
+                }
+                let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
+                self.push_token(tokens, result_start..range.end, stack);
                 return;
             }
             let zero_width_state_change =

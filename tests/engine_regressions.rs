@@ -67,13 +67,24 @@ fn custom_oracle_regressions_across_sessions_sinks_and_checkpoints() {
             root.get_or_insert(id);
         }
         let root = root.unwrap();
+        // vscode-textmate emits one token per produce call; public spans
+        // merge adjacent tokens with the same scopes.
         let expected: ScopeLines = golden
             .lines
             .into_iter()
             .map(|line| {
-                line.into_iter()
-                    .map(|span| (span.start..span.end, span.scopes))
-                    .collect()
+                let mut spans: Vec<(Range<usize>, Vec<String>)> = Vec::new();
+                for span in line {
+                    if let Some((range, scopes)) = spans.last_mut()
+                        && range.end == span.start
+                        && *scopes == span.scopes
+                    {
+                        range.end = span.end;
+                    } else {
+                        spans.push((span.start..span.end, span.scopes));
+                    }
+                }
+                spans
             })
             .collect();
         let prepared = PreparedLanguage::new(&registry, root).unwrap();

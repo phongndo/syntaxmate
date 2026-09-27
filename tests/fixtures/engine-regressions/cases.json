@@ -200,5 +200,18 @@
       }
     ],
     "sources": ["<zz> <zzbzz>", "<zzzz>"]
+  },
+  {
+    "name": "empty-match-pops-enclosing-rule",
+    "grammars": [
+      {
+        "scopeName": "source.safepop",
+        "patterns": [
+          {"begin": "\\{", "end": "\\}", "name": "meta.block", "patterns": [{"match": "(?=zz)", "name": "empty.mark"}, {"match": "x", "name": "letter.x"}]},
+          {"match": "x", "name": "outer.x"}
+        ]
+      }
+    ],
+    "sources": ["{ zz }\n}x", "{ a\nzz x\n} x", "x{zz}x"]
   }
 ]
