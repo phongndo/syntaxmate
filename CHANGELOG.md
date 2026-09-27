@@ -30,6 +30,12 @@
   match end instead of after lookahead captures. Captures past the match end
   now nest like captures inside it, including after an empty match such as
   `(?=((a)b))`.
+- Pop the enclosing rule after a match rule that does not advance, as
+  vscode-textmate does. The bundled GraphQL grammar no longer stays inside a
+  type block for the rest of the document.
+- Stop re-entering a begin rule that matched without advancing at the same
+  position, and drop deeply nested tokenizer states without recursion. A
+  self-including zero-width `begin` no longer overflows the stack.
 - Fold case for bracketed classes as Oniguruma does: under `(?i)` a character
   matches when one of its case variants is in the class, with intersections,
   nested classes, and properties evaluated first. `(?i)[^a-{]` now matches
