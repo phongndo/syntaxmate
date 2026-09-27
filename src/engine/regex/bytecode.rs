@@ -3493,28 +3493,69 @@ impl<'a> Compiler<'a> {
     }
 }
 
+/// Sorted, deduplicated case variants of one trie edge scalar.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct EdgeVariants {
+    chars: [char; 5],
+    len: u8,
+}
+
+impl EdgeVariants {
+    fn new(ch: char) -> Self {
+        let mut this = Self {
+            chars: ['\0'; 5],
+            len: 0,
+        };
+        for variant in CaseVariants::new(ch).iter() {
+            let members = &this.chars[..usize::from(this.len)];
+            if let Err(at) = members.binary_search(&variant) {
+                this.chars.copy_within(at..usize::from(this.len), at + 1);
+                this.chars[at] = variant;
+                this.len += 1;
+            }
+        }
+        this
+    }
+
+    fn members(&self) -> &[char] {
+        &self.chars[..usize::from(self.len)]
+    }
+}
+
 /// The existing edge `ch` joins, `Ok(None)` for a new edge, or `Err(())` when
 /// the scalar trie cannot represent it. Lookup follows the one edge that is
 /// case-equal to the input, but case equality is not transitive (`ϑ` and `ϴ`
 /// both equal `θ`, not each other). Edges therefore merge only scalars with
 /// identical case variants, and no input may be case-equal to two edges.
-fn unicode_edge(edges: &LiteralTrieEdges<CaseFoldKey>, ch: char) -> Result<Option<u32>, ()> {
-    let variants = |ch: char| {
-        let mut variants = CaseVariants::new(ch).iter().collect::<Vec<_>>();
-        variants.sort_unstable();
-        variants.dedup();
-        variants
-    };
-    let wanted = variants(ch);
+fn unicode_edge(
+    edges: &LiteralTrieEdges<CaseFoldKey>,
+    ch: &CaseFoldKey,
+) -> Result<Option<u32>, ()> {
+    // Existing edges are pairwise unambiguous, and a scalar with the same
+    // case mappings as an edge has the same variants, so it joins that edge
+    // without re-checking the others.
+    if let Some((_, child)) = edges.iter().find(|(edge, _)| edge.same_mappings(ch)) {
+        return Ok(Some(*child));
+    }
+    if matches!(edges, LiteralTrieEdges::Empty) {
+        return Ok(None);
+    }
+    let wanted = EdgeVariants::new(ch.ch());
+    let wanted_keys = wanted
+        .members()
+        .iter()
+        .map(|variant| CaseFoldKey::new(*variant))
+        .collect::<Vec<_>>();
     let mut joined = None;
     for (edge, child) in edges.iter() {
-        let existing = variants(edge.ch());
-        if existing == wanted {
+        // An edge shares a variant with `ch` exactly when it is case-equal
+        // to one of `ch`'s variants.
+        if !wanted_keys.iter().any(|variant| edge.case_eq(variant)) {
+            continue;
+        }
+        if EdgeVariants::new(edge.ch()) == wanted {
             joined = Some(*child);
-        } else if existing
-            .iter()
-            .any(|variant| wanted.binary_search(variant).is_ok())
-        {
+        } else {
             return Err(());
         }
     }
@@ -3547,17 +3588,17 @@ impl LiteralTrie {
                 let order = u32::try_from(order).map_err(|_| CompileError::TableOverflow)?;
                 let mut node = 0usize;
                 for ch in literal.as_ref().chars() {
-                    let Ok(edge) = unicode_edge(&trie.unicode_nodes[node].edges, ch) else {
+                    let key = CaseFoldKey::new(ch);
+                    let Ok(edge) = unicode_edge(&trie.unicode_nodes[node].edges, &key) else {
                         return Ok(None);
                     };
-                    let ch = CaseFoldKey::new(ch);
                     node = if let Some(child) = edge {
                         child as usize
                     } else {
                         let child = u32::try_from(trie.unicode_nodes.len())
                             .map_err(|_| CompileError::TableOverflow)?;
                         trie.unicode_nodes.push(UnicodeLiteralTrieNode::default());
-                        trie.unicode_nodes[node].edges.push((ch, child));
+                        trie.unicode_nodes[node].edges.push((key, child));
                         child as usize
                     };
                 }

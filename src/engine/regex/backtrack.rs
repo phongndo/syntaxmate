@@ -3052,6 +3052,12 @@ impl CaseFoldKey {
         self.ch
     }
 
+    /// Identical full case mappings, which make `unicode_case_eq` agree
+    /// for every third scalar.
+    pub(crate) fn same_mappings(&self, other: &Self) -> bool {
+        self.lower == other.lower && self.upper == other.upper
+    }
+
     #[inline]
     pub(crate) fn new(ch: char) -> Self {
         if ch.is_ascii() {
