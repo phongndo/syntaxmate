@@ -6741,7 +6741,11 @@ impl RepositoryContextBudget {
         let mut bytes = if local.is_empty() {
             0
         } else {
+            // The bindings live behind an `Arc` (two counts) whose pointer
+            // occupies a slot, with room for growth, in the context table.
             std::mem::size_of::<RepositoryBindings>()
+                .saturating_add(2 * std::mem::size_of::<usize>())
+                .saturating_add(2 * std::mem::size_of::<Arc<RepositoryBindings>>())
         };
         if sparse {
             // A public, hand-built grammar can have out-of-range IDs. Charge
