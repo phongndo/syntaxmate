@@ -1228,6 +1228,12 @@ const REPEAT_UNDO_STALLED: u32 = 1 << 31;
 /// `RepeatUndo` slot marking a returned call's jump entry rather than a
 /// repeat write; `vm_slot` never hands it out.
 const JUMP_UNDO_SLOT: VmSlot = REPEAT_UNDO_STALLED - 1;
+/// Capture-undo slot of a returned call's jump entry, whose `Open` holds the
+/// call's capture mark.
+const CAPTURE_JUMP_SLOT: VmSlot = JUMP_UNDO_SLOT;
+/// Flag on a capture-undo slot marking a returned call's summary: the
+/// slot's value at the call, which undoing does not write back.
+const CAPTURE_SUMMARY_FLAG: VmSlot = REPEAT_UNDO_STALLED;
 
 impl RepeatUndo {
     /// Logged when a call returns: the entries from `mark` up to this one
@@ -1373,9 +1379,11 @@ pub(crate) struct BytecodeScratch {
     repeat_restore_stamps: Vec<u32>,
     capture_restore_stamps: Vec<u32>,
     restore_generation: u32,
-    /// Repeat slots a `Return` restores, and their values at the call.
+    /// Slots a `Return` restores, and their values at the call.
     restore_slots: Vec<VmSlot>,
     restore_values: Vec<RepeatState>,
+    restore_capture_slots: Vec<VmSlot>,
+    restore_capture_values: Vec<CaptureState>,
     /// One-based index of the current call frame; 0 outside subroutines.
     call_frame: u32,
     cuts: Vec<u32>,
@@ -1826,20 +1834,54 @@ impl Program {
                     let generation = scratch.next_restore_generation();
                     // Recursive calls to the same capturing group overwrite
                     // an enclosing pending start. Restore pending captures
-                    // from their oldest entry; completed captures remain
-                    // observable.
-                    let capture_end = scratch.capture_undo.len();
-                    budget.charge(capture_end - arena_index(frame.capture_undo_mark))?;
-                    for index in arena_index(frame.capture_undo_mark)..capture_end {
-                        let (slot, previous) = scratch.capture_undo[index].clone();
-                        let stamp = &mut scratch.capture_restore_stamps[arena_index(slot)];
-                        if *stamp == generation {
+                    // from their oldest entry (newest first, so the oldest
+                    // wins); completed captures remain observable. A nested
+                    // call's range is skipped through its jump entry and
+                    // read from the summary entries logged after it.
+                    let capture_mark = arena_index(frame.capture_undo_mark);
+                    let mut index = scratch.capture_undo.len();
+                    let mut visited = 0usize;
+                    scratch.restore_capture_slots.clear();
+                    while index > capture_mark {
+                        index -= 1;
+                        visited += 1;
+                        let (entry, previous) = &scratch.capture_undo[index];
+                        if *entry == CAPTURE_JUMP_SLOT {
+                            let CaptureState::Open(target) = previous else {
+                                unreachable!("capture jump entries hold their target");
+                            };
+                            index = *target;
                             continue;
                         }
-                        *stamp = generation;
-                        if let CaptureState::Open(start) = previous {
+                        let slot = *entry & !CAPTURE_SUMMARY_FLAG;
+                        let previous = previous.clone();
+                        let stamp = &mut scratch.capture_restore_stamps[arena_index(slot)];
+                        if *stamp != generation {
+                            *stamp = generation;
+                            scratch.restore_capture_slots.push(slot);
+                        }
+                        scratch.restore_capture_values[arena_index(slot)] = previous;
+                    }
+                    budget.charge(visited)?;
+                    for position in 0..scratch.restore_capture_slots.len() {
+                        let slot = scratch.restore_capture_slots[position];
+                        if let CaptureState::Open(start) =
+                            scratch.restore_capture_values[arena_index(slot)]
+                        {
                             set_capture(scratch, slot, CaptureState::Open(start));
                         }
+                    }
+                    // Enclosing returns skip this call's range and read each
+                    // slot's value at the call from the summaries instead.
+                    scratch
+                        .capture_undo
+                        .push((CAPTURE_JUMP_SLOT, CaptureState::Open(capture_mark)));
+                    for position in 0..scratch.restore_capture_slots.len() {
+                        let slot = scratch.restore_capture_slots[position];
+                        let previous = scratch.restore_capture_values[arena_index(slot)].clone();
+                        scratch
+                            .capture_undo
+                            .push((slot | CAPTURE_SUMMARY_FLAG, previous));
                     }
                     // A recursive call reuses its caller's loop slots. Put
                     // every slot the call changed back to its value at the
@@ -2622,6 +2664,8 @@ impl BytecodeScratch {
         self.repeat_restore_stamps.resize(repeat_slots, 0);
         self.restore_values
             .resize(repeat_slots, RepeatState::default());
+        self.restore_capture_values
+            .resize(capture_slots, CaptureState::Unset);
         self.capture_restore_stamps.resize(capture_slots, 0);
         self.call_frame = 0;
         self.cuts.clear();
@@ -2668,7 +2712,11 @@ fn undo_repeats_to(scratch: &mut BytecodeScratch, mark: u32) {
 fn undo_captures_to(scratch: &mut BytecodeScratch, mark: u32) {
     while scratch.capture_undo.len() > arena_index(mark) {
         let (slot, value) = scratch.capture_undo.pop().expect("capture undo above mark");
-        scratch.captures[arena_index(slot)] = value;
+        // Jump and summary entries (at or above the jump slot) record
+        // returns, not writes.
+        if slot < CAPTURE_JUMP_SLOT {
+            scratch.captures[arena_index(slot)] = value;
+        }
     }
 }
 
@@ -5786,6 +5834,30 @@ mod tests {
             .expect("nested match");
         assert_eq!(matched.end, line.len());
         assert!(budget.used() < 20_000, "{}", budget.used());
+    }
+
+    #[test]
+    fn nested_capture_restores_are_charged_once_per_entry() {
+        // Each return skips its callees' capture entries through their jump
+        // and summary entries instead of rescanning them per level.
+        let pattern = r"(?<n>\((?:[^()]|\g<n>)*\))+";
+        let nest = format!("{}x{}", "(".repeat(40), ")".repeat(40));
+        let line = nest.repeat(35);
+        let program = Program::compile_captures(&parse(pattern), &[1]).expect("capture program");
+        let mut budget = StepBudget::new(100_000);
+        let matched = program
+            .execute_captures(
+                &line,
+                0,
+                context(),
+                &mut budget,
+                &mut BytecodeScratch::default(),
+            )
+            .expect("within budget")
+            .expect("repeated nests match");
+        assert_eq!(matched.end, line.len());
+        assert!(budget.used() < 50_000, "{}", budget.used());
+        assert_capture_replay(pattern, &nest.repeat(3), 0, &[1]);
     }
 
     #[test]
