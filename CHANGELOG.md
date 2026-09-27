@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-27
 
 - Replace string-only grammar, theme, bundle, render, and diagnostic errors with
   structured payloads and matchable kinds. Preserve JSON and writer source
