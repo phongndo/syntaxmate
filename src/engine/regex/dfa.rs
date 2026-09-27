@@ -2695,13 +2695,10 @@ fn frontier_min_regular_per_opaque() -> usize {
     4
 }
 
-/// Word-context class bit for a scan position: `1 << (prev_word * 2 +
-/// cur_word)`, with line edges counting as non-word. Any non-ASCII neighbor
-/// returns all classes so masks are only authoritative over ASCII text.
-#[inline]
 /// Start-class bit of a scan position (see `start_class`). Positions with a
 /// non-ASCII neighbor classify both neighbors with the Unicode `\w`
 /// predicate and select the Unicode-sound nibble of the packed masks.
+#[inline]
 fn position_class_bit(line: &str, position: usize) -> u8 {
     let bytes = line.as_bytes();
     let prev = position.checked_sub(1).and_then(|prev| bytes.get(prev));

@@ -861,19 +861,16 @@ impl<'a> Parser<'a> {
                 self.pos += 2;
                 continue;
             }
-            let width = if byte.is_ascii() {
-                let next = char::from(byte);
-                if is_regex_syntax(next) || (extended && (next.is_whitespace() || next == '#')) {
-                    break;
-                }
-                1
-            } else {
-                let next = self.peek().expect("scalar boundary");
-                if extended && next.is_whitespace() {
-                    break;
-                }
-                next.len_utf8()
-            };
+            // Every other ASCII byte is regex syntax, or whitespace and `#`
+            // in extended mode (see `PLAIN_LITERAL_BYTE`).
+            if byte.is_ascii() {
+                break;
+            }
+            let next = self.peek().expect("scalar boundary");
+            if extended && next.is_whitespace() {
+                break;
+            }
+            let width = next.len_utf8();
             if self
                 .bytes
                 .get(self.pos + width)

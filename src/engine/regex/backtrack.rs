@@ -3557,6 +3557,7 @@ mod tests {
             (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "ax", Some(0..2)),
             (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "bx", Some(0..2)),
             (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "ay", None),
+            (r"(?<a>x)(?<a>y)?(?(<a>)z|w)", "xw", None),
         ] {
             let matcher = FallbackMatcher::new(pattern);
             let found = matcher
