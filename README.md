@@ -43,6 +43,21 @@ For custom grammars, themes, and incremental use, start with the
 [compiled examples](examples). See [rendering](docs/rendering.md) for output
 options and source/document pairing requirements.
 
+For structured output, document and incremental APIs share the same token types:
+
+```rust
+use syntaxmate::{Highlighter, HighlightedToken};
+
+let mut highlighter = Highlighter::bundled()?;
+let document = highlighter.highlight("rust", "let x = true;", "github-dark")?;
+let token: &HighlightedToken = &document.lines()[0].tokens()[0];
+assert!(token.scopes().any(|scope| scope == "keyword.other.rust"));
+assert_eq!(token.range(), 0..3);
+# Ok::<(), syntaxmate::Error>(())
+```
+
+See [Migrating from 0.1](CHANGELOG.md#migrating-from-01) for the upcoming 0.2 API changes.
+
 ## License
 
 [MIT](LICENSE)

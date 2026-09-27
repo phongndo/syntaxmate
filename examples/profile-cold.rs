@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         token_count += document
             .lines()
             .iter()
-            .map(|line| line.spans().len())
+            .map(|line| line.tokens().len())
             .sum::<usize>();
     }
     let elapsed = started.elapsed();

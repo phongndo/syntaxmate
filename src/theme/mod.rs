@@ -3,7 +3,6 @@
 //! This is deliberately independent of the tokenizer: a theme can be changed
 //! while reusing the immutable scope table in [`crate::HighlightedLine`].
 
-#[cfg(any(feature = "bundled-grammars", test))]
 use std::sync::Arc;
 use std::{cmp::Ordering, collections::HashMap};
 
@@ -13,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 use serde::Deserialize;
 
-use crate::{HighlightScopeTable, ScopeStackRef, ThemeRule};
+use crate::{HighlightScopeTable, ScopeStackId, ThemeRule};
 
 #[cfg(feature = "bundled-themes")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -56,30 +55,42 @@ impl BuiltinTextMateTheme {
     }
 }
 
+/// An opaque sRGB color with 8-bit channels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RgbColor {
+    /// Red channel, from 0 to 255.
     pub red: u8,
+    /// Green channel, from 0 to 255.
     pub green: u8,
+    /// Blue channel, from 0 to 255.
     pub blue: u8,
 }
 
+/// A set of resolved font decorations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct SyntaxModifiers(u8);
+pub struct FontModifiers(u8);
 
-impl SyntaxModifiers {
+impl FontModifiers {
+    /// Bold text.
     pub const BOLD: Self = Self(0b0001);
+    /// Italic text.
     pub const ITALIC: Self = Self(0b0010);
+    /// Underlined text.
     pub const UNDERLINED: Self = Self(0b0100);
+    /// Struck-through text.
     pub const CROSSED_OUT: Self = Self(0b1000);
 
+    /// Returns an empty modifier set.
     pub const fn empty() -> Self {
         Self(0)
     }
 
+    /// Returns whether all modifiers in `other` are present.
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
 
+    /// Returns whether the collection is empty.
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
@@ -89,55 +100,80 @@ impl SyntaxModifiers {
     }
 }
 
+/// Resolved foreground, background, and font decorations.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct ResolvedSyntaxStyle {
+pub struct Style {
+    /// Foreground color, or `None` to inherit.
     pub foreground: Option<RgbColor>,
+    /// Background color, or `None` to inherit.
     pub background: Option<RgbColor>,
-    pub modifiers: SyntaxModifiers,
+    /// Resolved font decorations.
+    pub modifiers: FontModifiers,
 }
 
 /// Render-relevant theme resolution data, excluding diagnostic selector data.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct ResolvedThemeStyle {
+    /// Whether a selector explicitly supplied the foreground.
     pub foreground_matched: bool,
+    /// Whether a selector explicitly supplied the background.
     pub background_matched: bool,
+    /// Whether a selector explicitly supplied font decorations.
     pub modifiers_matched: bool,
-    pub style: ResolvedSyntaxStyle,
+    /// Resolved style including theme defaults.
+    pub style: Style,
 }
 
+/// Diagnostic style resolution and representative selector metadata.
+#[cfg(any(feature = "diagnostics", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeMatch<'a> {
+    /// Representative matching selector, if any.
     pub selector: Option<&'a str>,
+    /// Specificity of the representative selector.
     pub score: Option<ThemeSelectorScore>,
+    /// Zero-based rule order in the theme.
     pub source_order: Option<usize>,
+    /// Whether a selector explicitly supplied the foreground.
     pub foreground_matched: bool,
+    /// Whether a selector explicitly supplied the background.
     pub background_matched: bool,
+    /// Whether a selector explicitly supplied font decorations.
     pub modifiers_matched: bool,
-    pub style: ResolvedSyntaxStyle,
+    /// Resolved style including theme defaults.
+    pub style: Style,
 }
 
 struct ScopeResolution<'a> {
+    // Only selector diagnostics consume this metadata.
+    #[cfg_attr(not(any(feature = "diagnostics", test)), allow(dead_code))]
     representative: Option<&'a CompiledThemeRule>,
     foreground_matched: bool,
     background_matched: bool,
     modifiers_matched: bool,
-    style: ResolvedSyntaxStyle,
+    style: Style,
 }
 
+/// Diagnostic specificity components for a matching selector.
+#[cfg(any(feature = "diagnostics", test))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeSelectorScore {
+    /// Number of dotted components in the selector target.
     pub target_depth: usize,
+    /// Lengths of ancestor selector components, from nearest to farthest.
     pub parent_lengths: Vec<usize>,
+    /// Number of ancestor selector components.
     pub parent_count: usize,
+    /// Zero-based rule order in the theme.
     pub source_order: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TextMateTheme {
+pub(crate) struct TextMateTheme {
     name: String,
     generation: u64,
     colors: HashMap<String, RgbColor>,
-    default_style: ResolvedSyntaxStyle,
+    default_style: Style,
     rules: Vec<CompiledThemeRule>,
     candidates_by_head: HashMap<String, Vec<usize>>,
 }
@@ -150,11 +186,11 @@ struct CompiledThemeRule {
     parents: Vec<String>,
     foreground: Option<RgbColor>,
     background: Option<RgbColor>,
-    modifiers: Option<SyntaxModifiers>,
+    modifiers: Option<FontModifiers>,
     source_order: usize,
 }
 
-trait ThemeScopeStack {
+pub(crate) trait ThemeScopeStack {
     fn len(&self) -> usize;
     fn scope_name(&self, index: usize) -> Option<&str>;
 }
@@ -176,7 +212,6 @@ impl ThemeScopeStack for TableScopeStack<'_> {
     }
 }
 
-#[cfg(any(feature = "bundled-grammars", test))]
 impl ThemeScopeStack for [Arc<str>] {
     fn len(&self) -> usize {
         <[Arc<str>]>::len(self)
@@ -184,6 +219,24 @@ impl ThemeScopeStack for [Arc<str>] {
 
     fn scope_name(&self, index: usize) -> Option<&str> {
         self.get(index).map(AsRef::as_ref)
+    }
+}
+
+impl ThemeScopeStack for crate::Scopes<'_> {
+    fn len(&self) -> usize {
+        ExactSizeIterator::len(self)
+    }
+    fn scope_name(&self, index: usize) -> Option<&str> {
+        self.name(index)
+    }
+}
+
+impl ThemeScopeStack for [&str] {
+    fn len(&self) -> usize {
+        <[&str]>::len(self)
+    }
+    fn scope_name(&self, index: usize) -> Option<&str> {
+        self.get(index).copied()
     }
 }
 
@@ -243,7 +296,7 @@ impl TextMateTheme {
                     .map(|color| (name.clone(), color))
             })
             .collect();
-        let default_style = ResolvedSyntaxStyle {
+        let default_style = Style {
             foreground: parse_optional_color(
                 raw.colors
                     .get("editor.foreground")
@@ -251,7 +304,7 @@ impl TextMateTheme {
                 editor_background,
             )?,
             background: editor_background,
-            modifiers: SyntaxModifiers::empty(),
+            modifiers: FontModifiers::empty(),
         };
         let mut rules = Vec::new();
         let mut defaults = default_style;
@@ -376,7 +429,7 @@ impl TextMateTheme {
             name: "user syntax rules".to_owned(),
             generation: next_theme_generation(),
             colors: HashMap::new(),
-            default_style: ResolvedSyntaxStyle::default(),
+            default_style: Style::default(),
             rules: compiled,
             candidates_by_head,
         })
@@ -386,18 +439,16 @@ impl TextMateTheme {
         &self.name
     }
 
-    pub fn default_style(&self) -> ResolvedSyntaxStyle {
+    pub fn default_style(&self) -> Style {
         self.default_style
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = ResolvedSyntaxStyle> + '_ {
-        std::iter::once(self.default_style).chain(self.rules.iter().map(|rule| {
-            ResolvedSyntaxStyle {
-                foreground: rule.foreground,
-                background: rule.background,
-                modifiers: rule.modifiers.unwrap_or_default(),
-            }
+    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = Style> + '_ {
+        std::iter::once(self.default_style).chain(self.rules.iter().map(|rule| Style {
+            foreground: rule.foreground,
+            background: rule.background,
+            modifiers: rule.modifiers.unwrap_or_default(),
         }))
     }
 
@@ -405,26 +456,36 @@ impl TextMateTheme {
         self.colors.get(name).copied()
     }
 
-    pub fn resolve(
-        &self,
-        table: &HighlightScopeTable,
-        stack: ScopeStackRef,
-    ) -> ResolvedSyntaxStyle {
+    pub(crate) fn resolve_scopes(&self, scopes: crate::Scopes<'_>) -> Style {
+        if let Some(crate::types::ScopeStorage::Table(table)) = scopes.storage.owner.as_deref()
+            && ExactSizeIterator::len(&scopes)
+                == table.stack(scopes.storage.stack).unwrap_or_default().len()
+        {
+            return self.resolve(table, scopes.storage.stack);
+        }
+        self.resolve_scope_stack(&scopes).style
+    }
+
+    pub(crate) fn resolve_names(&self, scopes: &[&str]) -> Style {
+        self.resolve_scope_stack(scopes).style
+    }
+
+    pub fn resolve(&self, table: &HighlightScopeTable, stack: ScopeStackId) -> Style {
         self.resolve_style(table, stack).style
     }
 
     #[cfg(any(feature = "bundled-grammars", test))]
-    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> ResolvedSyntaxStyle {
+    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> Style {
         self.resolve_scope_stack(scopes).style
     }
 
     /// Resolves and caches all style and property-match data needed by a
     /// renderer. Diagnostic selector metadata remains available separately
-    /// through [`Self::resolve_with_match`].
+    /// through the diagnostics feature.
     pub fn resolve_style(
         &self,
         table: &HighlightScopeTable,
-        stack: ScopeStackRef,
+        stack: ScopeStackId,
     ) -> ResolvedThemeStyle {
         let (slot, cached) = table.cached_style(self.generation, stack);
         if let Some(style) = cached {
@@ -445,16 +506,22 @@ impl TextMateTheme {
         resolved
     }
 
+    #[cfg(test)]
     pub fn resolve_with_match<'a>(
         &'a self,
         table: &HighlightScopeTable,
-        stack: ScopeStackRef,
+        stack: ScopeStackId,
     ) -> ThemeMatch<'a> {
         let scopes = TableScopeStack {
             table,
             atoms: table.stack(stack).unwrap_or_default(),
         };
-        let resolved = self.resolve_scope_stack(&scopes);
+        self.inspect_scopes(&scopes)
+    }
+
+    #[cfg(any(feature = "diagnostics", test))]
+    pub(crate) fn inspect_scopes<S: ThemeScopeStack + ?Sized>(&self, scopes: &S) -> ThemeMatch<'_> {
+        let resolved = self.resolve_scope_stack(scopes);
         ThemeMatch {
             selector: resolved
                 .representative
@@ -535,7 +602,7 @@ fn compile_rule(
     selector: &str,
     foreground: Option<RgbColor>,
     background: Option<RgbColor>,
-    modifiers: Option<SyntaxModifiers>,
+    modifiers: Option<FontModifiers>,
     source_order: usize,
 ) -> Result<CompiledThemeRule, String> {
     let mut parts = selector.split_whitespace().collect::<Vec<_>>();
@@ -564,6 +631,7 @@ fn selector_head(target: &str) -> &str {
     target.split('.').next().unwrap_or(target)
 }
 
+#[cfg(any(feature = "diagnostics", test))]
 fn selector_score(rule: &CompiledThemeRule) -> ThemeSelectorScore {
     let parent_lengths = rule
         .parents
@@ -614,10 +682,10 @@ fn unpack_style(packed: u64) -> ResolvedThemeStyle {
         foreground_matched: packed & (1 << 58) != 0,
         background_matched: packed & (1 << 59) != 0,
         modifiers_matched: packed & (1 << 60) != 0,
-        style: ResolvedSyntaxStyle {
+        style: Style {
             foreground: color(packed & 0x1ff_ffff),
             background: color((packed >> 25) & 0x1ff_ffff),
-            modifiers: SyntaxModifiers(((packed >> 50) & 0xff) as u8),
+            modifiers: FontModifiers(((packed >> 50) & 0xff) as u8),
         },
     }
 }
@@ -733,16 +801,16 @@ fn validate_scope_pattern(pattern: &str, source_order: usize) -> Result<(), Stri
     Ok(())
 }
 
-fn parse_modifiers(value: &str) -> Result<SyntaxModifiers, String> {
-    let mut modifiers = SyntaxModifiers::empty();
+fn parse_modifiers(value: &str) -> Result<FontModifiers, String> {
+    let mut modifiers = FontModifiers::empty();
     for modifier in value.split_whitespace() {
         match modifier {
             // VS Code themes use `normal` to explicitly clear inherited styles.
             "normal" | "regular" => {}
-            "bold" => modifiers.insert(SyntaxModifiers::BOLD),
-            "italic" => modifiers.insert(SyntaxModifiers::ITALIC),
-            "underline" => modifiers.insert(SyntaxModifiers::UNDERLINED),
-            "strikethrough" => modifiers.insert(SyntaxModifiers::CROSSED_OUT),
+            "bold" => modifiers.insert(FontModifiers::BOLD),
+            "italic" => modifiers.insert(FontModifiers::ITALIC),
+            "underline" => modifiers.insert(FontModifiers::UNDERLINED),
+            "strikethrough" => modifiers.insert(FontModifiers::CROSSED_OUT),
             unsupported => return Err(format!("unsupported TextMate fontStyle `{unsupported}`")),
         }
     }
@@ -938,12 +1006,9 @@ mod tests {
 
     #[test]
     fn reset_font_styles_are_supported() {
-        assert_eq!(parse_modifiers("").unwrap(), SyntaxModifiers::empty());
-        assert_eq!(parse_modifiers("normal").unwrap(), SyntaxModifiers::empty());
-        assert_eq!(
-            parse_modifiers("regular").unwrap(),
-            SyntaxModifiers::empty()
-        );
+        assert_eq!(parse_modifiers("").unwrap(), FontModifiers::empty());
+        assert_eq!(parse_modifiers("normal").unwrap(), FontModifiers::empty());
+        assert_eq!(parse_modifiers("regular").unwrap(), FontModifiers::empty());
     }
 
     #[test]
@@ -952,7 +1017,7 @@ mod tests {
             foreground_matched: true,
             background_matched: false,
             modifiers_matched: true,
-            style: ResolvedSyntaxStyle {
+            style: Style {
                 foreground: Some(RgbColor {
                     red: 1,
                     green: 2,
@@ -963,9 +1028,7 @@ mod tests {
                     green: 0xfe,
                     blue: 0xff,
                 }),
-                modifiers: SyntaxModifiers(
-                    SyntaxModifiers::BOLD.0 | SyntaxModifiers::CROSSED_OUT.0,
-                ),
+                modifiers: FontModifiers(FontModifiers::BOLD.0 | FontModifiers::CROSSED_OUT.0),
             },
         };
         assert_eq!(unpack_style(pack_style(style)), style);
@@ -1150,7 +1213,7 @@ mod tests {
             theme
                 .resolve(&table, stack)
                 .modifiers
-                .contains(SyntaxModifiers::BOLD)
+                .contains(FontModifiers::BOLD)
         );
 
         let (table, stack) = HighlightScopeTable::from_scope_names(&[
@@ -1181,7 +1244,7 @@ mod tests {
 
         assert_eq!(
             theme.resolve(&table, stack),
-            ResolvedSyntaxStyle {
+            Style {
                 foreground: Some(RgbColor {
                     red: 0xff,
                     green: 0,
@@ -1192,7 +1255,7 @@ mod tests {
                     green: 0xff,
                     blue: 0,
                 }),
-                modifiers: SyntaxModifiers::empty(),
+                modifiers: FontModifiers::empty(),
             }
         );
     }
@@ -1222,7 +1285,7 @@ mod tests {
         assert_eq!(matched.selector, Some("support.function.deep"));
         assert!(matched.foreground_matched);
         assert!(matched.modifiers_matched);
-        assert_eq!(matched.style.modifiers, SyntaxModifiers::empty());
+        assert_eq!(matched.style.modifiers, FontModifiers::empty());
         assert_eq!(
             matched.style.foreground,
             Some(RgbColor {

@@ -808,10 +808,10 @@ mod tests {
             .unwrap();
 
         assert!(
-            highlighted.lines().iter().any(|line| line
-                .spans()
+            highlighted
+                .lines()
                 .iter()
-                .any(|span| line.scope_names(span.scope_stack()).count() > 1)),
+                .any(|line| line.tokens().iter().any(|span| span.scopes().count() > 1)),
             "YAML should not collapse to root-scope-only output"
         );
     }

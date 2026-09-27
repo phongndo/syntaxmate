@@ -19,7 +19,7 @@ fn custom_theme_incremental_session_needs_no_bundled_themes() {
     let line = session.highlight_line("fn main() {}").unwrap();
 
     assert_eq!(line.status(), HighlightStatus::Complete);
-    assert!(line.spans().iter().any(|span| {
+    assert!(line.tokens().iter().any(|span| {
         span.style().foreground
             == Some(RgbColor {
                 red: 0x11,

@@ -18,7 +18,7 @@ use crate::Theme;
 #[cfg(feature = "ansi")]
 use crate::theme::RgbColor;
 #[cfg(any(feature = "ansi", feature = "html"))]
-use crate::{Error, HighlightedDocument, Result, Style, theme::SyntaxModifiers};
+use crate::{Error, HighlightedDocument, Result, Style, theme::FontModifiers};
 
 /// A rendered string together with the tokenizer completion status.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,13 +119,10 @@ pub fn render_html_to(
         if index != 0 {
             output.write_char('\n').map_err(write_error)?;
         }
-        let spans = line.spans().iter().map(|span| {
-            (
-                span.range(),
-                span.style(),
-                line.scope_names(span.scope_stack()),
-            )
-        });
+        let spans = line
+            .tokens()
+            .iter()
+            .map(|span| (span.range(), span.style(), span.scopes()));
         render_html_line(
             chunk.text,
             spans,
@@ -166,7 +163,7 @@ pub(crate) fn render_html_compact(
         let spans = line.segments.iter().map(|span| {
             (
                 span.byte_start..span.byte_end,
-                theme.resolve(&line.scope_table, span.scope_stack),
+                theme.resolve_interned(&line.scope_table, span.scope_stack),
                 line.scope_table.stack_names(span.scope_stack),
             )
         });
@@ -203,7 +200,7 @@ fn write_html_start(
     output.write_str("<pre")?;
     // Decorations on an ancestor cannot be cleared by a descendant token.
     let colors = Style {
-        modifiers: SyntaxModifiers::empty(),
+        modifiers: FontModifiers::empty(),
         ..defaults
     };
     if options.class.is_some() || prefix.is_some() {
@@ -359,12 +356,12 @@ fn encode_class_prefix(prefix: &str) -> String {
 }
 
 #[cfg(feature = "html")]
-fn modifier_bits(modifiers: SyntaxModifiers) -> u8 {
+fn modifier_bits(modifiers: FontModifiers) -> u8 {
     [
-        SyntaxModifiers::BOLD,
-        SyntaxModifiers::ITALIC,
-        SyntaxModifiers::UNDERLINED,
-        SyntaxModifiers::CROSSED_OUT,
+        FontModifiers::BOLD,
+        FontModifiers::ITALIC,
+        FontModifiers::UNDERLINED,
+        FontModifiers::CROSSED_OUT,
     ]
     .into_iter()
     .enumerate()
@@ -550,7 +547,10 @@ pub fn render_ansi_to(
         if index != 0 {
             output.write_char('\n').map_err(write_error)?;
         }
-        let spans = line.spans().iter().map(|span| (span.range(), span.style()));
+        let spans = line
+            .tokens()
+            .iter()
+            .map(|span| (span.range(), span.style()));
         render_ansi_line(chunk.text, spans, document.default_style, options, output)
             .map_err(write_error)?;
     }
@@ -581,7 +581,7 @@ pub(crate) fn render_ansi_compact(
         let spans = line.segments.iter().map(|span| {
             (
                 span.byte_start..span.byte_end,
-                theme.resolve(&line.scope_table, span.scope_stack),
+                theme.resolve_interned(&line.scope_table, span.scope_stack),
             )
         });
         render_ansi_line(chunk.text, spans, defaults, options, &mut output).map_err(write_error)?;
@@ -647,10 +647,10 @@ fn write_ansi_style(style: Style, output: &mut dyn Write) -> fmt::Result {
     output.write_str("\x1b[")?;
     let mut separator = "";
     for (enabled, code) in [
-        (style.modifiers.contains(SyntaxModifiers::BOLD), "1"),
-        (style.modifiers.contains(SyntaxModifiers::ITALIC), "3"),
-        (style.modifiers.contains(SyntaxModifiers::UNDERLINED), "4"),
-        (style.modifiers.contains(SyntaxModifiers::CROSSED_OUT), "9"),
+        (style.modifiers.contains(FontModifiers::BOLD), "1"),
+        (style.modifiers.contains(FontModifiers::ITALIC), "3"),
+        (style.modifiers.contains(FontModifiers::UNDERLINED), "4"),
+        (style.modifiers.contains(FontModifiers::CROSSED_OUT), "9"),
     ] {
         if enabled {
             output.write_str(separator)?;
@@ -751,7 +751,7 @@ fn validate_document(source: &str, document: &HighlightedDocument) -> Result<()>
     {
         let text = chunk.text;
         let mut cursor = 0;
-        for span in line.spans() {
+        for span in line.tokens() {
             let range = span.range();
             if range.start < cursor
                 || range.start > range.end
@@ -838,7 +838,7 @@ mod tests {
                     green: 5,
                     blue: 6,
                 }),
-                modifiers: SyntaxModifiers::BOLD,
+                modifiers: FontModifiers::BOLD,
             },
             &mut output,
         )
@@ -846,9 +846,9 @@ mod tests {
         assert_eq!(output, "\x1b[1;38;2;1;2;3;48;2;4;5;6m");
 
         for (modifier, expected) in [
-            (SyntaxModifiers::ITALIC, "\x1b[3m"),
-            (SyntaxModifiers::UNDERLINED, "\x1b[4m"),
-            (SyntaxModifiers::CROSSED_OUT, "\x1b[9m"),
+            (FontModifiers::ITALIC, "\x1b[3m"),
+            (FontModifiers::UNDERLINED, "\x1b[4m"),
+            (FontModifiers::CROSSED_OUT, "\x1b[9m"),
         ] {
             output.clear();
             write_ansi_style(

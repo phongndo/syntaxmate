@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Prepare the breaking 0.2 API: unify document and incremental token/line types,
+  expose allocation-free `Scopes` views, and consolidate theme construction and
+  resolution on `Theme`. Document output now reports completion per line.
+- Hide scope storage and cache instrumentation, remove redundant aliases and
+  catalog free functions, and require rustdoc for every public item.
+
 - Implement `PartialEq`, `Eq`, and `Hash` for `TokenizerState`, allowing editors
   to stop incremental re-highlighting when continuation states converge. Keep
   embedded base-grammar context distinct when reusing static frame identities.
@@ -67,6 +73,41 @@
     `(\g<1>)?`, fails instead of overflowing the stack;
   - Unicode case-insensitive keyword sets containing characters such as `θ`,
     `ϑ`, and `ϴ` no longer miss matches.
+
+### Migrating from 0.1
+
+This is a clean break for 0.2; removed names have no deprecated aliases.
+Both document and incremental lines expose `tokens()`, and each token exposes
+`range()` and `scopes()`. Styled tokens also expose `style()`. Scope iteration
+borrows the token and allocates nothing; cloned tokens keep their scopes alive.
+Line `status()` describes that line, while document `status()` covers the whole
+operation (including any checkpoint replay).
+
+| Old API | 0.2 replacement |
+| --- | --- |
+| `DocumentLine` | `TokenizedLine` |
+| `TokenSpan`, `ScopedToken` | `Token` |
+| `HighlightedSpan`, `IncrementalHighlightedSpan` | `HighlightedToken` |
+| `IncrementalHighlightedLine` | `HighlightedLine` |
+| `ResolvedSyntaxStyle` | `Style` |
+| `SyntaxModifiers` | `FontModifiers` |
+| `ScopeStackRef` | `ScopeStackId` |
+| `ScopeTable`, `HighlightScopeTable`, `ScopeAtomId` | Private storage; use `token.scopes()` |
+| `line.spans()` | `line.tokens()` |
+| `line.scope_names(token.scope_stack())`, `line.scope_table()` | `token.scopes()` |
+| `token.scope_stack() -> ScopeStackRef` | `Option<ScopeStackId>`; `Some` for document tokens, `None` for incremental tokens; keys are comparable only within the same document |
+| `TextMateTheme` | `Theme`; `from_json`, `from_rules`, and `bundled` return crate `Result` / `Error` |
+| `Theme::resolve(table, stack)` | `Theme::resolve(token.scopes())`; standalone names use `resolve_scope_names(&[&str])` |
+| `TextMateTheme::resolve_style`, `resolve_with_match` | `Theme::resolve_style(scopes)`, `resolve_with_match(scopes)`, requiring `diagnostics` |
+| `ResolvedThemeStyle`, `ThemeMatch`, `ThemeSelectorScore` | Same names, available only with `diagnostics` |
+| `style_cache_stats`, `memory_bytes` | Private instrumentation; no public replacement |
+| `DEFAULT_LINE_CACHE_ENTRIES`, `DEFAULT_MAX_LINE_BYTES` | `TokenizerOptions::default()`; defaults are documented there |
+| `canonical_language(language)` | `Catalog::bundled().canonical_language(language)` |
+| `detect_language_from_path(path)` | `Catalog::bundled().detect_path(path)` |
+| `available_languages()` | `Catalog::bundled().languages()` |
+
+`Theme` also exposes `default_style()` and `color(name)`. Theme selector
+inspection is diagnostic output and remains outside the stable API contract.
 
 ## 0.1.3 - 2026-09-19
 

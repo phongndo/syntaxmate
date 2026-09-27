@@ -6,8 +6,8 @@ fn main() -> syntaxmate::Result<()> {
     let document = highlighter.highlight("rust", source, "github-dark")?;
 
     for line in document.lines() {
-        for span in line.spans() {
-            let scopes = line.scope_names(span.scope_stack()).collect::<Vec<_>>();
+        for span in line.tokens() {
+            let scopes = span.scopes().collect::<Vec<_>>();
             println!("{:?} {:?} {scopes:?}", span.range(), span.style());
         }
     }

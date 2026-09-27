@@ -2,7 +2,7 @@ use std::fs;
 
 use crate::{
     HighlightScopeTable, Highlighter,
-    theme::{RgbColor, SyntaxModifiers, github_dark_high_contrast},
+    theme::{FontModifiers, RgbColor, github_dark_high_contrast},
 };
 use serde::Deserialize;
 
@@ -57,24 +57,24 @@ fn latex_regression_scope_stacks_match_vscode_textmate() {
             })
             .collect::<Vec<_>>();
         assert_eq!(
-            line.spans().len(),
+            line.tokens().len(),
             expected.len(),
             "line {} actual={:?} expected={:?}",
             line_index + 1,
-            line.spans()
+            line.tokens()
                 .iter()
                 .map(|span| (
                     span.range().start,
                     span.range().end,
-                    line.scope_names(span.scope_stack()).collect::<Vec<_>>()
+                    span.scopes().collect::<Vec<_>>()
                 ))
                 .collect::<Vec<_>>(),
             expected
         );
-        for (span, (start, end, scopes)) in line.spans().iter().zip(expected) {
+        for (span, (start, end, scopes)) in line.tokens().iter().zip(expected) {
             assert_eq!(span.range(), start..end);
             assert_eq!(
-                line.scope_names(span.scope_stack()).collect::<Vec<_>>(),
+                span.scopes().collect::<Vec<_>>(),
                 scopes.iter().map(String::as_str).collect::<Vec<_>>(),
                 "line {} bytes {start}..{end}",
                 line_index + 1
@@ -156,12 +156,12 @@ fn parse_color(value: &str) -> RgbColor {
     }
 }
 
-fn modifier_names(modifiers: SyntaxModifiers) -> Vec<String> {
+fn modifier_names(modifiers: FontModifiers) -> Vec<String> {
     [
-        (SyntaxModifiers::ITALIC, "italic"),
-        (SyntaxModifiers::BOLD, "bold"),
-        (SyntaxModifiers::UNDERLINED, "underline"),
-        (SyntaxModifiers::CROSSED_OUT, "strikethrough"),
+        (FontModifiers::ITALIC, "italic"),
+        (FontModifiers::BOLD, "bold"),
+        (FontModifiers::UNDERLINED, "underline"),
+        (FontModifiers::CROSSED_OUT, "strikethrough"),
     ]
     .into_iter()
     .filter(|(modifier, _)| modifiers.contains(*modifier))

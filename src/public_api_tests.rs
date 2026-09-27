@@ -226,7 +226,7 @@ fn batteries_included_api_detects_tokenizes_and_styles() {
         .unwrap();
     assert_eq!(document.status(), HighlightStatus::Complete);
     assert_eq!(document.lines().len(), 1);
-    assert!(!document.lines()[0].spans().is_empty());
+    assert!(!document.lines()[0].tokens().is_empty());
 }
 
 #[test]
@@ -243,11 +243,12 @@ fn custom_grammar_and_theme_work_without_product_types() {
     let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
     let document = tokenizer.tokenize("todo then done");
     assert_eq!(document.status(), HighlightStatus::Complete);
-    assert!(document.lines()[0].spans().iter().any(|span| {
+    assert!(
         document.lines()[0]
-            .scope_names(span.scope_stack())
-            .any(|scope| scope == "keyword.demo")
-    }));
+            .tokens()
+            .iter()
+            .any(|span| { span.scopes().any(|scope| scope == "keyword.demo") })
+    );
 
     let theme = Theme::from_json(
         r##"{
@@ -262,7 +263,7 @@ fn custom_grammar_and_theme_work_without_product_types() {
     assert_eq!(theme.name(), "Demo");
 
     let highlighted = style_document(document, &theme);
-    assert!(highlighted.lines()[0].spans().iter().any(|span| {
+    assert!(highlighted.lines()[0].tokens().iter().any(|span| {
         span.style()
             .foreground
             .is_some_and(|color| color.red == 255 && color.green == 0 && color.blue == 0)
@@ -282,7 +283,7 @@ fn incremental_output_matches_complete_document_scopes() {
         let incremental = session.highlight_line(text).unwrap();
         assert_eq!(incremental.status(), HighlightStatus::Complete);
         let incremental_scopes = incremental
-            .spans()
+            .tokens()
             .iter()
             .map(|span| {
                 (
@@ -292,15 +293,12 @@ fn incremental_output_matches_complete_document_scopes() {
             })
             .collect::<Vec<_>>();
         let complete_scopes = complete.lines()[line_index]
-            .spans()
+            .tokens()
             .iter()
             .map(|span| {
                 (
                     span.range(),
-                    complete.lines()[line_index]
-                        .scope_names(span.scope_stack())
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>(),
+                    span.scopes().map(str::to_owned).collect::<Vec<_>>(),
                 )
             })
             .collect::<Vec<_>>();
@@ -326,8 +324,8 @@ fn incremental_highlight_sinks_match_owned_output() {
 
         assert_eq!(status, expected.status());
         assert_eq!(callback_status, expected.status());
-        assert_eq!(buffer, expected.spans());
-        assert_eq!(emitted, expected.spans());
+        assert_eq!(buffer, expected.tokens());
+        assert_eq!(emitted, expected.tokens());
     }
 
     let snapshot = buffer.clone();
@@ -400,7 +398,7 @@ fn incremental_session_accepts_a_custom_theme() {
     let mut session = highlighter.session_with_theme("rust", &theme).unwrap();
     let line = session.highlight_line("fn main() {}").unwrap();
     assert_eq!(line.status(), HighlightStatus::Complete);
-    assert!(line.spans().iter().any(|span| {
+    assert!(line.tokens().iter().any(|span| {
         span.style().foreground
             == Some(crate::RgbColor {
                 red: 0x11,
@@ -427,28 +425,22 @@ fn viewport_output_matches_complete_document_slice() {
 
     for (actual, expected) in viewport.lines().iter().zip(&full.lines()[1..4]) {
         let actual_scopes = actual
-            .spans()
+            .tokens()
             .iter()
             .map(|span| {
                 (
                     span.range(),
-                    actual
-                        .scope_names(span.scope_stack())
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>(),
+                    span.scopes().map(str::to_owned).collect::<Vec<_>>(),
                 )
             })
             .collect::<Vec<_>>();
         let expected_scopes = expected
-            .spans()
+            .tokens()
             .iter()
             .map(|span| {
                 (
                     span.range(),
-                    expected
-                        .scope_names(span.scope_stack())
-                        .map(str::to_owned)
-                        .collect::<Vec<_>>(),
+                    span.scopes().map(str::to_owned).collect::<Vec<_>>(),
                 )
             })
             .collect::<Vec<_>>();
@@ -469,4 +461,198 @@ fn tokenizer_state_cannot_cross_tokenizer_instances() {
         second.tokenize_line("text", &mut state).unwrap_err(),
         Error::StateMismatch
     );
+}
+
+#[test]
+fn unified_tokens_own_scopes_and_match_incremental_output() {
+    use crate::{HighlightedLine, HighlightedToken, ScopeStackId, Scopes, Token, TokenizedLine};
+    fn assert_key<T: Copy + Eq + std::hash::Hash>() {}
+    assert_key::<ScopeStackId>();
+    fn names(scopes: Scopes<'_>) -> Vec<&str> {
+        scopes.collect()
+    }
+
+    let source = "let café = true;";
+    let mut highlighter = Highlighter::bundled().unwrap();
+    let document = highlighter
+        .tokenize("rust", &format!("{source}\n"))
+        .unwrap();
+    let line: &TokenizedLine = &document.lines()[0];
+    let tokens: Vec<Token> = line.tokens().to_vec();
+    assert!(tokens.iter().all(|token| token.scope_stack().is_some()));
+    let theme = Theme::bundled("github-dark").unwrap();
+    let highlighted = style_document(document, &theme);
+    let styled_line: &HighlightedLine = &highlighted.lines()[0];
+    let styled: Vec<HighlightedToken> = styled_line.tokens().to_vec();
+    let mut session = highlighter.session_with_theme("rust", &theme).unwrap();
+    let incremental: HighlightedLine = session.highlight_line(source).unwrap();
+    assert_eq!(incremental, *styled_line);
+    drop(highlighted);
+    drop(highlighter);
+    drop(session);
+    assert_eq!(incremental.tokens(), styled);
+
+    for (token, styled) in tokens.iter().zip(&styled) {
+        let mut scopes = token.scopes();
+        let count = scopes.len();
+        assert!(count > 0);
+        assert_eq!(scopes.next(), Some("source.rust"));
+        assert_eq!(scopes.len(), count - 1);
+        let remaining = scopes.clone().collect::<Vec<_>>();
+        assert_eq!(
+            theme.resolve(scopes.clone()),
+            theme.resolve_scope_names(&remaining)
+        );
+        while scopes.next().is_some() {}
+        assert_eq!(scopes.len(), 0);
+        assert_eq!(scopes.next(), None);
+        assert_eq!(names(token.scopes()), names(styled.scopes()));
+        assert_eq!(theme.resolve(token.scopes()), styled.style());
+        assert!(source.get(token.range()).is_some());
+    }
+}
+
+#[test]
+fn unified_lines_report_individual_degradation_on_replay_and_viewports() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(r#"{"scopeName":"source.test","patterns":[]}"#)
+        .unwrap();
+    let mut tokenizer = Tokenizer::new(
+        &registry,
+        root,
+        crate::TokenizerOptions {
+            max_line_bytes: 8,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let source = "ok\ntoo long for limit\nok\n";
+    let expected = [
+        HighlightStatus::Complete,
+        HighlightStatus::Degraded,
+        HighlightStatus::Complete,
+        HighlightStatus::Complete,
+    ];
+    for _ in 0..2 {
+        let document = tokenizer.tokenize(source);
+        assert_eq!(document.status(), HighlightStatus::Degraded);
+        assert_eq!(
+            document
+                .lines()
+                .iter()
+                .map(|line| line.status())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        let theme = Theme::from_rules(&[]).unwrap();
+        let styled = style_document(document, &theme);
+        assert_eq!(
+            styled
+                .lines()
+                .iter()
+                .map(|line| line.status())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+    let mut checkpoints = tokenizer.checkpoints(1);
+    let viewport = tokenizer
+        .tokenize_viewport(source, 0..3, &mut checkpoints)
+        .unwrap();
+    assert_eq!(
+        viewport
+            .lines()
+            .iter()
+            .map(|line| line.status())
+            .collect::<Vec<_>>(),
+        expected[..3]
+    );
+}
+
+#[test]
+fn theme_facade_exposes_defaults_colors_and_validates_rules() {
+    use crate::{FontModifiers, RgbColor, ThemeRule};
+    let theme = Theme::from_json(
+        r##"{"name":"custom","colors":{
+        "editor.foreground":"#112233","editor.background":"#445566"},
+        "tokenColors":[{"scope":"keyword","settings":{"fontStyle":"bold"}}]}"##,
+    )
+    .unwrap();
+    assert_eq!(theme.name(), "custom");
+    assert_eq!(
+        theme.default_style().foreground,
+        Some(RgbColor {
+            red: 17,
+            green: 34,
+            blue: 51
+        })
+    );
+    assert_eq!(
+        theme.color("editor.background"),
+        theme.default_style().background
+    );
+    assert_eq!(theme.color("unknown"), None);
+    assert!(
+        theme
+            .resolve_scope_names(&["keyword"])
+            .modifiers
+            .contains(FontModifiers::BOLD)
+    );
+    let rules = [ThemeRule {
+        scope: "keyword".into(),
+        foreground: Some("#abcdef".into()),
+        font_style: Some("italic".into()),
+        ..Default::default()
+    }];
+    let theme = Theme::from_rules(&rules).unwrap();
+    assert_eq!(
+        theme.resolve_scope_names(&["keyword.rust"]).foreground,
+        Some(RgbColor {
+            red: 171,
+            green: 205,
+            blue: 239
+        })
+    );
+    for json in [
+        "{",
+        "null",
+        r##"{"colors":{"editor.foreground":"#fff;}</style><script>"}}"##,
+    ] {
+        assert!(matches!(Theme::from_json(json), Err(Error::Theme(_))));
+    }
+    for rule in [
+        ThemeRule::default(),
+        ThemeRule {
+            scope: "keyword".into(),
+            foreground: Some("#fff;}</style><script>".into()),
+            ..Default::default()
+        },
+        ThemeRule {
+            scope: "keyword".into(),
+            font_style: Some("bold;display:none".into()),
+            ..Default::default()
+        },
+    ] {
+        assert!(matches!(Theme::from_rules(&[rule]), Err(Error::Theme(_))));
+    }
+}
+
+#[cfg(feature = "diagnostics")]
+#[test]
+fn theme_diagnostics_accept_the_same_scope_view() {
+    let mut highlighter = Highlighter::bundled().unwrap();
+    let document = highlighter.tokenize("rust", "let x = true;\n").unwrap();
+    let theme = Theme::bundled("github-dark").unwrap();
+    for token in document.lines()[0].tokens() {
+        let matched: crate::ThemeMatch<'_> = theme.resolve_with_match(token.scopes());
+        let resolved: crate::ResolvedThemeStyle = theme.resolve_style(token.scopes());
+        assert_eq!(matched.style, theme.resolve(token.scopes()));
+        assert_eq!(matched.style, resolved.style);
+        assert_eq!(matched.foreground_matched, resolved.foreground_matched);
+        if let Some(score) = matched.score {
+            let _: crate::ThemeSelectorScore = score;
+            assert!(matched.selector.is_some());
+        }
+    }
 }
