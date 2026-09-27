@@ -361,6 +361,30 @@ fn incremental_session_reset_replays_from_document_start() {
 }
 
 #[test]
+fn incremental_session_state_detects_convergence() {
+    let highlighter = Highlighter::bundled().unwrap();
+    let mut session = highlighter.session("rust", "github-dark").unwrap();
+    let other = highlighter.session("rust", "github-dark").unwrap();
+    assert_ne!(session.state(), other.state());
+    session.highlight_line("/* open").unwrap();
+    session.highlight_line("body").unwrap();
+    let inside = session.state().clone();
+    session.highlight_line("*/").unwrap();
+    let closed = session.state().clone();
+    let suffix = session.highlight_line("let value = 1;").unwrap();
+    let end = session.state().clone();
+
+    session.reset();
+    session.highlight_line("/* open").unwrap();
+    session.highlight_line("body */").unwrap();
+    assert_ne!(session.state(), &inside);
+    session.highlight_line("*/").unwrap();
+    assert_eq!(session.state(), &closed);
+    assert_eq!(session.highlight_line("let value = 1;").unwrap(), suffix);
+    assert_eq!(session.state(), &end);
+}
+
+#[test]
 fn incremental_session_accepts_a_custom_theme() {
     let theme = Theme::from_json(
         r##"{

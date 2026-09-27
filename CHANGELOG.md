@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Implement `PartialEq`, `Eq`, and `Hash` for `TokenizerState`, allowing editors
+  to stop incremental re-highlighting when continuation states converge. Keep
+  embedded base-grammar context distinct when reusing static frame identities.
+
 - Restore allocation guardrails for prepared tokenizers and bundled construction
   by dropping construction-only rule templates and borrowing embedded repository
   skeleton bytes.
