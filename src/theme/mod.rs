@@ -3,6 +3,8 @@
 //! This is deliberately independent of the tokenizer: a theme can be changed
 //! while reusing the immutable scope table in [`crate::HighlightedLine`].
 
+use crate::ThemeError;
+
 use std::sync::Arc;
 use std::{cmp::Ordering, collections::HashMap};
 
@@ -277,9 +279,8 @@ struct RawSettings {
 }
 
 impl TextMateTheme {
-    pub fn from_json(json: &str) -> Result<Self, String> {
-        let raw: RawTheme = serde_json::from_str(json)
-            .map_err(|error| format!("invalid TextMate theme JSON: {error}"))?;
+    pub fn from_json(json: &str) -> Result<Self, ThemeError> {
+        let raw: RawTheme = serde_json::from_str(json).map_err(ThemeError::json)?;
         let editor_background = raw
             .colors
             .get("editor.background")
@@ -349,9 +350,9 @@ impl TextMateTheme {
                     continue;
                 }
                 let mut parts = selector.split_whitespace().collect::<Vec<_>>();
-                let target = parts
-                    .pop()
-                    .ok_or_else(|| format!("empty theme selector at rule {source_order}"))?;
+                let target = parts.pop().ok_or_else(|| {
+                    ThemeError::rule(format!("empty theme selector at rule {source_order}"))
+                })?;
                 validate_scope_pattern(target, source_order)?;
                 for parent in &parts {
                     if *parent != ">" {
@@ -390,7 +391,7 @@ impl TextMateTheme {
 
     /// Compiles post-theme user selector rules through the same matcher as
     /// built-in TextMate themes.
-    pub fn from_rules(rules: &[ThemeRule]) -> Result<Self, String> {
+    pub fn from_rules(rules: &[ThemeRule]) -> Result<Self, ThemeError> {
         let mut compiled = Vec::new();
         for (source_order, rule) in rules.iter().enumerate() {
             let foreground = parse_optional_syntax_rule_color(rule.foreground.as_deref())?;
@@ -401,13 +402,15 @@ impl TextMateTheme {
                 .map(parse_modifiers)
                 .transpose()?;
             if foreground.is_none() && background.is_none() && modifiers.is_none() {
-                return Err(format!(
+                return Err(ThemeError::rule(format!(
                     "syntax rule {source_order} must set foreground, background, or font_style"
-                ));
+                )));
             }
             for selector in rule.scope.split(',').map(str::trim) {
                 if selector.is_empty() {
-                    return Err(format!("empty syntax rule selector at rule {source_order}"));
+                    return Err(ThemeError::rule(format!(
+                        "empty syntax rule selector at rule {source_order}"
+                    )));
                 }
                 compiled.push(compile_rule(
                     selector,
@@ -613,11 +616,11 @@ fn compile_rule(
     background: Option<RgbColor>,
     modifiers: Option<FontModifiers>,
     source_order: usize,
-) -> Result<CompiledThemeRule, String> {
+) -> Result<CompiledThemeRule, ThemeError> {
     let mut parts = selector.split_whitespace().collect::<Vec<_>>();
     let target = parts
         .pop()
-        .ok_or_else(|| format!("empty theme selector at rule {source_order}"))?;
+        .ok_or_else(|| ThemeError::rule(format!("empty theme selector at rule {source_order}")))?;
     validate_scope_pattern(target, source_order)?;
     for parent in &parts {
         if *parent != ">" {
@@ -794,7 +797,7 @@ fn scope_matches(scope: &str, pattern: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('.'))
 }
 
-fn validate_scope_pattern(pattern: &str, source_order: usize) -> Result<(), String> {
+fn validate_scope_pattern(pattern: &str, source_order: usize) -> Result<(), ThemeError> {
     if pattern.is_empty()
         || pattern.starts_with('.')
         || pattern.ends_with('.')
@@ -803,14 +806,14 @@ fn validate_scope_pattern(pattern: &str, source_order: usize) -> Result<(), Stri
             byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b':' | b'.' | b'*')
         })
     {
-        return Err(format!(
+        return Err(ThemeError::rule(format!(
             "unsupported TextMate selector `{pattern}` at rule {source_order}"
-        ));
+        )));
     }
     Ok(())
 }
 
-fn parse_modifiers(value: &str) -> Result<FontModifiers, String> {
+fn parse_modifiers(value: &str) -> Result<FontModifiers, ThemeError> {
     let mut modifiers = FontModifiers::empty();
     for modifier in value.split_whitespace() {
         match modifier {
@@ -820,7 +823,11 @@ fn parse_modifiers(value: &str) -> Result<FontModifiers, String> {
             "italic" => modifiers.insert(FontModifiers::ITALIC),
             "underline" => modifiers.insert(FontModifiers::UNDERLINED),
             "strikethrough" => modifiers.insert(FontModifiers::CROSSED_OUT),
-            unsupported => return Err(format!("unsupported TextMate fontStyle `{unsupported}`")),
+            unsupported => {
+                return Err(ThemeError::rule(format!(
+                    "unsupported TextMate fontStyle `{unsupported}`"
+                )));
+            }
         }
     }
     Ok(modifiers)
@@ -829,13 +836,13 @@ fn parse_modifiers(value: &str) -> Result<FontModifiers, String> {
 fn parse_optional_color(
     value: Option<&str>,
     background: Option<RgbColor>,
-) -> Result<Option<RgbColor>, String> {
+) -> Result<Option<RgbColor>, ThemeError> {
     value
         .map(|value| parse_color(value, background))
         .transpose()
 }
 
-fn parse_optional_syntax_rule_color(value: Option<&str>) -> Result<Option<RgbColor>, String> {
+fn parse_optional_syntax_rule_color(value: Option<&str>) -> Result<Option<RgbColor>, ThemeError> {
     // User rules have no single background to composite against: their tokens
     // can be rendered over theme, diff, or inline-diff backgrounds. Preserve
     // the historical behavior of accepting alpha forms and using their RGB
@@ -845,23 +852,27 @@ fn parse_optional_syntax_rule_color(value: Option<&str>) -> Result<Option<RgbCol
         .transpose()
 }
 
-fn parse_editor_background(value: &str) -> Result<RgbColor, String> {
+fn parse_editor_background(value: &str) -> Result<RgbColor, ThemeError> {
     let (color, alpha) = parse_rgba_color(value)?;
     if alpha != u8::MAX {
-        return Err(format!(
-            "TextMate editor.background must be opaque, got `{value}`"
+        return Err(ThemeError::color(
+            value,
+            format!("TextMate editor.background must be opaque, got `{value}`"),
         ));
     }
     Ok(color)
 }
 
-fn parse_color(value: &str, background: Option<RgbColor>) -> Result<RgbColor, String> {
+fn parse_color(value: &str, background: Option<RgbColor>) -> Result<RgbColor, ThemeError> {
     let (color, alpha) = parse_rgba_color(value)?;
     if alpha == u8::MAX {
         return Ok(color);
     }
     let background = background.ok_or_else(|| {
-        format!("translucent TextMate color `{value}` requires an opaque editor.background")
+        ThemeError::color(
+            value,
+            format!("translucent TextMate color `{value}` requires an opaque editor.background"),
+        )
     })?;
     let composite = |foreground: u8, background: u8| {
         let alpha = u32::from(alpha);
@@ -877,8 +888,8 @@ fn parse_color(value: &str, background: Option<RgbColor>) -> Result<RgbColor, St
     })
 }
 
-fn parse_rgba_color(value: &str) -> Result<(RgbColor, u8), String> {
-    let invalid = || format!("unsupported TextMate color `{value}`");
+fn parse_rgba_color(value: &str) -> Result<(RgbColor, u8), ThemeError> {
+    let invalid = || ThemeError::color(value, format!("unsupported TextMate color `{value}`"));
     let hex = value.strip_prefix('#').ok_or_else(invalid)?;
     if !hex.is_ascii() {
         return Err(invalid());

@@ -862,23 +862,25 @@ fn write_ansi_source(text: &str, options: &AnsiOptions, output: &mut dyn Write) 
     any(feature = "ansi", feature = "html")
 ))]
 fn compact_line_count_error() -> Error {
-    Error::Render("source and compact token document have different logical line counts".to_owned())
+    Error::Render(crate::RenderError::mismatch(
+        "source and compact token document have different logical line counts".to_owned(),
+    ))
 }
 
 #[cfg(any(feature = "ansi", feature = "html"))]
-fn write_error(_: fmt::Error) -> Error {
-    Error::Render("render output writer failed".to_owned())
+fn write_error(error: fmt::Error) -> Error {
+    Error::Render(crate::RenderError::writer(error))
 }
 
 #[cfg(any(feature = "ansi", feature = "html"))]
 fn validate_document(source: &str, document: &HighlightedDocument) -> Result<()> {
     let line_count = crate::engine::line::LineChunks::new(source).count();
     if line_count != document.lines().len() {
-        return Err(Error::Render(format!(
+        return Err(Error::Render(crate::RenderError::mismatch(format!(
             "source has {} logical lines but the highlighted document has {}",
             line_count,
             document.lines().len()
-        )));
+        ))));
     }
     for (line_index, (chunk, line)) in crate::engine::line::LineChunks::new(source)
         .zip(document.lines())
@@ -894,9 +896,9 @@ fn validate_document(source: &str, document: &HighlightedDocument) -> Result<()>
                 || !text.is_char_boundary(range.start)
                 || !text.is_char_boundary(range.end)
             {
-                return Err(Error::Render(format!(
+                return Err(Error::Render(crate::RenderError::mismatch(format!(
                     "invalid highlighted byte range {range:?} on line {line_index}"
-                )));
+                ))));
             }
             cursor = range.end;
         }

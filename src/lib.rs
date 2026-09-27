@@ -52,7 +52,11 @@ mod tokenizer;
 mod types;
 
 pub use catalog::{AssetLicense, Catalog, CatalogSummary};
-pub use error::{Error, Result};
+pub use error::{
+    BundleError, BundleErrorKind, DiagnosticError, DiagnosticErrorKind, Error, GrammarError,
+    GrammarErrorKind, GrammarResource, JsonError, LimitExceeded, MissingInclude, RegexError,
+    RenderError, RenderErrorKind, Result, ThemeError, ThemeErrorKind,
+};
 #[cfg(feature = "bundled-grammars")]
 pub use highlighter::{HighlightSession, Highlighter};
 pub use highlighter::{
@@ -181,21 +185,23 @@ pub mod diagnostics {
         let (engine_name, result, steps) = match engine {
             RegexEngine::Auto => {
                 let matcher = RegexMatcher::new(pattern);
-                let (result, steps) = matcher
-                    .find_report(line, from, context)
-                    .map_err(|error| Error::Diagnostic(format!("fallback error: {error:?}")))?;
+                let (result, steps) =
+                    matcher.find_report(line, from, context).map_err(|error| {
+                        Error::Diagnostic(crate::DiagnosticError::fallback(pattern, error))
+                    })?;
                 (matcher.engine_name(), result, steps)
             }
             RegexEngine::Dfa => {
-                let matcher = AutomataMatcher::new(pattern)
-                    .map_err(|error| Error::Diagnostic(error.to_string()))?;
+                let matcher = AutomataMatcher::new(pattern).map_err(|error| {
+                    Error::Diagnostic(crate::DiagnosticError::build(pattern, error.to_string()))
+                })?;
                 ("dfa", matcher.find(line, from, context), None)
             }
             RegexEngine::Fallback => {
                 let matcher = FallbackMatcher::with_budget(pattern, fallback_budget);
-                let report = matcher
-                    .try_find(line, from, context)
-                    .map_err(|error| Error::Diagnostic(format!("fallback error: {error:?}")))?;
+                let report = matcher.try_find(line, from, context).map_err(|error| {
+                    Error::Diagnostic(crate::DiagnosticError::fallback(pattern, error))
+                })?;
                 ("fallback", report.result, Some(report.steps))
             }
         };

@@ -317,7 +317,8 @@ impl CompiledGrammar {
                         path,
                         "include",
                         format!("unknown repository include #{name}"),
-                    ));
+                    )
+                    .with_include(None, Some(name.clone())));
                 }
             }
             RuleRef::External { repository, .. } if validate_external_repository => {
@@ -329,7 +330,8 @@ impl CompiledGrammar {
                         path,
                         "include",
                         format!("unknown external repository #{repository}"),
-                    ));
+                    )
+                    .with_include(Some(self.scope_name.clone()), Some(repository.clone())));
                 }
             }
             RuleRef::SelfRef | RuleRef::BaseRef | RuleRef::External { .. } => {}
@@ -344,9 +346,19 @@ pub struct GrammarValidationError {
     pub rule_path: String,
     pub field: String,
     pub message: String,
+    pub missing_include: Option<Box<(Option<String>, Option<String>)>>,
 }
 
 impl GrammarValidationError {
+    pub(crate) fn with_include(
+        mut self,
+        scope: Option<String>,
+        repository: Option<String>,
+    ) -> Self {
+        self.missing_include = Some(Box::new((scope, repository)));
+        self
+    }
+
     pub fn new(
         grammar: impl Into<String>,
         rule_path: impl Into<String>,
@@ -358,6 +370,7 @@ impl GrammarValidationError {
             rule_path: rule_path.into(),
             field: field.into(),
             message: message.into(),
+            missing_include: None,
         }
     }
 }
@@ -382,7 +395,7 @@ pub enum GrammarLoadError {
     },
     Validation {
         path: Option<String>,
-        source: GrammarValidationError,
+        source: Box<GrammarValidationError>,
     },
 }
 

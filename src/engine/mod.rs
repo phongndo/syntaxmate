@@ -27,7 +27,13 @@ use tokenizer::{GrammarSet, LazyGrammar};
 /// include-availability checks for members the tokenizer has not entered.
 pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::GrammarId)> {
     let bundle = crate::grammars::embedded_bundle();
-    let missing = || Error::Grammar(format!("bundled TextMate grammar `{language}` is missing"));
+    let missing = || {
+        Error::Bundle(crate::BundleError::new(
+            crate::BundleErrorKind::MissingGrammar,
+            Some(language.to_owned()),
+            format!("bundled TextMate grammar `{language}` is missing"),
+        ))
+    };
     let root_index = bundle
         .grammar_blob_index_for_language(language)
         .ok_or_else(missing)?;
@@ -58,9 +64,13 @@ pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::Gra
     let root = root.ok_or_else(missing)?;
     if grammars.grammar(root).is_none() {
         let error = root_blob.compiled_grammar(root).err();
-        return Err(Error::Grammar(format!(
-            "failed to decode bundled TextMate grammar `{}`: {error:?}",
-            root_blob.language
+        return Err(Error::Bundle(crate::BundleError::new(
+            crate::BundleErrorKind::Decode,
+            Some(root_blob.language.to_string()),
+            format!(
+                "failed to decode bundled TextMate grammar `{}`: {error:?}",
+                root_blob.language
+            ),
         )));
     }
     Ok((grammars, root))
@@ -76,7 +86,13 @@ fn compiled_grammar_closure(
     let root = grammars
         .iter()
         .rposition(|grammar| grammar.scope_name == root_scope)
-        .ok_or_else(|| Error::Grammar(format!("missing root `{root_scope}`")))?;
+        .ok_or_else(|| {
+            Error::Bundle(crate::BundleError::new(
+                crate::BundleErrorKind::MissingGrammar,
+                Some(root_scope.to_owned()),
+                format!("missing root `{root_scope}`"),
+            ))
+        })?;
     let members = grammar_closure::dependency_closure(&grammars, root);
     let mut closure = Vec::with_capacity(members.len());
     for index in members.into_iter().rev() {
