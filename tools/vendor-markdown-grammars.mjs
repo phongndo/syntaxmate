@@ -10,7 +10,8 @@ const root = path.resolve(import.meta.dirname, '..')
 const shikiLangsVersion = JSON.parse(
   await fs.readFile(path.join(root, 'tools/golden-oracle/package.json'), 'utf8'),
 ).dependencies['@shikijs/langs']
-const source = path.resolve(root, '../tau/node_modules/.pnpm/@shikijs+langs@3.23.0/node_modules/@shikijs/langs/dist')
+// The oracle pins the Shiki grammars; install them with `npm ci --prefix tools/golden-oracle`.
+const source = path.join(root, 'tools/golden-oracle/node_modules/@shikijs/langs/dist')
 const output = path.join(root, 'assets/grammars/languages')
 
 const assets = [
