@@ -2,7 +2,7 @@ use syntaxmate::{Highlighter, HtmlOptions, Theme, html_stylesheet, render_html_t
 
 fn main() -> syntaxmate::Result<()> {
     let source = "fn main() { println!(\"<hello>\"); }";
-    let mut highlighter = Highlighter::bundled()?;
+    let highlighter = Highlighter::bundled()?;
     let theme = Theme::bundled("github-dark")?;
     let document = highlighter.highlight_with_theme("rust", source, &theme)?;
     let options = HtmlOptions {

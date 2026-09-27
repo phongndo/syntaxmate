@@ -1322,12 +1322,21 @@ impl RepositoryNameInterner {
 }
 
 /// A bundled closure member decoded on first access.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct LazyGrammar {
-    pub(crate) blob: &'static GrammarBlob,
+    pub(crate) bundle: Arc<crate::grammars::bundle::Bundle>,
+    pub(crate) index: usize,
     pub(crate) traits: ClosureMemberTraits,
-    pub(crate) top_level_availability: Option<&'static [AvailabilityStep]>,
-    pub(crate) repository_walk_skeleton: Option<&'static [u8]>,
+}
+
+impl LazyGrammar {
+    fn blob(&self) -> &GrammarBlob {
+        &self.bundle.grammar_blobs[self.index]
+    }
+
+    fn graph(&self) -> &crate::grammars::bundle::GrammarGraph {
+        &self.bundle.grammar_graphs[self.index]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1354,7 +1363,8 @@ impl GrammarSlot {
         self.grammar
             .get_or_init(|| {
                 self.lazy
-                    .and_then(|lazy| lazy.blob.compiled_grammar(id).ok())
+                    .as_ref()
+                    .and_then(|lazy| lazy.blob().compiled_grammar(id).ok())
                     .map(Arc::new)
             })
             .as_ref()
@@ -1388,7 +1398,7 @@ impl GrammarSet {
         let id = GrammarId(
             u16::try_from(self.grammars.len()).expect("grammar closure fits in GrammarId"),
         );
-        Arc::make_mut(&mut self.scope_to_id).insert(lazy.blob.scope_name.clone(), id);
+        Arc::make_mut(&mut self.scope_to_id).insert(lazy.blob().scope_name.clone(), id);
         self.insert_slot(
             id,
             GrammarSlot {
@@ -1439,7 +1449,10 @@ impl GrammarSet {
     fn repository_walk_grammar(&self, id: GrammarId) -> Option<&CompiledGrammar> {
         let slot = self.grammars.get(id.0 as usize)?;
         if slot.grammar.get().is_none()
-            && let Some(bytes) = slot.lazy.and_then(|lazy| lazy.repository_walk_skeleton)
+            && let Some(bytes) = slot
+                .lazy
+                .as_ref()
+                .and_then(|lazy| lazy.graph().repository_walk_skeleton.as_deref())
             && let Some(skeleton) = slot
                 .walk_skeleton
                 .get_or_init(|| decode_compiled_grammar(id, bytes).ok().map(Arc::new))
@@ -1476,7 +1489,7 @@ impl GrammarSet {
     fn may_inject(&self, id: GrammarId) -> bool {
         self.grammars
             .get(id.0 as usize)
-            .and_then(|slot| slot.lazy)
+            .and_then(|slot| slot.lazy.as_ref())
             .is_none_or(|lazy| lazy.traits.injects)
     }
 
@@ -1484,15 +1497,16 @@ impl GrammarSet {
     ///
     /// Evaluating any other availability node of a grammar decodes it, so the
     /// only cached nodes of such a member are `true` entries from this proof.
-    fn undecoded_top_level_availability(
-        &self,
-        id: GrammarId,
-    ) -> Option<&'static [AvailabilityStep]> {
+    fn undecoded_top_level_availability(&self, id: GrammarId) -> Option<&[AvailabilityStep]> {
         let slot = self.grammars.get(id.0 as usize)?;
         if slot.grammar.get().is_some() {
             return None;
         }
-        slot.lazy?.top_level_availability
+        slot.lazy
+            .as_ref()?
+            .graph()
+            .top_level_availability
+            .as_deref()
     }
 
     /// Whether the unbounded repository-context walk may skip an external
@@ -1514,7 +1528,7 @@ impl GrammarSet {
         let Some(slot) = self.grammars.get(id.0 as usize) else {
             return false;
         };
-        let traits = match slot.lazy {
+        let traits = match slot.lazy.as_ref() {
             Some(lazy) => Some(lazy.traits),
             None => loaded.traits(self, id),
         };
@@ -1865,11 +1879,47 @@ impl PreparedLanguage {
         })
     }
 
+    /// The bundle already records a closed grammar set. Keep members lazy and
+    /// size pattern slots from their validated metadata instead of walking and
+    /// decoding every rule merely to rediscover that closure.
+    pub(crate) fn from_catalog(grammars: GrammarSet, root: GrammarId) -> Self {
+        let grammar_count = grammars.len();
+        let static_patterns = Arc::new(PreparedPatternCache::new(
+            &grammars,
+            &vec![true; grammar_count],
+        ));
+        let static_blueprints = Arc::new(PreparedBlueprintCache::default());
+        let prototype = TextMateTokenizer::new_inner(
+            grammars,
+            root,
+            Some(Arc::clone(&static_patterns)),
+            Some(Arc::clone(&static_blueprints)),
+            None,
+            None,
+        );
+        Self {
+            prototype: Mutex::new(prototype),
+            static_patterns,
+            static_blueprints,
+            grammar_count,
+        }
+    }
+
     pub fn tokenizer(&self) -> TextMateTokenizer {
         self.prototype
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    /// First pooled worker uses direct matching caches: charging and publishing
+    /// shared regex payloads would otherwise penalize one-shot highlighting.
+    /// It still shares lazy grammar decoding with subsequent prepared workers.
+    pub(crate) fn first_tokenizer(&self) -> TextMateTokenizer {
+        let mut tokenizer = self.tokenizer();
+        tokenizer.prepared_pattern_cache = None;
+        tokenizer.prepared_blueprint_cache = None;
+        tokenizer
     }
 
     pub fn grammar_count(&self) -> usize {
@@ -2268,12 +2318,14 @@ impl PreparedPatternCache {
                 if !grammar_closure.get(index).copied().unwrap_or(false) {
                     return None;
                 }
-                let grammar = grammars.grammar(GrammarId(index as u16))?;
+                let slot = &grammars.grammars[index];
+                let pattern_count = if let Some(lazy) = &slot.lazy {
+                    lazy.blob().pattern_count as usize
+                } else {
+                    grammars.grammar(GrammarId(index as u16))?.patterns.len()
+                };
                 let remaining_bytes = MAX_PREPARED_PATTERN_SLOT_BYTES.saturating_sub(slot_bytes);
-                let slot_capacity = grammar
-                    .patterns
-                    .len()
-                    .min(remaining_bytes / pattern_slot_bytes);
+                let slot_capacity = pattern_count.min(remaining_bytes / pattern_slot_bytes);
                 let grammar_slot_bytes = slot_capacity.saturating_mul(pattern_slot_bytes);
                 slot_bytes = slot_bytes.saturating_add(grammar_slot_bytes);
                 capacity = capacity.saturating_add(slot_capacity);
@@ -11340,12 +11392,9 @@ mod lazy_bundle_tests {
             let mut grammars = GrammarSet::new();
             let root = grammars.load_and_add(host).unwrap();
             let external = grammars.add_lazy(LazyGrammar {
-                blob: &bundle.grammar_blobs[blob],
+                bundle: Arc::clone(crate::grammars::embedded_bundle_shared()),
+                index: blob,
                 traits: ClosureMemberTraits::default(),
-                top_level_availability: bundle.grammar_graphs[blob]
-                    .top_level_availability
-                    .as_deref(),
-                repository_walk_skeleton: None,
             });
             (TextMateTokenizer::new(grammars, root), root, external)
         };

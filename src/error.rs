@@ -341,6 +341,10 @@ pub enum BundleErrorKind {
     MissingGrammar,
     /// Compiled grammar data could not be decoded.
     Decode,
+    /// Caller-supplied bundle bytes are malformed or failed validation.
+    Invalid,
+    /// Caller-supplied bundle bytes exceed the accepted size.
+    TooLarge,
 }
 
 /// Bundled asset failure without exposing the private bundle format.

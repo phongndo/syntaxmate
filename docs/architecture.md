@@ -19,6 +19,11 @@ and UI-framework types belong in downstream adapters.
 
 ## Ownership
 
+`Catalog` owns a shared bundle, including custom or subset assets. `Highlighter`
+clones share its bounded preparation cache and idle tokenizer pool; matching
+runs outside the cache lock. Cache and per-tokenizer limits are configured by
+`HighlighterOptions`; active calls and sessions retain their own state.
+
 Mutable continuation state and source-dependent caches belong to a tokenizer
 or highlighting session. Independent instances must not affect one another's
 output. `TokenizerState` and `CheckpointTable` are tied to their originating
@@ -30,6 +35,11 @@ editor re-highlighting convergence example.
 tokenizers. It retains bounded grammar and static matcher preparation, while
 derived tokenizers keep their own mutable state. Read its rustdoc and statistics
 API for retention semantics; numeric cache ceilings live with the implementation.
+Highlighter preparation retains the bundle and defers dependency decoding and
+repository walks until needed, like a direct tokenizer. Its first pooled worker
+uses direct matching caches to avoid shared-cache publication costs on one-shot
+calls; later workers and sessions use shared matcher preparation. All workers
+share lazy grammar decoding.
 This avoids hidden process-global retention and lets the caller choose the
 lifetime of reusable work.
 
@@ -55,8 +65,8 @@ items tied to a downstream use case, with rustdoc and tests at the public
 boundary. Tokenization must remain independent of themes; custom assets must
 remain usable without bundled assets.
 
-The release library accepts custom assets as strings and performs no filesystem,
-network, or process-environment access. Committed bundled assets keep normal
+The release library accepts custom grammars/themes as strings and bundles as
+bytes and performs no filesystem, network, or process-environment access. Committed bundled assets keep normal
 builds independent of Node and upstream availability. Development tools own
 asset import, compilation, and oracle regeneration.
 

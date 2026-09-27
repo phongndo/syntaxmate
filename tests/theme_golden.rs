@@ -39,7 +39,7 @@ struct GoldenStyle {
 fn latex_regression_scope_stacks_match_vscode_textmate() {
     let source = fs::read_to_string(repo_path(FIXTURE)).unwrap();
     let records = read_golden(SCOPE_GOLDEN);
-    let mut highlighter = Highlighter::bundled().unwrap();
+    let highlighter = Highlighter::bundled().unwrap();
     let highlighted = highlighter.tokenize("latex", &source).unwrap();
     assert_eq!(highlighted.lines().len(), records.len());
 

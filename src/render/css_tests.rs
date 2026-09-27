@@ -227,7 +227,7 @@ fn bundled_css_fidelity_and_size() {
         class_prefix: Some("code".to_owned()),
         ..HtmlOptions::default()
     };
-    let mut highlighter = Highlighter::bundled().unwrap();
+    let highlighter = Highlighter::bundled().unwrap();
     let mut previous_html = std::collections::HashMap::new();
     for theme_name in Catalog::bundled().themes() {
         let theme = Theme::bundled(theme_name).unwrap();
