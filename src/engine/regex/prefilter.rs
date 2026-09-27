@@ -1051,6 +1051,15 @@ const FACTOR_SELECTIVE_SET_BYTES: u32 = 8;
 const FACTOR_MAX_ITEMS: usize = 64;
 
 impl FactorItem {
+    /// End of the run of member bytes from `start`, at most `limit` long.
+    fn run_end(&self, haystack: &[u8], start: usize, limit: usize) -> usize {
+        let mut end = start;
+        while end - start < limit && haystack.get(end).is_some_and(|byte| self.contains(*byte)) {
+            end += 1;
+        }
+        end
+    }
+
     fn fixed(byte: u8) -> Self {
         let mut set = [0u64; 4];
         set[byte as usize >> 6] |= 1u64 << (byte & 63);
@@ -1112,13 +1121,15 @@ impl RequiredFactor {
     /// candidate start once verification exceeds a linear budget.
     fn find(&self, haystack: &[u8]) -> Option<usize> {
         let first = self.items.first()?;
-        // Each failed candidate would otherwise rescan the bytes after it
-        // (`<[^>]*>` over a run of `<`). Items remember their last maximal
-        // run, so later candidates inside it reuse its end; the budget only
-        // guards unusual orders, and an earlier position is always a sound
-        // prefilter answer.
-        let mut runs = None;
-        let mut budget = haystack.len().saturating_mul(4).saturating_add(64);
+        // A failed candidate can rescan the bytes after it (`<[^>]*>` over a
+        // run of `<`). Once rescanning exceeds the line length, unbounded
+        // items remember their last maximal run so later candidates inside
+        // it reuse its end. The budget only guards unusual orders; an
+        // earlier position is always a sound prefilter answer.
+        let mut runs: Option<Box<[ItemRun]>> = None;
+        let mut scanned_total = 0usize;
+        let per_byte = 4 + 2 * self.items.len();
+        let budget = haystack.len().saturating_mul(per_byte).saturating_add(64);
         let mut from = 0usize;
         while from < haystack.len() {
             let rest = &haystack[from..];
@@ -1127,44 +1138,70 @@ impl RequiredFactor {
                 None => find_byte_set_bitmap(rest, &first.set)?,
             };
             let start = from + relative;
-            let runs = runs.get_or_insert([ItemRun::EMPTY; FACTOR_MAX_ITEMS]);
-            let (matched, scanned) = self.matches_at(haystack, start, runs);
-            if matched || scanned >= budget {
+            let (matched, scanned) = match runs.as_deref_mut() {
+                None => self.matches_at(haystack, start),
+                Some(runs) => self.matches_at_with_runs(haystack, start, runs),
+            };
+            if matched {
                 return Some(start);
             }
-            budget -= scanned;
+            scanned_total = scanned_total.saturating_add(scanned);
+            if scanned_total >= budget {
+                return Some(start);
+            }
+            if runs.is_none() && scanned_total > haystack.len() {
+                runs = Some(vec![ItemRun::EMPTY; self.items.len()].into_boxed_slice());
+            }
             from = start + 1;
         }
         None
     }
 
     /// Whether a run occurrence starts at `start`, and how many bytes the
-    /// check scanned.
-    fn matches_at(
+    /// check examined.
+    fn matches_at(&self, haystack: &[u8], start: usize) -> (bool, usize) {
+        let mut position = start;
+        for item in &self.items {
+            let mut count = 0u32;
+            while count < item.max
+                && haystack
+                    .get(position)
+                    .is_some_and(|byte| item.contains(*byte))
+            {
+                count += 1;
+                position += 1;
+            }
+            if count < item.min {
+                return (false, position - start + 1);
+            }
+        }
+        (true, position - start)
+    }
+
+    /// `matches_at`, reusing each unbounded item's last maximal run.
+    fn matches_at_with_runs(
         &self,
         haystack: &[u8],
         start: usize,
-        runs: &mut [ItemRun; FACTOR_MAX_ITEMS],
+        runs: &mut [ItemRun],
     ) -> (bool, usize) {
         let mut position = start;
         let mut scanned = 0usize;
-        for (item, run) in self.items.iter().zip(runs.iter_mut()) {
-            if !(run.start <= position && position <= run.end) {
-                let mut end = position;
-                while haystack.get(end).is_some_and(|byte| item.contains(*byte)) {
-                    end += 1;
-                }
-                scanned += end - position + 1;
-                *run = ItemRun {
-                    start: position,
-                    end,
-                };
-            }
-            let available = run.end - position;
+        for (item, run) in self.items.iter().zip(runs) {
             let count = if item.max == FACTOR_UNBOUNDED {
-                available
+                if !(run.start <= position && position <= run.end) {
+                    let end = item.run_end(haystack, position, usize::MAX);
+                    scanned += end - position + 1;
+                    *run = ItemRun {
+                        start: position,
+                        end,
+                    };
+                }
+                run.end - position
             } else {
-                available.min(item.max as usize)
+                let end = item.run_end(haystack, position, item.max as usize);
+                scanned += end - position + 1;
+                end - position
             };
             if count < item.min as usize {
                 return (false, scanned);
