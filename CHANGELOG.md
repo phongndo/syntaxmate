@@ -27,12 +27,13 @@
   only at those anchors, and each search reuses one matcher scratch.
 - Match vscode-textmate for captures outside a match: skip empty captures, stop
   at the first capture that starts after the match, and resume scanning at the
-  match end instead of after lookahead captures. This now includes captures
-  after an empty match, such as `(?=(zz))`.
+  match end instead of after lookahead captures. Captures past the match end
+  now nest like captures inside it, including after an empty match such as
+  `(?=((a)b))`.
 - Fold case for bracketed classes as Oniguruma does: under `(?i)` a character
   matches when one of its case variants is in the class, with intersections,
-  nested classes, and properties evaluated first. `(?i)[a-{]` no longer matches
-  `\`, `(?i)[A-Z&&a-z]` no longer matches `a`, and `(?i)[\p{Lu}]` matches
+  nested classes, and properties evaluated first. `(?i)[^a-{]` now matches
+  `` ` ``, `(?i)[A-Z&&a-z]` no longer matches `a`, and `(?i)[\p{Lu}]` matches
   `a`, while `(?i)\p{Lu}` outside brackets still does not.
 - Fix several Oniguruma incompatibilities in the fallback matcher:
   - `\k<name>` and `(?(<name>)…)` consider every group sharing the name;
@@ -42,7 +43,6 @@
     returned call;
   - Unicode case-insensitive keyword sets containing characters such as `θ`,
     `ϑ`, and `ϴ` no longer miss matches.
-- Keep the fallback byte-run prefilter linear on long lines it rejects.
 
 ## 0.1.3 - 2026-09-19
 
