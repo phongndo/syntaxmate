@@ -195,7 +195,7 @@ fn prepared_language_is_an_explicit_shared_immutable_boundary() {
 #[test]
 fn every_bundled_language_fits_the_preparation_bounds() {
     for language in Catalog::bundled().languages() {
-        let prepared = PreparedLanguage::for_bundled_language(&language)
+        let prepared = PreparedLanguage::for_bundled_language(language)
             .unwrap_or_else(|error| panic!("failed to prepare {language}: {error}"));
         let stats = prepared.stats();
         assert!(stats.compiled_pattern_count() <= stats.static_pattern_capacity());
@@ -208,7 +208,7 @@ fn every_bundled_language_fits_the_preparation_bounds() {
 #[test]
 fn batteries_included_api_detects_tokenizes_and_styles() {
     let catalog = Catalog::bundled();
-    assert_eq!(catalog.detect_path("src/main.rs").as_deref(), Some("rust"));
+    assert_eq!(catalog.detect_path("src/main.rs"), Some("rust"));
     assert!(catalog.languages().len() >= 264);
     assert_eq!(
         catalog.themes(),
@@ -220,7 +220,7 @@ fn batteries_included_api_detects_tokenizes_and_styles() {
         ]
     );
 
-    let mut highlighter = Highlighter::bundled().unwrap();
+    let highlighter = Highlighter::bundled().unwrap();
     let document = highlighter
         .highlight("rust", "fn main() {}", "github-dark")
         .unwrap();
@@ -275,7 +275,7 @@ fn custom_grammar_and_theme_work_without_product_types() {
 #[test]
 fn incremental_output_matches_complete_document_scopes() {
     let source = "fn main() {\n    let value = \"text\";\n}";
-    let mut highlighter = Highlighter::bundled().unwrap();
+    let highlighter = Highlighter::bundled().unwrap();
     let complete = highlighter.tokenize("rust", source).unwrap();
     let mut session = highlighter.session("rust", "github-dark").unwrap();
 
@@ -473,7 +473,7 @@ fn unified_tokens_own_scopes_and_match_incremental_output() {
     }
 
     let source = "let café = true;";
-    let mut highlighter = Highlighter::bundled().unwrap();
+    let highlighter = Highlighter::bundled().unwrap();
     let document = highlighter
         .tokenize("rust", &format!("{source}\n"))
         .unwrap();
@@ -641,7 +641,7 @@ fn theme_facade_exposes_defaults_colors_and_validates_rules() {
 #[cfg(feature = "diagnostics")]
 #[test]
 fn theme_diagnostics_accept_the_same_scope_view() {
-    let mut highlighter = Highlighter::bundled().unwrap();
+    let highlighter = Highlighter::bundled().unwrap();
     let document = highlighter.tokenize("rust", "let x = true;\n").unwrap();
     let theme = Theme::bundled("github-dark").unwrap();
     for token in document.lines()[0].tokens() {

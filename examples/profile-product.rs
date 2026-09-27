@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let source = fs::read_to_string(&args.file)?;
 
     let setup_started = Instant::now();
-    let mut highlighter = if args.phase == "steady" {
+    let highlighter = if args.phase == "steady" {
         Highlighter::with_options(TokenizerOptions {
             line_cache_entries: 0,
             ..TokenizerOptions::default()
@@ -20,16 +20,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (iterations, elapsed_nanos, output) = match args.phase.as_str() {
         "cold" => {
             let started = Instant::now();
-            let output = render(&mut highlighter, &args, &source)?;
+            let output = render(&highlighter, &args, &source)?;
             (1, nanos(started.elapsed()), output)
         }
         "steady" | "replay" => {
-            let warmup = render(&mut highlighter, &args, &source)?;
+            let warmup = render(&highlighter, &args, &source)?;
             if !warmup.status().is_complete() {
                 return Err("warmup highlighting degraded".into());
             }
             calibrate(args.minimum_time_ms, || {
-                render(&mut highlighter, &args, &source)
+                render(&highlighter, &args, &source)
             })?
         }
         phase => return Err(format!("unsupported phase {phase:?}").into()),
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn render(
-    highlighter: &mut Highlighter,
+    highlighter: &Highlighter,
     args: &Args,
     source: &str,
 ) -> syntaxmate::Result<syntaxmate::RenderedOutput> {

@@ -36,6 +36,50 @@ regenerating the bundle. Custom grammars use the JSON
 compiler. Release builds consume committed assets without running Node or
 fetching upstream sources.
 
+## Custom and subset bundles
+
+Build subsets from a checkout using the [bundle builder](../tools/build-bundle.rs):
+
+```sh
+cargo run --locked --bin syntaxmate-bundle --features bundle-tools -- \
+  --languages rust,toml,json --out grammars-subset.bundle
+```
+
+`--languages` accepts comma-separated public IDs or aliases. The output exposes
+only those languages, and includes their transitive dependencies, private
+grammars, and corresponding license records. Ordering and duplicate arguments
+do not change the output. With `--languages`, the default output is
+`grammars-subset.bundle`; without it, the builder updates the complete embedded
+bundle. `--check` compares the selected output with a deterministic rebuild.
+Build from the same Syntaxmate version that consumes the bundle.
+
+Disable `bundled-grammars` to omit the embedded bundle entirely:
+
+```toml
+syntaxmate = { version = "0.2", default-features = false }
+```
+
+```rust,ignore
+use syntaxmate::{Catalog, Highlighter};
+
+let catalog = Catalog::from_static(include_bytes!("grammars-subset.bundle"))?;
+let highlighter = Highlighter::new(&catalog);
+let tokens = highlighter.tokenize("rust", "fn main() {}")?;
+```
+
+`Catalog::from_static` borrows uncompressed tables from static storage;
+`Catalog::from_bytes(&bytes)` copies retained data and lets the caller release
+its buffer. Both validate grammar IR before returning. A separate `Vec`/`Arc`
+constructor would not avoid the decoder's per-section ownership, so the borrowed
+slice constructor covers runtime-loaded bundles without another ownership API.
+Use `Catalog::licenses()` to retrieve the included notices for distribution.
+Custom JSON grammars through `GrammarRegistry` remain available too.
+
+Catalog queries borrow metadata; keep the catalog alive while using their
+results. `language(id_or_alias)` exposes IDs, aliases, suffixes, basenames, and
+root scopes. See [`Catalog::detect`](../src/catalog.rs) for combined filename
+and bounded first-line detection, including precedence and supported modelines.
+
 ## Updating assets
 
 1. Review the upstream change and license, then update the appropriate source

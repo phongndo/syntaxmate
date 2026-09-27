@@ -474,7 +474,6 @@ impl TextMateTheme {
         self.resolve_style(table, stack).style
     }
 
-    #[cfg(any(feature = "bundled-grammars", test))]
     pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> Style {
         self.resolve_scope_stack(scopes).style
     }

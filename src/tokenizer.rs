@@ -30,8 +30,8 @@ impl SharedScopeSink for ScopedTokenVecSink<'_> {
         }
     }
 
-    fn push(&mut self, range: Range<usize>, _stack: EngineScopeStackId, scopes: Arc<ScopeStorage>) {
-        if let Some(token) = scoped_token(self.line, range, scopes) {
+    fn push(&mut self, range: Range<usize>, stack: EngineScopeStackId, scopes: Arc<ScopeStorage>) {
+        if let Some(token) = scoped_token(self.line, range, stack, scopes) {
             self.tokens.push(token);
         }
     }
@@ -45,21 +45,26 @@ struct ScopedTokenCallbackSink<'a, F> {
 impl<F: FnMut(Token)> SharedScopeSink for ScopedTokenCallbackSink<'_, F> {
     fn reserve(&mut self, _token_count: usize) {}
 
-    fn push(&mut self, range: Range<usize>, _stack: EngineScopeStackId, scopes: Arc<ScopeStorage>) {
-        if let Some(token) = scoped_token(self.line, range, scopes) {
+    fn push(&mut self, range: Range<usize>, stack: EngineScopeStackId, scopes: Arc<ScopeStorage>) {
+        if let Some(token) = scoped_token(self.line, range, stack, scopes) {
             (self.callback)(token);
         }
     }
 }
 
-fn scoped_token(line: &str, range: Range<usize>, scopes: Arc<ScopeStorage>) -> Option<Token> {
+fn scoped_token(
+    line: &str,
+    range: Range<usize>,
+    stack: EngineScopeStackId,
+    scopes: Arc<ScopeStorage>,
+) -> Option<Token> {
     let start = range.start.min(line.len());
     let end = range.end.min(line.len());
     (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then_some(Token {
         range: start..end,
         scopes: TokenScopes {
             owner: Some(scopes),
-            stack: ScopeStackId::default(),
+            stack: ScopeStackId(stack.0),
         },
     })
 }
@@ -204,14 +209,38 @@ impl PreparedLanguage {
     /// Bundled grammars are checked to remain inside the preparation bounds.
     #[cfg(feature = "bundled-grammars")]
     pub fn for_bundled_language(language: &str) -> Result<Self> {
-        let canonical = crate::grammars::canonical_language(language)
+        Self::from_catalog(&crate::Catalog::bundled(), language)
+    }
+
+    /// Prepares a language and its recorded dependencies from a catalog.
+    ///
+    /// Retains the shared bundle and prepares the reachable root graph. Returns
+    /// an error for an unknown language or exceeded preparation bounds.
+    pub fn from_catalog(catalog: &crate::Catalog, language: &str) -> Result<Self> {
+        let canonical = catalog
+            .canonical_language(language)
             .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
-        let (grammars, root) = crate::engine::load_grammar_set(&canonical)?;
+        let (grammars, root) =
+            crate::engine::load_catalog_grammar_set(catalog.bundle(), canonical)?;
         let inner =
             EnginePreparedLanguage::try_new(grammars, root).map_err(preparation_limit_error)?;
         Ok(Self {
             inner: Arc::new(inner),
         })
+    }
+
+    // Highlighter caches the recorded closure and defers repository/candidate
+    // walks just like direct tokenizers, preserving one-shot cold latency.
+    pub(crate) fn for_highlighter(catalog: &crate::Catalog, canonical: &str) -> Result<Self> {
+        let (grammars, root) =
+            crate::engine::load_catalog_grammar_set(catalog.bundle(), canonical)?;
+        Ok(Self {
+            inner: Arc::new(EnginePreparedLanguage::from_catalog(grammars, root)),
+        })
+    }
+
+    pub(crate) fn first_tokenizer(&self, options: TokenizerOptions) -> Tokenizer {
+        Tokenizer::from_engine(self.inner.first_tokenizer(), options)
     }
 
     /// Creates a tokenizer with independent mutable state and caches.
@@ -417,7 +446,6 @@ impl Tokenizer {
         Ok(self.tokenize_line_with_validated(line, state, &mut sink))
     }
 
-    #[cfg(feature = "bundled-grammars")]
     pub(crate) fn tokenize_line_shared_with(
         &mut self,
         line: &str,
@@ -428,7 +456,6 @@ impl Tokenizer {
         Ok(self.tokenize_line_shared_with_validated(line, state, sink))
     }
 
-    #[cfg(feature = "bundled-grammars")]
     pub(crate) fn tokenize_line_shared_with_validated(
         &mut self,
         line: &str,
@@ -492,11 +519,7 @@ impl Tokenizer {
         }
     }
 
-    #[cfg(all(
-        feature = "bundled-grammars",
-        feature = "bundled-themes",
-        any(feature = "html", feature = "ansi")
-    ))]
+    #[cfg(all(feature = "bundled-themes", any(feature = "html", feature = "ansi")))]
     pub(crate) fn tokenize_compact(
         &mut self,
         source: &str,
@@ -788,13 +811,13 @@ impl Token {
         self.scopes.view()
     }
 
-    /// Returns the interned key for document output, or `None` for incremental output.
-    /// Keys may only be compared within the same document's scope table.
+    /// Returns the interned scope-stack key (including incremental output).
+    ///
+    /// Document keys are comparable only within the same document. Incremental
+    /// keys are comparable across calls to the same tokenizer or session,
+    /// including after reset, but not with document keys or other tokenizers.
     pub fn scope_stack(&self) -> Option<ScopeStackId> {
-        match self.scopes.owner.as_deref() {
-            Some(ScopeStorage::Shared(_)) => None,
-            _ => Some(self.scopes.stack),
-        }
+        Some(self.scopes.stack)
     }
 }
 

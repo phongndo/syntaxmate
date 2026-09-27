@@ -7,7 +7,7 @@
 //! ```
 //! use syntaxmate::Highlighter;
 //!
-//! let mut highlighter = Highlighter::bundled()?;
+//! let highlighter = Highlighter::bundled()?;
 //! let document = highlighter.highlight("rust", "fn main() {}", "github-dark")?;
 //! assert!(document.status().is_complete());
 //! # Ok::<(), syntaxmate::Error>(())
@@ -51,10 +51,9 @@ mod tokenizer;
 #[allow(dead_code)]
 mod types;
 
-pub use catalog::{AssetLicense, Catalog, CatalogSummary};
+pub use catalog::{AssetLicense, Catalog, CatalogSummary, LanguageInfo};
 pub use error::{Error, Result};
-#[cfg(feature = "bundled-grammars")]
-pub use highlighter::{HighlightSession, Highlighter};
+pub use highlighter::{HighlightSession, Highlighter, HighlighterOptions};
 pub use highlighter::{
     HighlightedDocument, HighlightedLine, HighlightedToken, Theme, style_document,
 };

@@ -24,6 +24,9 @@ pub enum SyntaxClass {
 }
 
 /// A compact reference to one complete, ordered TextMate scope stack.
+///
+/// Compare only within one document, or across incremental calls on the same
+/// tokenizer/session. Document and incremental IDs use separate namespaces.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub struct ScopeStackId(pub(crate) u32);
 

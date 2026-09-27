@@ -13,7 +13,7 @@ document as well, render it separately:
 use syntaxmate::{Highlighter, HtmlOptions, render_html};
 
 let source = "const message = '<safe>';";
-let mut highlighter = Highlighter::bundled()?;
+let highlighter = Highlighter::bundled()?;
 let document = highlighter.highlight("typescript", source, "github-dark")?;
 let html = render_html(source, &document, &HtmlOptions {
     include_scopes: true,
@@ -48,7 +48,7 @@ use syntaxmate::{Highlighter, HtmlOptions, Theme, html_stylesheet, render_html};
 
 let source = "fn main() {}";
 let theme = Theme::bundled("github-dark")?;
-let mut highlighter = Highlighter::bundled()?;
+let highlighter = Highlighter::bundled()?;
 let document = highlighter.highlight_with_theme("rust", source, &theme)?;
 let options = HtmlOptions {
     class_prefix: Some("code".to_owned()),
@@ -73,7 +73,7 @@ for the naming scheme. The existing `class` option still adds a class to `<pre>`
 ```rust
 use syntaxmate::Highlighter;
 
-let mut highlighter = Highlighter::bundled()?;
+let highlighter = Highlighter::bundled()?;
 let ansi = highlighter.highlight_ansi("rust", "let answer = 42;", "github-dark")?;
 assert!(ansi.status().is_complete());
 print!("{}", ansi.as_str());
@@ -112,7 +112,7 @@ impl fmt::Write for ByteCount {
 }
 
 let source = "fn main() {}";
-let mut highlighter = Highlighter::bundled()?;
+let highlighter = Highlighter::bundled()?;
 let document = highlighter.highlight("rust", source, "github-dark")?;
 let mut sink = ByteCount(0);
 let status = render_html_to(source, &document, &HtmlOptions::default(), &mut sink)?;

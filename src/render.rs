@@ -7,11 +7,7 @@ use std::{
 };
 
 use crate::HighlightStatus;
-#[cfg(all(
-    feature = "bundled-grammars",
-    feature = "bundled-themes",
-    any(feature = "ansi", feature = "html")
-))]
+#[cfg(all(feature = "bundled-themes", any(feature = "ansi", feature = "html")))]
 use crate::HighlightedText;
 #[cfg(feature = "html")]
 use crate::Theme;
@@ -138,11 +134,7 @@ pub fn render_html_to(
 }
 
 /// Renders compact scope-stack tokens without an owned styled-document intermediate.
-#[cfg(all(
-    feature = "html",
-    feature = "bundled-grammars",
-    feature = "bundled-themes"
-))]
+#[cfg(all(feature = "html", feature = "bundled-themes"))]
 pub(crate) fn render_html_compact(
     source: &str,
     tokens: &HighlightedText,
@@ -558,11 +550,7 @@ pub fn render_ansi_to(
 }
 
 /// ANSI counterpart to the compact HTML renderer.
-#[cfg(all(
-    feature = "ansi",
-    feature = "bundled-grammars",
-    feature = "bundled-themes"
-))]
+#[cfg(all(feature = "ansi", feature = "bundled-themes"))]
 pub(crate) fn render_ansi_compact(
     source: &str,
     tokens: &HighlightedText,
@@ -721,11 +709,7 @@ fn write_ansi_source(text: &str, options: &AnsiOptions, output: &mut dyn Write) 
     Ok(())
 }
 
-#[cfg(all(
-    feature = "bundled-grammars",
-    feature = "bundled-themes",
-    any(feature = "ansi", feature = "html")
-))]
+#[cfg(all(feature = "bundled-themes", any(feature = "ansi", feature = "html")))]
 fn compact_line_count_error() -> Error {
     Error::Render("source and compact token document have different logical line counts".to_owned())
 }
@@ -769,13 +753,7 @@ fn validate_document(source: &str, document: &HighlightedDocument) -> Result<()>
     Ok(())
 }
 
-#[cfg(all(
-    test,
-    feature = "ansi",
-    feature = "html",
-    feature = "bundled-grammars",
-    feature = "bundled-themes"
-))]
+#[cfg(all(test, feature = "ansi", feature = "html", feature = "bundled-themes"))]
 mod tests {
     use super::*;
     use crate::Highlighter;
@@ -783,7 +761,7 @@ mod tests {
     #[test]
     fn html_escapes_source_and_can_expose_exact_scopes() {
         let source = "fn main() { println!(\"<script>&\"); }\n";
-        let mut highlighter = Highlighter::bundled().unwrap();
+        let highlighter = Highlighter::bundled().unwrap();
         let document = highlighter
             .highlight("rust", source, "github-dark")
             .unwrap();
@@ -870,7 +848,7 @@ mod tests {
     #[test]
     fn ansi_sanitizes_source_escape_sequences() {
         let source = "let value = \"\x1b[31m\";";
-        let mut highlighter = Highlighter::bundled().unwrap();
+        let highlighter = Highlighter::bundled().unwrap();
         let document = highlighter
             .highlight("rust", source, "github-dark")
             .unwrap();
@@ -884,7 +862,7 @@ mod tests {
     fn direct_compact_rendering_is_byte_exact_with_owned_rendering() {
         let source = "fn main() {\n\tprintln!(\"λ<&>\");\n}\n";
 
-        let mut direct = Highlighter::bundled().unwrap();
+        let direct = Highlighter::bundled().unwrap();
         let direct_html = direct
             .highlight_html("rust", source, "github-dark")
             .unwrap();
@@ -892,7 +870,7 @@ mod tests {
             .highlight_ansi("rust", source, "github-dark")
             .unwrap();
 
-        let mut owned = Highlighter::bundled().unwrap();
+        let owned = Highlighter::bundled().unwrap();
         let document = owned.highlight("rust", source, "github-dark").unwrap();
         let owned_html = render_html(source, &document, &HtmlOptions::default()).unwrap();
         let owned_ansi = render_ansi(source, &document, &AnsiOptions::default()).unwrap();
@@ -929,7 +907,7 @@ mod tests {
 
     #[test]
     fn renderers_reject_mismatched_line_counts() {
-        let mut highlighter = Highlighter::bundled().unwrap();
+        let highlighter = Highlighter::bundled().unwrap();
         let document = highlighter
             .highlight("rust", "let x = 1;", "github-dark")
             .unwrap();
@@ -1013,7 +991,7 @@ mod tests {
     #[test]
     fn html_default_background_is_constant_size() {
         let source = "let x = 42;\n".repeat(100);
-        let mut highlighter = Highlighter::bundled().unwrap();
+        let highlighter = Highlighter::bundled().unwrap();
         let html = highlighter
             .highlight_html("rust", &source, "github-dark")
             .unwrap();
@@ -1247,7 +1225,7 @@ mod tests {
 
     #[test]
     fn compact_public_and_writer_paths_match_for_all_modes_and_line_shapes() {
-        let mut highlighter = Highlighter::bundled().unwrap();
+        let highlighter = Highlighter::bundled().unwrap();
         for source in [
             "",
             "\n",
@@ -1375,7 +1353,7 @@ mod tests {
             );
             assert_eq!(output, "untouched");
         }
-        let mut highlighter = Highlighter::with_options(crate::TokenizerOptions {
+        let highlighter = Highlighter::with_options(crate::TokenizerOptions {
             max_line_bytes: 1,
             ..crate::TokenizerOptions::default()
         })

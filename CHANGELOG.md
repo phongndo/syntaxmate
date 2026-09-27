@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Add validated custom/subset catalogs, borrowed language metadata, and bounded
+  filename/first-line detection. `syntaxmate-bundle --languages` emits selected
+  public languages, their dependency closures, and included licenses.
+- Make `Highlighter` cheaply cloneable and `Send + Sync`, with `&self` operations,
+  shared prepared languages, and configurable bounded idle-tokenizer retention.
+  Sessions reuse preparation; custom catalogs work without default features.
+- Expose incremental scope-stack IDs, comparable across calls and resets on the
+  same tokenizer/session (separate from document-local IDs).
+
 - Prepare the breaking 0.2 API: unify document and incremental token/line types,
   expose allocation-free `Scopes` views, and consolidate theme construction and
   resolution on `Theme`. Document output now reports completion per line.
@@ -13,7 +22,7 @@
   embedded base-grammar context distinct when reusing static frame identities.
 - Borrow uncompressed bundle string and scope tables to reduce cold-start latency
   and retained heap, trading a larger bundle for no metadata decompression.
-  Custom-grammar-only builds no longer depend on `miniz_oxide`.
+  The bundle decoder (including `miniz_oxide`) is available without bundled assets.
 - Reduce HTML output by inheriting default colors from the wrapper and merging
   equal adjacent runs. Keep full colors when rendering without a wrapper.
   ANSI output now omits the theme default background unless
@@ -95,7 +104,7 @@ operation (including any checkpoint replay).
 | `ScopeTable`, `HighlightScopeTable`, `ScopeAtomId` | Private storage; use `token.scopes()` |
 | `line.spans()` | `line.tokens()` |
 | `line.scope_names(token.scope_stack())`, `line.scope_table()` | `token.scopes()` |
-| `token.scope_stack() -> ScopeStackRef` | `Option<ScopeStackId>`; `Some` for document tokens, `None` for incremental tokens; keys are comparable only within the same document |
+| `token.scope_stack() -> ScopeStackRef` | `Option<ScopeStackId>`; always `Some`; compare within one document or across incremental calls on one tokenizer/session, never between those namespaces |
 | `TextMateTheme` | `Theme`; `from_json`, `from_rules`, and `bundled` return crate `Result` / `Error` |
 | `Theme::resolve(table, stack)` | `Theme::resolve(token.scopes())`; standalone names use `resolve_scope_names(&[&str])` |
 | `TextMateTheme::resolve_style`, `resolve_with_match` | `Theme::resolve_style(scopes)`, `resolve_with_match(scopes)`, requiring `diagnostics` |
@@ -105,6 +114,11 @@ operation (including any checkpoint replay).
 | `canonical_language(language)` | `Catalog::bundled().canonical_language(language)` |
 | `detect_language_from_path(path)` | `Catalog::bundled().detect_path(path)` |
 | `available_languages()` | `Catalog::bundled().languages()` |
+| `Catalog` unit value, `Copy`, `Default` | `Catalog::bundled()` (requires `bundled-grammars`), `from_static`, or `from_bytes`; use cheap `clone()` |
+| Catalog language queries returning `String` / `Vec<String>` | Borrowed `&str` / `Vec<&str>` tied to `&Catalog`; retain the handle or call `to_owned()` |
+| `Catalog::bundle_version() -> &'static str` | `&str` tied to the catalog |
+| `Highlighter` methods taking `&mut self` | `&self`; clone or share one highlighter across threads |
+| Unbounded highlighter language cache / default tokenizer limits | `HighlighterOptions` controls preparation and idle-tokenizer retention; see rustdoc for defaults |
 
 `Theme` also exposes `default_style()` and `color(name)`. Theme selector
 inspection is diagnostic output and remains outside the stable API contract.

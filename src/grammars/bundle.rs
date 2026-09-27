@@ -276,7 +276,6 @@ impl GrammarBlob {
     pub fn decoded_bytes(&self) -> Result<Cow<'_, [u8]>, BundleError> {
         match self.codec {
             CODEC_NONE => Ok(Cow::Borrowed(&self.bytes)),
-            #[cfg(any(feature = "bundled-grammars", feature = "bundle-tools"))]
             CODEC_DEFLATE_ZLIB => {
                 // The recorded length sizes the output exactly: no growth
                 // copies, and a longer stream fails as `HasMoreOutput`.
@@ -348,6 +347,53 @@ impl Bundle {
             grammar_graphs,
             licenses,
         })
+    }
+
+    /// Validate caller-provided assets before exposing them through a catalog.
+    pub(crate) fn validate(&self) -> Result<(), BundleError> {
+        let bad = BundleError::BadMetadata;
+        if self.grammar_blobs.len() > 4096 || self.languages.len() > 4096 {
+            return Err(bad("catalog exceeds 4096 grammars or languages"));
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for entry in &self.languages {
+            if entry.canonical.is_empty()
+                || normalize_token(&entry.canonical) != entry.canonical
+                || !ids.insert(&entry.canonical)
+            {
+                return Err(bad("invalid or duplicate public language ID"));
+            }
+            let blob = self
+                .grammar_blobs
+                .get(entry.grammar_blob as usize)
+                .ok_or(BundleError::BadGrammarBlobId(entry.grammar_blob))?;
+            if blob.scope_name != entry.scope_name {
+                return Err(bad("language root scope mismatch"));
+            }
+            if entry.license as usize >= self.licenses.len() {
+                return Err(BundleError::BadLicenseId(entry.license));
+            }
+        }
+        let mut total = 0usize;
+        for (index, blob) in self.grammar_blobs.iter().enumerate() {
+            total = total.saturating_add(blob.raw_len as usize);
+            if blob.raw_len > 16 * 1024 * 1024 || total > 256 * 1024 * 1024 {
+                return Err(bad("decoded grammar size exceeds validation limit"));
+            }
+            let grammar = blob.compiled_grammar(GrammarId(0))?;
+            if grammar.scope_name != blob.scope_name {
+                return Err(bad("grammar root scope mismatch"));
+            }
+            if let Some(skeleton) = &self.grammar_graphs[index].repository_walk_skeleton {
+                decode_compiled_grammar(GrammarId(0), skeleton).map_err(|error| {
+                    BundleError::GrammarIr {
+                        language: blob.language.clone(),
+                        message: error.to_string(),
+                    }
+                })?;
+            }
+        }
+        Ok(())
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -749,7 +795,7 @@ fn decode_language_table(
     strings: &StringTable,
 ) -> Result<Vec<LanguageEntry>, BundleError> {
     let mut cursor = Cursor::new(bytes, "language table");
-    let count = cursor.u32()?;
+    let count = cursor.count(32)?;
     let mut languages = Vec::with_capacity(count as usize);
     for _ in 0..count {
         languages.push(LanguageEntry {
@@ -795,7 +841,7 @@ fn decode_grammar_blobs(
     strings: &StringTable,
 ) -> Result<Vec<GrammarBlob>, BundleError> {
     let mut cursor = Cursor::new(bytes, "grammar blobs");
-    let count = cursor.u32()?;
+    let count = cursor.count(48)?;
     let mut records = Vec::with_capacity(count as usize);
     for _ in 0..count {
         records.push((
@@ -996,7 +1042,7 @@ fn decode_license_table(
     strings: &StringTable,
 ) -> Result<Vec<LicenseEntry>, BundleError> {
     let mut cursor = Cursor::new(bytes, "license table");
-    let count = cursor.u32()?;
+    let count = cursor.count(24)?;
     let mut licenses = Vec::with_capacity(count as usize);
     for _ in 0..count {
         licenses.push(LicenseEntry {
@@ -1023,7 +1069,7 @@ fn read_string_id_vec(
     cursor: &mut Cursor<'_>,
     strings: &StringTable,
 ) -> Result<Vec<String>, BundleError> {
-    let count = cursor.u32()?;
+    let count = cursor.count(4)?;
     let mut values = Vec::with_capacity(count as usize);
     for _ in 0..count {
         values.push(string_by_id(strings, cursor.u32()?)?);
@@ -1100,6 +1146,14 @@ impl<'a> Cursor<'a> {
             cursor: 0,
             name,
         }
+    }
+
+    fn count(&mut self, record_bytes: usize) -> Result<u32, BundleError> {
+        let count = self.u32()?;
+        if count as usize > (self.bytes.len() - self.cursor) / record_bytes {
+            return Err(BundleError::Truncated(self.name));
+        }
+        Ok(count)
     }
 
     fn u32(&mut self) -> Result<u32, BundleError> {

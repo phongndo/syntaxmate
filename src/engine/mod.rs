@@ -26,7 +26,13 @@ use tokenizer::{GrammarSet, LazyGrammar};
 /// cannot bind a non-empty context, and recorded availability proofs answer
 /// include-availability checks for members the tokenizer has not entered.
 pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::GrammarId)> {
-    let bundle = crate::grammars::embedded_bundle();
+    load_catalog_grammar_set(crate::grammars::embedded_bundle_shared(), language)
+}
+
+pub(crate) fn load_catalog_grammar_set(
+    bundle: &std::sync::Arc<crate::grammars::bundle::Bundle>,
+    language: &str,
+) -> Result<(GrammarSet, state::GrammarId)> {
     let missing = || Error::Grammar(format!("bundled TextMate grammar `{language}` is missing"));
     let root_index = bundle
         .grammar_blob_index_for_language(language)
@@ -38,14 +44,9 @@ pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::Gra
     for member in &root_graph.closure {
         let blob = &bundle.grammar_blobs[member.blob as usize];
         let grammar_id = grammars.add_lazy(LazyGrammar {
-            blob,
+            bundle: std::sync::Arc::clone(bundle),
+            index: member.blob as usize,
             traits: member.traits,
-            top_level_availability: bundle.grammar_graphs[member.blob as usize]
-                .top_level_availability
-                .as_deref(),
-            repository_walk_skeleton: bundle.grammar_graphs[member.blob as usize]
-                .repository_walk_skeleton
-                .as_deref(),
         });
         if blob.scope_name == root_blob.scope_name {
             root = Some(grammar_id);
