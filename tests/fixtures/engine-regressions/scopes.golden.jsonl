@@ -12,3 +12,7 @@
 {"name":"empty-match-lookahead-capture","source":"zz","lines":[[{"start":0,"end":2,"scopes":["source.emptycap","empty.look"]}]]}
 {"name":"empty-match-lookahead-capture","source":"a zz b","lines":[[{"start":0,"end":2,"scopes":["source.emptycap"]},{"start":2,"end":4,"scopes":["source.emptycap","empty.look"]},{"start":4,"end":6,"scopes":["source.emptycap"]}]]}
 {"name":"empty-match-lookahead-capture","source":"zzb","lines":[[{"start":0,"end":2,"scopes":["source.emptycap","empty.look"]},{"start":2,"end":3,"scopes":["source.emptycap"]}]]}
+{"name":"nested-captures-past-match-end","source":"xab","lines":[[{"start":0,"end":1,"scopes":["source.nestedcap","keyword.x"]},{"start":1,"end":2,"scopes":["source.nestedcap","keyword.x","outer","inner"]},{"start":2,"end":3,"scopes":["source.nestedcap","keyword.x","outer"]}]]}
+{"name":"nested-captures-past-match-end","source":"cd","lines":[[{"start":0,"end":2,"scopes":["source.nestedcap","c1","c2"]}]]}
+{"name":"nested-captures-past-match-end","source":"ef","lines":[[{"start":0,"end":1,"scopes":["source.nestedcap","outer.empty","inner.empty"]},{"start":1,"end":2,"scopes":["source.nestedcap","outer.empty"]}]]}
+{"name":"nested-captures-past-match-end","source":"xab cd","lines":[[{"start":0,"end":1,"scopes":["source.nestedcap","keyword.x"]},{"start":1,"end":2,"scopes":["source.nestedcap","keyword.x","outer","inner"]},{"start":2,"end":3,"scopes":["source.nestedcap","keyword.x","outer"]},{"start":3,"end":4,"scopes":["source.nestedcap"]},{"start":4,"end":6,"scopes":["source.nestedcap","c1","c2"]}]]}

@@ -158,5 +158,19 @@
       }
     ],
     "sources": ["zz", "a zz b", "zzb"]
+  },
+  {
+    "name": "nested-captures-past-match-end",
+    "grammars": [
+      {
+        "scopeName": "source.nestedcap",
+        "patterns": [
+          {"match": "x(?=((a)b))", "name": "keyword.x", "captures": {"1": {"name": "outer"}, "2": {"name": "inner"}}},
+          {"match": "(?=(c))(?=(cd))", "captures": {"1": {"name": "c1"}, "2": {"name": "c2"}}},
+          {"match": "(?=((e)f))", "captures": {"1": {"name": "outer.empty"}, "2": {"name": "inner.empty"}}}
+        ]
+      }
+    ],
+    "sources": ["xab", "cd", "ef", "xab cd"]
   }
 ]

@@ -5413,22 +5413,6 @@ impl TextMateTokenizer {
             self.push_token(tokens, result.start..result.end, base_stack);
             return;
         }
-        let match_end = result.end;
-        let outside = outside_captures(result, captures)
-            .map(|(range, entry)| (range, entry.clone()))
-            .collect::<Vec<_>>();
-        if outside.is_empty() {
-            self.emit_capture_range(
-                tokens,
-                line,
-                result.start..result.end,
-                grammar_id,
-                base_stack,
-                captures,
-                result,
-            );
-            return;
-        }
         self.emit_capture_range(
             tokens,
             line,
@@ -5438,28 +5422,6 @@ impl TextMateTokenizer {
             captures,
             result,
         );
-        for (range, entry) in outside {
-            let range = range.start.max(match_end)..range.end;
-            let mut stack = base_stack;
-            if let Some(scope_id) = entry.name {
-                let (name, template) =
-                    self.capture_scope_application(grammar_id, scope_id, line, result);
-                stack = self.push_scope_application(stack, name.as_deref(), template);
-            }
-            if entry.patterns.is_empty() {
-                self.push_token(tokens, range, stack);
-            } else {
-                self.tokenize_inline_patterns(
-                    tokens,
-                    line,
-                    range,
-                    grammar_id,
-                    stack,
-                    &entry.patterns,
-                    true,
-                );
-            }
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5473,9 +5435,7 @@ impl TextMateTokenizer {
         capture_spec: &CaptureSpec,
         result: &MatchResult,
     ) {
-        if range.start >= range.end {
-            return;
-        }
+        // An empty match can still have lookahead captures past its end.
         if self.grammars.grammar(grammar_id).is_none() {
             self.push_token(tokens, range, base_stack);
             return;
@@ -5486,6 +5446,11 @@ impl TextMateTokenizer {
         // retokenized capture always starts from the rule/content stack plus
         // that capture's own name. Inheriting unrelated overlapping capture
         // names here adds broad `meta.head.*` scopes to C++ child tokens.
+        // Empty captures are skipped and handling stops at the first capture
+        // that starts after `range`, but a lookahead capture can still extend
+        // past it (`(?=((a)b))`). Scanning resumes at the match end;
+        // monotone token production drops any later token prefix those
+        // captures already covered.
         let mut cursor = range.start;
         let mut active = CaptureScopeStack::default();
         for (group, entry) in &capture_spec.entries {
@@ -5498,7 +5463,9 @@ impl TextMateTokenizer {
             if capture_range.start > range.end {
                 break;
             }
-            let capture_range = clamp_range(capture_range, range.clone());
+            // Earlier text is already tokenized; a lookbehind capture only
+            // covers the part inside the match.
+            let capture_range = capture_range.start.max(range.start)..capture_range.end;
             if capture_range.start >= capture_range.end {
                 continue;
             }
@@ -5508,7 +5475,6 @@ impl TextMateTokenizer {
                 .is_some_and(|(_, end)| *end <= capture_range.start)
             {
                 let (stack, end) = active.pop().expect("checked active capture");
-                let end = end.min(range.end);
                 if cursor < end {
                     self.push_token(tokens, cursor..end, stack);
                     cursor = end;
@@ -5543,7 +5509,6 @@ impl TextMateTokenizer {
         }
 
         while let Some((stack, end)) = active.pop() {
-            let end = end.min(range.end);
             if cursor < end {
                 self.push_token(tokens, cursor..end, stack);
                 cursor = end;
@@ -7711,31 +7676,6 @@ fn fallback_call_budget(source_bytes: usize) -> u64 {
             .unwrap_or(u64::MAX)
             .saturating_mul(FALLBACK_STEPS_PER_SOURCE_BYTE),
     )
-}
-
-/// Specified captures that emit tokens after the match, which can be empty.
-/// vscode-textmate skips empty captures and stops at the first capture that
-/// starts after the match, so only lookahead captures beginning exactly at the
-/// match end count. Scanning still resumes at the match end; monotone token
-/// production drops any later token prefix those captures already covered.
-fn outside_captures<'a>(
-    result: &'a MatchResult,
-    captures: &'a CaptureSpec,
-) -> impl Iterator<Item = (Range<usize>, &'a CaptureEntry)> {
-    let match_end = result.end;
-    captures
-        .entries
-        .iter()
-        .filter_map(|(group, entry)| {
-            result
-                .capture(*group as usize)
-                .filter(|range| range.start < range.end)
-                .map(|range| (range, entry))
-        })
-        .take_while(move |(range, _)| range.start <= match_end)
-        .filter(move |(range, entry)| {
-            range.start == match_end && (entry.name.is_some() || !entry.patterns.is_empty())
-        })
 }
 
 fn plain_compact_tokens(parse_text: &str, stack: ScopeStackId) -> Vec<CompactScopedToken> {
