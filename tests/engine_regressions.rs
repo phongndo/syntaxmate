@@ -163,7 +163,7 @@ fn custom_oracle_regressions_across_sessions_sinks_and_checkpoints() {
 }
 
 #[test]
-fn deep_tokenizer_states_drop_without_recursing() {
+fn deep_tokenizer_states_format_and_drop_without_recursing() {
     // Each line enters one more frame, the shape nested input produces.
     let grammar = r##"{"scopeName":"source.deep","patterns":[{"include":"#r"}],"repository":{"r":{"begin":"(?=(zz))","end":"b","name":"meta.r","patterns":[{"include":"#r"}]}}}"##;
     let mut registry = GrammarRegistry::new();
@@ -174,11 +174,14 @@ fn deep_tokenizer_states_drop_without_recursing() {
     for _ in 0..10_000 {
         tokenizer.tokenize_line("zz", &mut state).unwrap();
     }
-    // A recursive drop of 10,000 frames overflows a 64 KiB stack. Every
-    // owner of the frames drops on that thread.
+    // Recursing once per frame through 10,000 frames overflows a 64 KiB
+    // stack. Every owner of the frames drops on that thread.
     std::thread::Builder::new()
         .stack_size(64 * 1024)
-        .spawn(move || drop((state, tokenizer, prepared, registry)))
+        .spawn(move || {
+            assert!(format!("{state:?}").len() > 10_000);
+            drop((state, tokenizer, prepared, registry));
+        })
         .unwrap()
         .join()
         .unwrap();

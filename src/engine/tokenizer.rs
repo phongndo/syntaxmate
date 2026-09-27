@@ -663,14 +663,13 @@ impl FrameStackInternTable {
 // neither ever clones frames — even when the stack is shared with interned
 // states, line-cache entries, and checkpoints. Exact equality is the interned
 // stack id maintained on each frame.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct FrameStack {
     tail: Option<Arc<FrameNode>>,
     len: usize,
     interned_id: InternedFrameStackId,
 }
 
-#[derive(Debug)]
 struct FrameNode {
     parent: Option<Arc<FrameNode>>,
     frame: Frame,
@@ -764,9 +763,7 @@ impl FrameStack {
         debug_assert_eq!(node.depth, self.len + 1);
         self.interned_id = node.frame.interned_stack_id;
         self.len = node.depth;
-        if let Some(old) = self.tail.replace(node) {
-            drop_frame_node(old);
-        }
+        self.tail = Some(node);
     }
 
     #[inline]
@@ -780,7 +777,6 @@ impl FrameStack {
             return;
         };
         self.tail = tail.parent.clone();
-        drop_frame_node(tail);
         self.len -= 1;
         self.refresh_interned_id_from_top();
     }
@@ -795,9 +791,7 @@ impl FrameStack {
                 cursor = Some(node);
                 break;
             }
-            let parent = node.parent.clone();
-            drop_frame_node(node);
-            cursor = parent;
+            cursor = node.parent.clone();
         }
         self.tail = cursor;
         self.len = len;
@@ -841,24 +835,32 @@ impl FrameStack {
     }
 }
 
-impl Drop for FrameStack {
-    fn drop(&mut self) {
-        if let Some(tail) = self.tail.take() {
-            drop_frame_node(tail);
-        }
+// Frame chains can be as deep as the input's nesting; derived `Debug` would
+// recurse through every parent.
+impl std::fmt::Debug for FrameStack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameStack")
+            .field("len", &self.len)
+            .field("interned_id", &self.interned_id)
+            .field(
+                "frames",
+                &self
+                    .nodes_in_order()
+                    .into_iter()
+                    .map(|node| &node.frame)
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
     }
 }
 
-/// Drops a frame-node chain iteratively. Deep continuation stacks otherwise
-/// recurse once per frame through `Arc`/`FrameNode` drop glue, which can
-/// overflow the thread stack on adversarial nesting depths.
-fn drop_frame_node(node: Arc<FrameNode>) {
-    let mut cursor = Some(node);
-    while let Some(node) = cursor {
-        match Arc::try_unwrap(node) {
-            Ok(mut owned) => cursor = owned.parent.take(),
-            Err(_) => break,
-        }
+impl std::fmt::Debug for FrameNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameNode")
+            .field("frame", &self.frame)
+            .field("depth", &self.depth)
+            .field("while_frames", &self.while_frames)
+            .finish_non_exhaustive()
     }
 }
 
