@@ -365,3 +365,11 @@ fn preparation_limits_keep_the_known_root_scope() {
         GrammarErrorKind::PreparationLimit(_)
     ));
 }
+
+// Payloads are boxed so `Result<T>` stays small on hot paths; keep `Error`
+// no larger than its largest inline payload (`String`) plus the discriminant.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn error_stays_small() {
+    assert!(std::mem::size_of::<Error>() <= 32);
+}

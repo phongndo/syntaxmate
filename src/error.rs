@@ -216,29 +216,32 @@ pub enum GrammarErrorKind {
 /// Grammar failure with the originating scope when available.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct GrammarError {
+pub struct GrammarError(Box<GrammarErrorInner>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GrammarErrorInner {
     scope: Option<String>,
     kind: GrammarErrorKind,
 }
 impl GrammarError {
     pub(crate) fn new(scope: Option<String>, kind: GrammarErrorKind) -> Self {
-        Self { scope, kind }
+        Self(Box::new(GrammarErrorInner { scope, kind }))
     }
     /// Grammar scope, or `None` when parsing/limits failed before it was known.
     pub fn scope_name(&self) -> Option<&str> {
-        self.scope.as_deref()
+        self.0.scope.as_deref()
     }
     /// Matchable failure cause.
     pub fn kind(&self) -> &GrammarErrorKind {
-        &self.kind
+        &self.0.kind
     }
 }
 impl fmt::Display for GrammarError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(scope) = &self.scope {
+        if let Some(scope) = &self.0.scope {
             write!(f, "{scope}: ")?;
         }
-        match &self.kind {
+        match &self.0.kind {
             GrammarErrorKind::InvalidJson(error) => write!(f, "JSON parse error: {error}"),
             GrammarErrorKind::MissingInclude(include) => write!(
                 f,
@@ -272,7 +275,7 @@ impl fmt::Display for GrammarError {
 }
 impl std::error::Error for GrammarError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.kind {
+        match &self.0.kind {
             GrammarErrorKind::InvalidJson(error) => Some(error),
             _ => None,
         }
@@ -294,7 +297,10 @@ pub enum ThemeErrorKind {
 /// Theme parsing or rule compilation failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct ThemeError {
+pub struct ThemeError(Box<ThemeErrorInner>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ThemeErrorInner {
     kind: ThemeErrorKind,
     message: String,
 }
@@ -303,7 +309,7 @@ impl ThemeError {
         Self::new(ThemeErrorKind::InvalidRule, message)
     }
     pub(crate) fn new(kind: ThemeErrorKind, message: String) -> Self {
-        Self { kind, message }
+        Self(Box::new(ThemeErrorInner { kind, message }))
     }
     pub(crate) fn json(error: serde_json::Error) -> Self {
         let message = format!("invalid TextMate theme JSON: {error}");
@@ -314,17 +320,17 @@ impl ThemeError {
     }
     /// Matchable failure cause, including the invalid color when applicable.
     pub fn kind(&self) -> &ThemeErrorKind {
-        &self.kind
+        &self.0.kind
     }
 }
 impl fmt::Display for ThemeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&self.0.message)
     }
 }
 impl std::error::Error for ThemeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.kind {
+        match &self.0.kind {
             ThemeErrorKind::InvalidJson(error) => Some(error),
             _ => None,
         }
@@ -350,31 +356,34 @@ pub enum BundleErrorKind {
 /// Bundled asset failure without exposing the private bundle format.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct BundleError {
+pub struct BundleError(Box<BundleErrorInner>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BundleErrorInner {
     kind: BundleErrorKind,
     language: Option<String>,
     message: String,
 }
 impl BundleError {
     pub(crate) fn new(kind: BundleErrorKind, language: Option<String>, message: String) -> Self {
-        Self {
+        Self(Box::new(BundleErrorInner {
             kind,
             language,
             message,
-        }
+        }))
     }
     /// Matchable failure cause.
     pub fn kind(&self) -> BundleErrorKind {
-        self.kind
+        self.0.kind
     }
     /// Affected language or scope, when known.
     pub fn language(&self) -> Option<&str> {
-        self.language.as_deref()
+        self.0.language.as_deref()
     }
 }
 impl fmt::Display for BundleError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&self.0.message)
     }
 }
 impl std::error::Error for BundleError {}
@@ -394,7 +403,10 @@ pub enum DiagnosticErrorKind {
 /// Diagnostic regex failure with the original pattern and execution context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct DiagnosticError {
+pub struct DiagnosticError(Box<DiagnosticErrorInner>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiagnosticErrorInner {
     kind: DiagnosticErrorKind,
     pattern: String,
     position: Option<usize>,
@@ -404,13 +416,13 @@ pub struct DiagnosticError {
 impl DiagnosticError {
     #[cfg(feature = "diagnostics")]
     pub(crate) fn build(pattern: &str, message: String) -> Self {
-        Self {
+        Self(Box::new(DiagnosticErrorInner {
             kind: DiagnosticErrorKind::MatcherBuild,
             pattern: pattern.to_owned(),
             position: None,
             steps: None,
             message,
-        }
+        }))
     }
     #[cfg(feature = "diagnostics")]
     pub(crate) fn fallback(pattern: &str, error: crate::engine::regex::FallbackError) -> Self {
@@ -423,34 +435,34 @@ impl DiagnosticError {
                 (DiagnosticErrorKind::BudgetExceeded, None, Some(steps))
             }
         };
-        Self {
+        Self(Box::new(DiagnosticErrorInner {
             kind,
             pattern: pattern.to_owned(),
             position,
             steps,
             message: format!("fallback error: {error:?}"),
-        }
+        }))
     }
     /// Matchable failure cause.
     pub fn kind(&self) -> DiagnosticErrorKind {
-        self.kind
+        self.0.kind
     }
     /// Original regex pattern.
     pub fn pattern(&self) -> &str {
-        &self.pattern
+        &self.0.pattern
     }
     /// Invalid starting byte offset, if applicable.
     pub fn position(&self) -> Option<usize> {
-        self.position
+        self.0.position
     }
     /// Executed fallback steps when the budget was exhausted.
     pub fn steps(&self) -> Option<usize> {
-        self.steps
+        self.0.steps
     }
 }
 impl fmt::Display for DiagnosticError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&self.0.message)
     }
 }
 impl std::error::Error for DiagnosticError {}
@@ -468,7 +480,10 @@ pub enum RenderErrorKind {
 /// Render validation or writer failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct RenderError {
+pub struct RenderError(Box<RenderErrorInner>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RenderErrorInner {
     kind: RenderErrorKind,
     message: String,
     source: Option<fmt::Error>,
@@ -476,33 +491,33 @@ pub struct RenderError {
 impl RenderError {
     #[cfg(any(feature = "html", feature = "ansi"))]
     pub(crate) fn mismatch(message: String) -> Self {
-        Self {
+        Self(Box::new(RenderErrorInner {
             kind: RenderErrorKind::SourceMismatch,
             message,
             source: None,
-        }
+        }))
     }
     #[cfg(any(feature = "html", feature = "ansi"))]
     pub(crate) fn writer(error: fmt::Error) -> Self {
-        Self {
+        Self(Box::new(RenderErrorInner {
             kind: RenderErrorKind::Writer,
             message: "render output writer failed".to_owned(),
             source: Some(error),
-        }
+        }))
     }
     /// Matchable failure cause.
     pub fn kind(&self) -> RenderErrorKind {
-        self.kind
+        self.0.kind
     }
 }
 impl fmt::Display for RenderError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&self.0.message)
     }
 }
 impl std::error::Error for RenderError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source.as_ref().map(|error| error as _)
+        self.0.source.as_ref().map(|error| error as _)
     }
 }
 
