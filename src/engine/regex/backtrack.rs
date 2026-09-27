@@ -3535,6 +3535,29 @@ mod tests {
     }
 
     #[test]
+    fn folded_ascii_classes_admit_kelvin_and_long_s_on_every_path() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, span) in [
+            (r"(?i)(?:[[:ascii:]]x|yz)", "\u{212a}x", 0..4),
+            (r"(?i:[[:ascii:]])*(?-i:\x{212a})|zz", "\u{212a}", 0..3),
+            (r"(?i)(?:[[[:ascii:]]]x|yz)", "\u{17f}x", 0..3),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let mut scratch = BytecodeScratch::default();
+            let selected = matcher
+                .try_find_at_without_captures_with_scratch(line, 0, ctx(), &mut scratch)
+                .unwrap()
+                .result
+                .map(|result| result.start..result.end);
+            assert_eq!(selected, Some(span.clone()), "{pattern} on {line:?}");
+            let found = matcher
+                .find(line, 0, ctx())
+                .map(|result| result.start..result.end);
+            assert_eq!(found, Some(span), "{pattern} on {line:?}");
+        }
+    }
+
+    #[test]
     fn plus_after_an_interval_repeats_it() {
         // Expectations checked against vscode-oniguruma.
         for (pattern, line, expected) in [

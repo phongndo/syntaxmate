@@ -699,7 +699,15 @@ fn class_non_ascii_kinds(class: &CharClass, case_insensitive: bool) -> u8 {
     if class.negated {
         return FirstChars::NON_ASCII_ANY;
     }
-    class.atoms.iter().fold(0, |kinds, atom| {
+    // A folded bracketed class also matches the case variants of its members,
+    // such as the Kelvin sign for `(?i)[[:ascii:]]`; case variants are never
+    // whitespace.
+    let folded = if case_insensitive && class.bracketed {
+        FirstChars::NON_ASCII_OTHER
+    } else {
+        0
+    };
+    class.atoms.iter().fold(folded, |kinds, atom| {
         kinds | atom_non_ascii_kinds(atom, case_insensitive)
     })
 }
