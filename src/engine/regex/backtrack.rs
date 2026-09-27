@@ -22,13 +22,19 @@ const INITIAL_FANOUT_CAPACITY: usize = 16;
 pub struct StepBudget {
     limit: usize,
     remaining: usize,
+    /// Nested subroutine calls in the recursive evaluator.
+    call_depth: u32,
 }
+
+/// Subroutine nesting limit, matching the bytecode VM's call stack.
+const MAX_SUBROUTINE_DEPTH: u32 = 128;
 
 impl StepBudget {
     pub fn new(steps: usize) -> Self {
         Self {
             limit: steps,
             remaining: steps,
+            call_depth: 0,
         }
     }
 
@@ -1785,7 +1791,16 @@ fn match_node(
             let Some(group) = group else {
                 return Ok(VmStates::empty());
             };
-            match_node(group, line, state, ctx, flags, budget, parsed)
+            // Oniguruma rejects recursion that can re-enter without consuming
+            // input, such as `(\g<1>)?`; bound the nesting so it fails
+            // instead of overflowing the stack.
+            if budget.call_depth >= MAX_SUBROUTINE_DEPTH {
+                return Ok(VmStates::empty());
+            }
+            budget.call_depth += 1;
+            let states = match_node(group, line, state, ctx, flags, budget, parsed);
+            budget.call_depth -= 1;
+            states
         }
         Ast::Flags {
             flags: local,
@@ -3559,6 +3574,20 @@ mod tests {
                 .map(|result| result.start..result.end);
             assert_eq!(found, Some(span), "{pattern} on {line:?}");
         }
+    }
+
+    #[test]
+    fn unbounded_zero_width_recursion_fails_without_overflowing() {
+        for pattern in [r"(\g<1>)?", r"(\g<1>+)?", r"(\g<1>++)", r"(?<n>a|\g<n>)"] {
+            let matcher = FallbackMatcher::new(pattern);
+            let _ = matcher.try_find_at("a", 0, ctx());
+        }
+        let nested = FallbackMatcher::new(r"(?<n>\((?:[^()]|\g<n>)*\))");
+        let line = format!("{}{}", "(".repeat(100), ")".repeat(100));
+        let found = nested
+            .find(&line, 0, ctx())
+            .map(|result| result.start..result.end);
+        assert_eq!(found, Some(0..line.len()));
     }
 
     #[test]
