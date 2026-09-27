@@ -1317,6 +1317,8 @@ struct CallFrame {
     return_pc: ProgramCounter,
     capture_undo_mark: u32,
     repeat_undo_mark: u32,
+    /// Undo entries already scanned by returns of calls this frame made.
+    nested_scanned: u32,
     /// The caller's `BytecodeScratch::call_frame` value.
     parent: u32,
     depth: u32,
@@ -1330,7 +1332,7 @@ const _: () = {
     assert!(std::mem::size_of::<Instruction>() == 24);
     assert!(std::mem::size_of::<BacktrackFrame>() == 32);
     assert!(std::mem::size_of::<AssertionFrame>() == 64);
-    assert!(std::mem::size_of::<CallFrame>() == 20);
+    assert!(std::mem::size_of::<CallFrame>() == 24);
     assert!(std::mem::size_of::<RepeatState>() == 16);
     assert!(std::mem::size_of::<RepeatUndo>() == 16);
     assert!(std::mem::size_of::<GuardCell>() == 16);
@@ -1784,6 +1786,7 @@ impl Program {
                             return_pc: *next,
                             capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
                             repeat_undo_mark: arena_mark(scratch.repeat_undo.len())?,
+                            nested_scanned: 0,
                             parent: scratch.call_frame,
                             depth,
                         };
@@ -1808,11 +1811,18 @@ impl Program {
                     let repeat_end = scratch.repeat_undo.len();
                     // The scan is linear in the undo entries since the call,
                     // which backtracking into a returned routine can revisit;
-                    // charge it like the steps that logged them.
-                    budget.charge(
-                        (capture_end - arena_index(frame.capture_undo_mark))
-                            + (repeat_end - arena_index(frame.repeat_undo_mark)),
-                    )?;
+                    // charge it like the steps that logged them. Entries a
+                    // nested return already scanned are charged there, so
+                    // deep nesting does not pay for them once per level.
+                    let scanned = (capture_end - arena_index(frame.capture_undo_mark))
+                        + (repeat_end - arena_index(frame.repeat_undo_mark));
+                    budget.charge(scanned.saturating_sub(arena_index(frame.nested_scanned)))?;
+                    if let Some(caller) = frame.parent.checked_sub(1) {
+                        let caller = &mut scratch.calls[arena_index(caller)];
+                        caller.nested_scanned = caller
+                            .nested_scanned
+                            .saturating_add(u32::try_from(scanned).unwrap_or(u32::MAX));
+                    }
                     for index in arena_index(frame.capture_undo_mark)..capture_end {
                         let (slot, previous) = scratch.capture_undo[index].clone();
                         let stamp = &mut scratch.capture_restore_stamps[arena_index(slot)];
@@ -4628,7 +4638,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Instruction>(), 24);
         assert_eq!(std::mem::size_of::<BacktrackFrame>(), 32);
         assert_eq!(std::mem::size_of::<AssertionFrame>(), 64);
-        assert_eq!(std::mem::size_of::<CallFrame>(), 20);
+        assert_eq!(std::mem::size_of::<CallFrame>(), 24);
         assert_eq!(std::mem::size_of::<RepeatState>(), 16);
         assert_eq!(std::mem::size_of::<ResumeAction>(), 8);
         assert_eq!(std::mem::size_of::<AssertDirection>(), 8);
@@ -5720,6 +5730,29 @@ mod tests {
             scratch.repeat_undo.len()
         );
         assert_capture_replay(pattern, &line, 0, &[1]);
+    }
+
+    #[test]
+    fn nested_returns_charge_each_undo_entry_once() {
+        // Charging every return for its callees' entries again made the
+        // cost grow with depth, so nested template arguments ran out of
+        // budget in capture replay.
+        let pattern = r"(?<n><(?:[^<>]|\g<n>)*>)";
+        let line = format!("{}{}{}", "<".repeat(60), "x".repeat(2000), ">".repeat(60));
+        let program = Program::compile_captures(&parse(pattern), &[1]).expect("capture program");
+        let mut budget = StepBudget::new(100_000);
+        let matched = program
+            .execute_captures(
+                &line,
+                0,
+                context(),
+                &mut budget,
+                &mut BytecodeScratch::default(),
+            )
+            .expect("within budget")
+            .expect("nested match");
+        assert_eq!(matched.end, line.len());
+        assert!(budget.used() < 20_000, "{}", budget.used());
     }
 
     #[test]
