@@ -20,7 +20,7 @@ mod grammar_ir;
 mod state;
 
 const MAGIC: &[u8; 4] = b"MRKB";
-const FORMAT_VERSION: u16 = 3;
+const FORMAT_VERSION: u16 = 4;
 const CODEC_NONE: u32 = 0;
 const CODEC_DEFLATE_ZLIB: u32 = 1;
 const GRAMMAR_BLOB_COMPILED_IR: u32 = 1;
@@ -690,8 +690,14 @@ fn bundle_to_bytes(
 ) -> Vec<u8> {
     let strings = interned_strings(&scopes, &languages, &grammar_blobs, &licenses);
     let sections = vec![
-        (SECTION_STRINGS, encode_string_table(&strings)),
-        (SECTION_SCOPES, encode_scope_table(&scopes, &strings)),
+        (
+            SECTION_STRINGS,
+            encode_metadata(&encode_string_table(&strings)),
+        ),
+        (
+            SECTION_SCOPES,
+            encode_metadata(&encode_scope_table(&scopes, &strings)),
+        ),
         (
             SECTION_LANGUAGES,
             encode_language_table(&languages, &strings),
@@ -745,6 +751,20 @@ fn interned_strings(
         strings.insert(license.source_revision.clone(), ());
     }
     strings.into_keys().collect()
+}
+
+fn encode_metadata(raw: &[u8]) -> Vec<u8> {
+    let compressed = miniz_oxide::deflate::compress_to_vec_zlib(raw, 6);
+    let (codec, payload) = if compressed.len() < raw.len() {
+        (CODEC_DEFLATE_ZLIB, compressed.as_slice())
+    } else {
+        (CODEC_NONE, raw)
+    };
+    let mut bytes = Vec::with_capacity(8 + payload.len());
+    write_u32(&mut bytes, codec);
+    write_u32(&mut bytes, raw.len() as u32);
+    bytes.extend_from_slice(payload);
+    bytes
 }
 
 fn encode_string_table(strings: &[String]) -> Vec<u8> {

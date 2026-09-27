@@ -5,6 +5,9 @@
 - Implement `PartialEq`, `Eq`, and `Hash` for `TokenizerState`, allowing editors
   to stop incremental re-highlighting when continuation states converge. Keep
   embedded base-grammar context distinct when reusing static frame identities.
+- Shrink the embedded grammar bundle with compressed string and scope tables,
+  and reduce first-use allocations by retaining one indexed string buffer.
+  Custom-grammar-only builds no longer depend on `miniz_oxide`.
 
 - Restore allocation guardrails for prepared tokenizers and bundled construction
   by dropping construction-only rule templates and borrowing embedded repository
