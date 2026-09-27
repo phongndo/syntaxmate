@@ -19,19 +19,44 @@ and UI-framework types belong in downstream adapters.
 
 ## Ownership
 
+`Catalog` owns a shared bundle, including custom or subset assets. `Highlighter`
+clones share its bounded preparation cache and idle tokenizer pool; matching
+runs outside the cache lock. Cache and per-tokenizer limits are configured by
+`HighlighterOptions`; active calls and sessions retain their own state.
+
 Mutable continuation state and source-dependent caches belong to a tokenizer
 or highlighting session. Independent instances must not affect one another's
 output. `TokenizerState` and `CheckpointTable` are tied to their originating
 tokenizer; cloning a state does not make it transferable to another tokenizer.
+See [`TokenizerState`](../src/tokenizer.rs) for continuation equality and an
+editor re-highlighting convergence example.
 
 `PreparedLanguage` is the explicit sharing boundary for repeated independent
 tokenizers. It retains bounded grammar and static matcher preparation, while
 derived tokenizers keep their own mutable state. Read its rustdoc and statistics
 API for retention semantics; numeric cache ceilings live with the implementation.
+Highlighter preparation retains the bundle and defers dependency decoding and
+repository walks until needed, like a direct tokenizer. Its first pooled worker
+uses direct matching caches to avoid shared-cache publication costs on one-shot
+calls; later workers and sessions use shared matcher preparation. All workers
+share lazy grammar decoding.
 This avoids hidden process-global retention and lets the caller choose the
 lifetime of reusable work.
 
 ## Public contract
+
+The public output families are `TokenizedDocument` → `TokenizedLine` → `Token`
+and `HighlightedDocument` → `HighlightedLine` → `HighlightedToken`. Incremental
+calls return those same line and token types. Each token owns shared scope
+storage and exposes a borrowed `Scopes` iterator, keeping intern tables private.
+`Theme` is the single theme facade; selector inspection requires `diagnostics`.
+See the [migration table](../CHANGELOG.md#migrating-from-01) for removed names.
+
+Fallible public operations return structured [`Error`](../src/error.rs) payloads.
+Match their kinds and access context through their accessors; display text is
+for people. Engine errors stay private and are mapped at the facade. Explicit
+registry validation reports missing includes; opt-in `validate_regexes()` reports
+parser diagnostics while loading and tokenization remain permissive.
 
 Exact ordered scopes, UTF-8 byte ranges, resolved styles, detection metadata,
 and completion status are observable. Regex bytecode, rule IDs, cache layout,
@@ -40,8 +65,8 @@ items tied to a downstream use case, with rustdoc and tests at the public
 boundary. Tokenization must remain independent of themes; custom assets must
 remain usable without bundled assets.
 
-The release library accepts custom assets as strings and performs no filesystem,
-network, or process-environment access. Committed bundled assets keep normal
+The release library accepts custom grammars/themes as strings and bundles as
+bytes and performs no filesystem, network, or process-environment access. Committed bundled assets keep normal
 builds independent of Node and upstream availability. Development tools own
 asset import, compilation, and oracle regeneration.
 

@@ -2,72 +2,121 @@ use serde::{Deserialize, Serialize};
 
 const MAX_PATTERN_HOTSPOTS: usize = 128;
 
+/// Optional diagnostic counters accumulated by one tokenizer.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EngineCounters {
+    /// Time spent decoding grammars, in microseconds.
     pub grammar_decode_micros: u64,
+    /// Number of logical lines processed.
     pub lines_tokenized: u64,
+    /// Lines skipped because of resource limits.
     pub lines_skipped: u64,
+    /// Lines replayed to reconstruct viewport continuation state.
     pub checkpoint_replay_lines: u64,
+    /// Line-result cache hits.
     pub line_cache_hits: u64,
+    /// Line-result cache misses.
     pub line_cache_misses: u64,
+    /// Line-result cache evictions.
     pub line_cache_evictions: u64,
+    /// Continuation-state cache hits.
     pub state_cache_hits: u64,
+    /// Continuation-state cache misses.
     pub state_cache_misses: u64,
+    /// Candidate-list cache hits.
     pub candidate_list_cache_hits: u64,
+    /// Candidate-list cache misses.
     pub candidate_list_cache_misses: u64,
+    /// Number of compiled regular expressions.
     #[serde(default)]
     pub regex_compile_count: u64,
+    /// Number of constructed pattern-set matchers.
     #[serde(default)]
     pub pattern_set_construction_count: u64,
+    /// Number of constructed inline candidate sets.
     #[serde(default)]
     pub inline_candidate_set_construction_count: u64,
+    /// Compilation counts grouped by pattern.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pattern_compile_counts: Vec<PatternCompileCount>,
+    /// DFA matcher attempts.
     pub regex_dfa_attempts: u64,
+    /// Fallback matcher attempts.
     pub regex_fallback_attempts: u64,
+    /// Candidate-set searches.
     #[serde(default)]
     pub candidate_searches: u64,
+    /// Total patterns considered across candidate searches.
     #[serde(default)]
     pub candidate_patterns_considered: u64,
+    /// Successful candidate searches.
     #[serde(default)]
     pub candidate_winners: u64,
+    /// Capture matching replays.
     #[serde(default)]
     pub capture_replays: u64,
+    /// Pattern prefilter checks.
     pub prefilter_checks: u64,
+    /// Prefilter checks that allowed matching.
     pub prefilter_hits: u64,
+    /// Matching attempts skipped by the prefilter.
     pub prefilter_skips: u64,
+    /// Total fallback execution steps.
     pub fallback_steps_total: u64,
+    /// Largest fallback execution step count in one attempt.
     pub fallback_steps_max: u64,
+    /// Matching attempts stopped by the fallback budget.
     pub fallback_budget_kills: u64,
+    /// Lines whose tokenization exceeded resource limits.
     pub degraded_lines: u64,
+    /// Bounded collection of costly pattern execution records.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pattern_hotspots: Vec<PatternHotspot>,
 }
 
+/// Diagnostic execution costs for one pattern.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatternHotspot {
+    /// Root grammar scope name.
     pub root_scope: String,
+    /// Internal grammar identity, when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grammar_id: Option<u16>,
+    /// Internal pattern identity, when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern_id: Option<u32>,
+    /// Name of the matcher used.
     pub engine: String,
+    /// Original regex pattern text.
     pub pattern: String,
+    /// Number of matching attempts.
     pub attempts: u64,
+    /// Number of successful matches.
     pub matches: u64,
+    /// Total matching time, in microseconds.
     pub total_micros: u64,
+    /// Total fallback execution steps.
     pub fallback_steps_total: u64,
+    /// Largest fallback execution step count in one attempt.
     pub fallback_steps_max: u64,
+    /// Matching attempts stopped by the fallback budget.
     pub fallback_budget_kills: u64,
+    /// Prefilter checks that allowed matching.
     pub prefilter_hits: u64,
+    /// Matching attempts skipped by the prefilter.
     pub prefilter_skips: u64,
 }
 
+/// Compilation count for one pattern identity.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PatternCompileCount {
+    /// Internal grammar identity, when available.
     pub grammar_id: Option<u16>,
+    /// Internal pattern identity, when available.
     pub pattern_id: Option<u32>,
+    /// Original regex pattern text.
     pub pattern: String,
+    /// Number of compilations.
     pub count: u64,
 }
 
@@ -209,6 +258,7 @@ impl EngineCounters {
         self.degraded_lines = self.degraded_lines.saturating_add(1);
     }
 
+    /// Merges counters using saturating totals and per-attempt maxima.
     pub fn merge(&mut self, other: Self) {
         self.grammar_decode_micros = self
             .grammar_decode_micros

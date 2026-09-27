@@ -16,6 +16,16 @@ so updates remain reviewable and reproducible.
 - Runtime bundle: [assets/grammars.bundle](../assets/grammars.bundle), generated
   by the [bundle builder](../tools/build-bundle.rs).
 
+The string table and scope-ID table are uncompressed. The runtime borrows their
+embedded bytes, including the string offset index, without allocating per string
+or decompressing metadata at first use. The reader validates table bounds,
+UTF-8, string boundaries, and scope IDs before exposing them. Tool parsing of
+non-static input owns each table in one buffer. Repository-walk skeletons also
+remain uncompressed so the runtime can borrow their embedded bytes.
+
+The private v4 format was redefined before release to remove metadata compression,
+prioritizing cold-start latency and retained heap over bundle and binary size.
+
 The bundle uses independently compressed compiled grammars and records each
 grammar's dependency closure, so a tokenizer decodes a closure member only when
 it needs that grammar. Its format is private; version and validation rules live
@@ -25,6 +35,50 @@ in the [container decoder](../src/grammars/bundle.rs), the
 regenerating the bundle. Custom grammars use the JSON
 compiler. Release builds consume committed assets without running Node or
 fetching upstream sources.
+
+## Custom and subset bundles
+
+Build subsets from a checkout using the [bundle builder](../tools/build-bundle.rs):
+
+```sh
+cargo run --locked --bin syntaxmate-bundle --features bundle-tools -- \
+  --languages rust,toml,json --out grammars-subset.bundle
+```
+
+`--languages` accepts comma-separated public IDs or aliases. The output exposes
+only those languages, and includes their transitive dependencies, private
+grammars, and corresponding license records. Ordering and duplicate arguments
+do not change the output. With `--languages`, the default output is
+`grammars-subset.bundle`; without it, the builder updates the complete embedded
+bundle. `--check` compares the selected output with a deterministic rebuild.
+Build from the same Syntaxmate version that consumes the bundle.
+
+Disable `bundled-grammars` to omit the embedded bundle entirely:
+
+```toml
+syntaxmate = { version = "0.2", default-features = false }
+```
+
+```rust,ignore
+use syntaxmate::{Catalog, Highlighter};
+
+let catalog = Catalog::from_static(include_bytes!("grammars-subset.bundle"))?;
+let highlighter = Highlighter::new(&catalog);
+let tokens = highlighter.tokenize("rust", "fn main() {}")?;
+```
+
+`Catalog::from_static` borrows uncompressed tables from static storage;
+`Catalog::from_bytes(&bytes)` copies retained data and lets the caller release
+its buffer. Both validate grammar IR before returning. A separate `Vec`/`Arc`
+constructor would not avoid the decoder's per-section ownership, so the borrowed
+slice constructor covers runtime-loaded bundles without another ownership API.
+Use `Catalog::licenses()` to retrieve the included notices for distribution.
+Custom JSON grammars through `GrammarRegistry` remain available too.
+
+Catalog queries borrow metadata; keep the catalog alive while using their
+results. `language(id_or_alias)` exposes IDs, aliases, suffixes, basenames, and
+root scopes. See [`Catalog::detect`](../src/catalog.rs) for combined filename
+and bounded first-line detection, including precedence and supported modelines.
 
 ## Updating assets
 

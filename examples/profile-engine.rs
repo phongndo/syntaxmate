@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let token_count = document
         .lines()
         .iter()
-        .map(|line| line.spans().len())
+        .map(|line| line.tokens().len())
         .sum::<usize>();
 
     println!(
@@ -102,15 +102,12 @@ fn scope_digest(document: &TokenizedDocument) -> String {
     let mut canonical = String::new();
     for (line_index, line) in document.lines().iter().enumerate() {
         let mut coalesced: Vec<(std::ops::Range<usize>, Vec<String>)> = Vec::new();
-        for span in line.spans() {
+        for span in line.tokens() {
             let range = span.range();
             if range.start >= range.end {
                 continue;
             }
-            let scopes = line
-                .scope_names(span.scope_stack())
-                .map(str::to_owned)
-                .collect::<Vec<_>>();
+            let scopes = span.scopes().map(str::to_owned).collect::<Vec<_>>();
             if let Some((previous_range, previous_scopes)) = coalesced.last_mut()
                 && previous_range.end == range.start
                 && *previous_scopes == scopes

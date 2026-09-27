@@ -25,7 +25,7 @@ fn backreference_to_missing_group_does_not_panic() {
     let document = tokenizer.tokenize(source);
     assert_eq!(document.lines().len(), source.split('\n').count());
     for line in document.lines() {
-        for span in line.spans() {
+        for span in line.tokens() {
             assert!(span.range().start <= span.range().end);
         }
     }

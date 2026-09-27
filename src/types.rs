@@ -24,12 +24,32 @@ pub enum SyntaxClass {
 }
 
 /// A compact reference to one complete, ordered TextMate scope stack.
+///
+/// Compare only within one document, or across incremental calls on the same
+/// tokenizer/session. Document and incremental IDs use separate namespaces.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct ScopeStackRef(pub(crate) u32);
+pub struct ScopeStackId(pub(crate) u32);
 
 /// An interned TextMate scope name.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub struct ScopeAtomId(pub(crate) u32);
+pub(crate) struct ScopeAtomId(pub(crate) u32);
+
+/// Shared ownership behind the public scope view. Incremental stacks retain
+/// their existing shared name slice; document tokens share one table owner.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ScopeStorage {
+    Table(Arc<HighlightScopeTable>),
+    Shared(Arc<[Arc<str>]>),
+}
+
+impl ScopeStorage {
+    pub(crate) fn shared_names(&self) -> &[Arc<str>] {
+        match self {
+            Self::Shared(names) => names,
+            Self::Table(_) => unreachable!("incremental scope storage"),
+        }
+    }
+}
 
 // Rendering can resolve a base theme and a post-theme scope override for each
 // segment. Keep both generations warm instead of making them evict each other.
@@ -43,7 +63,7 @@ const STYLE_CACHE_UPDATING_EPOCH: u64 = 1;
 /// Entry zero is always the empty stack. Keeping this table separate from
 /// segments allows themes to be changed without tokenizing the source again.
 #[derive(Debug)]
-pub struct HighlightScopeTable {
+pub(crate) struct HighlightScopeTable {
     atoms: Vec<Arc<str>>,
     stacks: Vec<Arc<[ScopeAtomId]>>,
     resolved_styles: Vec<[AtomicU64; STYLE_CACHE_SLOTS]>,
@@ -107,7 +127,7 @@ impl HighlightScopeTable {
     }
 
     /// Builds a small standalone table for diagnostics and theme tooling.
-    pub fn from_scope_names(scopes: &[&str]) -> (Self, ScopeStackRef) {
+    pub fn from_scope_names(scopes: &[&str]) -> (Self, ScopeStackId) {
         let atoms = scopes
             .iter()
             .map(|scope| Arc::<str>::from(*scope))
@@ -130,11 +150,11 @@ impl HighlightScopeTable {
                 style_cache_misses: AtomicU64::new(0),
                 style_cache_stats_enabled: style_cache_stats_enabled(),
             },
-            ScopeStackRef(1),
+            ScopeStackId(1),
         )
     }
 
-    pub fn stack(&self, stack: ScopeStackRef) -> Option<&[ScopeAtomId]> {
+    pub fn stack(&self, stack: ScopeStackId) -> Option<&[ScopeAtomId]> {
         self.stacks.get(stack.0 as usize).map(AsRef::as_ref)
     }
 
@@ -142,7 +162,7 @@ impl HighlightScopeTable {
         self.atoms.get(atom.0 as usize).map(AsRef::as_ref)
     }
 
-    pub fn stack_names(&self, stack: ScopeStackRef) -> impl Iterator<Item = &str> {
+    pub fn stack_names(&self, stack: ScopeStackId) -> impl Iterator<Item = &str> {
         self.stack(stack)
             .unwrap_or_default()
             .iter()
@@ -199,7 +219,7 @@ impl HighlightScopeTable {
         }
     }
 
-    pub(crate) fn cached_style(&self, theme: u64, stack: ScopeStackRef) -> (usize, Option<u64>) {
+    pub(crate) fn cached_style(&self, theme: u64, stack: ScopeStackId) -> (usize, Option<u64>) {
         let (slot, style) = loop {
             // Cached rendering is overwhelmingly a read-only operation. Use
             // a monotonically advancing slot epoch for seqlock-style
@@ -272,7 +292,7 @@ impl HighlightScopeTable {
         (slot, style)
     }
 
-    pub(crate) fn cache_style(&self, theme: u64, stack: ScopeStackRef, slot: usize, style: u64) {
+    pub(crate) fn cache_style(&self, theme: u64, stack: ScopeStackId, slot: usize, style: u64) {
         let _read = self
             .style_cache_lock
             .read()
@@ -299,7 +319,7 @@ pub struct SyntaxSegment {
     pub byte_end: usize,
     pub class: Option<SyntaxClass>,
     /// Exact TextMate scopes. `class` is retained only as a coarse fallback.
-    pub scope_stack: ScopeStackRef,
+    pub scope_stack: ScopeStackId,
 }
 
 impl SyntaxSegment {
@@ -309,11 +329,11 @@ impl SyntaxSegment {
             byte_start,
             byte_end,
             class,
-            scope_stack: ScopeStackRef::default(),
+            scope_stack: ScopeStackId::default(),
         }
     }
 
-    pub fn with_scope_stack(mut self, scope_stack: ScopeStackRef) -> Self {
+    pub fn with_scope_stack(mut self, scope_stack: ScopeStackId) -> Self {
         self.scope_stack = scope_stack;
         self
     }
@@ -329,6 +349,7 @@ impl SyntaxSegment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HighlightedLine {
+    pub degraded: bool,
     pub fingerprint: LineTextFingerprint,
     pub segments: Vec<SyntaxSegment>,
     pub scope_table: Arc<HighlightScopeTable>,
@@ -343,6 +364,7 @@ impl Default for HighlightedLine {
 impl HighlightedLine {
     pub fn new(text: &str) -> Self {
         Self {
+            degraded: false,
             fingerprint: LineTextFingerprint::from_text(text),
             segments: Vec::new(),
             scope_table: HighlightScopeTable::empty_shared(),
@@ -410,10 +432,11 @@ fn stable_text_hash(bytes: &[u8]) -> u64 {
     hash
 }
 
-pub const DEFAULT_MAX_LINE_BYTES: usize = 8 * 1024;
-pub const DEFAULT_LINE_CACHE_ENTRIES: usize = 32_768;
+pub(crate) const DEFAULT_MAX_LINE_BYTES: usize = 8 * 1024;
+pub(crate) const DEFAULT_LINE_CACHE_ENTRIES: usize = 32_768;
 
 /// Resource options applied to one TextMate tokenizer.
+/// See [`Self::default`] for the default limits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenizerOptions {
     /// Maximum source-line size accepted by the tokenizer.
@@ -424,6 +447,8 @@ pub struct TokenizerOptions {
 }
 
 impl Default for TokenizerOptions {
+    /// Uses an 8 KiB maximum parse-line size and 32,768 cached lines.
+    /// Parsing includes the newline terminator when one is supplied or synthesized.
     fn default() -> Self {
         Self {
             max_line_bytes: DEFAULT_MAX_LINE_BYTES,
@@ -435,8 +460,12 @@ impl Default for TokenizerOptions {
 /// One caller-supplied TextMate theme rule.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Deserialize)]
 pub struct ThemeRule {
+    /// TextMate selector, or a comma-separated list of selectors.
     pub scope: String,
+    /// Optional foreground color in supported hexadecimal notation.
     pub foreground: Option<String>,
+    /// Optional background color in supported hexadecimal notation.
     pub background: Option<String>,
+    /// Space-separated font styles; an empty string clears decorations.
     pub font_style: Option<String>,
 }

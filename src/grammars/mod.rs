@@ -4,7 +4,12 @@
 //! highlighting, language metadata, path detection, and bundle diagnostics
 //! all resolve through it.
 
-use std::{borrow::Cow, collections::HashMap, path::Path, sync::OnceLock};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    path::Path,
+    sync::{Arc, OnceLock},
+};
 
 pub mod bundle;
 pub mod catalog;
@@ -13,7 +18,7 @@ pub(crate) mod registry;
 
 use bundle::{Bundle, BundleError, BundleGrammarRegistry, LicenseEntry};
 
-static EMBEDDED_BUNDLE: OnceLock<Bundle> = OnceLock::new();
+static EMBEDDED_BUNDLE: OnceLock<Arc<Bundle>> = OnceLock::new();
 static CATALOG_INDEX: OnceLock<CatalogIndex> = OnceLock::new();
 
 struct CatalogIndex {
@@ -30,13 +35,17 @@ static EMBEDDED_BUNDLE_BYTES: &[u8] = include_bytes!(concat!(
 static EMBEDDED_BUNDLE_BYTES: &[u8] = &[];
 
 pub fn embedded_bundle() -> &'static Bundle {
+    embedded_bundle_shared().as_ref()
+}
+
+pub(crate) fn embedded_bundle_shared() -> &'static Arc<Bundle> {
     EMBEDDED_BUNDLE.get_or_init(|| {
-        if cfg!(feature = "bundled-grammars") {
+        Arc::new(if cfg!(feature = "bundled-grammars") {
             Bundle::parse_static(embedded_bundle_bytes())
                 .expect("embedded Syntaxmate grammar bundle should parse")
         } else {
             Bundle::default()
-        }
+        })
     })
 }
 
@@ -162,7 +171,7 @@ pub fn grammar_registry() -> BundleGrammarRegistry {
 }
 
 pub fn parse_embedded_bundle() -> Result<Bundle, BundleError> {
-    Bundle::parse(embedded_bundle_bytes())
+    Bundle::parse_static(embedded_bundle_bytes())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -799,7 +808,7 @@ mod tests {
 
     #[test]
     fn bundled_yaml_loads_private_dependency_closure() {
-        let mut highlighter = crate::Highlighter::bundled().unwrap();
+        let highlighter = crate::Highlighter::bundled().unwrap();
         let highlighted = highlighter
             .tokenize(
                 "yaml",
@@ -808,10 +817,10 @@ mod tests {
             .unwrap();
 
         assert!(
-            highlighted.lines().iter().any(|line| line
-                .spans()
+            highlighted
+                .lines()
                 .iter()
-                .any(|span| line.scope_names(span.scope_stack()).count() > 1)),
+                .any(|line| line.tokens().iter().any(|span| span.scopes().count() > 1)),
             "YAML should not collapse to root-scope-only output"
         );
     }

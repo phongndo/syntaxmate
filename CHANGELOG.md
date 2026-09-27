@@ -2,6 +2,41 @@
 
 ## Unreleased
 
+- Replace string-only grammar, theme, bundle, render, and diagnostic errors with
+  structured payloads and matchable kinds. Preserve JSON and writer source
+  chains, and retain `Clone`, `PartialEq`, and `Eq`. Add opt-in
+  `GrammarRegistry::validate_regexes()` for pattern/position diagnostics without
+  changing permissive loading or tokenization.
+- Add validated custom/subset catalogs, borrowed language metadata, and bounded
+  filename/first-line detection. `syntaxmate-bundle --languages` emits selected
+  public languages, their dependency closures, and included licenses.
+- Make `Highlighter` cheaply cloneable and `Send + Sync`, with `&self` operations,
+  shared prepared languages, and configurable bounded idle-tokenizer retention.
+  Sessions reuse preparation; custom catalogs work without default features.
+- Expose incremental scope-stack IDs, comparable across calls and resets on the
+  same tokenizer/session (separate from document-local IDs).
+
+- Prepare the breaking 0.2 API: unify document and incremental token/line types,
+  expose allocation-free `Scopes` views, and consolidate theme construction and
+  resolution on `Theme`. Document output now reports completion per line.
+- Hide scope storage and cache instrumentation, remove redundant aliases and
+  catalog free functions, and require rustdoc for every public item.
+
+- Implement `PartialEq`, `Eq`, and `Hash` for `TokenizerState`, allowing editors
+  to stop incremental re-highlighting when continuation states converge. Keep
+  embedded base-grammar context distinct when reusing static frame identities.
+- Borrow uncompressed bundle string and scope tables to reduce cold-start latency
+  and retained heap, trading a larger bundle for no metadata decompression.
+  The bundle decoder (including `miniz_oxide`) is available without bundled assets.
+- Reduce HTML output by inheriting default colors from the wrapper and merging
+  equal adjacent runs. Keep full colors when rendering without a wrapper.
+  ANSI output now omits the theme default background unless
+  `AnsiOptions::include_default_background` is set.
+- Add theme-independent scope classes through `HtmlOptions::class_prefix` and
+  `html_stylesheet`: render HTML once and switch themes by replacing CSS.
+  Nested scopes preserve parent selectors; unsupported selectors are skipped.
+  Add `render_html_to` and `render_ansi_to` for `fmt::Write` sinks. Option struct
+  literals should use `..Default::default()` or supply the new fields.
 - Restore allocation guardrails for prepared tokenizers and bundled construction
   by dropping construction-only rule templates and borrowing embedded repository
   skeleton bytes.
@@ -10,7 +45,10 @@
   each tokenizer. Refresh the [catalog reference measurements](benchmarks/textmate/catalog-performance.json).
 - Honor `TokenizerOptions::line_cache_entries = 0` by disabling line-result
   caching completely.
-- Raise the MSRV from Rust 1.88 to 1.98; this requires a minor release.
+- Keep the verified MSRV at Rust 1.88 while using a newer development toolchain.
+- Slim the published crate by omitting raw grammar sources and checkout-only
+  development targets; retain bundled assets and all license notices.
+- Document only user-facing features on docs.rs, with feature availability labels.
 - Refresh bundled grammars from `@shikijs/langs` 3.23.0 to 4.4.3. Highlighting
   changes for 52 upstream-updated grammars, including a rewritten C++ grammar
   whose declarations, calls, and attributes scope differently, and `coq` now
@@ -51,6 +89,52 @@
     `(\g<1>)?`, fails instead of overflowing the stack;
   - Unicode case-insensitive keyword sets containing characters such as `θ`,
     `ϑ`, and `ϴ` no longer miss matches.
+
+### Migrating from 0.1
+
+This is a clean break for 0.2; removed names have no deprecated aliases.
+Both document and incremental lines expose `tokens()`, and each token exposes
+`range()` and `scopes()`. Styled tokens also expose `style()`. Scope iteration
+borrows the token and allocates nothing; cloned tokens keep their scopes alive.
+Line `status()` describes that line, while document `status()` covers the whole
+operation (including any checkpoint replay).
+
+| Old API | 0.2 replacement |
+| --- | --- |
+| `Error::Grammar(String)` | `GrammarError`: `scope_name()` and `kind()`; include targets, regex positions, registry limit values, and foreign IDs are matchable |
+| `Error::Theme(String)` | `ThemeError::kind()` distinguishes JSON, color values, and rule failures |
+| `Error::Render(String)` | `RenderError::kind()` distinguishes `SourceMismatch` and `Writer`; writer failures chain to `fmt::Error` |
+| `Error::Bundle(String)`, bundled decode errors under `Grammar` | `BundleError::kind()` and `language()` |
+| `Error::Diagnostic(String)` | `DiagnosticError` exposes kind, pattern, invalid byte offset, and executed steps |
+| Parsing error display text for JSON locations | `JsonError::line()` / `column()`; follow `std::error::Error::source()` to the original `serde_json::Error` |
+| `DocumentLine` | `TokenizedLine` |
+| `TokenSpan`, `ScopedToken` | `Token` |
+| `HighlightedSpan`, `IncrementalHighlightedSpan` | `HighlightedToken` |
+| `IncrementalHighlightedLine` | `HighlightedLine` |
+| `ResolvedSyntaxStyle` | `Style` |
+| `SyntaxModifiers` | `FontModifiers` |
+| `ScopeStackRef` | `ScopeStackId` |
+| `ScopeTable`, `HighlightScopeTable`, `ScopeAtomId` | Private storage; use `token.scopes()` |
+| `line.spans()` | `line.tokens()` |
+| `line.scope_names(token.scope_stack())`, `line.scope_table()` | `token.scopes()` |
+| `token.scope_stack() -> ScopeStackRef` | `Option<ScopeStackId>`; always `Some`; compare within one document or across incremental calls on one tokenizer/session, never between those namespaces |
+| `TextMateTheme` | `Theme`; `from_json`, `from_rules`, and `bundled` return crate `Result` / `Error` |
+| `Theme::resolve(table, stack)` | `Theme::resolve(token.scopes())`; standalone names use `resolve_scope_names(&[&str])` |
+| `TextMateTheme::resolve_style`, `resolve_with_match` | `Theme::resolve_style(scopes)`, `resolve_with_match(scopes)`, requiring `diagnostics` |
+| `ResolvedThemeStyle`, `ThemeMatch`, `ThemeSelectorScore` | Same names, available only with `diagnostics` |
+| `style_cache_stats`, `memory_bytes` | Private instrumentation; no public replacement |
+| `DEFAULT_LINE_CACHE_ENTRIES`, `DEFAULT_MAX_LINE_BYTES` | `TokenizerOptions::default()`; defaults are documented there |
+| `canonical_language(language)` | `Catalog::bundled().canonical_language(language)` |
+| `detect_language_from_path(path)` | `Catalog::bundled().detect_path(path)` |
+| `available_languages()` | `Catalog::bundled().languages()` |
+| `Catalog` unit value, `Copy`, `Default` | `Catalog::bundled()` (requires `bundled-grammars`), `from_static`, or `from_bytes`; use cheap `clone()` |
+| Catalog language queries returning `String` / `Vec<String>` | Borrowed `&str` / `Vec<&str>` tied to `&Catalog`; retain the handle or call `to_owned()` |
+| `Catalog::bundle_version() -> &'static str` | `&str` tied to the catalog |
+| `Highlighter` methods taking `&mut self` | `&self`; clone or share one highlighter across threads |
+| Unbounded highlighter language cache / default tokenizer limits | `HighlighterOptions` controls preparation and idle-tokenizer retention; see rustdoc for defaults |
+
+`Theme` also exposes `default_style()` and `color(name)`. Theme selector
+inspection is diagnostic output and remains outside the stable API contract.
 
 ## 0.1.3 - 2026-09-19
 

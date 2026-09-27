@@ -8,7 +8,7 @@ fn main() -> syntaxmate::Result<()> {
         "tokenColors": [{"scope": "keyword", "settings": {"foreground": "#ff6600"}}]
     }"##,
     )?;
-    let mut highlighter = Highlighter::bundled()?;
+    let highlighter = Highlighter::bundled()?;
     let document = highlighter.highlight_with_theme("rust", "fn main() {}", &theme)?;
     println!("{} highlighted line(s)", document.lines().len());
     Ok(())

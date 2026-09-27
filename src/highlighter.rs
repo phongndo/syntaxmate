@@ -1,19 +1,20 @@
-#[cfg(feature = "bundled-grammars")]
-use std::collections::BTreeMap;
-use std::{ops::Range, sync::Arc};
+use std::collections::VecDeque;
+use std::{
+    ops::Range,
+    sync::{Arc, Mutex},
+};
 
 #[cfg(feature = "bundled-themes")]
 use crate::theme::BuiltinTextMateTheme;
 use crate::{
-    Error, HighlightScopeTable, Result, ScopeStackRef,
-    theme::{ResolvedSyntaxStyle, TextMateTheme},
-    tokenizer::{HighlightStatus, TokenizedDocument},
+    Catalog, PreparedLanguage, TokenizerOptions,
+    engine::{state::ScopeStackId as EngineScopeStackId, tokenizer::SharedScopeSink},
+    tokenizer::{TokenScopes, Tokenizer, TokenizerState},
 };
-#[cfg(feature = "bundled-grammars")]
 use crate::{
-    TokenizerOptions,
-    engine::{state::ScopeStackId, tokenizer::SharedScopeSink},
-    tokenizer::{Tokenizer, TokenizerState},
+    Error, Result, ScopeStackId,
+    theme::{Style, TextMateTheme},
+    tokenizer::{HighlightStatus, Scopes, Token, TokenizedDocument},
 };
 
 /// A parsed TextMate theme that can be shared across highlighting sessions.
@@ -40,6 +41,7 @@ impl ThemeInner {
 }
 
 impl Theme {
+    /// Parses a TextMate JSON theme, returning [`Error::Theme`] for invalid input.
     pub fn from_json(json: &str) -> Result<Self> {
         TextMateTheme::from_json(json)
             .map(|theme| Self {
@@ -48,6 +50,7 @@ impl Theme {
             .map_err(Error::Theme)
     }
 
+    /// Loads a bundled theme by name, returning an error for an unknown name.
     #[cfg(feature = "bundled-themes")]
     pub fn bundled(name: &str) -> Result<Self> {
         let theme = BuiltinTextMateTheme::from_name(name)
@@ -57,95 +60,256 @@ impl Theme {
         })
     }
 
+    /// Returns the theme name.
     pub fn name(&self) -> &str {
         self.inner.get().name()
     }
 
-    /// Resolves a style for an interned exact TextMate scope stack.
-    pub fn resolve(
-        &self,
-        table: &HighlightScopeTable,
-        stack: ScopeStackRef,
-    ) -> ResolvedSyntaxStyle {
-        self.inner.get().resolve(table, stack)
+    #[cfg(feature = "html")]
+    pub(crate) fn rendering_rules(&self) -> impl Iterator<Item = (&str, Style, bool)> {
+        self.inner.get().rendering_rules()
+    }
+
+    /// Builds a theme from ordered TextMate rules, returning [`Error::Theme`] on invalid settings.
+    pub fn from_rules(rules: &[crate::ThemeRule]) -> Result<Self> {
+        TextMateTheme::from_rules(rules)
+            .map(|theme| Self {
+                inner: ThemeInner::Owned(Arc::new(theme)),
+            })
+            .map_err(Error::Theme)
+    }
+
+    /// Returns the theme's default foreground, background, and font modifiers.
+    pub fn default_style(&self) -> Style {
+        self.inner.get().default_style()
+    }
+
+    /// Looks up a named UI color, such as `editor.background`.
+    pub fn color(&self, name: &str) -> Option<crate::RgbColor> {
+        self.inner.get().color(name)
+    }
+
+    /// Resolves the remaining ordered scope names in a borrowed view.
+    /// Whole-document views reuse the intern table's resolved-style cache.
+    pub fn resolve(&self, scopes: Scopes<'_>) -> Style {
+        self.inner.get().resolve_scopes(scopes)
     }
 
     /// Resolves a style for a standalone ordered list of scope names.
-    pub fn resolve_scope_names(&self, scopes: &[&str]) -> ResolvedSyntaxStyle {
-        let (table, stack) = HighlightScopeTable::from_scope_names(scopes);
-        self.inner.get().resolve(&table, stack)
+    pub fn resolve_scope_names(&self, scopes: &[&str]) -> Style {
+        self.inner.get().resolve_names(scopes)
     }
 
-    #[cfg(feature = "bundled-grammars")]
-    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> ResolvedSyntaxStyle {
+    /// Resolves a style together with diagnostic selector and match metadata.
+    #[cfg(feature = "diagnostics")]
+    pub fn resolve_with_match(&self, scopes: Scopes<'_>) -> crate::ThemeMatch<'_> {
+        self.inner.get().inspect_scopes(&scopes)
+    }
+
+    /// Resolves property-match flags for diagnostic tooling.
+    #[cfg(feature = "diagnostics")]
+    pub fn resolve_style(&self, scopes: Scopes<'_>) -> crate::ResolvedThemeStyle {
+        let matched = self.resolve_with_match(scopes);
+        crate::ResolvedThemeStyle {
+            foreground_matched: matched.foreground_matched,
+            background_matched: matched.background_matched,
+            modifiers_matched: matched.modifiers_matched,
+            style: matched.style,
+        }
+    }
+
+    #[cfg(all(feature = "bundled-themes", any(feature = "html", feature = "ansi")))]
+    pub(crate) fn resolve_interned(
+        &self,
+        table: &crate::HighlightScopeTable,
+        stack: ScopeStackId,
+    ) -> Style {
+        self.inner.get().resolve(table, stack)
+    }
+
+    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> Style {
         self.inner.get().resolve_shared_scope_names(scopes)
     }
 }
 
-/// Batteries-included TextMate highlighter with the bundled language catalog.
-#[cfg(feature = "bundled-grammars")]
-#[derive(Debug)]
-pub struct Highlighter {
-    options: TokenizerOptions,
-    tokenizers: BTreeMap<String, Tokenizer>,
+/// Cache and tokenizer limits for a shared [`Highlighter`].
+#[derive(Debug, Clone, Copy)]
+pub struct HighlighterOptions {
+    /// Maximum retained prepared languages (LRU); defaults to 16. Zero disables retention.
+    pub prepared_languages: usize,
+    /// Maximum idle tokenizers per retained language; defaults to 2.
+    /// Zero disables replay reuse. Active calls and sessions are caller-owned
+    /// and may temporarily exceed this limit.
+    pub idle_tokenizers_per_language: usize,
+    /// Per-tokenizer limits. Defaults to 1,024 cached lines and otherwise
+    /// [`TokenizerOptions::default`]. Zero line entries disables replay caching.
+    pub tokenizer: TokenizerOptions,
 }
 
-#[cfg(feature = "bundled-grammars")]
-impl Highlighter {
-    #[cfg(feature = "bundled-grammars")]
-    pub fn bundled() -> Result<Self> {
-        if crate::grammars::available_languages().is_empty() {
-            return Err(Error::Bundle(
-                "the bundled language catalog is empty".to_owned(),
-            ));
+impl Default for HighlighterOptions {
+    fn default() -> Self {
+        Self {
+            prepared_languages: 16,
+            idle_tokenizers_per_language: 2,
+            tokenizer: TokenizerOptions {
+                line_cache_entries: 1024,
+                ..TokenizerOptions::default()
+            },
         }
-        Ok(Self {
-            options: TokenizerOptions::default(),
-            tokenizers: BTreeMap::new(),
-        })
+    }
+}
+
+/// A cheaply cloned, thread-safe highlighter backed by a [`Catalog`].
+///
+/// Clones share a bounded LRU of prepared languages and idle tokenizers.
+/// Matching runs outside the cache lock; simultaneous calls use independent
+/// mutable tokenizers. Sessions share preparation but own their continuation.
+/// See [`HighlighterOptions`] for retention limits. Limits count entries, not
+/// bytes: grammar size, line length and scope diversity also affect memory.
+#[derive(Debug, Clone)]
+pub struct Highlighter {
+    inner: Arc<HighlighterInner>,
+}
+
+#[derive(Debug)]
+struct HighlighterInner {
+    catalog: Catalog,
+    options: HighlighterOptions,
+    cache: Mutex<VecDeque<CachedLanguage>>,
+}
+
+#[derive(Debug)]
+struct CachedLanguage {
+    id: String,
+    prepared: Arc<PreparedLanguage>,
+    idle: Vec<Tokenizer>,
+}
+
+impl Highlighter {
+    /// Creates a highlighter backed by the supplied catalog.
+    pub fn new(catalog: &Catalog) -> Self {
+        Self::with_catalog_options(catalog, HighlighterOptions::default())
     }
 
+    /// Creates a catalog-backed highlighter with explicit retention limits.
+    pub fn with_catalog_options(catalog: &Catalog, options: HighlighterOptions) -> Self {
+        Self {
+            inner: Arc::new(HighlighterInner {
+                catalog: catalog.clone(),
+                options,
+                cache: Mutex::new(VecDeque::new()),
+            }),
+        }
+    }
+
+    /// Creates a highlighter backed by the embedded catalog.
+    #[cfg(feature = "bundled-grammars")]
+    pub fn bundled() -> Result<Self> {
+        let catalog = Catalog::bundled();
+        if catalog.languages().is_empty() {
+            return Err(Error::Bundle(crate::BundleError::new(
+                crate::BundleErrorKind::EmptyCatalog,
+                None,
+                "the bundled language catalog is empty".to_owned(),
+            )));
+        }
+        Ok(Self::new(&catalog))
+    }
+
+    /// Creates a bundled highlighter with caller-supplied tokenizer limits.
     #[cfg(feature = "bundled-grammars")]
     pub fn with_options(options: TokenizerOptions) -> Result<Self> {
-        let mut highlighter = Self::bundled()?;
-        highlighter.options = options;
-        Ok(highlighter)
+        Ok(Self::with_catalog_options(
+            &Catalog::bundled(),
+            HighlighterOptions {
+                tokenizer: options,
+                ..HighlighterOptions::default()
+            },
+        ))
     }
 
     /// Tokenizes a complete document and preserves exact TextMate scope stacks.
-    #[cfg(feature = "bundled-grammars")]
-    pub fn tokenize(&mut self, language: &str, source: &str) -> Result<TokenizedDocument> {
-        Ok(self.tokenizer_for(language)?.tokenize(source))
+    pub fn tokenize(&self, language: &str, source: &str) -> Result<TokenizedDocument> {
+        self.with_tokenizer(language, |tokenizer| tokenizer.tokenize(source))
     }
 
-    fn tokenizer_for(&mut self, language: &str) -> Result<&mut Tokenizer> {
-        let canonical = crate::grammars::canonical_language(language)
+    fn checkout(
+        &self,
+        language: &str,
+        take_idle: bool,
+    ) -> Result<(Arc<PreparedLanguage>, Option<Tokenizer>)> {
+        let canonical = self
+            .inner
+            .catalog
+            .canonical_language(language)
             .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
-        if !self.tokenizers.contains_key(&canonical) {
-            self.tokenizers.insert(
-                canonical.clone(),
-                Tokenizer::for_bundled_language(&canonical, self.options)?,
-            );
+        let mut cache = self
+            .inner
+            .cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(index) = cache.iter().position(|entry| entry.id == canonical) {
+            let mut entry = cache.remove(index).expect("cache index exists");
+            let tokenizer = if take_idle { entry.idle.pop() } else { None };
+            let prepared = Arc::clone(&entry.prepared);
+            cache.push_back(entry);
+            return Ok((prepared, tokenizer));
         }
-        Ok(self
-            .tokenizers
-            .get_mut(&canonical)
-            .expect("tokenizer inserted before use"))
+        let prepared = Arc::new(PreparedLanguage::for_highlighter(
+            &self.inner.catalog,
+            canonical,
+        )?);
+        let tokenizer = take_idle.then(|| prepared.first_tokenizer(self.inner.options.tokenizer));
+        if self.inner.options.prepared_languages > 0 {
+            if cache.len() == self.inner.options.prepared_languages {
+                cache.pop_front();
+            }
+            cache.push_back(CachedLanguage {
+                id: canonical.to_owned(),
+                prepared: Arc::clone(&prepared),
+                idle: Vec::new(),
+            });
+        }
+        Ok((prepared, tokenizer))
+    }
+
+    fn with_tokenizer<T>(
+        &self,
+        language: &str,
+        operation: impl FnOnce(&mut Tokenizer) -> T,
+    ) -> Result<T> {
+        let (prepared, tokenizer) = self.checkout(language, true)?;
+        let mut tokenizer =
+            tokenizer.unwrap_or_else(|| prepared.tokenizer(self.inner.options.tokenizer));
+        let result = operation(&mut tokenizer);
+        let mut cache = self
+            .inner
+            .cache
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(entry) = cache
+            .iter_mut()
+            .find(|entry| Arc::ptr_eq(&entry.prepared, &prepared))
+            && entry.idle.len() < self.inner.options.idle_tokenizers_per_language
+        {
+            entry.idle.push(tokenizer);
+        }
+        Ok(result)
     }
 
     #[cfg(all(feature = "bundled-themes", any(feature = "html", feature = "ansi")))]
     fn tokenize_compact(
-        &mut self,
+        &self,
         language: &str,
         source: &str,
     ) -> Result<(crate::HighlightedText, HighlightStatus)> {
-        Ok(self.tokenizer_for(language)?.tokenize_compact(source))
+        self.with_tokenizer(language, |tokenizer| tokenizer.tokenize_compact(source))
     }
 
     /// Tokenizes and styles a complete source document with a bundled theme.
-    #[cfg(all(feature = "bundled-grammars", feature = "bundled-themes"))]
+    #[cfg(feature = "bundled-themes")]
     pub fn highlight(
-        &mut self,
+        &self,
         language: &str,
         source: &str,
         theme: &str,
@@ -157,7 +321,7 @@ impl Highlighter {
     /// Highlights source and renders escaped HTML with safe defaults.
     #[cfg(all(feature = "bundled-themes", feature = "html"))]
     pub fn highlight_html(
-        &mut self,
+        &self,
         language: &str,
         source: &str,
         theme: &str,
@@ -168,7 +332,7 @@ impl Highlighter {
     /// Highlights and renders escaped HTML directly from compact tokens.
     #[cfg(all(feature = "bundled-themes", feature = "html"))]
     pub fn highlight_html_with_options(
-        &mut self,
+        &self,
         language: &str,
         source: &str,
         theme: &str,
@@ -182,7 +346,7 @@ impl Highlighter {
     /// Highlights source and renders 24-bit ANSI output with control sanitization.
     #[cfg(all(feature = "bundled-themes", feature = "ansi"))]
     pub fn highlight_ansi(
-        &mut self,
+        &self,
         language: &str,
         source: &str,
         theme: &str,
@@ -193,7 +357,7 @@ impl Highlighter {
     /// Highlights and renders ANSI output directly from compact tokens.
     #[cfg(all(feature = "bundled-themes", feature = "ansi"))]
     pub fn highlight_ansi_with_options(
-        &mut self,
+        &self,
         language: &str,
         source: &str,
         theme: &str,
@@ -204,9 +368,9 @@ impl Highlighter {
         crate::render::render_ansi_compact(source, &tokens, status, &theme, options)
     }
 
-    #[cfg(feature = "bundled-grammars")]
+    /// Tokenizes and styles a document with a caller-supplied theme.
     pub fn highlight_with_theme(
-        &mut self,
+        &self,
         language: &str,
         source: &str,
         theme: &Theme,
@@ -215,22 +379,25 @@ impl Highlighter {
         Ok(style_document(tokenized, theme))
     }
 
-    /// Detects a bundled language from a path and highlights the source.
-    #[cfg(all(feature = "bundled-grammars", feature = "bundled-themes"))]
+    /// Detects a language using [`Catalog::detect`] and highlights the source.
+    #[cfg(feature = "bundled-themes")]
     pub fn highlight_path(
-        &mut self,
+        &self,
         path: impl AsRef<std::path::Path>,
         source: &str,
         theme: &str,
     ) -> Result<HighlightedDocument> {
         let path = path.as_ref().to_string_lossy();
-        let language = crate::grammars::detect_language_from_path(&path)
+        let language = self
+            .inner
+            .catalog
+            .detect(Some(std::path::Path::new(path.as_ref())), source)
             .ok_or_else(|| Error::UnknownLanguage(path.into_owned()))?;
-        self.highlight(&language, source, theme)
+        self.highlight(language, source, theme)
     }
 
     /// Starts an incremental session with a bundled theme.
-    #[cfg(all(feature = "bundled-grammars", feature = "bundled-themes"))]
+    #[cfg(feature = "bundled-themes")]
     pub fn session(&self, language: &str, theme: &str) -> Result<HighlightSession> {
         let theme = Theme::bundled(theme)?;
         self.session_with_theme(language, &theme)
@@ -240,7 +407,8 @@ impl Highlighter {
     ///
     /// This remains available when `bundled-themes` is disabled.
     pub fn session_with_theme(&self, language: &str, theme: &Theme) -> Result<HighlightSession> {
-        let tokenizer = Tokenizer::for_bundled_language(language, self.options)?;
+        let (prepared, _) = self.checkout(language, false)?;
+        let tokenizer = prepared.tokenizer(self.inner.options.tokenizer);
         let state = tokenizer.initial_state();
         Ok(HighlightSession {
             tokenizer,
@@ -255,43 +423,38 @@ impl Highlighter {
 pub fn style_document(tokenized: TokenizedDocument, theme: &Theme) -> HighlightedDocument {
     let status = tokenized.status();
     let lines = tokenized
-        .lines()
-        .iter()
+        .lines
+        .into_iter()
         .map(|line| HighlightedLine {
-            spans: line
-                .spans()
-                .iter()
-                .map(|span| HighlightedSpan {
-                    range: span.range(),
-                    scope_stack: span.scope_stack(),
-                    style: theme.resolve(line.scope_table(), span.scope_stack()),
+            tokens: line
+                .tokens
+                .into_iter()
+                .map(|token| {
+                    let style = theme.resolve(token.scopes());
+                    HighlightedToken { token, style }
                 })
                 .collect(),
-            scopes: Arc::clone(line.scope_table()),
+            status: line.status,
         })
         .collect();
-    HighlightedDocument { lines, status }
+    HighlightedDocument {
+        lines,
+        status,
+        default_style: theme.inner.get().default_style(),
+    }
 }
 
-#[cfg(feature = "bundled-grammars")]
 const MAX_INCREMENTAL_STYLE_CACHE_ENTRIES: usize = 8_192;
 
 /// A dense session-local cache keyed by the originating tokenizer's stable
 /// scope-stack identity. IDs above the fixed slot bound remain uncached.
-#[cfg(feature = "bundled-grammars")]
 #[derive(Debug, Default)]
 struct IncrementalStyleCache {
-    styles: Vec<Option<ResolvedSyntaxStyle>>,
+    styles: Vec<Option<Style>>,
 }
 
-#[cfg(feature = "bundled-grammars")]
 impl IncrementalStyleCache {
-    fn resolve(
-        &mut self,
-        stack: ScopeStackId,
-        scopes: &[Arc<str>],
-        theme: &Theme,
-    ) -> ResolvedSyntaxStyle {
+    fn resolve(&mut self, stack: EngineScopeStackId, scopes: &[Arc<str>], theme: &Theme) -> Style {
         let index = stack.0 as usize;
         if let Some(style) = self.styles.get(index).copied().flatten() {
             return style;
@@ -308,15 +471,13 @@ impl IncrementalStyleCache {
     }
 }
 
-#[cfg(feature = "bundled-grammars")]
 struct IncrementalSpanVecSink<'a> {
     line: &'a str,
     theme: &'a Theme,
     style_cache: &'a mut IncrementalStyleCache,
-    spans: &'a mut Vec<IncrementalHighlightedSpan>,
+    spans: &'a mut Vec<HighlightedToken>,
 }
 
-#[cfg(feature = "bundled-grammars")]
 impl SharedScopeSink for IncrementalSpanVecSink<'_> {
     fn reserve(&mut self, span_count: usize) {
         if self.spans.capacity() == 0 {
@@ -326,7 +487,12 @@ impl SharedScopeSink for IncrementalSpanVecSink<'_> {
         }
     }
 
-    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+    fn push(
+        &mut self,
+        range: Range<usize>,
+        stack: EngineScopeStackId,
+        scopes: Arc<crate::types::ScopeStorage>,
+    ) {
         if let Some(span) = incremental_span(
             self.line,
             range,
@@ -340,7 +506,6 @@ impl SharedScopeSink for IncrementalSpanVecSink<'_> {
     }
 }
 
-#[cfg(feature = "bundled-grammars")]
 struct IncrementalSpanCallbackSink<'a, F> {
     line: &'a str,
     theme: &'a Theme,
@@ -348,11 +513,15 @@ struct IncrementalSpanCallbackSink<'a, F> {
     callback: F,
 }
 
-#[cfg(feature = "bundled-grammars")]
-impl<F: FnMut(IncrementalHighlightedSpan)> SharedScopeSink for IncrementalSpanCallbackSink<'_, F> {
+impl<F: FnMut(HighlightedToken)> SharedScopeSink for IncrementalSpanCallbackSink<'_, F> {
     fn reserve(&mut self, _span_count: usize) {}
 
-    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+    fn push(
+        &mut self,
+        range: Range<usize>,
+        stack: EngineScopeStackId,
+        scopes: Arc<crate::types::ScopeStorage>,
+    ) {
         if let Some(span) = incremental_span(
             self.line,
             range,
@@ -366,22 +535,26 @@ impl<F: FnMut(IncrementalHighlightedSpan)> SharedScopeSink for IncrementalSpanCa
     }
 }
 
-#[cfg(feature = "bundled-grammars")]
 fn incremental_span(
     line: &str,
     range: Range<usize>,
-    stack: ScopeStackId,
-    scopes: Arc<[Arc<str>]>,
+    stack: EngineScopeStackId,
+    scopes: Arc<crate::types::ScopeStorage>,
     theme: &Theme,
     style_cache: &mut IncrementalStyleCache,
-) -> Option<IncrementalHighlightedSpan> {
+) -> Option<HighlightedToken> {
     let start = range.start.min(line.len());
     let end = range.end.min(line.len());
     (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then(|| {
-        IncrementalHighlightedSpan {
-            range: start..end,
-            style: style_cache.resolve(stack, &scopes, theme),
-            scopes,
+        HighlightedToken {
+            style: style_cache.resolve(stack, scopes.shared_names(), theme),
+            token: Token {
+                range: start..end,
+                scopes: TokenScopes {
+                    owner: Some(scopes),
+                    stack: ScopeStackId(stack.0),
+                },
+            },
         }
     })
 }
@@ -390,7 +563,6 @@ fn incremental_span(
 ///
 /// Resolved styles are retained in a session-local cache for up to 8,192
 /// tokenizer scope-stack identities. Higher identities remain uncached.
-#[cfg(feature = "bundled-grammars")]
 #[derive(Debug)]
 pub struct HighlightSession {
     tokenizer: Tokenizer,
@@ -399,12 +571,15 @@ pub struct HighlightSession {
     style_cache: IncrementalStyleCache,
 }
 
-#[cfg(feature = "bundled-grammars")]
 impl HighlightSession {
-    pub fn highlight_line(&mut self, line: &str) -> Result<IncrementalHighlightedLine> {
+    /// Highlights one logical line without newline terminators and advances continuation state.
+    pub fn highlight_line(&mut self, line: &str) -> Result<HighlightedLine> {
         let mut spans = Vec::new();
         let status = self.highlight_line_into(line, &mut spans)?;
-        Ok(IncrementalHighlightedLine { spans, status })
+        Ok(HighlightedLine {
+            tokens: spans,
+            status,
+        })
     }
 
     /// Highlights one logical line into a caller-owned reusable span buffer.
@@ -414,7 +589,7 @@ impl HighlightSession {
     pub fn highlight_line_into(
         &mut self,
         line: &str,
-        spans: &mut Vec<IncrementalHighlightedSpan>,
+        spans: &mut Vec<HighlightedToken>,
     ) -> Result<HighlightStatus> {
         self.tokenizer.validate_line(line, &self.state)?;
         spans.clear();
@@ -436,7 +611,7 @@ impl HighlightSession {
     pub fn highlight_line_with(
         &mut self,
         line: &str,
-        sink: impl FnMut(IncrementalHighlightedSpan),
+        sink: impl FnMut(HighlightedToken),
     ) -> Result<HighlightStatus> {
         let mut sink = IncrementalSpanCallbackSink {
             line,
@@ -456,96 +631,75 @@ impl HighlightSession {
         self.state = self.tokenizer.initial_state();
     }
 
+    /// Borrows the current continuation state.
     pub fn state(&self) -> &TokenizerState {
         &self.state
     }
 }
 
+/// One styled token with a line-relative byte range and exact ordered scopes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HighlightedSpan {
-    range: Range<usize>,
-    scope_stack: ScopeStackRef,
-    style: ResolvedSyntaxStyle,
+pub struct HighlightedToken {
+    token: Token,
+    style: Style,
 }
 
-impl HighlightedSpan {
+impl HighlightedToken {
+    /// Returns the line-relative UTF-8 byte range, excluding line terminators.
     pub fn range(&self) -> Range<usize> {
-        self.range.clone()
+        self.token.range()
     }
 
-    pub fn scope_stack(&self) -> ScopeStackRef {
-        self.scope_stack
+    /// Iterates scope names from outermost to innermost without allocating.
+    pub fn scopes(&self) -> Scopes<'_> {
+        self.token.scopes()
     }
 
-    pub fn style(&self) -> ResolvedSyntaxStyle {
+    /// Returns the scope-stack key; see [`Token::scope_stack`] for comparability.
+    pub fn scope_stack(&self) -> Option<ScopeStackId> {
+        self.token.scope_stack()
+    }
+
+    /// Returns the resolved theme style.
+    pub fn style(&self) -> Style {
         self.style
     }
 }
 
+/// One styled logical line, from a document or an incremental session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HighlightedLine {
-    spans: Vec<HighlightedSpan>,
-    scopes: Arc<HighlightScopeTable>,
-}
-
-impl HighlightedLine {
-    pub fn spans(&self) -> &[HighlightedSpan] {
-        &self.spans
-    }
-
-    pub fn scope_names(&self, stack: ScopeStackRef) -> impl Iterator<Item = &str> {
-        self.scopes.stack_names(stack)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HighlightedDocument {
-    lines: Vec<HighlightedLine>,
+    tokens: Vec<HighlightedToken>,
     status: HighlightStatus,
 }
 
-impl HighlightedDocument {
-    pub fn lines(&self) -> &[HighlightedLine] {
-        &self.lines
+impl HighlightedLine {
+    /// Returns styled tokens in byte order.
+    pub fn tokens(&self) -> &[HighlightedToken] {
+        &self.tokens
     }
 
+    /// Reports whether this line was fully tokenized within resource limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
 }
 
+/// Styled logical lines and their aggregate completion status.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IncrementalHighlightedSpan {
-    range: Range<usize>,
-    scopes: Arc<[Arc<str>]>,
-    style: ResolvedSyntaxStyle,
-}
-
-impl IncrementalHighlightedSpan {
-    pub fn range(&self) -> Range<usize> {
-        self.range.clone()
-    }
-
-    pub fn scopes(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.scopes.iter().map(AsRef::as_ref)
-    }
-
-    pub fn style(&self) -> ResolvedSyntaxStyle {
-        self.style
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IncrementalHighlightedLine {
-    spans: Vec<IncrementalHighlightedSpan>,
+pub struct HighlightedDocument {
+    lines: Vec<HighlightedLine>,
     status: HighlightStatus,
+    pub(crate) default_style: Style,
 }
 
-impl IncrementalHighlightedLine {
-    pub fn spans(&self) -> &[IncrementalHighlightedSpan] {
-        &self.spans
+impl HighlightedDocument {
+    /// Returns logical lines in source order.
+    pub fn lines(&self) -> &[HighlightedLine] {
+        &self.lines
     }
 
+    /// Reports whether the entire tokenization operation completed within limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
@@ -576,14 +730,20 @@ mod incremental_style_cache_tests {
         let expected = theme.resolve_shared_scope_names(&scopes);
         let mut cache = IncrementalStyleCache::default();
 
-        assert_eq!(cache.resolve(ScopeStackId(3), &scopes, &theme), expected);
+        assert_eq!(
+            cache.resolve(EngineScopeStackId(3), &scopes, &theme),
+            expected
+        );
         assert_eq!(cache.styles.len(), 4);
         assert_eq!(cache.styles[3], Some(expected));
-        assert_eq!(cache.resolve(ScopeStackId(3), &scopes, &theme), expected);
+        assert_eq!(
+            cache.resolve(EngineScopeStackId(3), &scopes, &theme),
+            expected
+        );
 
         assert_eq!(
             cache.resolve(
-                ScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32 - 1),
+                EngineScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32 - 1),
                 &scopes,
                 &theme,
             ),
@@ -592,7 +752,7 @@ mod incremental_style_cache_tests {
         assert_eq!(cache.styles.len(), MAX_INCREMENTAL_STYLE_CACHE_ENTRIES);
         assert_eq!(
             cache.resolve(
-                ScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32),
+                EngineScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32),
                 &scopes,
                 &theme,
             ),
@@ -630,5 +790,67 @@ mod incremental_style_cache_tests {
                 .count(),
             cached_slots
         );
+    }
+}
+
+#[cfg(all(test, feature = "bundled-grammars"))]
+mod cache_tests {
+    use super::*;
+
+    #[test]
+    fn cache_reuses_preparation_for_sessions_and_bounds_idle_state() {
+        let highlighter = Highlighter::with_catalog_options(
+            &Catalog::bundled(),
+            HighlighterOptions {
+                prepared_languages: 1,
+                idle_tokenizers_per_language: 1,
+                ..HighlighterOptions::default()
+            },
+        );
+        let (first, _) = highlighter.checkout("rs", false).unwrap();
+        let (second, _) = highlighter.clone().checkout("rust", false).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        let theme = Theme::from_json(r#"{"tokenColors":[]}"#).unwrap();
+        let mut session = highlighter.session_with_theme("rust", &theme).unwrap();
+        highlighter.tokenize("rust", "fn main() {}").unwrap();
+        let (prepared, tokenizer) = highlighter.checkout("rust", true).unwrap();
+        assert!(tokenizer.is_some());
+        assert!(Arc::ptr_eq(&first, &prepared));
+        highlighter.tokenize("json", "{}").unwrap();
+        let cache = highlighter.inner.cache.lock().unwrap();
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache[0].id, "json");
+        assert_eq!(cache[0].idle.len(), 1);
+        drop(cache);
+        // An evicted language remains usable by an already active session.
+        assert!(
+            session
+                .highlight_line("fn main() {}")
+                .unwrap()
+                .status()
+                .is_complete()
+        );
+        highlighter
+            .with_tokenizer("json", |_| {
+                highlighter.tokenize("json", "[]").unwrap();
+            })
+            .unwrap();
+        assert_eq!(highlighter.inner.cache.lock().unwrap()[0].idle.len(), 1);
+    }
+
+    #[test]
+    fn zero_capacity_disables_retention() {
+        let highlighter = Highlighter::with_catalog_options(
+            &Catalog::bundled(),
+            HighlighterOptions {
+                prepared_languages: 0,
+                ..HighlighterOptions::default()
+            },
+        );
+        highlighter.tokenize("json", "{}").unwrap();
+        assert!(highlighter.inner.cache.lock().unwrap().is_empty());
+        let first = highlighter.checkout("json", false).unwrap().0;
+        let second = highlighter.checkout("json", false).unwrap().0;
+        assert!(!Arc::ptr_eq(&first, &second));
     }
 }

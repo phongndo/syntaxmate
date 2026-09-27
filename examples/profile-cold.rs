@@ -70,9 +70,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .as_ref()
         .map(|assets| load_asset_closure(assets, &scope))
         .transpose()?;
+    let catalog = Catalog::bundled();
     let bundled_language = if custom.is_none() {
         Some(
-            Catalog::bundled()
+            catalog
                 .language_for_scope(&scope)
                 .ok_or_else(|| format!("unknown bundled scope {scope:?}"))?,
         )
@@ -85,9 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Tokenizer::new(registry, *root, TokenizerOptions::default())
         } else {
             Tokenizer::for_bundled_language(
-                bundled_language
-                    .as_deref()
-                    .expect("bundled language selected"),
+                bundled_language.expect("bundled language selected"),
                 TokenizerOptions::default(),
             )
         }
@@ -109,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         token_count += document
             .lines()
             .iter()
-            .map(|line| line.spans().len())
+            .map(|line| line.tokens().len())
             .sum::<usize>();
     }
     let elapsed = started.elapsed();

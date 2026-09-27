@@ -14,9 +14,11 @@ use std::{
 };
 
 use crate::grammars::bundle::GrammarBlob;
+use crate::types::ScopeStorage;
 use crate::{
     EngineHighlightedLine as HighlightedLine, HighlightScopeTable, HighlightedText,
-    LineTextFingerprint, ScopeAtomId, ScopeStackRef, SyntaxClass, SyntaxSegment,
+    LineTextFingerprint, ScopeAtomId, ScopeStackId as OutputScopeStackId, SyntaxClass,
+    SyntaxSegment,
 };
 
 use super::cache::{CachedLine, LineCache, LineCacheKey};
@@ -98,7 +100,7 @@ pub struct ScopedToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SharedScopedToken {
     pub(crate) range: Range<usize>,
-    pub(crate) scopes: Arc<[Arc<str>]>,
+    pub(crate) scopes: Arc<ScopeStorage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,7 +111,41 @@ pub(crate) struct CompactScopedToken {
 
 pub(crate) trait SharedScopeSink {
     fn reserve(&mut self, token_count: usize);
-    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>);
+    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<ScopeStorage>);
+}
+
+/// A statically dispatched destination for document output. Scope tables are
+/// published only after every line has interned its stacks.
+pub(crate) trait DocumentOutputLine: Sized {
+    type ScopeOwner;
+    fn scope_owner(scopes: Arc<HighlightScopeTable>) -> Self::ScopeOwner;
+    fn new(fingerprint: LineTextFingerprint, capacity: usize, degraded: bool) -> Self;
+    fn push(&mut self, range: Range<usize>, class: Option<SyntaxClass>, stack: OutputScopeStackId);
+    fn finish(&mut self, scopes: &Self::ScopeOwner);
+}
+
+impl DocumentOutputLine for HighlightedLine {
+    type ScopeOwner = Arc<HighlightScopeTable>;
+
+    fn scope_owner(scopes: Arc<HighlightScopeTable>) -> Self::ScopeOwner {
+        scopes
+    }
+    fn new(fingerprint: LineTextFingerprint, capacity: usize, degraded: bool) -> Self {
+        Self {
+            fingerprint,
+            degraded,
+            segments: Vec::with_capacity(capacity),
+            scope_table: HighlightScopeTable::empty_shared(),
+        }
+    }
+
+    fn push(&mut self, range: Range<usize>, class: Option<SyntaxClass>, stack: OutputScopeStackId) {
+        push_segment(&mut self.segments, range.start, range.end, class, stack);
+    }
+
+    fn finish(&mut self, scopes: &Arc<HighlightScopeTable>) {
+        self.scope_table = Arc::clone(scopes);
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -118,25 +154,25 @@ struct OutputScopeTableCache {
 }
 
 struct OutputScopeTableBuilder {
-    engine_to_output: FastMap<ScopeStackId, ScopeStackRef>,
+    engine_to_output: FastMap<ScopeStackId, OutputScopeStackId>,
     output_stacks: Vec<ScopeStackId>,
 }
 
 impl OutputScopeTableBuilder {
     fn new() -> Self {
         let mut engine_to_output = hashing::fast_map();
-        engine_to_output.insert(ScopeStackId::default(), ScopeStackRef::default());
+        engine_to_output.insert(ScopeStackId::default(), OutputScopeStackId::default());
         Self {
             engine_to_output,
             output_stacks: vec![ScopeStackId::default()],
         }
     }
 
-    fn intern_engine_stack(&mut self, stack: ScopeStackId) -> ScopeStackRef {
+    fn intern_engine_stack(&mut self, stack: ScopeStackId) -> OutputScopeStackId {
         if let Some(output) = self.engine_to_output.get(&stack) {
             return *output;
         }
-        let output = ScopeStackRef(self.output_stacks.len() as u32);
+        let output = OutputScopeStackId(self.output_stacks.len() as u32);
         self.output_stacks.push(stack);
         self.engine_to_output.insert(stack, output);
         output
@@ -229,6 +265,7 @@ pub(crate) struct SharedTokenizedLine {
 
 #[derive(Debug, Clone)]
 struct CompactTokenizedLine {
+    degraded: bool,
     tokens: CompactLineTokens,
     state: TokenizerState,
     entry_state_id: StateId,
@@ -261,11 +298,12 @@ impl From<Vec<CompactScopedToken>> for CompactLineTokens {
 
 #[derive(Debug, Clone, Default)]
 pub struct TokenizerState {
-    // Parent-linked immutable chunks keep continuation updates bounded. Pushes
-    // copy at most one 32-frame tail chunk instead of cloning every frame
-    // pointer in a deep stack; a hash-consed stack id keeps equality exact and
-    // O(1) even when equal states were built independently.
+    // Parent-linked immutable nodes keep continuation updates bounded. Exact
+    // structural interning makes equality O(1), even for independently built
+    // stacks. Engine states must belong to the same tokenizer; the public
+    // wrapper checks ownership and compares the document-start anchor flag.
     frames: FrameStack,
+    // Derived from the stack identity; not a separate continuation field.
     interner_hash: u64,
 }
 
@@ -413,6 +451,16 @@ fn fnv64_mix_opt_str(hash: u64, value: Option<&str>) -> u64 {
     value.map_or(hash, |value| fnv64_mix(hash, value.as_bytes()))
 }
 
+// Continuation identity audit (FrameIdentityKey mirrors these semantic fields):
+// - grammar/base/rule select rules, repository context, and embedded $base;
+// - scope_prefix/name/content_name determine output and injection selection;
+// - end/while text includes begin-capture substitutions; optional pattern IDs
+//   select the corresponding static matcher and its capture layout;
+// - apply_end_pattern_last controls precedence; begin_captured_eol restores \G.
+// Capture specs and nested patterns are immutable rule payloads, determined by
+// grammar_id/rule_id within the owning tokenizer. Hashes and interned IDs are
+// derived accelerators, not additional semantics. Matcher, scope, candidate,
+// and line caches live on the tokenizer and do not add continuation context.
 #[derive(Debug, Clone)]
 struct Frame {
     grammar_id: GrammarId,
@@ -448,12 +496,21 @@ struct InternedFrameStackId(u32);
 struct InternedFrameId(u32);
 
 /// Precomputed identity of a fully static frame: the identity hash plus the
-/// globally interned frame id. Cached per candidate so repeat pushes of the
-/// same begin rule skip both string hashing and the intern-table mutex.
+/// tokenizer-local interned frame id. Cached per static rule and context so
+/// repeat pushes skip string hashing and structural interner lookup.
 #[derive(Debug, Clone, Copy)]
 struct StaticFrameIdentity {
     identity_hash: u64,
     frame_id: InternedFrameId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct StaticFrameKey {
+    grammar_id: GrammarId,
+    base_grammar_id: GrammarId,
+    rule_id: RuleId,
+    scope_prefix: Option<Arc<str>>,
+    begin_captured_eol: bool,
 }
 
 impl Frame {
@@ -666,7 +723,10 @@ impl FrameStackInternTable {
 #[derive(Clone, Default)]
 struct FrameStack {
     tail: Option<Arc<FrameNode>>,
+    // Length and FrameNode depth/while_frames are derived from the chain.
     len: usize,
+    // Exact identity of (parent identity, structural frame identity), retained
+    // for the tokenizer's lifetime. Hash collisions are resolved structurally.
     interned_id: InternedFrameStackId,
 }
 
@@ -1262,12 +1322,21 @@ impl RepositoryNameInterner {
 }
 
 /// A bundled closure member decoded on first access.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct LazyGrammar {
-    pub(crate) blob: &'static GrammarBlob,
+    pub(crate) bundle: Arc<crate::grammars::bundle::Bundle>,
+    pub(crate) index: usize,
     pub(crate) traits: ClosureMemberTraits,
-    pub(crate) top_level_availability: Option<&'static [AvailabilityStep]>,
-    pub(crate) repository_walk_skeleton: Option<&'static [u8]>,
+}
+
+impl LazyGrammar {
+    fn blob(&self) -> &GrammarBlob {
+        &self.bundle.grammar_blobs[self.index]
+    }
+
+    fn graph(&self) -> &crate::grammars::bundle::GrammarGraph {
+        &self.bundle.grammar_graphs[self.index]
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1294,7 +1363,8 @@ impl GrammarSlot {
         self.grammar
             .get_or_init(|| {
                 self.lazy
-                    .and_then(|lazy| lazy.blob.compiled_grammar(id).ok())
+                    .as_ref()
+                    .and_then(|lazy| lazy.blob().compiled_grammar(id).ok())
                     .map(Arc::new)
             })
             .as_ref()
@@ -1328,7 +1398,7 @@ impl GrammarSet {
         let id = GrammarId(
             u16::try_from(self.grammars.len()).expect("grammar closure fits in GrammarId"),
         );
-        Arc::make_mut(&mut self.scope_to_id).insert(lazy.blob.scope_name.clone(), id);
+        Arc::make_mut(&mut self.scope_to_id).insert(lazy.blob().scope_name.clone(), id);
         self.insert_slot(
             id,
             GrammarSlot {
@@ -1379,7 +1449,10 @@ impl GrammarSet {
     fn repository_walk_grammar(&self, id: GrammarId) -> Option<&CompiledGrammar> {
         let slot = self.grammars.get(id.0 as usize)?;
         if slot.grammar.get().is_none()
-            && let Some(bytes) = slot.lazy.and_then(|lazy| lazy.repository_walk_skeleton)
+            && let Some(bytes) = slot
+                .lazy
+                .as_ref()
+                .and_then(|lazy| lazy.graph().repository_walk_skeleton.as_deref())
             && let Some(skeleton) = slot
                 .walk_skeleton
                 .get_or_init(|| decode_compiled_grammar(id, bytes).ok().map(Arc::new))
@@ -1416,7 +1489,7 @@ impl GrammarSet {
     fn may_inject(&self, id: GrammarId) -> bool {
         self.grammars
             .get(id.0 as usize)
-            .and_then(|slot| slot.lazy)
+            .and_then(|slot| slot.lazy.as_ref())
             .is_none_or(|lazy| lazy.traits.injects)
     }
 
@@ -1424,15 +1497,16 @@ impl GrammarSet {
     ///
     /// Evaluating any other availability node of a grammar decodes it, so the
     /// only cached nodes of such a member are `true` entries from this proof.
-    fn undecoded_top_level_availability(
-        &self,
-        id: GrammarId,
-    ) -> Option<&'static [AvailabilityStep]> {
+    fn undecoded_top_level_availability(&self, id: GrammarId) -> Option<&[AvailabilityStep]> {
         let slot = self.grammars.get(id.0 as usize)?;
         if slot.grammar.get().is_some() {
             return None;
         }
-        slot.lazy?.top_level_availability
+        slot.lazy
+            .as_ref()?
+            .graph()
+            .top_level_availability
+            .as_deref()
     }
 
     /// Whether the unbounded repository-context walk may skip an external
@@ -1454,7 +1528,7 @@ impl GrammarSet {
         let Some(slot) = self.grammars.get(id.0 as usize) else {
             return false;
         };
-        let traits = match slot.lazy {
+        let traits = match slot.lazy.as_ref() {
             Some(lazy) => Some(lazy.traits),
             None => loaded.traits(self, id),
         };
@@ -1691,6 +1765,7 @@ impl GrammarSet {
                             "include",
                             format!("unknown external grammar {scope_text}"),
                         )
+                        .with_include(Some(scope_text.to_owned()), repository.clone())
                     })?;
                     if let Some(repository) = repository
                         && !external.repository.contains_key(repository)
@@ -1700,7 +1775,8 @@ impl GrammarSet {
                             format!("{path}[{index}]"),
                             "include",
                             format!("unknown external include {scope_text}#{repository}"),
-                        ));
+                        )
+                        .with_include(Some(scope_text.to_owned()), Some(repository.clone())));
                     }
                 }
                 other => {
@@ -1803,11 +1879,47 @@ impl PreparedLanguage {
         })
     }
 
+    /// The bundle already records a closed grammar set. Keep members lazy and
+    /// size pattern slots from their validated metadata instead of walking and
+    /// decoding every rule merely to rediscover that closure.
+    pub(crate) fn from_catalog(grammars: GrammarSet, root: GrammarId) -> Self {
+        let grammar_count = grammars.len();
+        let static_patterns = Arc::new(PreparedPatternCache::new(
+            &grammars,
+            &vec![true; grammar_count],
+        ));
+        let static_blueprints = Arc::new(PreparedBlueprintCache::default());
+        let prototype = TextMateTokenizer::new_inner(
+            grammars,
+            root,
+            Some(Arc::clone(&static_patterns)),
+            Some(Arc::clone(&static_blueprints)),
+            None,
+            None,
+        );
+        Self {
+            prototype: Mutex::new(prototype),
+            static_patterns,
+            static_blueprints,
+            grammar_count,
+        }
+    }
+
     pub fn tokenizer(&self) -> TextMateTokenizer {
         self.prototype
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
+    }
+
+    /// First pooled worker uses direct matching caches: charging and publishing
+    /// shared regex payloads would otherwise penalize one-shot highlighting.
+    /// It still shares lazy grammar decoding with subsequent prepared workers.
+    pub(crate) fn first_tokenizer(&self) -> TextMateTokenizer {
+        let mut tokenizer = self.tokenizer();
+        tokenizer.prepared_pattern_cache = None;
+        tokenizer.prepared_blueprint_cache = None;
+        tokenizer
     }
 
     pub fn grammar_count(&self) -> usize {
@@ -2206,12 +2318,14 @@ impl PreparedPatternCache {
                 if !grammar_closure.get(index).copied().unwrap_or(false) {
                     return None;
                 }
-                let grammar = grammars.grammar(GrammarId(index as u16))?;
+                let slot = &grammars.grammars[index];
+                let pattern_count = if let Some(lazy) = &slot.lazy {
+                    lazy.blob().pattern_count as usize
+                } else {
+                    grammars.grammar(GrammarId(index as u16))?.patterns.len()
+                };
                 let remaining_bytes = MAX_PREPARED_PATTERN_SLOT_BYTES.saturating_sub(slot_bytes);
-                let slot_capacity = grammar
-                    .patterns
-                    .len()
-                    .min(remaining_bytes / pattern_slot_bytes);
+                let slot_capacity = pattern_count.min(remaining_bytes / pattern_slot_bytes);
                 let grammar_slot_bytes = slot_capacity.saturating_mul(pattern_slot_bytes);
                 slot_bytes = slot_bytes.saturating_add(grammar_slot_bytes);
                 capacity = capacity.saturating_add(slot_capacity);
@@ -2565,7 +2679,7 @@ pub struct TextMateTokenizer {
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
     current_scope_stack_cache: FastMap<CurrentScopeStackKey, CachedCurrentScopeStackIds>,
-    resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<[Arc<str>]>>,
+    resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<ScopeStorage>>,
     scope_resolution_scratch: Vec<ScopeId>,
     output_scope_table_cache: OutputScopeTableCache,
     capture_scope_templates: FastMap<(GrammarId, ScopeId), ScopeTemplateId>,
@@ -2589,7 +2703,7 @@ pub struct TextMateTokenizer {
     /// Repeat pushes of a known (parent stack, frame) transition skip interner lookup.
     frame_edge_cache: FastMap<(InternedFrameStackId, InternedFrameId), InternedFrameStackId>,
     /// Precomputed identities for grammar-static frames, scoped to this interner.
-    static_frame_identities: FastMap<(GrammarId, RuleId, bool), StaticFrameIdentity>,
+    static_frame_identities: FastMap<StaticFrameKey, StaticFrameIdentity>,
     /// Immutable frame nodes from previous pushes, keyed by the same edge, so
     /// a repeated transition reuses one shared allocation instead of
     /// constructing and hashing a fresh `Frame`.
@@ -2735,16 +2849,19 @@ impl TextMateTokenizer {
     }
 
     pub fn tokenize_source(&mut self, source: &str) -> HighlightedText {
+        HighlightedText {
+            lines: self.tokenize_source_output(source),
+        }
+    }
+
+    pub(crate) fn tokenize_source_output<L: DocumentOutputLine>(&mut self, source: &str) -> Vec<L> {
         let previous_budget = self
             .fallback_call_budget_remaining
             .replace(fallback_call_budget(source.len()));
         let mut state = TokenizerState::default();
-        let mut lines = Vec::with_capacity(source.len().div_ceil(40).max(1));
+        let mut lines =
+            Vec::with_capacity(memchr::memchr_iter(b'\n', source.as_bytes()).count() + 1);
         let mut scope_table = OutputScopeTableBuilder::new();
-        // Reuse one placeholder while the result-wide scope table is built.
-        // Constructing `Arc::default()` here for every line used to perform
-        // several immediately discarded heap allocations per source line.
-        let empty_scope_table = HighlightScopeTable::empty_shared();
         for (line_index, chunk) in LineChunks::new(source).enumerate() {
             let tokenized = self.tokenize_line_compact_at_line(chunk.parse_text, state, line_index);
             state = tokenized.state.clone();
@@ -2753,13 +2870,14 @@ impl TextMateTokenizer {
             } else {
                 tokenized.parse_fingerprint
             };
-            lines.push(self.build_highlighted_line(
+            let line: L = self.build_output_line(
                 chunk.text,
                 fingerprint,
                 &tokenized.tokens,
                 &mut scope_table,
-                &empty_scope_table,
-            ));
+                tokenized.degraded,
+            );
+            lines.push(line);
         }
         self.fallback_call_budget_remaining = previous_budget;
         let scope_table = scope_table.finish(
@@ -2767,10 +2885,11 @@ impl TextMateTokenizer {
             &self.scope_names,
             &mut self.output_scope_table_cache,
         );
+        let owner = L::scope_owner(scope_table);
         for line in &mut lines {
-            line.scope_table = Arc::clone(&scope_table);
+            line.finish(&owner);
         }
-        HighlightedText { lines }
+        lines
     }
 
     fn tokenize_viewport_compact(
@@ -2830,6 +2949,17 @@ impl TextMateTokenizer {
         visible: Range<usize>,
         checkpoints: &mut CheckpointTable,
     ) -> HighlightedText {
+        HighlightedText {
+            lines: self.highlight_viewport_output(source, visible, checkpoints),
+        }
+    }
+
+    pub(crate) fn highlight_viewport_output<L: DocumentOutputLine>(
+        &mut self,
+        source: &str,
+        visible: Range<usize>,
+        checkpoints: &mut CheckpointTable,
+    ) -> Vec<L> {
         let visible_start = visible.start;
         let previous_budget = self
             .fallback_call_budget_remaining
@@ -2837,7 +2967,6 @@ impl TextMateTokenizer {
         let tokenized = self.tokenize_viewport_compact(source, visible, checkpoints);
         self.fallback_call_budget_remaining = previous_budget;
         let mut scope_table = OutputScopeTableBuilder::new();
-        let empty_scope_table = HighlightScopeTable::empty_shared();
         let mut lines = tokenized
             .iter()
             .zip(LineChunks::new(source).skip(visible_start))
@@ -2847,12 +2976,12 @@ impl TextMateTokenizer {
                 } else {
                     tokenized.parse_fingerprint
                 };
-                self.build_highlighted_line(
+                self.build_output_line::<L>(
                     chunk.text,
                     fingerprint,
                     &tokenized.tokens,
                     &mut scope_table,
-                    &empty_scope_table,
+                    tokenized.degraded,
                 )
             })
             .collect::<Vec<_>>();
@@ -2861,10 +2990,11 @@ impl TextMateTokenizer {
             &self.scope_names,
             &mut self.output_scope_table_cache,
         );
+        let owner = L::scope_owner(scope_table);
         for line in &mut lines {
-            line.scope_table = Arc::clone(&scope_table);
+            line.finish(&owner);
         }
-        HighlightedText { lines }
+        lines
     }
 
     pub fn tokenize_line_scopes(
@@ -2990,6 +3120,7 @@ impl TextMateTokenizer {
             self.record_degraded_line();
             let stack = self.current_scope_stack_id(&state, true, None);
             return CompactTokenizedLine {
+                degraded: true,
                 tokens: plain_compact_tokens(parse_text, stack).into(),
                 state,
                 entry_state_id,
@@ -3005,6 +3136,7 @@ impl TextMateTokenizer {
             self.record_degraded_line();
             let stack = self.current_scope_stack_id(&state, true, None);
             return CompactTokenizedLine {
+                degraded: true,
                 tokens: plain_compact_tokens(parse_text, stack).into(),
                 state,
                 entry_state_id,
@@ -3023,6 +3155,7 @@ impl TextMateTokenizer {
                     self.record_degraded_line();
                 }
                 return CompactTokenizedLine {
+                    degraded: cached.degraded,
                     tokens: CompactLineTokens::Shared(cached.tokens),
                     state: exit_state,
                     entry_state_id,
@@ -3228,6 +3361,7 @@ impl TextMateTokenizer {
             CompactLineTokens::Owned(tokens)
         };
         CompactTokenizedLine {
+            degraded: self.line_degraded,
             tokens,
             state,
             entry_state_id,
@@ -3537,19 +3671,22 @@ impl TextMateTokenizer {
         }
     }
 
-    fn build_highlighted_line(
+    fn build_output_line<L: DocumentOutputLine>(
         &self,
         text: &str,
         fingerprint: LineTextFingerprint,
         scoped_tokens: &[CompactScopedToken],
         scope_table: &mut OutputScopeTableBuilder,
-        empty_scope_table: &Arc<HighlightScopeTable>,
-    ) -> HighlightedLine {
-        let mut line = HighlightedLine {
-            fingerprint,
-            segments: Vec::with_capacity(scoped_tokens.len()),
-            scope_table: Arc::clone(empty_scope_table),
-        };
+        degraded: bool,
+    ) -> L {
+        // A standalone newline token is clipped out of public line output.
+        let capacity = scoped_tokens.len()
+            - usize::from(
+                scoped_tokens
+                    .last()
+                    .is_some_and(|token| token.range.start >= text.len()),
+            );
+        let mut line = L::new(fingerprint, capacity, degraded);
         for token in scoped_tokens {
             let start = token.range.start.min(text.len());
             let end = token.range.end.min(text.len());
@@ -3558,7 +3695,7 @@ impl TextMateTokenizer {
             }
             let class = self.scope_stacks.class(token.stack);
             let stack = scope_table.intern_engine_stack(token.stack);
-            push_segment(&mut line.segments, start, end, class, stack);
+            line.push(start..end, class, stack);
         }
         line
     }
@@ -4343,7 +4480,7 @@ impl TextMateTokenizer {
                     self.injection_outcome(&[])
                 } else {
                     let stack = self.resolve_scope_stack_cached(active_stack_id);
-                    self.injection_outcome(stack.as_ref())
+                    self.injection_outcome(stack.shared_names())
                 };
                 if self.injection_outcome_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
                     self.injection_outcome_cache.clear();
@@ -5178,7 +5315,13 @@ impl TextMateTokenizer {
                         )
                     };
                 let begin_captured_eol = result.end == line.len() && line.ends_with('\n');
-                let identity_key = (*grammar_id, *rule_id, begin_captured_eol);
+                let identity_key = StaticFrameKey {
+                    grammar_id: *grammar_id,
+                    base_grammar_id: candidate.base_grammar_id,
+                    rule_id: *rule_id,
+                    scope_prefix: candidate.scope_prefix.clone(),
+                    begin_captured_eol,
+                };
                 let cached = static_frame
                     .then(|| self.static_frame_identities.get(&identity_key).copied())
                     .flatten();
@@ -5304,7 +5447,13 @@ impl TextMateTokenizer {
                         )
                     };
                 let begin_captured_eol = result.end == line.len() && line.ends_with('\n');
-                let identity_key = (*grammar_id, *rule_id, begin_captured_eol);
+                let identity_key = StaticFrameKey {
+                    grammar_id: *grammar_id,
+                    base_grammar_id: candidate.base_grammar_id,
+                    rule_id: *rule_id,
+                    scope_prefix: candidate.scope_prefix.clone(),
+                    begin_captured_eol,
+                };
                 let cached = static_frame
                     .then(|| self.static_frame_identities.get(&identity_key).copied())
                     .flatten();
@@ -5634,7 +5783,7 @@ impl TextMateTokenizer {
                             } else {
                                 let active_scopes =
                                     self.resolve_scope_stack_cached(stacks.active_stack_id);
-                                self.injection_outcome(active_scopes.as_ref())
+                                self.injection_outcome(active_scopes.shared_names())
                             };
                         let source = CandidateSourceKey::for_state(self.root, &state);
                         let blueprint = self.candidate_blueprint(
@@ -5880,7 +6029,7 @@ impl TextMateTokenizer {
         self.current_scope_stack_cache.entry(key).or_insert(value);
     }
 
-    fn resolve_scope_stack_cached(&mut self, stack: ScopeStackId) -> Arc<[Arc<str>]> {
+    fn resolve_scope_stack_cached(&mut self, stack: ScopeStackId) -> Arc<ScopeStorage> {
         if let Some(scopes) = self.resolved_scope_stack_cache.get(&stack).cloned() {
             return scopes;
         }
@@ -5898,6 +6047,7 @@ impl TextMateTokenizer {
                     .expect("scope-stack IDs come from the scope interner")
             })
             .collect::<Arc<[Arc<str>]>>();
+        let scopes = Arc::new(ScopeStorage::Shared(scopes));
         self.resolved_scope_stack_cache
             .insert(stack, Arc::clone(&scopes));
         scopes
@@ -7786,7 +7936,7 @@ fn push_segment(
     start: usize,
     end: usize,
     class: Option<SyntaxClass>,
-    scope_stack: ScopeStackRef,
+    scope_stack: OutputScopeStackId,
 ) {
     if start >= end {
         return;
@@ -8713,6 +8863,75 @@ mod tests {
             .expect("second tokenizer bound nested static blueprint");
         assert!(Arc::ptr_eq(&first_nested, &second_nested));
         assert!(prepared.static_blueprint_count() <= MAX_CANDIDATE_BLUEPRINTS);
+    }
+
+    #[test]
+    fn frame_interning_compares_every_continuation_field_even_on_hash_collision() {
+        let original = continuation_frame(1);
+        let mut interner = FrameStackInternTable::new();
+        let original_id = interner.intern_frame(&original);
+        // Keep the same hash deliberately: interning must compare structure.
+        let changes: [fn(&mut Frame); 12] = [
+            |f| f.grammar_id = GrammarId(3),
+            |f| f.base_grammar_id = GrammarId(3),
+            |f| f.rule_id = RuleId(3),
+            |f| f.scope_prefix = Some(Arc::from("other.prefix")),
+            |f| f.name = Some(Arc::from("other.name")),
+            |f| f.content_name = Some(Arc::from("other.content")),
+            |f| f.end_pattern = Some(Arc::from("other-end")),
+            |f| f.end_pattern_id = None,
+            |f| f.while_pattern = Some(Arc::from("while")),
+            |f| f.while_pattern_id = Some(PatternId(3)),
+            |f| f.apply_end_pattern_last = !f.apply_end_pattern_last,
+            |f| f.begin_captured_eol = true,
+        ];
+        for change in changes {
+            let mut changed = original.clone();
+            change(&mut changed);
+            assert_ne!(interner.intern_frame(&changed), original_id);
+            assert_ne!(changed, original);
+        }
+        assert_eq!(interner.intern_frame(&original.clone()), original_id);
+    }
+
+    #[test]
+    fn static_frame_identity_preserves_base_after_capture_retokenization() {
+        for condition in [r#""end":">""#, r#""while":"^keep""#] {
+            let mut grammars = GrammarSet::new();
+            let root = grammars
+                .load_and_add(
+                    r#"{
+                "scopeName":"source.host",
+                "patterns":[
+                    {"match":"host","name":"keyword.host"},
+                    {"include":"source.embedded"}
+                ]
+            }"#,
+                )
+                .unwrap();
+            grammars
+                .load_and_add(&format!(
+                    r#"{{
+                "scopeName":"source.embedded",
+                "patterns":[
+                    {{"match":"capture:(<)","captures":{{"1":{{"patterns":[
+                        {{"include":"source.embedded"}}
+                    ]}}}}}},
+                    {{"begin":"<",{condition},"name":"meta.embedded",
+                        "patterns":[{{"include":"$base"}}]
+                    }}
+                ]
+            }}"#
+                ))
+                .unwrap();
+            let mut tokenizer = TextMateTokenizer::new(grammars, root);
+            tokenizer.tokenize_line_scopes("capture:<\n", TokenizerState::default());
+            let line = tokenizer.tokenize_line_scopes("<\n", TokenizerState::default());
+            assert_eq!(line.state.depth(), 1);
+            assert_eq!(line.state.frames.last().unwrap().base_grammar_id, root);
+            let next = tokenizer.tokenize_line_scopes("keep host\n", line.state);
+            assert!(line_has_scope(&next, "keyword.host"));
+        }
     }
 
     #[test]
@@ -10769,7 +10988,7 @@ mod tests {
 
         let mut builder = OutputScopeTableBuilder::new();
         let output = builder.intern_engine_stack(high_stack);
-        assert_eq!(output, ScopeStackRef(1));
+        assert_eq!(output, OutputScopeStackId(1));
         assert_eq!(builder.intern_engine_stack(high_stack), output);
 
         let mut cache = OutputScopeTableCache::default();
@@ -11173,12 +11392,9 @@ mod lazy_bundle_tests {
             let mut grammars = GrammarSet::new();
             let root = grammars.load_and_add(host).unwrap();
             let external = grammars.add_lazy(LazyGrammar {
-                blob: &bundle.grammar_blobs[blob],
+                bundle: Arc::clone(crate::grammars::embedded_bundle_shared()),
+                index: blob,
                 traits: ClosureMemberTraits::default(),
-                top_level_availability: bundle.grammar_graphs[blob]
-                    .top_level_availability
-                    .as_deref(),
-                repository_walk_skeleton: None,
             });
             (TextMateTokenizer::new(grammars, root), root, external)
         };

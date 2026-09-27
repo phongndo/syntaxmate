@@ -20,7 +20,7 @@ mod grammar_ir;
 mod state;
 
 const MAGIC: &[u8; 4] = b"MRKB";
-const FORMAT_VERSION: u16 = 3;
+const FORMAT_VERSION: u16 = 4;
 const CODEC_NONE: u32 = 0;
 const CODEC_DEFLATE_ZLIB: u32 = 1;
 const GRAMMAR_BLOB_COMPILED_IR: u32 = 1;
@@ -127,21 +127,34 @@ fn run() -> Result<(), String> {
     let default_output = manifest_dir.join("assets/grammars.bundle");
     let mut output = default_output;
     let mut check = false;
+    let mut languages = None;
+    let mut explicit_output = false;
     let mut args = env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
             "--check" => check = true,
+            "--languages" => {
+                languages = Some(
+                    args.next()
+                        .ok_or("--languages requires comma-separated IDs")?,
+                )
+            }
             "--out" => {
                 output = PathBuf::from(args.next().ok_or("--out requires a path")?);
+                explicit_output = true;
             }
             "--help" | "-h" => {
                 println!(
-                    "usage: cargo run --bin syntaxmate-bundle --features bundle-tools -- [--check] [--out PATH]"
+                    "usage: cargo run --bin syntaxmate-bundle --features bundle-tools -- [--check] [--languages a,b,c] [--out PATH]"
                 );
                 return Ok(());
             }
             other => return Err(format!("unexpected argument {other:?}")),
         }
+    }
+
+    if languages.is_some() && !explicit_output {
+        output = PathBuf::from("grammars-subset.bundle");
     }
 
     let mut hash_bytes = Vec::new();
@@ -161,7 +174,7 @@ fn run() -> Result<(), String> {
         hash_bytes.extend_from_slice(&fs::read(manifest_dir.join(path)).unwrap_or_default());
     }
     let input_hash = fnv1a64(&hash_bytes);
-    let bytes = build_bundle(&assets, input_hash)?;
+    let bytes = build_bundle(&assets, input_hash, languages.as_deref())?;
     let version = read_bundle_hash(&bytes).unwrap_or(0);
 
     if check {
@@ -188,7 +201,11 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
+fn build_bundle(
+    assets: &Path,
+    input_hash: u64,
+    selection: Option<&str>,
+) -> Result<Vec<u8>, String> {
     let source_text = fs::read_to_string(assets.join("SOURCE.toml")).map_err(|e| e.to_string())?;
     let coverage_text =
         fs::read_to_string(assets.join("coverage.toml")).map_err(|e| e.to_string())?;
@@ -349,7 +366,7 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
         })
         .collect::<Vec<_>>();
 
-    let grammar_graphs = grammar_graphs(&grammars)?;
+    let grammar_graphs = build_grammar_graphs(&grammars)?;
 
     let mut language_entries = Vec::new();
     let mut seen = BTreeSet::new();
@@ -389,6 +406,96 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
     }
     language_entries.sort_by(|l, r| l.canonical.cmp(&r.canonical));
 
+    let (scopes, language_entries, grammar_blobs, grammar_graphs, licenses_out) =
+        if let Some(selection) = selection {
+            let mut selected = BTreeSet::new();
+            for token in selection.split(',') {
+                let token = catalog::normalize_language_token(token);
+                let entry = language_entries
+                    .iter()
+                    .find(|entry| entry.canonical == token)
+                    .or_else(|| {
+                        language_entries
+                            .iter()
+                            .find(|entry| entry.aliases.contains(&token))
+                    })
+                    .ok_or_else(|| format!("unknown public language {token:?}"))?;
+                selected.insert(entry.canonical.clone());
+            }
+            let compiled = grammars
+                .iter()
+                .map(|grammar| {
+                    grammar_ir::decode_compiled_grammar(state::GrammarId(0), &grammar.bytes)
+                        .map_err(|error| error.to_string())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut included = BTreeSet::new();
+            for entry in language_entries
+                .iter()
+                .filter(|entry| selected.contains(&entry.canonical))
+            {
+                included.extend(grammar_closure::dependency_closure(
+                    &compiled,
+                    entry.grammar_blob as usize,
+                ));
+            }
+            // Every retained blob has its own recorded closure, even when it is
+            // private. Include those members too so every graph remains valid.
+            loop {
+                let previous = included.len();
+                for index in included.clone() {
+                    included.extend(grammar_closure::dependency_closure(&compiled, index));
+                }
+                if included.len() == previous {
+                    break;
+                }
+            }
+            let remap = included
+                .iter()
+                .enumerate()
+                .map(|(new, old)| (*old, new as u32))
+                .collect::<BTreeMap<_, _>>();
+            let entries = language_entries
+                .into_iter()
+                .filter(|entry| selected.contains(&entry.canonical))
+                .map(|mut entry| {
+                    entry.grammar_blob = remap[&(entry.grammar_blob as usize)];
+                    entry.license = entry.grammar_blob;
+                    entry
+                })
+                .collect();
+            let assets = included
+                .iter()
+                .map(|index| grammars[*index].clone())
+                .collect::<Vec<_>>();
+            let mut scopes = BTreeSet::new();
+            for asset in &assets {
+                scopes.insert(asset.scope_name.clone());
+                scopes.extend(asset.scopes.iter().cloned());
+            }
+            (
+                scopes,
+                entries,
+                included
+                    .iter()
+                    .map(|index| grammar_blobs[*index].clone())
+                    .collect(),
+                build_grammar_graphs(&assets)?,
+                included
+                    .iter()
+                    .map(|index| licenses_out[*index].clone())
+                    .collect(),
+            )
+        } else {
+            (
+                scopes,
+                language_entries,
+                grammar_blobs,
+                grammar_graphs,
+                licenses_out,
+            )
+        };
+
     let mut source_hash_input = Vec::new();
     source_hash_input.extend_from_slice(source_text.as_bytes());
     source_hash_input.extend_from_slice(coverage_text.as_bytes());
@@ -411,7 +518,7 @@ fn build_bundle(assets: &Path, input_hash: u64) -> Result<Vec<u8>, String> {
 /// some closure's repository-context walk must visit it, its walk skeleton:
 /// the facts the runtime needs before decoding a grammar.
 /// `src/grammars/bundle.rs` owns the reader.
-fn grammar_graphs(grammars: &[GrammarAsset]) -> Result<Vec<u8>, String> {
+fn build_grammar_graphs(grammars: &[GrammarAsset]) -> Result<Vec<u8>, String> {
     let compiled = grammars
         .iter()
         .map(|grammar| {
@@ -942,4 +1049,66 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subset_is_deterministic_and_keeps_only_requested_public_languages() {
+        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/grammars");
+        let first = build_bundle(&assets, 0, Some("rust,toml,json")).unwrap();
+        let second = build_bundle(&assets, 0, Some("json,rs,toml,rust")).unwrap();
+        assert_eq!(first, second);
+        let subset = syntaxmate::Catalog::from_bytes(&first).unwrap();
+        assert_eq!(subset.languages(), ["json", "rust", "toml"]);
+        assert_eq!(
+            subset.bundle_summary().grammar_count,
+            subset.licenses().len()
+        );
+        assert!(
+            subset
+                .licenses()
+                .iter()
+                .all(|license| ["json", "rust", "toml"].contains(&license.language.as_str()))
+        );
+        let highlighter = syntaxmate::Highlighter::new(&subset);
+        assert!(
+            highlighter
+                .tokenize("rust", "fn main() {}")
+                .unwrap()
+                .status()
+                .is_complete()
+        );
+        assert!(build_bundle(&assets, 0, Some("not-a-language")).is_err());
+    }
+
+    #[test]
+    fn subset_retains_private_dependencies_and_output() {
+        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/grammars");
+        let bytes = build_bundle(&assets, 0, Some("cpp")).unwrap();
+        let subset = syntaxmate::Catalog::from_bytes(&bytes).unwrap();
+        assert_eq!(subset.languages(), ["cpp"]);
+        assert!(
+            subset
+                .licenses()
+                .iter()
+                .any(|license| license.language == "cpp-macro")
+        );
+        assert!(subset.language("cpp-macro").is_none());
+        #[cfg(feature = "bundled-grammars")]
+        {
+            let source = "#define ADD(x) ((x)+1)\nint main() { return ADD(3); }";
+            assert_eq!(
+                syntaxmate::Highlighter::new(&subset)
+                    .tokenize("cpp", source)
+                    .unwrap(),
+                syntaxmate::Highlighter::bundled()
+                    .unwrap()
+                    .tokenize("cpp", source)
+                    .unwrap(),
+            );
+        }
+    }
 }

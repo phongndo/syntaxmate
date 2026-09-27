@@ -16,7 +16,7 @@ use crate::engine::{
 };
 
 pub const MAGIC: &[u8; 4] = b"MRKB";
-pub const FORMAT_VERSION: u16 = 3;
+pub const FORMAT_VERSION: u16 = 4;
 pub const CODEC_NONE: u32 = 0;
 pub const CODEC_DEFLATE_ZLIB: u32 = 1;
 pub const GRAMMAR_BLOB_COMPILED_IR: u32 = 1;
@@ -58,14 +58,70 @@ pub struct SectionEntry {
 pub struct Bundle {
     pub source_hash: u64,
     pub bundle_hash: u64,
-    pub strings: Vec<String>,
-    pub scopes: Vec<String>,
+    pub strings: StringTable,
+    pub scopes: ScopeTable,
     pub languages: Vec<LanguageEntry>,
     pub grammar_blobs: Vec<GrammarBlob>,
     /// Include-graph facts recorded for each grammar blob, indexed like
     /// `grammar_blobs`.
     pub grammar_graphs: Vec<GrammarGraph>,
     pub licenses: Vec<LicenseEntry>,
+}
+
+/// Validated UTF-8 strings and their little-endian offset index, borrowed when embedded.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StringTable {
+    bytes: Cow<'static, [u8]>,
+}
+
+impl StringTable {
+    fn len(&self) -> usize {
+        self.bytes.get(..4).map_or(0, |bytes| {
+            u32::from_le_bytes(bytes.try_into().expect("four bytes")) as usize
+        })
+    }
+
+    fn get(&self, id: u32) -> Option<&str> {
+        let index = id as usize;
+        let count = self.len();
+        if index >= count {
+            return None;
+        }
+        let payload_start = 8 + count * 4;
+        let start = read_u32_at(&self.bytes, 8 + index * 4).expect("validated offset") as usize;
+        let end = if index + 1 == count {
+            self.bytes.len() - payload_start
+        } else {
+            read_u32_at(&self.bytes, 8 + (index + 1) * 4).expect("validated offset") as usize
+        };
+        Some(
+            std::str::from_utf8(&self.bytes[payload_start + start..payload_start + end])
+                .expect("validated string"),
+        )
+    }
+}
+
+/// Validated string IDs stored as little-endian bytes, borrowed when embedded.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ScopeTable {
+    bytes: Cow<'static, [u8]>,
+}
+
+impl ScopeTable {
+    /// Number of validated scope IDs.
+    pub fn len(&self) -> usize {
+        self.bytes.len().saturating_sub(4) / 4
+    }
+
+    fn iter(&self) -> impl Iterator<Item = u32> + '_ {
+        self.bytes
+            .get(4..)
+            .unwrap_or_default()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|id| u32::from_le_bytes(*id))
+    }
 }
 
 /// Include-graph facts the runtime needs before decoding a grammar.
@@ -138,6 +194,7 @@ pub enum BundleError {
     BadGrammarBlobId(u32),
     BadLicenseId(u32),
     BadCodec(u32),
+    BadMetadata(&'static str),
     BadGrammarFlags { language: String, flags: u32 },
     Inflate { language: String },
     Truncated(&'static str),
@@ -245,25 +302,30 @@ impl GrammarBlob {
 
 impl Bundle {
     pub fn parse(bytes: &[u8]) -> Result<Self, BundleError> {
-        Self::parse_with_skeleton_storage(bytes, |skeleton| Cow::Owned(skeleton.to_vec()))
+        Self::parse_with_storage(bytes, |bytes| Cow::Owned(bytes.to_vec()))
     }
 
     /// Embedded bytes already live for the process lifetime; keep repository
-    /// walk skeletons in that storage instead of copying them onto the heap.
+    /// walk skeletons and uncompressed metadata in that storage instead of
+    /// copying them onto the heap.
     pub(crate) fn parse_static(bytes: &'static [u8]) -> Result<Self, BundleError> {
-        Self::parse_with_skeleton_storage(bytes, Cow::Borrowed)
+        Self::parse_with_storage(bytes, Cow::Borrowed)
     }
 
-    fn parse_with_skeleton_storage<'a>(
+    fn parse_with_storage<'a>(
         bytes: &'a [u8],
-        store_skeleton: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
+        store_bytes: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
     ) -> Result<Self, BundleError> {
         let (header, sections) = read_header_and_sections(bytes)?;
         if header.format_version != FORMAT_VERSION {
             return Err(BundleError::UnsupportedVersion(header.format_version));
         }
-        let strings = decode_string_table(section(bytes, &sections, SECTION_STRINGS)?)?;
-        let scopes = decode_scope_table(section(bytes, &sections, SECTION_SCOPES)?, &strings)?;
+        let strings =
+            decode_string_table(store_bytes(section(bytes, &sections, SECTION_STRINGS)?))?;
+        let scopes = decode_scope_table(
+            store_bytes(section(bytes, &sections, SECTION_SCOPES)?),
+            &strings,
+        )?;
         let languages =
             decode_language_table(section(bytes, &sections, SECTION_LANGUAGES)?, &strings)?;
         let grammar_blobs =
@@ -273,7 +335,7 @@ impl Bundle {
         let grammar_graphs = decode_grammar_graphs(
             section(bytes, &sections, SECTION_GRAMMAR_GRAPHS)?,
             grammar_blobs.len(),
-            store_skeleton,
+            store_bytes,
         )?;
         Ok(Self {
             source_hash: header.source_hash,
@@ -287,11 +349,61 @@ impl Bundle {
         })
     }
 
+    /// Validate caller-provided assets before exposing them through a catalog.
+    pub(crate) fn validate(&self) -> Result<(), BundleError> {
+        let bad = BundleError::BadMetadata;
+        if self.grammar_blobs.len() > 4096 || self.languages.len() > 4096 {
+            return Err(bad("catalog exceeds 4096 grammars or languages"));
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for entry in &self.languages {
+            if entry.canonical.is_empty()
+                || normalize_token(&entry.canonical) != entry.canonical
+                || !ids.insert(&entry.canonical)
+            {
+                return Err(bad("invalid or duplicate public language ID"));
+            }
+            let blob = self
+                .grammar_blobs
+                .get(entry.grammar_blob as usize)
+                .ok_or(BundleError::BadGrammarBlobId(entry.grammar_blob))?;
+            if blob.scope_name != entry.scope_name {
+                return Err(bad("language root scope mismatch"));
+            }
+            if entry.license as usize >= self.licenses.len() {
+                return Err(BundleError::BadLicenseId(entry.license));
+            }
+        }
+        let mut total = 0usize;
+        for (index, blob) in self.grammar_blobs.iter().enumerate() {
+            total = total.saturating_add(blob.raw_len as usize);
+            if blob.raw_len > 16 * 1024 * 1024 || total > 256 * 1024 * 1024 {
+                return Err(bad("decoded grammar size exceeds validation limit"));
+            }
+            let grammar = blob.compiled_grammar(GrammarId(0))?;
+            if grammar.scope_name != blob.scope_name {
+                return Err(bad("grammar root scope mismatch"));
+            }
+            if let Some(skeleton) = &self.grammar_graphs[index].repository_walk_skeleton {
+                decode_compiled_grammar(GrammarId(0), skeleton).map_err(|error| {
+                    BundleError::GrammarIr {
+                        language: blob.language.clone(),
+                        message: error.to_string(),
+                    }
+                })?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         let strings = interned_strings(self);
         let sections = vec![
             (SECTION_STRINGS, encode_string_table(&strings)),
-            (SECTION_SCOPES, encode_scope_table(&self.scopes, &strings)),
+            (
+                SECTION_SCOPES,
+                encode_scope_table(&self.scopes, &self.strings, &strings),
+            ),
             (
                 SECTION_LANGUAGES,
                 encode_language_table(&self.languages, &strings),
@@ -442,7 +554,7 @@ fn read_header_and_sections(
         let end = offset
             .checked_add(len)
             .ok_or(BundleError::SectionOutOfBounds { id })?;
-        if end as usize > bytes.len() {
+        if end > bytes.len() as u64 {
             return Err(BundleError::SectionOutOfBounds { id });
         }
         sections.push(SectionEntry { id, offset, len });
@@ -523,8 +635,8 @@ fn interned_strings(bundle: &Bundle) -> Vec<String> {
     let mut insert = |value: &str| {
         strings.insert(value.to_owned(), ());
     };
-    for scope in &bundle.scopes {
-        insert(scope);
+    for scope in bundle.scopes.iter() {
+        insert(bundle.strings.get(scope).expect("validated scope string"));
     }
     for language in &bundle.languages {
         insert(&language.canonical);
@@ -566,14 +678,14 @@ fn optional_string_id(strings: &[String], value: Option<&str>) -> u32 {
     value.map_or(NO_STRING, |value| string_id(strings, value))
 }
 
-fn string_by_id(strings: &[String], id: u32) -> Result<String, BundleError> {
+fn string_by_id(strings: &StringTable, id: u32) -> Result<String, BundleError> {
     strings
-        .get(id as usize)
-        .cloned()
+        .get(id)
+        .map(str::to_owned)
         .ok_or(BundleError::BadStringId(id))
 }
 
-fn optional_string_by_id(strings: &[String], id: u32) -> Result<Option<String>, BundleError> {
+fn optional_string_by_id(strings: &StringTable, id: u32) -> Result<Option<String>, BundleError> {
     if id == NO_STRING {
         Ok(None)
     } else {
@@ -598,49 +710,65 @@ fn encode_string_table(strings: &[String]) -> Vec<u8> {
     bytes
 }
 
-fn decode_string_table(bytes: &[u8]) -> Result<Vec<String>, BundleError> {
-    let mut cursor = Cursor::new(bytes, "string table");
+fn decode_string_table(bytes: Cow<'static, [u8]>) -> Result<StringTable, BundleError> {
+    let mut cursor = Cursor::new(&bytes, "string table");
     let count = cursor.u32()? as usize;
     let payload_len = cursor.u32()? as usize;
-    let mut offsets = Vec::with_capacity(count);
-    for _ in 0..count {
-        offsets.push(cursor.u32()? as usize);
-    }
+    let index_len = count
+        .checked_mul(4)
+        .ok_or(BundleError::Truncated("string index"))?;
+    let offsets = cursor.bytes(index_len)?;
     let payload = cursor.bytes(payload_len)?;
     cursor.finish()?;
-    let mut strings = Vec::with_capacity(count);
+    let text = std::str::from_utf8(payload).map_err(|_| BundleError::BadUtf8)?;
+    let mut previous = 0;
     for index in 0..count {
-        let start = offsets[index];
-        let end = offsets.get(index + 1).copied().unwrap_or(payload_len);
-        if start > end || end > payload.len() {
+        let offset = read_u32_at(offsets, index * 4)? as usize;
+        if offset < previous || offset > payload_len || (index == 0 && offset != 0) {
             return Err(BundleError::Truncated("string table payload"));
         }
-        let string = std::str::from_utf8(&payload[start..end])
-            .map_err(|_| BundleError::BadUtf8)?
-            .to_owned();
-        strings.push(string);
+        if !text.is_char_boundary(offset) {
+            return Err(BundleError::BadUtf8);
+        }
+        previous = offset;
     }
-    Ok(strings)
+    if count == 0 && payload_len != 0 {
+        return Err(BundleError::TrailingBytes("string table payload"));
+    }
+    Ok(StringTable { bytes })
 }
 
-fn encode_scope_table(scopes: &[String], strings: &[String]) -> Vec<u8> {
+fn encode_scope_table(scopes: &ScopeTable, source: &StringTable, strings: &[String]) -> Vec<u8> {
     let mut bytes = Vec::new();
     write_u32(&mut bytes, scopes.len() as u32);
-    for scope in scopes {
-        write_u32(&mut bytes, string_id(strings, scope));
+    for scope in scopes.iter() {
+        write_u32(
+            &mut bytes,
+            string_id(strings, source.get(scope).expect("validated scope string")),
+        );
     }
     bytes
 }
 
-fn decode_scope_table(bytes: &[u8], strings: &[String]) -> Result<Vec<String>, BundleError> {
-    let mut cursor = Cursor::new(bytes, "scope table");
-    let count = cursor.u32()?;
-    let mut scopes = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        scopes.push(string_by_id(strings, cursor.u32()?)?);
-    }
+fn decode_scope_table(
+    bytes: Cow<'static, [u8]>,
+    strings: &StringTable,
+) -> Result<ScopeTable, BundleError> {
+    let mut cursor = Cursor::new(&bytes, "scope table");
+    let count = cursor.u32()? as usize;
+    let ids = cursor.bytes(
+        count
+            .checked_mul(4)
+            .ok_or(BundleError::Truncated("scope table"))?,
+    )?;
     cursor.finish()?;
-    Ok(scopes)
+    for id in ids.as_chunks::<4>().0 {
+        let id = u32::from_le_bytes(*id);
+        if id as usize >= strings.len() {
+            return Err(BundleError::BadStringId(id));
+        }
+    }
+    Ok(ScopeTable { bytes })
 }
 
 fn encode_language_table(languages: &[LanguageEntry], strings: &[String]) -> Vec<u8> {
@@ -664,10 +792,10 @@ fn encode_language_table(languages: &[LanguageEntry], strings: &[String]) -> Vec
 
 fn decode_language_table(
     bytes: &[u8],
-    strings: &[String],
+    strings: &StringTable,
 ) -> Result<Vec<LanguageEntry>, BundleError> {
     let mut cursor = Cursor::new(bytes, "language table");
-    let count = cursor.u32()?;
+    let count = cursor.count(32)?;
     let mut languages = Vec::with_capacity(count as usize);
     for _ in 0..count {
         languages.push(LanguageEntry {
@@ -708,9 +836,12 @@ fn encode_grammar_blobs(blobs: &[GrammarBlob], strings: &[String]) -> Vec<u8> {
     records
 }
 
-fn decode_grammar_blobs(bytes: &[u8], strings: &[String]) -> Result<Vec<GrammarBlob>, BundleError> {
+fn decode_grammar_blobs(
+    bytes: &[u8],
+    strings: &StringTable,
+) -> Result<Vec<GrammarBlob>, BundleError> {
     let mut cursor = Cursor::new(bytes, "grammar blobs");
-    let count = cursor.u32()?;
+    let count = cursor.count(48)?;
     let mut records = Vec::with_capacity(count as usize);
     for _ in 0..count {
         records.push((
@@ -817,7 +948,7 @@ fn encode_grammar_graphs(graphs: &[GrammarGraph]) -> Vec<u8> {
 fn decode_grammar_graphs<'a>(
     bytes: &'a [u8],
     blob_count: usize,
-    store_skeleton: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
+    store_bytes: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
 ) -> Result<Vec<GrammarGraph>, BundleError> {
     let mut cursor = Cursor::new(bytes, "grammar graphs");
     let count = cursor.u32()? as usize;
@@ -857,7 +988,7 @@ fn decode_grammar_graphs<'a>(
         }
         let skeleton_len = cursor.u32()?;
         let repository_walk_skeleton = (skeleton_len != NO_SKELETON)
-            .then(|| cursor.bytes(skeleton_len as usize).map(&store_skeleton))
+            .then(|| cursor.bytes(skeleton_len as usize).map(&store_bytes))
             .transpose()?;
         let step_count = cursor.u32()?;
         let top_level_availability = if step_count == NO_AVAILABILITY {
@@ -908,10 +1039,10 @@ fn encode_license_table(licenses: &[LicenseEntry], strings: &[String]) -> Vec<u8
 
 fn decode_license_table(
     bytes: &[u8],
-    strings: &[String],
+    strings: &StringTable,
 ) -> Result<Vec<LicenseEntry>, BundleError> {
     let mut cursor = Cursor::new(bytes, "license table");
-    let count = cursor.u32()?;
+    let count = cursor.count(24)?;
     let mut licenses = Vec::with_capacity(count as usize);
     for _ in 0..count {
         licenses.push(LicenseEntry {
@@ -936,9 +1067,9 @@ fn write_string_id_vec(out: &mut Vec<u8>, strings: &[String], values: &[String])
 
 fn read_string_id_vec(
     cursor: &mut Cursor<'_>,
-    strings: &[String],
+    strings: &StringTable,
 ) -> Result<Vec<String>, BundleError> {
-    let count = cursor.u32()?;
+    let count = cursor.count(4)?;
     let mut values = Vec::with_capacity(count as usize);
     for _ in 0..count {
         values.push(string_by_id(strings, cursor.u32()?)?);
@@ -1017,6 +1148,14 @@ impl<'a> Cursor<'a> {
         }
     }
 
+    fn count(&mut self, record_bytes: usize) -> Result<u32, BundleError> {
+        let count = self.u32()?;
+        if count as usize > (self.bytes.len() - self.cursor) / record_bytes {
+            return Err(BundleError::Truncated(self.name));
+        }
+        Ok(count)
+    }
+
     fn u32(&mut self) -> Result<u32, BundleError> {
         let value =
             read_u32_at(self.bytes, self.cursor).map_err(|_| BundleError::Truncated(self.name))?;
@@ -1071,8 +1210,11 @@ mod tests {
         Bundle {
             source_hash: 7,
             bundle_hash: 0,
-            strings: Vec::new(),
-            scopes: vec!["source.rust".to_owned()],
+            strings: decode_string_table(encode_string_table(&["source.rust".to_owned()]).into())
+                .unwrap(),
+            scopes: ScopeTable {
+                bytes: vec![1, 0, 0, 0, 0, 0, 0, 0].into(),
+            },
             languages: vec![LanguageEntry {
                 canonical: "rust".to_owned(),
                 scope_name: "source.rust".to_owned(),
@@ -1136,12 +1278,32 @@ mod tests {
     }
 
     #[test]
-    fn static_bundle_borrows_skeletons_and_matches_owned_parsing() {
+    fn static_bundle_borrows_tables_and_skeletons_and_matches_owned_parsing() {
         let bytes = Box::leak(sample_bundle().to_bytes().into_boxed_slice());
         let borrowed = Bundle::parse_static(bytes).unwrap();
         let owned = Bundle::parse(bytes).unwrap();
         assert_eq!(borrowed, owned);
         assert_eq!(borrowed.to_bytes(), bytes);
+        let (_, sections) = read_header_and_sections(bytes).unwrap();
+        for (id, borrowed_bytes, owned_bytes) in [
+            (
+                SECTION_STRINGS,
+                &borrowed.strings.bytes,
+                &owned.strings.bytes,
+            ),
+            (SECTION_SCOPES, &borrowed.scopes.bytes, &owned.scopes.bytes),
+        ] {
+            assert!(matches!(borrowed_bytes, Cow::Borrowed(_)));
+            assert!(matches!(owned_bytes, Cow::Owned(_)));
+            assert_eq!(
+                borrowed_bytes.as_ptr(),
+                section(bytes, &sections, id).unwrap().as_ptr()
+            );
+        }
+        assert_eq!(
+            borrowed.scopes.iter().collect::<Vec<_>>(),
+            owned.scopes.iter().collect::<Vec<_>>()
+        );
         assert!(matches!(
             borrowed.grammar_graphs[0].repository_walk_skeleton,
             Some(Cow::Borrowed(_))
@@ -1238,6 +1400,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(any(feature = "bundled-grammars", feature = "bundle-tools"))]
     fn inflates_compressed_blobs_to_their_recorded_length() {
         let mut blob = sample_bundle().grammar_blobs.remove(0);
         let raw = blob.bytes.clone();
@@ -1255,6 +1418,128 @@ mod tests {
                 Err(BundleError::Inflate { .. })
             ));
         }
+    }
+
+    #[test]
+    fn string_table_borrows_utf8_and_handles_empty_strings() {
+        // count=3, payload length=2, offsets=[0, 0, 2], payload="é".
+        static BYTES: &[u8] = &[
+            3, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0xc3, 0xa9,
+        ];
+        let table = decode_string_table(Cow::Borrowed(BYTES)).unwrap();
+        assert!(matches!(table.bytes, Cow::Borrowed(_)));
+        assert_eq!(table.get(0), Some(""));
+        assert_eq!(table.get(1), Some("é"));
+        assert_eq!(table.get(2), Some(""));
+        assert_eq!(table.get(3), None);
+        assert_eq!(table.get(1).unwrap().as_ptr(), BYTES[20..].as_ptr());
+        assert_eq!(decode_string_table(BYTES.to_vec().into()).unwrap(), table);
+        let empty = decode_string_table(encode_string_table(&[]).into()).unwrap();
+        assert_eq!(empty.len(), 0);
+        assert_eq!(empty.get(0), None);
+    }
+
+    #[test]
+    fn rejects_malformed_string_and_scope_tables() {
+        let raw = encode_string_table(&["é".to_owned(), "x".to_owned()]);
+        for (position, value) in [(0, u32::MAX), (4, u32::MAX), (8, 1), (12, 4), (12, 1)] {
+            let mut bytes = raw.clone();
+            bytes[position..position + 4].copy_from_slice(&value.to_le_bytes());
+            assert!(decode_string_table(bytes.into()).is_err());
+        }
+        let mut descending = encode_string_table(&["a".to_owned(), "b".to_owned(), "c".to_owned()]);
+        descending[16..20].copy_from_slice(&0u32.to_le_bytes());
+        assert!(decode_string_table(descending.into()).is_err());
+        let mut invalid_utf8 = raw.clone();
+        *invalid_utf8.last_mut().unwrap() = 0xff;
+        assert_eq!(
+            decode_string_table(invalid_utf8.into()),
+            Err(BundleError::BadUtf8)
+        );
+        let mut trailing = raw.clone();
+        trailing.push(0);
+        assert!(matches!(
+            decode_string_table(trailing.into()),
+            Err(BundleError::TrailingBytes(_))
+        ));
+        for len in 0..raw.len() {
+            assert!(decode_string_table(raw[..len].to_vec().into()).is_err());
+        }
+        let strings = decode_string_table(raw.into()).unwrap();
+        assert_eq!(
+            decode_scope_table(Cow::Borrowed(&[1, 0, 0, 0, 2, 0, 0, 0]), &strings),
+            Err(BundleError::BadStringId(2))
+        );
+        assert!(decode_scope_table(u32::MAX.to_le_bytes().to_vec().into(), &strings).is_err());
+    }
+
+    #[test]
+    fn both_bundle_readers_reject_malformed_table_sections() {
+        let valid_strings = encode_string_table(&["é".to_owned(), "x".to_owned()]);
+        let mut bad_tables = Vec::new();
+        for (position, value) in [(0, u32::MAX), (4, u32::MAX), (8, 1), (12, 4), (12, 1)] {
+            let mut raw = valid_strings.clone();
+            raw[position..position + 4].copy_from_slice(&value.to_le_bytes());
+            bad_tables.push((SECTION_STRINGS, raw));
+        }
+        let mut invalid_utf8 = valid_strings.clone();
+        *invalid_utf8.last_mut().unwrap() = 0xff;
+        bad_tables.push((SECTION_STRINGS, invalid_utf8));
+        for (id, raw) in [
+            (SECTION_STRINGS, valid_strings),
+            (SECTION_SCOPES, vec![1, 0, 0, 0, 0, 0, 0, 0]),
+        ] {
+            for len in 0..raw.len() {
+                bad_tables.push((id, raw[..len].to_vec()));
+            }
+            let mut trailing = raw;
+            trailing.push(0);
+            bad_tables.push((id, trailing));
+        }
+        bad_tables.push((SECTION_SCOPES, vec![1, 0, 0, 0, 255, 255, 255, 255]));
+        bad_tables.push((SECTION_SCOPES, u32::MAX.to_le_bytes().to_vec()));
+        let original = sample_bundle().to_bytes();
+        let (_, sections) = read_header_and_sections(&original).unwrap();
+        for (bad_id, raw) in bad_tables {
+            let tables = sections
+                .iter()
+                .map(|entry| {
+                    let bytes = if entry.id == bad_id {
+                        raw.clone()
+                    } else {
+                        section(&original, &sections, entry.id).unwrap().to_vec()
+                    };
+                    (entry.id, bytes)
+                })
+                .collect();
+            let bytes = Box::leak(write_container(0, 0, tables).into_boxed_slice());
+            let owned = Bundle::parse(bytes);
+            assert!(owned.is_err(), "malformed section {bad_id}");
+            assert_eq!(Bundle::parse_static(bytes), owned);
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "bundled-grammars")]
+    fn embedded_metadata_roundtrips_through_owned_and_static_readers() {
+        let bytes = crate::grammars::embedded_bundle_bytes();
+        let input = bytes.to_vec();
+        let owned = Bundle::parse(&input).unwrap();
+        drop(input);
+        let borrowed = Bundle::parse_static(bytes).unwrap();
+        assert_eq!(owned, borrowed);
+        assert_eq!(owned.to_bytes(), bytes);
+        assert!(matches!(borrowed.strings.bytes, Cow::Borrowed(_)));
+        assert!(matches!(borrowed.scopes.bytes, Cow::Borrowed(_)));
+        assert!(matches!(owned.strings.bytes, Cow::Owned(_)));
+        assert!(matches!(owned.scopes.bytes, Cow::Owned(_)));
+        assert!(
+            borrowed
+                .grammar_graphs
+                .iter()
+                .filter_map(|graph| graph.repository_walk_skeleton.as_ref())
+                .all(|skeleton| matches!(skeleton, Cow::Borrowed(_)))
+        );
     }
 
     #[test]

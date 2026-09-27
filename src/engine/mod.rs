@@ -26,8 +26,20 @@ use tokenizer::{GrammarSet, LazyGrammar};
 /// cannot bind a non-empty context, and recorded availability proofs answer
 /// include-availability checks for members the tokenizer has not entered.
 pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::GrammarId)> {
-    let bundle = crate::grammars::embedded_bundle();
-    let missing = || Error::Grammar(format!("bundled TextMate grammar `{language}` is missing"));
+    load_catalog_grammar_set(crate::grammars::embedded_bundle_shared(), language)
+}
+
+pub(crate) fn load_catalog_grammar_set(
+    bundle: &std::sync::Arc<crate::grammars::bundle::Bundle>,
+    language: &str,
+) -> Result<(GrammarSet, state::GrammarId)> {
+    let missing = || {
+        Error::Bundle(crate::BundleError::new(
+            crate::BundleErrorKind::MissingGrammar,
+            Some(language.to_owned()),
+            format!("bundled TextMate grammar `{language}` is missing"),
+        ))
+    };
     let root_index = bundle
         .grammar_blob_index_for_language(language)
         .ok_or_else(missing)?;
@@ -38,14 +50,9 @@ pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::Gra
     for member in &root_graph.closure {
         let blob = &bundle.grammar_blobs[member.blob as usize];
         let grammar_id = grammars.add_lazy(LazyGrammar {
-            blob,
+            bundle: std::sync::Arc::clone(bundle),
+            index: member.blob as usize,
             traits: member.traits,
-            top_level_availability: bundle.grammar_graphs[member.blob as usize]
-                .top_level_availability
-                .as_deref(),
-            repository_walk_skeleton: bundle.grammar_graphs[member.blob as usize]
-                .repository_walk_skeleton
-                .as_deref(),
         });
         if blob.scope_name == root_blob.scope_name {
             root = Some(grammar_id);
@@ -58,9 +65,13 @@ pub(crate) fn load_grammar_set(language: &str) -> Result<(GrammarSet, state::Gra
     let root = root.ok_or_else(missing)?;
     if grammars.grammar(root).is_none() {
         let error = root_blob.compiled_grammar(root).err();
-        return Err(Error::Grammar(format!(
-            "failed to decode bundled TextMate grammar `{}`: {error:?}",
-            root_blob.language
+        return Err(Error::Bundle(crate::BundleError::new(
+            crate::BundleErrorKind::Decode,
+            Some(root_blob.language.to_string()),
+            format!(
+                "failed to decode bundled TextMate grammar `{}`: {error:?}",
+                root_blob.language
+            ),
         )));
     }
     Ok((grammars, root))
@@ -76,7 +87,13 @@ fn compiled_grammar_closure(
     let root = grammars
         .iter()
         .rposition(|grammar| grammar.scope_name == root_scope)
-        .ok_or_else(|| Error::Grammar(format!("missing root `{root_scope}`")))?;
+        .ok_or_else(|| {
+            Error::Bundle(crate::BundleError::new(
+                crate::BundleErrorKind::MissingGrammar,
+                Some(root_scope.to_owned()),
+                format!("missing root `{root_scope}`"),
+            ))
+        })?;
     let members = grammar_closure::dependency_closure(&grammars, root);
     let mut closure = Vec::with_capacity(members.len());
     for index in members.into_iter().rev() {

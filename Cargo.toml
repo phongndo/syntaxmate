@@ -1,8 +1,8 @@
 [package]
 name = "syntaxmate"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2024"
-rust-version = "1.98"
+rust-version = "1.88"
 license = "MIT"
 description = "Rust-native TextMate syntax highlighting with bundled grammars and themes"
 repository = "https://github.com/phongndo/syntaxmate"
@@ -14,12 +14,13 @@ autobins = false
 autotests = false
 include = [
   "src/**",
-  "assets/grammars/**",
+  "assets/grammars/licenses/**",
+  "assets/grammars/licenses.json",
+  "assets/grammars/SOURCE.toml",
   "assets/grammars.bundle",
   "assets/themes/**",
-  "examples/**",
-  "tests/*.rs",
-  "tools/build-bundle.rs",
+  "examples/html.rs",
+  "examples/ansi.rs",
   "/Cargo.toml",
   "/README.md",
   "/CHANGELOG.md",
@@ -63,7 +64,9 @@ tempfile = "3"
 toml = "1.1"
 
 [package.metadata.docs.rs]
-all-features = true
+all-features = false
+default-features = false
+features = ["bundled-grammars", "bundled-themes", "html", "ansi"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [[test]]
@@ -133,3 +136,17 @@ required-features = ["bundled-grammars", "bundled-themes", "html"]
 name = "ansi"
 path = "examples/ansi.rs"
 required-features = ["bundled-grammars", "bundled-themes", "ansi"]
+
+[[test]]
+name = "custom_bundle"
+path = "tests/custom_bundle.rs"
+
+[[example]]
+name = "bundle-measure"
+path = "examples/bundle-measure.rs"
+required-features = ["bundled-grammars"]
+
+[[example]]
+name = "profile-shared"
+path = "examples/profile-shared.rs"
+required-features = ["bundled-grammars"]
