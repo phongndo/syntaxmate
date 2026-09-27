@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::sync::OnceLock;
+use std::ops::Deref;
+use std::sync::{Arc, OnceLock};
 
 use super::analysis::RegexAnalysis;
 
@@ -123,17 +124,14 @@ pub enum ClassAtom {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct CharClass {
     pub negated: bool,
+    /// Written in brackets. Oniguruma folds case for bracketed classes as a
+    /// whole but leaves escapes such as `\p{Lu}` and `\w` unfolded.
+    pub bracketed: bool,
     /// Additional union terms intersected with `atoms` by Oniguruma's `&&`
     /// operator. Each inner vector is a union, so `[ab&&bc&&cd]` is stored as
     /// `ab AND bc AND cd`.
     pub intersections: Vec<Vec<ClassAtom>>,
     pub atoms: Vec<ClassAtom>,
-}
-
-impl CharClass {
-    fn current_union_mut(&mut self) -> &mut Vec<ClassAtom> {
-        self.intersections.last_mut().unwrap_or(&mut self.atoms)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,10 +152,140 @@ pub struct SubroutineCall {
     pub(crate) target_path: Option<Vec<AstPathStep>>,
 }
 
+/// Text of a literal node. Unescaped literal runs borrow a span of the
+/// shared pattern source instead of owning a copy: keyword inventories parse
+/// to thousands of literals, and one allocation per literal dominated both
+/// parsing and teardown.
+#[derive(Clone)]
+pub struct LiteralText(LiteralRepr);
+
+#[derive(Clone)]
+enum LiteralRepr {
+    Source {
+        source: Arc<str>,
+        start: u32,
+        end: u32,
+    },
+    Owned(String),
+}
+
+impl LiteralText {
+    fn from_source(source: &Arc<str>, start: usize, end: usize) -> Self {
+        match (u32::try_from(start), u32::try_from(end)) {
+            (Ok(start), Ok(end)) => Self(LiteralRepr::Source {
+                source: Arc::clone(source),
+                start,
+                end,
+            }),
+            _ => Self(LiteralRepr::Owned(source[start..end].to_owned())),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match &self.0 {
+            LiteralRepr::Source { source, start, end } => &source[*start as usize..*end as usize],
+            LiteralRepr::Owned(text) => text,
+        }
+    }
+
+    /// Appends `other`, extending a source span in place when `other`
+    /// continues it.
+    fn push_literal(&mut self, other: &Self) {
+        if let (
+            LiteralRepr::Source { source, end, .. },
+            LiteralRepr::Source {
+                source: next_source,
+                start: next_start,
+                end: next_end,
+            },
+        ) = (&mut self.0, &other.0)
+            && Arc::ptr_eq(source, next_source)
+            && *end == *next_start
+        {
+            *end = *next_end;
+            return;
+        }
+        let mut text = std::mem::take(self).into_string();
+        text.push_str(other);
+        self.0 = LiteralRepr::Owned(text);
+    }
+
+    fn into_string(self) -> String {
+        match self.0 {
+            LiteralRepr::Owned(text) => text,
+            repr => Self(repr).as_str().to_owned(),
+        }
+    }
+}
+
+impl Default for LiteralText {
+    fn default() -> Self {
+        Self(LiteralRepr::Owned(String::new()))
+    }
+}
+
+impl Deref for LiteralText {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl AsRef<str> for LiteralText {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl From<String> for LiteralText {
+    fn from(text: String) -> Self {
+        Self(LiteralRepr::Owned(text))
+    }
+}
+
+impl From<&str> for LiteralText {
+    fn from(text: &str) -> Self {
+        Self(LiteralRepr::Owned(text.to_owned()))
+    }
+}
+
+impl PartialEq for LiteralText {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for LiteralText {}
+
+impl PartialEq<str> for LiteralText {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<&str> for LiteralText {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl fmt::Debug for LiteralText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+impl fmt::Display for LiteralText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ast {
     Empty,
-    Literal(String),
+    Literal(LiteralText),
     Dot,
     Grapheme,
     Class(CharClass),
@@ -285,7 +413,10 @@ pub struct ParsedRegex {
     pub features: RegexFeatures,
     pub flags: RegexFlags,
     pub capture_count: u32,
+    /// Last group of each name.
     pub named_captures: BTreeMap<String, u32>,
+    /// Every group of each name used by more than one group, ascending.
+    pub duplicate_names: BTreeMap<String, Vec<u32>>,
     pub diagnostics: Vec<String>,
     analysis: OnceLock<RegexAnalysis>,
 }
@@ -298,6 +429,7 @@ impl PartialEq for ParsedRegex {
             && self.flags == other.flags
             && self.capture_count == other.capture_count
             && self.named_captures == other.named_captures
+            && self.duplicate_names == other.duplicate_names
             && self.diagnostics == other.diagnostics
     }
 }
@@ -338,6 +470,12 @@ fn is_quantifier_start(ch: char) -> bool {
     matches!(ch, '*' | '+' | '?' | '{')
 }
 
+/// Escaped ASCII punctuation and whitespace always denote the scalar itself:
+/// every special escape in `parse_escape` is a letter or digit.
+fn is_punctuation_escape(ch: char) -> bool {
+    ch.is_ascii() && !ch.is_ascii_alphanumeric()
+}
+
 fn is_regex_syntax(ch: char) -> bool {
     matches!(
         ch,
@@ -345,12 +483,58 @@ fn is_regex_syntax(ch: char) -> bool {
     )
 }
 
+/// ASCII bytes that stand for themselves outside a class: everything except
+/// regex syntax and, under the extended `x` option, whitespace and `#`.
+/// Quantifier starts are syntax, so a run of these bytes never contains a
+/// quantifier. Indexed by `extended` then byte.
+static PLAIN_LITERAL_BYTE: [[bool; 256]; 2] = {
+    let mut table = [[false; 256]; 2];
+    let mut byte = 0;
+    while byte < 128 {
+        let plain = !matches!(
+            byte as u8,
+            b'(' | b'[' | b'.' | b'^' | b'$' | b'\\' | b')' | b'|' | b'*' | b'+' | b'?' | b'{'
+        );
+        // `char::is_whitespace` for ASCII scalars.
+        let extended_syntax = matches!(byte as u8, b'\t'..=b'\r' | b' ' | b'#');
+        table[0][byte] = plain;
+        table[1][byte] = plain && !extended_syntax;
+        byte += 1;
+    }
+    table
+};
+
+/// End of the run of plain literal bytes starting at `pos`.
+#[inline]
+fn plain_literal_end(bytes: &[u8], mut pos: usize, extended: bool) -> usize {
+    let table = &PLAIN_LITERAL_BYTE[usize::from(extended)];
+    while let Some(&byte) = bytes.get(pos) {
+        if !table[usize::from(byte)] {
+            break;
+        }
+        pos += 1;
+    }
+    pos
+}
+
 struct Parser<'a> {
     source: &'a str,
-    chars: Vec<char>,
+    bytes: &'a [u8],
+    /// Byte offset into `source`; always on a scalar boundary.
     pos: usize,
+    /// Scratch stack shared by every sequence and branch list under
+    /// construction. Nested constructs complete before their parent resumes,
+    /// so each list occupies the top of the stack and leaves as one
+    /// exactly-sized vector instead of growing its own allocation.
+    nodes: Vec<Ast>,
+    /// Shared copy of `source` that unescaped literals borrow spans of;
+    /// created on the first such literal.
+    shared_source: Option<Arc<str>>,
+    /// The same scratch discipline for character-class unions.
+    class_atoms: Vec<ClassAtom>,
     next_capture: u32,
     named_captures: BTreeMap<String, u32>,
+    duplicate_names: BTreeMap<String, Vec<u32>>,
     features: RegexFeatures,
     flags: RegexFlags,
     diagnostics: Vec<String>,
@@ -369,10 +553,14 @@ impl<'a> Parser<'a> {
     fn new(source: &'a str) -> Self {
         Self {
             source,
-            chars: source.chars().collect(),
+            bytes: source.as_bytes(),
             pos: 0,
+            nodes: Vec::new(),
+            shared_source: None,
+            class_atoms: Vec::new(),
             next_capture: 1,
             named_captures: BTreeMap::new(),
+            duplicate_names: BTreeMap::new(),
             features: RegexFeatures::default(),
             flags: RegexFlags::default(),
             diagnostics: Vec::new(),
@@ -382,9 +570,10 @@ impl<'a> Parser<'a> {
 
     fn parse(mut self) -> ParsedRegex {
         let mut ast = self.parse_alternation(None);
-        if self.pos < self.chars.len() {
+        if self.pos < self.bytes.len() {
+            let at = self.char_index(self.pos);
             self.diagnostics
-                .push(format!("trailing input at char {}", self.pos));
+                .push(format!("trailing input at char {at}"));
         }
         if self.features.subroutine {
             let mut paths = BTreeMap::new();
@@ -402,26 +591,52 @@ impl<'a> Parser<'a> {
             flags: RegexFlags::default(),
             capture_count: self.next_capture.saturating_sub(1),
             named_captures: self.named_captures,
+            duplicate_names: self.duplicate_names,
             diagnostics: self.diagnostics,
             analysis: OnceLock::new(),
         }
     }
 
+    /// Literal text of the unescaped source span `start..end`.
+    fn source_literal(&mut self, start: usize, end: usize) -> LiteralText {
+        let source = self
+            .shared_source
+            .get_or_insert_with(|| Arc::from(self.source));
+        LiteralText::from_source(source, start, end)
+    }
+
     fn parse_alternation(&mut self, terminator: Option<char>) -> Ast {
-        let mut branches = Vec::new();
-        loop {
-            branches.push(self.parse_concat(terminator));
-            if self.peek() == Some('|') {
-                self.bump();
-                continue;
-            }
-            break;
+        let first = self.parse_concat(terminator);
+        if self.peek() != Some('|') {
+            // Most groups have one branch; only an option change inside it
+            // needs the branch-list normalization.
+            return if has_flag_change_marker(&first) {
+                normalize_flag_changes(vec![first])
+            } else {
+                first
+            };
         }
+        let base = self.nodes.len();
+        self.nodes.push(first);
+        while self.peek() == Some('|') {
+            self.bump();
+            // Keyword inventories are thousands of plain words; build each
+            // directly in the branch list.
+            let branch = match self.parse_plain_literal_branch(terminator) {
+                Some(literal) => literal,
+                None => self.parse_concat(terminator),
+            };
+            self.nodes.push(branch);
+        }
+        let branches = self.nodes.drain(base..).collect();
         normalize_flag_changes(branches)
     }
 
     fn parse_concat(&mut self, terminator: Option<char>) -> Ast {
-        let mut nodes = Vec::new();
+        if let Some(literal) = self.parse_plain_literal_branch(terminator) {
+            return literal;
+        }
+        let base = self.nodes.len();
         while let Some(ch) = self.peek() {
             if Some(ch) == terminator || ch == '|' {
                 break;
@@ -436,13 +651,46 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            push_concat_node(&mut nodes, self.parse_repeat());
+            let node = self.parse_repeat();
+            push_concat_node(&mut self.nodes, base, node);
         }
-        match nodes.len() {
+        match self.nodes.len() - base {
             0 => Ast::Empty,
-            1 => nodes.pop().expect("one node"),
-            _ => Ast::Concat(nodes),
+            1 => self.nodes.pop().expect("one node"),
+            _ => Ast::Concat(self.nodes.drain(base..).collect()),
         }
+    }
+
+    /// Keyword inventories spell most sequences as bare ASCII words ending at
+    /// a branch or group boundary. Such a sequence parses to the single
+    /// literal (under the active option snapshot) that the general path
+    /// would build scalar run by scalar run, so take it in one scan.
+    #[inline(always)]
+    fn parse_plain_literal_branch(&mut self, terminator: Option<char>) -> Option<Ast> {
+        let start = self.pos;
+        let end = plain_literal_end(self.bytes, start, self.flags.ignore_whitespace);
+        if end == start {
+            return None;
+        }
+        let ends_sequence = match self.bytes.get(end) {
+            None => true,
+            Some(b'|') => true,
+            Some(b')') => terminator == Some(')'),
+            Some(_) => false,
+        };
+        if !ends_sequence {
+            return None;
+        }
+        self.pos = end;
+        let literal = Ast::Literal(self.source_literal(start, end));
+        Some(if self.flags == RegexFlags::default() {
+            literal
+        } else {
+            Ast::Flags {
+                flags: self.flags,
+                child: Box::new(literal),
+            }
+        })
     }
 
     fn parse_repeat(&mut self) -> Ast {
@@ -472,6 +720,7 @@ impl<'a> Parser<'a> {
             };
         }
         while let Some(ch) = self.peek() {
+            let braced = ch == '{';
             let quantifier = match ch {
                 '*' => {
                     self.bump();
@@ -520,7 +769,9 @@ impl<'a> Parser<'a> {
             if self.peek() == Some('?') {
                 self.bump();
                 greedy = false;
-            } else if self.peek() == Some('+') {
+            } else if self.peek() == Some('+') && !braced {
+                // After an interval, Oniguruma reads `+` as another
+                // quantifier: `a{1,2}+` is `(?:a{1,2})+`, not possessive.
                 self.bump();
                 possessive = true;
                 self.features.possessive_or_atomic = true;
@@ -553,32 +804,96 @@ impl<'a> Parser<'a> {
                 self.features.line_anchor = true;
                 Ast::Anchor(AnchorKind::LineEnd)
             }
+            '\\' if self.peek().is_some_and(is_punctuation_escape) => {
+                self.pos += 1;
+                self.parse_literal_run(self.pos - 2)
+            }
             '\\' => self.parse_escape(false),
             ')' => {
-                self.diagnostics.push(format!(
-                    "unmatched ')' at char {}",
-                    self.pos.saturating_sub(1)
-                ));
+                let at = self.char_index(self.pos - 1);
+                self.diagnostics.push(format!("unmatched ')' at char {at}"));
                 Ast::Unsupported("unmatched ')'".to_owned())
             }
-            ch => {
-                let mut literal = String::new();
-                literal.push(ch);
-                while let Some(next) = self.peek() {
-                    if is_regex_syntax(next)
-                        || (self.flags.ignore_whitespace && (next.is_whitespace() || next == '#'))
-                        || self
-                            .chars
-                            .get(self.pos + 1)
-                            .is_some_and(|following| is_quantifier_start(*following))
-                    {
-                        break;
-                    }
-                    literal.push(self.bump().expect("peeked literal character"));
+            _ => self.parse_literal_run(self.pos - ch.len_utf8()),
+        }
+    }
+
+    /// Continues a literal run whose first scalar (or punctuation escape)
+    /// starts at `start` and has been consumed. Punctuation escapes such as
+    /// `\.` are literal scalars too; absorbing them here yields the same
+    /// coalesced literal `push_concat_node` would build from one-scalar
+    /// pieces. A scalar or escape followed by a quantifier ends the run so
+    /// the quantifier binds to it alone. The run is measured first so the
+    /// string is allocated once; keyword inventories parse thousands of runs.
+    fn parse_literal_run(&mut self, start: usize) -> Ast {
+        let mut escaped = start < self.pos && self.bytes[start] == b'\\';
+        let extended = self.flags.ignore_whitespace;
+        while let Some(&byte) = self.bytes.get(self.pos) {
+            if PLAIN_LITERAL_BYTE[usize::from(extended)][usize::from(byte)] {
+                // A plain byte is followed by a quantifier only where the run
+                // of plain bytes stops; that final scalar then binds alone.
+                self.pos = plain_literal_end(self.bytes, self.pos, extended);
+                if self
+                    .bytes
+                    .get(self.pos)
+                    .is_some_and(|following| is_quantifier_start(char::from(*following)))
+                {
+                    self.pos -= 1;
+                    break;
                 }
-                Ast::Literal(literal)
+                continue;
+            }
+            if byte == b'\\' {
+                // Punctuation escapes and quantifiers are ASCII, so byte
+                // lookahead cannot split a multi-byte scalar.
+                let absorbs = self
+                    .bytes
+                    .get(self.pos + 1)
+                    .is_some_and(|escaped| is_punctuation_escape(char::from(*escaped)))
+                    && !self
+                        .bytes
+                        .get(self.pos + 2)
+                        .is_some_and(|following| is_quantifier_start(char::from(*following)));
+                if !absorbs {
+                    break;
+                }
+                escaped = true;
+                self.pos += 2;
+                continue;
+            }
+            // Every other ASCII byte is regex syntax, or whitespace and `#`
+            // in extended mode (see `PLAIN_LITERAL_BYTE`).
+            if byte.is_ascii() {
+                break;
+            }
+            let next = self.peek().expect("scalar boundary");
+            if extended && next.is_whitespace() {
+                break;
+            }
+            let width = next.len_utf8();
+            if self
+                .bytes
+                .get(self.pos + width)
+                .is_some_and(|following| is_quantifier_start(char::from(*following)))
+            {
+                break;
+            }
+            self.pos += width;
+        }
+        let run = &self.source[start..self.pos];
+        if !escaped {
+            return Ast::Literal(self.source_literal(start, self.pos));
+        }
+        let mut literal = String::with_capacity(run.len());
+        let mut scalars = run.chars();
+        while let Some(scalar) = scalars.next() {
+            if scalar == '\\' {
+                literal.push(scalars.next().expect("absorbed escapes are complete"));
+            } else {
+                literal.push(scalar);
             }
         }
+        Ast::Literal(literal.into())
     }
 
     fn parse_group(&mut self) -> Ast {
@@ -690,7 +1005,7 @@ impl<'a> Parser<'a> {
                         }
                     }
                     _ => {
-                        let name = self.take_until('>');
+                        let name = self.take_until(b'>').to_owned();
                         self.expect('>');
                         self.features.named_group = true;
                         let index = self.alloc_capture(Some(name.clone()));
@@ -706,10 +1021,10 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            Some('P') if self.peek_n(1) == Some('<') => {
+            Some('P') if self.peek_second() == Some('<') => {
                 self.bump();
                 self.bump();
-                let name = self.take_until('>');
+                let name = self.take_until(b'>').to_owned();
                 self.expect('>');
                 self.features.named_group = true;
                 let index = self.alloc_capture(Some(name.clone()));
@@ -741,7 +1056,7 @@ impl<'a> Parser<'a> {
             }
             Some('#') => {
                 self.bump();
-                self.take_until(')');
+                self.take_until(b')');
                 self.expect(')');
                 Ast::Empty
             }
@@ -755,7 +1070,7 @@ impl<'a> Parser<'a> {
             Some(ch) if is_flag_char(ch) || ch == '-' => self.parse_flag_group(),
             _ => {
                 self.features.unsupported_escape = true;
-                let rest = self.take_until(')');
+                let rest = self.take_until(b')');
                 self.expect(')');
                 Ast::Unsupported(format!("unsupported group (?{rest})"))
             }
@@ -764,7 +1079,7 @@ impl<'a> Parser<'a> {
 
     fn parse_conditional(&mut self) -> Ast {
         self.bump(); // condition's opening `(`
-        let raw = self.take_until(')');
+        let raw = self.take_until(b')');
         self.expect(')');
         let condition = if let Ok(index) = raw.parse::<u32>() {
             Some(Backref::Number(index))
@@ -858,75 +1173,96 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_class_body_inner(&mut self) -> CharClass {
-        let mut class = CharClass::default();
+        let mut class = CharClass {
+            bracketed: true,
+            ..CharClass::default()
+        };
         if self.peek() == Some('^') {
             self.bump();
             class.negated = true;
         }
+        // The union being read accumulates on the scratch atom stack from
+        // `base`; nested classes use and release the stack above it. The
+        // first union becomes `atoms`, each one after `&&` an intersection.
+        let base = self.class_atoms.len();
+        let mut first_union = true;
         // Oniguruma treats `]` as a literal when it is the first class atom,
         // e.g. `[]),;}]`. Several VS Code TypeScript rules rely on this form.
         if self.peek() == Some(']') {
             self.bump();
-            class.atoms.push(ClassAtom::Char(']'));
+            self.class_atoms.push(ClassAtom::Char(']'));
         }
         while let Some(ch) = self.peek() {
             if ch == ']' {
                 self.bump();
                 break;
             }
-            if ch == '&' && self.peek_n(1) == Some('&') {
+            if ch == '&' && self.peek_second() == Some('&') {
                 self.bump();
                 self.bump();
-                class.intersections.push(Vec::new());
+                self.finish_class_union(&mut class, base, &mut first_union);
                 continue;
             }
             let atom = self.read_class_atom();
             if let ClassAtom::Char(start) = atom {
-                if self.peek() == Some('-') && self.peek_n(1).is_some_and(|next| next != ']') {
+                if self.peek() == Some('-') && self.peek_second().is_some_and(|next| next != ']') {
                     self.bump();
                     let end_atom = self.read_class_atom();
                     if let ClassAtom::Char(end) = end_atom {
-                        class.current_union_mut().push(ClassAtom::Range(start, end));
+                        self.class_atoms.push(ClassAtom::Range(start, end));
                     } else {
-                        let union = class.current_union_mut();
-                        union.push(ClassAtom::Char(start));
-                        union.push(ClassAtom::Char('-'));
-                        union.push(end_atom);
+                        self.class_atoms.push(ClassAtom::Char(start));
+                        self.class_atoms.push(ClassAtom::Char('-'));
+                        self.class_atoms.push(end_atom);
                     }
                     continue;
                 }
-                class.current_union_mut().push(ClassAtom::Char(start));
+                self.class_atoms.push(ClassAtom::Char(start));
             } else {
-                class.current_union_mut().push(atom);
+                self.class_atoms.push(atom);
             }
         }
+        self.finish_class_union(&mut class, base, &mut first_union);
         class
+    }
+
+    fn finish_class_union(&mut self, class: &mut CharClass, base: usize, first_union: &mut bool) {
+        let union = self.class_atoms.drain(base..).collect();
+        if std::mem::take(first_union) {
+            class.atoms = union;
+        } else {
+            class.intersections.push(union);
+        }
     }
 
     fn read_class_atom(&mut self) -> ClassAtom {
         let Some(ch) = self.peek() else {
             return ClassAtom::Char('\0');
         };
-        if ch == '[' && self.peek_n(1) == Some(':') {
+        if ch == '[' && self.peek_second() == Some(':') {
             self.bump();
             self.bump();
-            let mut name = String::new();
             let mut negated = false;
             if self.peek() == Some('^') {
                 self.bump();
                 negated = true;
             }
+            let start = self.pos;
+            let mut end = self.bytes.len();
             while let Some(next) = self.peek() {
-                if next == ':' && self.peek_n(1) == Some(']') {
+                if next == ':' && self.peek_second() == Some(']') {
+                    end = self.pos;
                     self.bump();
                     self.bump();
                     break;
                 }
-                name.push(next);
                 self.bump();
             }
             self.features.unicode_or_posix_class = true;
-            return ClassAtom::Posix { name, negated };
+            return ClassAtom::Posix {
+                name: self.source[start..end].to_owned(),
+                negated,
+            };
         }
         if ch == '[' {
             self.bump();
@@ -958,7 +1294,7 @@ impl<'a> Parser<'a> {
             'N' => ClassAtom::Perl(PerlClassKind::NotNewline),
             'p' | 'P' if self.peek() == Some('{') => {
                 self.bump();
-                let name = self.take_until('}');
+                let name = self.take_until(b'}').to_owned();
                 self.expect('}');
                 self.features.unicode_or_posix_class = true;
                 ClassAtom::Unicode {
@@ -969,7 +1305,7 @@ impl<'a> Parser<'a> {
             'x' => {
                 let digits = if self.peek() == Some('{') {
                     self.bump();
-                    let digits = self.take_until('}');
+                    let digits = self.take_until(b'}');
                     self.expect('}');
                     digits
                 } else {
@@ -982,6 +1318,7 @@ impl<'a> Parser<'a> {
                 match chars.as_deref() {
                     Some([ch]) => ClassAtom::Char(*ch),
                     Some(chars) if !chars.is_empty() => ClassAtom::Nested(Box::new(CharClass {
+                        bracketed: true,
                         negated: false,
                         intersections: Vec::new(),
                         atoms: chars.iter().copied().map(ClassAtom::Char).collect(),
@@ -991,7 +1328,7 @@ impl<'a> Parser<'a> {
             }
             'u' => {
                 let digits = self.take_hex_digits(4);
-                ClassAtom::Char(hex_char(&digits).unwrap_or('u'))
+                ClassAtom::Char(hex_char(digits).unwrap_or('u'))
             }
             _ => ClassAtom::Char(unescape_char(ch)),
         }
@@ -999,7 +1336,7 @@ impl<'a> Parser<'a> {
 
     fn parse_escape(&mut self, in_class: bool) -> Ast {
         let Some(ch) = self.bump() else {
-            return Ast::Literal("\\".to_owned());
+            return Ast::Literal("\\".into());
         };
         match ch {
             'A' => {
@@ -1015,56 +1352,67 @@ impl<'a> Parser<'a> {
             'b' if !in_class => Ast::Anchor(AnchorKind::WordBoundary),
             'B' if !in_class => Ast::Anchor(AnchorKind::NotWordBoundary),
             'd' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Digit)],
             }),
             'D' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotDigit)],
             }),
             's' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Space)],
             }),
             'S' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotSpace)],
             }),
             'w' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::Word)],
             }),
             'W' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotWord)],
             }),
             'h' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::HorizontalSpace)],
             }),
             'H' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotHorizontalSpace)],
             }),
             'v' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::VerticalSpace)],
             }),
             'V' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotVerticalSpace)],
             }),
             'N' => Ast::Class(CharClass {
+                bracketed: false,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Perl(PerlClassKind::NotNewline)],
@@ -1072,10 +1420,11 @@ impl<'a> Parser<'a> {
             'X' => Ast::Grapheme,
             'p' | 'P' if self.peek() == Some('{') => {
                 self.bump();
-                let name = self.take_until('}');
+                let name = self.take_until(b'}').to_owned();
                 self.expect('}');
                 self.features.unicode_or_posix_class = true;
                 Ast::Class(CharClass {
+                    bracketed: false,
                     negated: false,
                     intersections: Vec::new(),
                     atoms: vec![ClassAtom::Unicode {
@@ -1086,14 +1435,14 @@ impl<'a> Parser<'a> {
             }
             'k' if self.peek() == Some('<') => {
                 self.bump();
-                let name = self.take_until('>');
+                let name = self.take_until(b'>').to_owned();
                 self.expect('>');
                 self.features.backreference = true;
                 Ast::Backref(Backref::Name(name))
             }
             'g' if self.peek() == Some('<') => {
                 self.bump();
-                let name = self.take_until('>');
+                let name = self.take_until(b'>').to_owned();
                 self.expect('>');
                 self.features.subroutine = true;
                 if let Ok(index) = name.parse::<u32>() {
@@ -1128,21 +1477,22 @@ impl<'a> Parser<'a> {
             }
             'x' if self.peek() == Some('{') => {
                 self.bump();
-                let digits = self.take_until('}');
+                let digits = self.take_until(b'}');
                 self.expect('}');
-                Ast::Literal(hex_char(&digits).unwrap_or('\u{FFFD}').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('\u{FFFD}').to_string().into())
             }
             'x' => {
                 let digits = self.take_hex_digits(2);
-                Ast::Literal(hex_char(&digits).unwrap_or('x').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('x').to_string().into())
             }
             'u' => {
                 let digits = self.take_hex_digits(4);
-                Ast::Literal(hex_char(&digits).unwrap_or('u').to_string())
+                Ast::Literal(hex_char(digits).unwrap_or('u').to_string().into())
             }
             'R' => Ast::Alternation(vec![
-                Ast::Literal("\r\n".to_owned()),
+                Ast::Literal("\r\n".into()),
                 Ast::Class(CharClass {
+                    bracketed: false,
                     negated: false,
                     intersections: Vec::new(),
                     atoms: vec![
@@ -1156,7 +1506,7 @@ impl<'a> Parser<'a> {
                     ],
                 }),
             ]),
-            _ => Ast::Literal(unescape_char(ch).to_string()),
+            _ => Ast::Literal(unescape_char(ch).to_string().into()),
         }
     }
 
@@ -1207,70 +1557,113 @@ impl<'a> Parser<'a> {
         let index = self.next_capture;
         self.next_capture += 1;
         if let Some(name) = name {
-            self.named_captures.insert(name, index);
+            if let Some(last) = self.named_captures.get_mut(&name) {
+                let previous = std::mem::replace(last, index);
+                self.duplicate_names
+                    .entry(name)
+                    .or_insert_with(|| vec![previous])
+                    .push(index);
+            } else {
+                self.named_captures.insert(name, index);
+            }
         }
         index
     }
 
-    fn take_digits(&mut self) -> String {
-        let mut out = String::new();
-        while let Some(ch) = self.peek().filter(|ch| ch.is_ascii_digit()) {
-            out.push(ch);
-            self.bump();
+    fn take_digits(&mut self) -> &'a str {
+        let start = self.pos;
+        while self.bytes.get(self.pos).is_some_and(u8::is_ascii_digit) {
+            self.pos += 1;
         }
-        out
+        &self.source[start..self.pos]
     }
 
-    fn take_hex_digits(&mut self, limit: usize) -> String {
-        let mut out = String::new();
-        for _ in 0..limit {
-            let Some(ch) = self.peek().filter(|ch| ch.is_ascii_hexdigit()) else {
-                break;
-            };
-            out.push(ch);
-            self.bump();
+    fn take_hex_digits(&mut self, limit: usize) -> &'a str {
+        let start = self.pos;
+        while self.pos - start < limit
+            && self.bytes.get(self.pos).is_some_and(u8::is_ascii_hexdigit)
+        {
+            self.pos += 1;
         }
-        out
+        &self.source[start..self.pos]
     }
 
-    fn take_until(&mut self, terminator: char) -> String {
-        let mut out = String::new();
-        while let Some(ch) = self.peek() {
-            if ch == terminator {
-                break;
-            }
-            out.push(ch);
-            self.bump();
-        }
-        out
+    /// Consumes input up to, not including, the first ASCII `terminator`.
+    fn take_until(&mut self, terminator: u8) -> &'a str {
+        let start = self.pos;
+        let rest = &self.bytes[start..];
+        self.pos = memchr::memchr(terminator, rest).map_or(self.bytes.len(), |end| start + end);
+        &self.source[start..self.pos]
     }
 
     fn expect(&mut self, expected: char) {
         if self.peek() == Some(expected) {
             self.bump();
         } else {
+            let at = self.char_index(self.pos);
             self.diagnostics
-                .push(format!("expected '{expected}' at char {}", self.pos));
+                .push(format!("expected '{expected}' at char {at}"));
         }
     }
 
+    /// Scalar index of a byte offset; diagnostics report scalar positions.
+    fn char_index(&self, byte: usize) -> usize {
+        self.source[..byte].chars().count()
+    }
+
+    #[inline]
+    fn char_at(&self, pos: usize) -> Option<char> {
+        let byte = *self.bytes.get(pos)?;
+        if byte.is_ascii() {
+            Some(char::from(byte))
+        } else {
+            self.source[pos..].chars().next()
+        }
+    }
+
+    #[inline]
     fn peek(&self) -> Option<char> {
-        self.chars.get(self.pos).copied()
+        self.char_at(self.pos)
     }
 
-    fn peek_n(&self, n: usize) -> Option<char> {
-        self.chars.get(self.pos + n).copied()
+    /// The scalar after the next one.
+    fn peek_second(&self) -> Option<char> {
+        let first = self.peek()?;
+        self.char_at(self.pos + first.len_utf8())
     }
 
+    #[inline]
     fn bump(&mut self) -> Option<char> {
         let ch = self.peek()?;
-        self.pos += 1;
+        self.pos += ch.len_utf8();
         Some(ch)
     }
 }
 
 fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
+    // Most branches contain no bare option change. They are already in the
+    // shape the rewrite below would rebuild, so skip taking them apart.
+    let needs_rewrite = |branch: &Ast| match branch {
+        Ast::Concat(nodes) => {
+            nodes.len() < 2 || nodes.iter().any(|node| flag_change_flags(node).is_some())
+        }
+        node => flag_change_flags(node).is_some(),
+    };
+    if !branches.iter().any(needs_rewrite) {
+        return alternation_ast(branches);
+    }
     for branch_index in 0..branches.len() {
+        // Branches without an option-change marker are left in place; only
+        // a branch that needs restructuring is unpacked into a sequence.
+        if !has_flag_change_marker(&branches[branch_index]) {
+            if let Ast::Concat(nodes) = &mut branches[branch_index]
+                && nodes.len() < 2
+            {
+                let nodes = std::mem::take(nodes);
+                branches[branch_index] = concat_ast(nodes);
+            }
+            continue;
+        }
         let branch = std::mem::replace(&mut branches[branch_index], Ast::Empty);
         let mut nodes = match branch {
             Ast::Concat(nodes) => nodes,
@@ -1297,6 +1690,15 @@ fn normalize_flag_changes(mut branches: Vec<Ast>) -> Ast {
         break;
     }
     alternation_ast(branches)
+}
+
+/// Whether a parsed branch contains a bare option change (`(?i)`) that
+/// `normalize_flag_changes` must scope over the rest of the alternation.
+fn has_flag_change_marker(branch: &Ast) -> bool {
+    match branch {
+        Ast::Concat(nodes) => nodes.iter().any(|node| flag_change_flags(node).is_some()),
+        node => flag_change_flags(node).is_some(),
+    }
 }
 
 fn flag_change_marker(flags: RegexFlags) -> Ast {
@@ -1339,40 +1741,36 @@ fn alternation_ast(mut branches: Vec<Ast>) -> Ast {
     }
 }
 
-fn push_concat_node(nodes: &mut Vec<Ast>, node: Ast) {
-    if let Ast::Literal(literal) = node {
-        if let Some(Ast::Literal(previous)) = nodes.last_mut() {
-            previous.push_str(&literal);
-        } else {
-            nodes.push(Ast::Literal(literal));
-        }
-    } else if let Ast::Flags { flags, child } = node {
+/// Appends `node` to the sequence occupying `nodes[base..]`, coalescing
+/// adjacent literals (and adjacent literals under identical option
+/// snapshots) with the sequence's last node.
+fn push_concat_node(nodes: &mut Vec<Ast>, base: usize, node: Ast) {
+    let previous = if nodes.len() > base {
+        nodes.last_mut()
+    } else {
+        None
+    };
+    match (previous, &node) {
+        (Some(Ast::Literal(previous)), Ast::Literal(literal)) => previous.push_literal(literal),
         // Keep option snapshots compact. Without this, `(?i:keyword)` becomes
         // one flag node per scalar and defeats literal/alternation fast paths.
-        match *child {
-            Ast::Literal(literal) => {
-                if let Some(Ast::Flags {
-                    flags: previous_flags,
-                    child: previous_child,
-                }) = nodes.last_mut()
-                    && *previous_flags == flags
-                    && let Ast::Literal(previous) = previous_child.as_mut()
-                {
-                    previous.push_str(&literal);
-                } else {
-                    nodes.push(Ast::Flags {
-                        flags,
-                        child: Box::new(Ast::Literal(literal)),
-                    });
-                }
-            }
-            child => nodes.push(Ast::Flags {
-                flags,
-                child: Box::new(child),
+        (
+            Some(Ast::Flags {
+                flags: previous_flags,
+                child: previous_child,
             }),
+            Ast::Flags { flags, child },
+        ) if previous_flags == flags
+            && matches!(previous_child.as_ref(), Ast::Literal(_))
+            && matches!(child.as_ref(), Ast::Literal(_)) =>
+        {
+            if let (Ast::Literal(previous), Ast::Literal(literal)) =
+                (previous_child.as_mut(), child.as_ref())
+            {
+                previous.push_literal(literal);
+            }
         }
-    } else {
-        nodes.push(node);
+        _ => nodes.push(node),
     }
 }
 
@@ -1525,6 +1923,7 @@ mod tests {
         assert_eq!(
             parsed.ast,
             Ast::Class(CharClass {
+                bracketed: true,
                 negated: false,
                 intersections: Vec::new(),
                 atoms: vec![
@@ -1549,6 +1948,7 @@ mod tests {
         assert_eq!(
             class.atoms[2],
             ClassAtom::Nested(Box::new(CharClass {
+                bracketed: true,
                 negated: true,
                 intersections: Vec::new(),
                 atoms: vec![ClassAtom::Range('\0', '\u{7f}')],
@@ -1628,7 +2028,40 @@ mod tests {
     #[test]
     fn coalesces_adjacent_literals() {
         let parsed = parse("return");
-        assert_eq!(parsed.ast, Ast::Literal("return".to_owned()));
+        assert_eq!(parsed.ast, Ast::Literal("return".into()));
+        // Escaped scalars merge into the preceding run even when the whole
+        // branch collapses to one node.
+        assert_eq!(parse(r"a\.é").ast, Ast::Literal("a.é".into()));
+        assert_eq!(parse(r"\(\\\)x").ast, Ast::Literal(r"(\)x".into()));
+        // A quantified escape binds alone, exactly as a quantified scalar.
+        let Ast::Concat(nodes) = parse(r"a\.+\-").ast else {
+            panic!("expected concat");
+        };
+        assert_eq!(nodes[0], Ast::Literal("a".into()));
+        assert!(
+            matches!(&nodes[1], Ast::Repeat { node, .. } if **node == Ast::Literal(".".into()))
+        );
+        assert_eq!(nodes[2], Ast::Literal("-".into()));
+        // Escaped whitespace and comment markers stay literal in extended mode.
+        let Ast::Flags { child, .. } = parse(r"(?x: a \ b \# c )").ast else {
+            panic!("expected option scope");
+        };
+        assert!(matches!(child.as_ref(), Ast::Flags { child, .. }
+            if **child == Ast::Literal("a b#c".into())));
+        assert_eq!(
+            parse(r"x\.|y").ast,
+            Ast::Alternation(vec![Ast::Literal("x.".into()), Ast::Literal("y".into()),])
+        );
+        // A trailing option change scopes only the rest of its branch and
+        // the following branches, never the preceding literal.
+        let Ast::Concat(nodes) = parse("ab(?i)c|d").ast else {
+            panic!("expected scoped concat");
+        };
+        assert_eq!(nodes[0], Ast::Literal("ab".into()));
+        let Ast::Flags { child, .. } = &nodes[1] else {
+            panic!("expected option scope");
+        };
+        assert!(matches!(child.as_ref(), Ast::Alternation(branches) if branches.len() == 2));
     }
 
     #[test]
@@ -1647,16 +2080,93 @@ mod tests {
     }
 
     #[test]
+    fn multibyte_scalars_parse_by_scalar_not_byte() {
+        // A quantifier binds to the whole preceding scalar, whatever its
+        // UTF-8 width, and the run before it stays one literal.
+        let Ast::Concat(nodes) = parse("日本語+").ast else {
+            panic!("expected concat");
+        };
+        assert_eq!(nodes[0], Ast::Literal("日本".into()));
+        assert!(
+            matches!(&nodes[1], Ast::Repeat { node, min: 1, .. } if **node == Ast::Literal("語".into()))
+        );
+        let Ast::Repeat { node, .. } = parse("🛰?").ast else {
+            panic!("expected repeat");
+        };
+        assert_eq!(*node, Ast::Literal("🛰".into()));
+        // Escaped punctuation still coalesces across multi-byte neighbours.
+        assert_eq!(parse(r"é\.ß\-").ast, Ast::Literal("é.ß-".into()));
+        // Extended mode skips Unicode whitespace inside a literal run.
+        let Ast::Flags { child, .. } = parse("(?x:a\u{a0}é b)").ast else {
+            panic!("expected option scope");
+        };
+        assert!(matches!(child.as_ref(), Ast::Flags { child, .. }
+            if **child == Ast::Literal("aéb".into())));
+        // Class ranges and POSIX names read whole scalars.
+        let Ast::Class(class) = parse("[α-ω[:alpha:]é]").ast else {
+            panic!("expected class");
+        };
+        assert_eq!(
+            class.atoms,
+            vec![
+                ClassAtom::Range('α', 'ω'),
+                ClassAtom::Posix {
+                    name: "alpha".to_owned(),
+                    negated: false,
+                },
+                ClassAtom::Char('é'),
+            ]
+        );
+        // Unterminated POSIX names keep the remaining input.
+        let Ast::Class(class) = parse("[[:é").ast else {
+            panic!("expected class");
+        };
+        assert_eq!(
+            class.atoms,
+            vec![ClassAtom::Posix {
+                name: "é".to_owned(),
+                negated: false,
+            }]
+        );
+    }
+
+    #[test]
+    fn diagnostics_report_scalar_positions() {
+        assert_eq!(parse("é)").diagnostics, vec!["unmatched ')' at char 1"]);
+        assert_eq!(parse("(日本").diagnostics, vec!["expected ')' at char 3"]);
+        assert_eq!(
+            parse("[é&&[^ß]x]y").ast,
+            Ast::Concat(vec![
+                Ast::Class(CharClass {
+                    bracketed: true,
+                    negated: false,
+                    intersections: vec![vec![
+                        ClassAtom::Nested(Box::new(CharClass {
+                            bracketed: true,
+                            negated: true,
+                            intersections: Vec::new(),
+                            atoms: vec![ClassAtom::Char('ß')],
+                        })),
+                        ClassAtom::Char('x'),
+                    ]],
+                    atoms: vec![ClassAtom::Char('é')],
+                }),
+                Ast::Literal("y".into()),
+            ])
+        );
+    }
+
+    #[test]
     fn does_not_coalesce_across_repeats_or_captures() {
         let parsed = parse("ab+c(d)e");
         let Ast::Concat(nodes) = parsed.ast else {
             panic!("expected concat");
         };
-        assert_eq!(nodes.first(), Some(&Ast::Literal("a".to_owned())));
+        assert_eq!(nodes.first(), Some(&Ast::Literal("a".into())));
         assert!(matches!(nodes.get(1), Some(Ast::Repeat { .. })));
-        assert_eq!(nodes.get(2), Some(&Ast::Literal("c".to_owned())));
+        assert_eq!(nodes.get(2), Some(&Ast::Literal("c".into())));
         assert!(matches!(nodes.get(3), Some(Ast::Group { .. })));
-        assert_eq!(nodes.get(4), Some(&Ast::Literal("e".to_owned())));
+        assert_eq!(nodes.get(4), Some(&Ast::Literal("e".into())));
     }
 
     #[test]

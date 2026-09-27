@@ -67,13 +67,24 @@ fn custom_oracle_regressions_across_sessions_sinks_and_checkpoints() {
             root.get_or_insert(id);
         }
         let root = root.unwrap();
+        // vscode-textmate emits one token per produce call; public spans
+        // merge adjacent tokens with the same scopes.
         let expected: ScopeLines = golden
             .lines
             .into_iter()
             .map(|line| {
-                line.into_iter()
-                    .map(|span| (span.start..span.end, span.scopes))
-                    .collect()
+                let mut spans: Vec<(Range<usize>, Vec<String>)> = Vec::new();
+                for span in line {
+                    if let Some((range, scopes)) = spans.last_mut()
+                        && range.end == span.start
+                        && *scopes == span.scopes
+                    {
+                        range.end = span.end;
+                    } else {
+                        spans.push((span.start..span.end, span.scopes));
+                    }
+                }
+                spans
             })
             .collect();
         let prepared = PreparedLanguage::new(&registry, root).unwrap();
@@ -149,4 +160,29 @@ fn custom_oracle_regressions_across_sessions_sinks_and_checkpoints() {
         assert_eq!(replay.status(), fresh.status());
         assert_eq!(scopes(&replay), scopes(&fresh));
     }
+}
+
+#[test]
+fn deep_tokenizer_states_format_and_drop_without_recursing() {
+    // Each line enters one more frame, the shape nested input produces.
+    let grammar = r##"{"scopeName":"source.deep","patterns":[{"include":"#r"}],"repository":{"r":{"begin":"(?=(zz))","end":"b","name":"meta.r","patterns":[{"include":"#r"}]}}}"##;
+    let mut registry = GrammarRegistry::new();
+    let root = registry.add_json(grammar).unwrap();
+    let prepared = PreparedLanguage::new(&registry, root).unwrap();
+    let mut tokenizer = prepared.tokenizer(TokenizerOptions::default());
+    let mut state = tokenizer.initial_state();
+    for _ in 0..10_000 {
+        tokenizer.tokenize_line("zz", &mut state).unwrap();
+    }
+    // Recursing once per frame through 10,000 frames overflows a 64 KiB
+    // stack. Every owner of the frames drops on that thread.
+    std::thread::Builder::new()
+        .stack_size(64 * 1024)
+        .spawn(move || {
+            assert!(format!("{state:?}").len() > 10_000);
+            drop((state, tokenizer, prepared, registry));
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }

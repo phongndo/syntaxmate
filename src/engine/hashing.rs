@@ -47,7 +47,37 @@ impl Hasher for FastHasher {
     }
 }
 
+/// Word-at-a-time hasher for the engine's string-keyed tables (scope names,
+/// scope templates, grammar scopes). `FastHasher` mixes one byte at a time,
+/// and SipHash's DoS resistance is unnecessary for grammar-derived keys.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StrHasher(u64);
+
+impl Hasher for StrHasher {
+    fn finish(&self) -> u64 {
+        let mut hash = self.0;
+        hash ^= hash >> 33;
+        hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        hash ^ (hash >> 33)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        const K: u64 = 0xf135_7aea_2e62_a9c5;
+        let mut hash = (self.0 ^ bytes.len() as u64).wrapping_mul(K);
+        let (words, remainder) = bytes.as_chunks::<8>();
+        for word in words {
+            hash = (hash ^ u64::from_le_bytes(*word))
+                .wrapping_mul(K)
+                .rotate_left(26);
+        }
+        let mut tail = [0u8; 8];
+        tail[..remainder.len()].copy_from_slice(remainder);
+        self.0 = (hash ^ u64::from_le_bytes(tail)).wrapping_mul(K);
+    }
+}
+
 pub(crate) type FastMap<K, V> = HashMap<K, V, BuildHasherDefault<FastHasher>>;
+pub(crate) type StrMap<K, V> = HashMap<K, V, BuildHasherDefault<StrHasher>>;
 pub(crate) type FastSet<T> = HashSet<T, BuildHasherDefault<FastHasher>>;
 
 pub(crate) fn fast_map<K, V>() -> FastMap<K, V> {

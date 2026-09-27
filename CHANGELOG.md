@@ -1,5 +1,57 @@
 # Changelog
 
+## Unreleased
+
+- Restore allocation guardrails for prepared tokenizers and bundled construction
+  by dropping construction-only rule templates and borrowing embedded repository
+  skeleton bytes.
+- Reduce first-use tokenization costs for complex and embedded grammars through
+  lower-allocation regex parsing, deferred matcher construction, and reuse within
+  each tokenizer. Refresh the [catalog reference measurements](benchmarks/textmate/catalog-performance.json).
+- Honor `TokenizerOptions::line_cache_entries = 0` by disabling line-result
+  caching completely.
+- Raise the MSRV from Rust 1.88 to 1.98; this requires a minor release.
+- Refresh bundled grammars from `@shikijs/langs` 3.23.0 to 4.4.3. Highlighting
+  changes for 52 upstream-updated grammars, including a rewritten C++ grammar
+  whose declarations, calls, and attributes scope differently, and `coq` now
+  uses the upstream `source.rocq` root scope. Seven new Shiki grammars (`ahk`,
+  `ahk2`, `chapel`, `nsis`, `org`, `rbs`, `smithy`) are vendored as private
+  assets pending promotion; the public catalog is unchanged at 264 languages.
+- Update the reference oracle to `vscode-textmate` 9.3.2, matching current
+  VS Code; `vscode-oniguruma` stays at 1.7.0 because VS Code still ships it.
+- Support Oniguruma `\p{XIDS}`/`\p{XIDC}` (XID_Start/XID_Continue, with loose
+  property-name matching), used by the updated Typst grammar.
+- Fix fallback regex search skipping matches of nullable patterns whose empty
+  branch is guarded by a lookbehind, such as `x|(?<=T)`. Patterns whose every
+  branch starts with `^`, `\A`, or `\G` (for example `(^|\G)`) are now tried
+  only at those anchors, and each search reuses one matcher scratch.
+- Match vscode-textmate for captures outside a match: skip empty captures, stop
+  at the first capture that starts after the match, and resume scanning at the
+  match end instead of after lookahead captures. Captures past the match end
+  now nest like captures inside it, including after an empty match such as
+  `(?=((a)b))`.
+- Pop the enclosing rule after a match rule that does not advance, as
+  vscode-textmate does. The bundled GraphQL grammar no longer stays inside a
+  type block for the rest of the document.
+- Stop re-entering a begin rule that matched without advancing at the same
+  position, and drop or format deeply nested tokenizer states without
+  recursion. A self-including zero-width `begin` no longer overflows the
+  stack.
+- Fold case for bracketed classes as Oniguruma does: under `(?i)` a character
+  matches when one of its case variants is in the class, with intersections,
+  nested classes, and properties evaluated first. `(?i)[^a-{]` now matches
+  `` ` ``, `(?i)[A-Z&&a-z]` no longer matches `a`, and `(?i)[\p{Lu}]` matches
+  `a`, while `(?i)\p{Lu}` outside brackets still does not.
+- Fix several Oniguruma incompatibilities in the fallback matcher:
+  - `\k<name>` and `(?(<name>)…)` consider every group sharing the name;
+  - `a{1,2}+` repeats the interval instead of being possessive;
+  - recursive subroutine calls keep their caller's loop counts;
+  - subroutine capture replay no longer panics after backtracking into a
+    returned call, and recursion that never consumes input, such as
+    `(\g<1>)?`, fails instead of overflowing the stack;
+  - Unicode case-insensitive keyword sets containing characters such as `θ`,
+    `ϑ`, and `ϴ` no longer miss matches.
+
 ## 0.1.3 - 2026-09-19
 
 - Reduce temporary bytecode-compilation allocations by borrowing subroutine AST

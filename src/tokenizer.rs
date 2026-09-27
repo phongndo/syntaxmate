@@ -117,7 +117,7 @@ impl GrammarRegistry {
                 self.limits.max_grammar_bytes
             )));
         }
-        if self.inner.grammars().len() >= self.limits.max_grammars {
+        if self.inner.len() >= self.limits.max_grammars {
             return Err(Error::Grammar(format!(
                 "grammar registry reached its {} grammar limit",
                 self.limits.max_grammars
@@ -134,7 +134,7 @@ impl GrammarRegistry {
     }
 
     pub fn grammar_count(&self) -> usize {
-        self.inner.grammars().len()
+        self.inner.len()
     }
 
     /// Validates local and external include references across the registry.

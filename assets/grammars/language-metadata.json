@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "source": {
     "package": "@shikijs/langs",
-    "version": "3.23.0",
+    "version": "4.4.3",
     "derivation": "aliases and fileTypes from vendored grammar registrations"
   },
   "languages": [
@@ -16,7 +16,10 @@
     },
     {
       "id": "actionscript-3",
-      "aliases": [],
+      "aliases": [
+        "actionscript",
+        "as3"
+      ],
       "extensions": [
         "as"
       ],
@@ -195,7 +198,8 @@
     {
       "id": "bat",
       "aliases": [
-        "batch"
+        "batch",
+        "cmd"
       ],
       "extensions": [],
       "basenames": []
@@ -328,7 +332,6 @@
         "bib",
         "cbl",
         "cblcpy",
-        "cblle",
         "cblsrce",
         "ccp",
         "cob",
@@ -345,7 +348,6 @@
         "scb",
         "scbl",
         "sel",
-        "sqlcblle",
         "src",
         "ss",
         "wks"
@@ -563,6 +565,8 @@
         "_emacs",
         "abbrev_defs",
         "cask",
+        "eask",
+        "easkfile",
         "el",
         "elc",
         "eld",
@@ -652,17 +656,7 @@
     {
       "id": "es-tag-sql",
       "aliases": [],
-      "extensions": [
-        "html",
-        "js",
-        "jsx",
-        "php",
-        "res",
-        "svelte",
-        "ts",
-        "tsx",
-        "vue"
-      ],
+      "extensions": [],
       "basenames": []
     },
     {
@@ -1118,7 +1112,9 @@
     },
     {
       "id": "just",
-      "aliases": [],
+      "aliases": [
+        "justfile"
+      ],
       "extensions": [
         "just",
         "justfile"
@@ -1327,7 +1323,9 @@
         "mbti"
       ],
       "extensions": [
-        "mbt"
+        "mbt",
+        "mbtp",
+        "mbtx"
       ],
       "basenames": []
     },
@@ -1542,7 +1540,8 @@
       "id": "powershell",
       "aliases": [
         "ps",
-        "ps1"
+        "ps1",
+        "pwsh"
       ],
       "extensions": [],
       "basenames": []
@@ -1821,6 +1820,7 @@
       "id": "smalltalk",
       "aliases": [],
       "extensions": [
+        "gst",
         "st"
       ],
       "basenames": []
@@ -2124,9 +2124,7 @@
     },
     {
       "id": "vb",
-      "aliases": [
-        "cmd"
-      ],
+      "aliases": [],
       "extensions": [],
       "basenames": []
     },

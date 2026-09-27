@@ -111,12 +111,29 @@ pub struct CompiledGrammar {
     pub scope_name: String,
     pub metadata: GrammarMetadata,
     pub string_names: Vec<Arc<str>>,
-    pub patterns: Vec<String>,
+    /// Regex sources, sharing the grammar's interned string allocations.
+    pub patterns: Vec<Arc<str>>,
     pub rules: Vec<Rule>,
     pub repository: BTreeMap<String, RuleRef>,
     pub top_level: Vec<RuleRef>,
     pub injections: Vec<Injection>,
     pub scope_names: Vec<Arc<str>>,
+    /// Include-graph facts recorded while compiling from source; `None` when
+    /// the grammar was built another way. See `GrammarWalkSummary`.
+    pub walk_summary: Option<GrammarWalkSummary>,
+}
+
+/// Grammar-wide include facts that the tokenizer's repository-context walk
+/// would otherwise rediscover by visiting every rule reference.
+///
+/// Equals a `grammar_closure::for_each_rule_ref` scan: whether any rule has a
+/// local repository, whether any reference is `$base`, and the distinct
+/// external scopes referenced (in no meaningful order).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GrammarWalkSummary {
+    pub local_repository: bool,
+    pub base_reference: bool,
+    pub external_scopes: Vec<ScopeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,7 +154,11 @@ impl CompiledGrammar {
     }
 
     pub fn pattern(&self, id: PatternId) -> Option<&str> {
-        self.patterns.get(id.0 as usize).map(String::as_str)
+        self.patterns.get(id.0 as usize).map(AsRef::as_ref)
+    }
+
+    pub(crate) fn shared_pattern(&self, id: PatternId) -> Option<&Arc<str>> {
+        self.patterns.get(id.0 as usize)
     }
 
     pub fn scope(&self, id: ScopeId) -> Option<&str> {
@@ -676,13 +697,14 @@ struct DevCompiler {
     next_rule: u32,
     strings: BTreeMap<Arc<str>, StringId>,
     string_names: Vec<Arc<str>>,
-    patterns: Vec<String>,
+    patterns: Vec<Arc<str>>,
     scopes: BTreeMap<Arc<str>, ScopeId>,
     scope_names: Vec<Arc<str>>,
     rules: Vec<Rule>,
     repository: BTreeMap<String, RuleRef>,
     local_repository_scopes: Vec<BTreeMap<String, String>>,
     next_local_repository: u32,
+    walk_summary: GrammarWalkSummary,
 }
 
 pub fn load_dev_grammar_from_str(
@@ -752,6 +774,7 @@ pub fn load_dev_grammar_from_path(
         top_level,
         injections,
         scope_names: compiler.scope_names,
+        walk_summary: Some(compiler.walk_summary),
     })
 }
 
@@ -901,6 +924,8 @@ impl DevCompiler {
         }
         let repository_id = self.next_local_repository;
         self.next_local_repository = self.next_local_repository.saturating_add(1);
+        // Every non-empty local repository becomes some rule's aliases.
+        self.walk_summary.local_repository = true;
         let aliases = repository
             .keys()
             .map(|name| (name.clone(), format!("$mark.local.{repository_id}.{name}")))
@@ -922,7 +947,10 @@ impl DevCompiler {
         self.string_id(include);
         match include {
             "$self" => RuleRef::SelfRef,
-            "$base" => RuleRef::BaseRef,
+            "$base" => {
+                self.walk_summary.base_reference = true;
+                RuleRef::BaseRef
+            }
             include if include.starts_with('#') => {
                 let name = include.trim_start_matches('#');
                 let resolved = self
@@ -944,22 +972,20 @@ impl DevCompiler {
                 if let Some(repository) = &repository {
                     self.string_id(repository);
                 }
-                RuleRef::External {
-                    scope: self.scope_id(scope),
-                    repository,
+                let scope = self.scope_id(scope);
+                if !self.walk_summary.external_scopes.contains(&scope) {
+                    self.walk_summary.external_scopes.push(scope);
                 }
+                RuleRef::External { scope, repository }
             }
         }
     }
 
-    fn pattern_id(&mut self, mut pattern: String) -> PatternId {
-        self.string_id(&pattern);
-        // Direct serde_json string decoding grows escaped regexes geometrically.
-        // Grammar patterns live for the tokenizer's lifetime, so release that
-        // transient spare capacity before retaining them.
-        pattern.shrink_to_fit();
+    fn pattern_id(&mut self, pattern: String) -> PatternId {
+        let string_id = self.string_id(&pattern);
         let id = PatternId(self.patterns.len() as u32);
-        self.patterns.push(pattern);
+        self.patterns
+            .push(Arc::clone(&self.string_names[string_id.0 as usize]));
         id
     }
 
@@ -1102,6 +1128,7 @@ mod tests {
             top_level: vec![RuleRef::Rule(RuleId(0)), RuleRef::Rule(RuleId(1))],
             injections: vec![],
             scope_names: vec![],
+            walk_summary: None,
         };
         assert_eq!(grammar.rules[0].id, RuleId(0));
         assert!(grammar.rule(RuleId(1)).is_some());

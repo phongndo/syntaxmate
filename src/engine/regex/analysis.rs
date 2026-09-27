@@ -9,7 +9,7 @@
 
 use super::ast::{Ast, Backref, ParsedRegex, RegexFlags};
 use super::backtrack::{StartByteSet, expand_case_insensitive_start_bytes, first_start_bytes};
-use super::prefilter::{Prefilter, required_literals};
+use super::prefilter::{Prefilter, required_factor, required_literals};
 use super::skip_prefix::SkipGate;
 use std::sync::OnceLock;
 
@@ -51,27 +51,39 @@ pub(crate) struct RegexAnalysis {
     skip_gate: Option<SkipGate>,
     capture: CaptureAnalysis,
     scanner_supported: bool,
+    scanner_end_exact: bool,
     bytecode_beneficial: bool,
+    instruction_capacity_hint: usize,
 }
 
 impl RegexAnalysis {
     pub(crate) fn new(parsed: &ParsedRegex) -> Self {
-        // Effective flags are shared by start-byte, required-literal, and
-        // skip-prefix analysis. Compute them once before deriving those views.
-        let flags = analyze_effective_flags(&parsed.ast);
+        // One structural walk derives every whole-tree property; separate
+        // walks each paid the pointer-chasing cost of the full AST. Effective
+        // flags are then shared by start-byte, required-literal, and
+        // skip-prefix analysis.
+        let summary = summarize_ast(parsed);
+        let flags = summary.flags;
         let uniform_effective_flags = flags.uniform;
         let has_case_insensitive_scope = flags.has_case_insensitive_scope;
         let prefilter_case_insensitive = prefilter_case_policy(parsed, &flags);
 
         let (start_bytes, start_nullable) =
             analyze_start_bytes(parsed, uniform_effective_flags, has_case_insensitive_scope);
-        let capture = analyze_captures(parsed);
+        let capture = analyze_captures(
+            parsed,
+            summary.referenced_groups,
+            summary.capture_bytecode_supported,
+        );
         let scanner_supported = super::scanner::Scanner::supports(parsed);
-        let bytecode_beneficial = super::bytecode::Program::is_beneficial(parsed);
+        let scanner_end_exact = super::scanner::match_end_is_exact(parsed);
+        let bytecode_beneficial =
+            super::bytecode::Program::is_beneficial_fanout(summary.ordered_fanout);
         let skip_gate = SkipGate::analyze_with_effective_flags(
             parsed,
             uniform_effective_flags,
             has_case_insensitive_scope,
+            start_bytes.is_some() && !start_nullable,
         );
 
         Self {
@@ -85,8 +97,16 @@ impl RegexAnalysis {
             skip_gate,
             capture,
             scanner_supported,
+            scanner_end_exact,
             bytecode_beneficial,
+            instruction_capacity_hint: summary.instruction_capacity_hint,
         }
+    }
+
+    /// Instruction count estimate for bytecode compilation, derived here so
+    /// lazy compilation does not walk a cold AST just to size its arena.
+    pub(crate) fn instruction_capacity_hint(&self) -> usize {
+        self.instruction_capacity_hint
     }
 
     pub(crate) fn uniform_effective_flags(&self) -> Option<RegexFlags> {
@@ -102,7 +122,20 @@ impl RegexAnalysis {
             let Some(case_fold) = self.prefilter_case_insensitive else {
                 return Prefilter::None;
             };
-            Prefilter::from_required(required_literals(&parsed.ast), case_fold)
+            let literals = required_literals(&parsed.ast);
+            // Byte-class runs are only derived for wholly case-sensitive
+            // patterns; case folding can map ASCII to non-ASCII characters.
+            if !case_fold
+                && !self.has_case_insensitive_scope
+                && !parsed.flags.case_insensitive
+                && let Some(factor) = required_factor(&parsed.ast)
+            {
+                return Prefilter::Factor {
+                    factor,
+                    literals: Box::new(Prefilter::from_required(literals, false)),
+                };
+            }
+            Prefilter::from_required(literals, case_fold)
         })
     }
 
@@ -130,6 +163,11 @@ impl RegexAnalysis {
         self.scanner_supported
     }
 
+    /// See [`super::scanner::match_end_is_exact`].
+    pub(crate) fn scanner_end_exact(&self) -> bool {
+        self.scanner_end_exact
+    }
+
     pub(crate) fn bytecode_beneficial(&self) -> bool {
         self.bytecode_beneficial
     }
@@ -140,12 +178,15 @@ fn analyze_start_bytes(
     uniform_flags: Option<RegexFlags>,
     has_case_insensitive_scope: bool,
 ) -> (Option<StartByteSet>, bool) {
-    if has_case_insensitive_scope && uniform_flags.is_none() {
-        return (None, false);
-    }
+    // With mixed case scopes, fold the whole set: case-insensitive expansion
+    // only adds candidates, so it stays a superset for case-sensitive parts.
+    let case_insensitive = match uniform_flags {
+        Some(flags) => flags.case_insensitive,
+        None => has_case_insensitive_scope || parsed.flags.case_insensitive,
+    };
     match first_start_bytes(&parsed.ast) {
         Some(mut info) if !info.bytes.is_empty() => {
-            if uniform_flags.unwrap_or(parsed.flags).case_insensitive {
+            if case_insensitive {
                 expand_case_insensitive_start_bytes(&mut info.bytes);
             }
             if info.bytes.len() < 128 {
@@ -168,13 +209,10 @@ fn prefilter_case_policy(parsed: &ParsedRegex, flags: &EffectiveFlagsAnalysis) -
     if let Some(root_flags) = flags.root_flags_without_nested_scope {
         return Some(root_flags.case_insensitive);
     }
-    if parsed.flags.case_insensitive {
-        Some(true)
-    } else if flags.has_case_insensitive_scope {
-        None
-    } else {
-        Some(false)
-    }
+    // Mixed case scopes search every required literal case-insensitively:
+    // that finds a superset of the case-sensitive occurrences, so the
+    // rejection gate stays free of false negatives.
+    Some(parsed.flags.case_insensitive || flags.has_case_insensitive_scope)
 }
 
 #[derive(Clone, Copy)]
@@ -191,96 +229,215 @@ struct FlagNodeAnalysis {
     has_flag_scope: bool,
 }
 
-fn analyze_effective_flags(ast: &Ast) -> EffectiveFlagsAnalysis {
-    fn combine(nodes: impl IntoIterator<Item = FlagNodeAnalysis>) -> FlagNodeAnalysis {
-        let mut uniform = None;
-        let mut mixed = false;
-        let mut has_case_insensitive_scope = false;
-        let mut has_flag_scope = false;
-        for node in nodes {
-            has_case_insensitive_scope |= node.has_case_insensitive_scope;
-            has_flag_scope |= node.has_flag_scope;
-            match node.uniform {
-                Ok(Some(node_flags)) => {
-                    mixed |= uniform.is_some_and(|flags| flags != node_flags);
-                    uniform = Some(node_flags);
-                }
-                Ok(None) => {}
-                Err(()) => mixed = true,
-            }
-        }
-        FlagNodeAnalysis {
-            uniform: if mixed { Err(()) } else { Ok(uniform) },
-            has_case_insensitive_scope,
-            has_flag_scope,
-        }
-    }
-
-    fn visit(ast: &Ast, inherited: RegexFlags) -> FlagNodeAnalysis {
-        match ast {
-            Ast::Empty => FlagNodeAnalysis {
-                uniform: Ok(None),
-                has_case_insensitive_scope: false,
-                has_flag_scope: false,
-            },
-            Ast::Flags { flags, child } => {
-                let child = visit(child, *flags);
-                FlagNodeAnalysis {
-                    uniform: child.uniform,
-                    has_case_insensitive_scope: flags.case_insensitive
-                        || child.has_case_insensitive_scope,
-                    has_flag_scope: true,
-                }
-            }
-            Ast::Concat(nodes) | Ast::Alternation(nodes) => {
-                combine(nodes.iter().map(|node| visit(node, inherited)))
-            }
-            Ast::Conditional {
-                matched, unmatched, ..
-            } => combine([visit(matched, inherited), visit(unmatched, inherited)]),
-            Ast::Repeat { node, .. }
-            | Ast::Group { child: node, .. }
-            | Ast::Look { child: node, .. } => visit(node, inherited),
-            _ => FlagNodeAnalysis {
-                uniform: Ok(Some(inherited)),
-                has_case_insensitive_scope: false,
-                has_flag_scope: false,
-            },
-        }
-    }
-
-    let (root, root_flags_without_nested_scope) = match ast {
-        Ast::Flags { flags, child } => {
-            let child = visit(child, *flags);
-            let root_flags = (!child.has_flag_scope).then_some(*flags);
-            (
-                FlagNodeAnalysis {
-                    uniform: child.uniform,
-                    has_case_insensitive_scope: flags.case_insensitive
-                        || child.has_case_insensitive_scope,
-                    has_flag_scope: true,
-                },
-                root_flags,
-            )
-        }
-        _ => (visit(ast, RegexFlags::default()), None),
+impl FlagNodeAnalysis {
+    const EMPTY: Self = Self {
+        uniform: Ok(None),
+        has_case_insensitive_scope: false,
+        has_flag_scope: false,
     };
-    EffectiveFlagsAnalysis {
-        uniform: root.uniform.ok().flatten(),
-        has_case_insensitive_scope: root.has_case_insensitive_scope,
-        root_flags_without_nested_scope,
+
+    fn leaf(inherited: RegexFlags) -> Self {
+        Self {
+            uniform: Ok(Some(inherited)),
+            has_case_insensitive_scope: false,
+            has_flag_scope: false,
+        }
+    }
+
+    fn scoped(flags: RegexFlags, child: Self) -> Self {
+        Self {
+            uniform: child.uniform,
+            has_case_insensitive_scope: flags.case_insensitive || child.has_case_insensitive_scope,
+            has_flag_scope: true,
+        }
     }
 }
 
-fn analyze_captures(parsed: &ParsedRegex) -> CaptureAnalysis {
-    let mut referenced_groups = Vec::new();
-    collect_referenced_groups(&parsed.ast, parsed, &mut referenced_groups);
+/// Combines sibling flag analyses: the union is uniform only when every
+/// non-empty sibling reports the same effective flags.
+struct FlagCombiner {
+    uniform: Option<RegexFlags>,
+    mixed: bool,
+    has_case_insensitive_scope: bool,
+    has_flag_scope: bool,
+}
+
+impl FlagCombiner {
+    fn new() -> Self {
+        Self {
+            uniform: None,
+            mixed: false,
+            has_case_insensitive_scope: false,
+            has_flag_scope: false,
+        }
+    }
+
+    fn push(&mut self, node: FlagNodeAnalysis) {
+        self.has_case_insensitive_scope |= node.has_case_insensitive_scope;
+        self.has_flag_scope |= node.has_flag_scope;
+        match node.uniform {
+            Ok(Some(node_flags)) => {
+                self.mixed |= self.uniform.is_some_and(|flags| flags != node_flags);
+                self.uniform = Some(node_flags);
+            }
+            Ok(None) => {}
+            Err(()) => self.mixed = true,
+        }
+    }
+
+    fn finish(self) -> FlagNodeAnalysis {
+        FlagNodeAnalysis {
+            uniform: if self.mixed {
+                Err(())
+            } else {
+                Ok(self.uniform)
+            },
+            has_case_insensitive_scope: self.has_case_insensitive_scope,
+            has_flag_scope: self.has_flag_scope,
+        }
+    }
+}
+
+/// Whole-tree facts gathered by one traversal of a parsed regex.
+struct AstSummary {
+    flags: EffectiveFlagsAnalysis,
+    /// Valid backreference and conditional-test groups, unsorted.
+    referenced_groups: Vec<u32>,
+    /// No grapheme or unsupported node occurs anywhere in the tree.
+    capture_bytecode_supported: bool,
+    /// Ordered choice points: extra alternation branches, repeats of
+    /// non-trivial nodes, and conditionals.
+    ordered_fanout: usize,
+    instruction_capacity_hint: usize,
+}
+
+struct SummaryWalk<'a> {
+    parsed: &'a ParsedRegex,
+    referenced_groups: Vec<u32>,
+    capture_bytecode_supported: bool,
+    ordered_fanout: usize,
+    instruction_capacity_hint: usize,
+}
+
+impl SummaryWalk<'_> {
+    fn add_instructions(&mut self, count: usize) {
+        self.instruction_capacity_hint = self.instruction_capacity_hint.saturating_add(count);
+    }
+
+    fn add_fanout(&mut self, count: usize) {
+        self.ordered_fanout = self.ordered_fanout.saturating_add(count);
+    }
+
+    fn leaf(&mut self, inherited: RegexFlags) -> FlagNodeAnalysis {
+        self.add_instructions(1);
+        FlagNodeAnalysis::leaf(inherited)
+    }
+
+    fn visit(&mut self, ast: &Ast, inherited: RegexFlags) -> FlagNodeAnalysis {
+        match ast {
+            Ast::Empty => FlagNodeAnalysis::EMPTY,
+            Ast::Flags { flags, child } => {
+                let child = self.visit(child, *flags);
+                FlagNodeAnalysis::scoped(*flags, child)
+            }
+            Ast::Concat(nodes) => {
+                let mut combined = FlagCombiner::new();
+                for node in nodes {
+                    combined.push(self.visit(node, inherited));
+                }
+                combined.finish()
+            }
+            Ast::Alternation(branches) => {
+                let extra = branches.len().saturating_sub(1);
+                self.add_fanout(extra);
+                self.add_instructions(extra.saturating_mul(2));
+                let mut combined = FlagCombiner::new();
+                for branch in branches {
+                    combined.push(self.visit(branch, inherited));
+                }
+                combined.finish()
+            }
+            Ast::Conditional {
+                condition,
+                matched,
+                unmatched,
+            } => {
+                push_backref_group(condition, self.parsed, &mut self.referenced_groups);
+                self.add_fanout(1);
+                self.add_instructions(1);
+                let mut combined = FlagCombiner::new();
+                combined.push(self.visit(matched, inherited));
+                combined.push(self.visit(unmatched, inherited));
+                combined.finish()
+            }
+            Ast::Repeat { node, .. } => {
+                self.add_fanout(usize::from(!matches!(
+                    node.as_ref(),
+                    Ast::Literal(_) | Ast::Class(_) | Ast::Dot
+                )));
+                self.add_instructions(3);
+                self.visit(node, inherited)
+            }
+            Ast::Group { child, .. } => self.visit(child, inherited),
+            Ast::Look { child, .. } => {
+                self.add_instructions(2);
+                self.visit(child, inherited)
+            }
+            Ast::Backref(backref) => {
+                push_backref_group(backref, self.parsed, &mut self.referenced_groups);
+                self.leaf(inherited)
+            }
+            Ast::Grapheme | Ast::Unsupported(_) => {
+                self.capture_bytecode_supported = false;
+                self.leaf(inherited)
+            }
+            Ast::Literal(_) | Ast::Dot | Ast::Class(_) | Ast::Anchor(_) | Ast::Subroutine(_) => {
+                self.leaf(inherited)
+            }
+        }
+    }
+}
+
+fn summarize_ast(parsed: &ParsedRegex) -> AstSummary {
+    let mut walk = SummaryWalk {
+        parsed,
+        referenced_groups: Vec::new(),
+        capture_bytecode_supported: true,
+        ordered_fanout: 0,
+        instruction_capacity_hint: 0,
+    };
+    let (root, root_flags_without_nested_scope) = match &parsed.ast {
+        Ast::Flags { flags, child } => {
+            let child = walk.visit(child, *flags);
+            let root_flags = (!child.has_flag_scope).then_some(*flags);
+            (FlagNodeAnalysis::scoped(*flags, child), root_flags)
+        }
+        ast => (walk.visit(ast, RegexFlags::default()), None),
+    };
+    AstSummary {
+        flags: EffectiveFlagsAnalysis {
+            uniform: root.uniform.ok().flatten(),
+            has_case_insensitive_scope: root.has_case_insensitive_scope,
+            root_flags_without_nested_scope,
+        },
+        referenced_groups: walk.referenced_groups,
+        capture_bytecode_supported: walk.capture_bytecode_supported,
+        ordered_fanout: walk.ordered_fanout,
+        instruction_capacity_hint: walk.instruction_capacity_hint,
+    }
+}
+
+fn analyze_captures(
+    parsed: &ParsedRegex,
+    mut referenced_groups: Vec<u32>,
+    capture_bytecode_supported: bool,
+) -> CaptureAnalysis {
     referenced_groups.sort_unstable();
     referenced_groups.dedup();
     let features = &parsed.features;
     CaptureAnalysis {
         referenced_groups: referenced_groups.into_boxed_slice(),
-        capture_bytecode_supported: capture_ast_supported(&parsed.ast),
+        capture_bytecode_supported,
         position_only_eligible: parsed.capture_count > 0
             && !features.backreference
             && !features.subroutine
@@ -293,59 +450,6 @@ fn analyze_captures(parsed: &ParsedRegex) -> CaptureAnalysis {
     }
 }
 
-fn capture_ast_supported(ast: &Ast) -> bool {
-    match ast {
-        Ast::Grapheme | Ast::Unsupported(_) => false,
-        Ast::Repeat { node, .. }
-        | Ast::Group { child: node, .. }
-        | Ast::Look { child: node, .. }
-        | Ast::Flags { child: node, .. } => capture_ast_supported(node),
-        Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().all(capture_ast_supported),
-        Ast::Conditional {
-            matched, unmatched, ..
-        } => capture_ast_supported(matched) && capture_ast_supported(unmatched),
-        Ast::Empty
-        | Ast::Literal(_)
-        | Ast::Dot
-        | Ast::Class(_)
-        | Ast::Anchor(_)
-        | Ast::Backref(_)
-        | Ast::Subroutine(_) => true,
-    }
-}
-
-fn collect_referenced_groups(ast: &Ast, parsed: &ParsedRegex, groups: &mut Vec<u32>) {
-    match ast {
-        Ast::Backref(backref) => push_backref_group(backref, parsed, groups),
-        Ast::Concat(nodes) | Ast::Alternation(nodes) => {
-            for node in nodes {
-                collect_referenced_groups(node, parsed, groups);
-            }
-        }
-        Ast::Repeat { node, .. }
-        | Ast::Group { child: node, .. }
-        | Ast::Look { child: node, .. }
-        | Ast::Flags { child: node, .. } => collect_referenced_groups(node, parsed, groups),
-        Ast::Conditional {
-            condition,
-            matched,
-            unmatched,
-        } => {
-            push_backref_group(condition, parsed, groups);
-            collect_referenced_groups(matched, parsed, groups);
-            collect_referenced_groups(unmatched, parsed, groups);
-        }
-        Ast::Empty
-        | Ast::Literal(_)
-        | Ast::Dot
-        | Ast::Grapheme
-        | Ast::Class(_)
-        | Ast::Anchor(_)
-        | Ast::Subroutine(_)
-        | Ast::Unsupported(_) => {}
-    }
-}
-
 fn push_backref_group(backref: &Backref, parsed: &ParsedRegex, groups: &mut Vec<u32>) {
     match backref {
         Backref::Number(group) => {
@@ -354,7 +458,9 @@ fn push_backref_group(backref: &Backref, parsed: &ParsedRegex, groups: &mut Vec<
             }
         }
         Backref::Name(name) => {
-            if let Some(group) = parsed.named_captures.get(name) {
+            if let Some(shared) = parsed.duplicate_names.get(name) {
+                groups.extend_from_slice(shared);
+            } else if let Some(group) = parsed.named_captures.get(name) {
                 groups.push(*group);
             }
         }
@@ -409,12 +515,33 @@ mod tests {
     }
 
     #[test]
-    fn mixed_case_scopes_disable_shared_byte_and_literal_gates() {
+    fn mixed_case_scopes_use_case_folded_byte_and_literal_gates() {
         let parsed = parse(r"(?i:foo)(?-i:bar)");
         let analysis = parsed.analysis();
 
         assert!(analysis.uniform_effective_flags().is_none());
-        assert!(analysis.start_bytes().is_none());
-        assert!(!analysis.prefilter(&parsed).is_enabled());
+        let start_bytes = analysis.start_bytes().expect("folded start bytes");
+        for byte in [b'f', b'F', 0xc5, 0xe2] {
+            assert!(start_bytes.contains(byte), "{byte:#x}");
+        }
+        assert!(!start_bytes.contains(b'b'));
+        let prefilter = analysis.prefilter(&parsed);
+        assert!(prefilter.is_enabled());
+        for line in ["FOObar", "xfOobar", "fooBAR"] {
+            assert!(prefilter.may_match(line, 0), "{line:?}");
+        }
+        assert!(!prefilter.may_match("fo obar", 0));
+
+        // A case-sensitive literal behind a case-insensitive scope keeps a
+        // (folded) gate instead of none.
+        let parsed = parse(r"(?<!@)@@(?i)\b(error|rowcount)");
+        let analysis = parsed.analysis();
+        assert!(
+            analysis
+                .start_bytes()
+                .is_some_and(|bytes| bytes.contains(b'@'))
+        );
+        assert!(!analysis.prefilter(&parsed).may_match("select 1", 0));
+        assert!(analysis.prefilter(&parsed).may_match("x @@ERROR", 0));
     }
 }

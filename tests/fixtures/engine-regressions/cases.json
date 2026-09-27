@@ -44,5 +44,174 @@
       {"match": "!", "name": "keyword.outside"}
     ]}],
     "sources": ["cd\n>!\nstop\nabd\na>!\nstop\n"]
+  },
+  {
+    "name": "lookahead-capture-outside-match",
+    "grammars": [
+      {
+        "scopeName": "source.outside",
+        "patterns": [
+          {
+            "match": "T\\b(?=\\s*+(\\w+)(?=(x?)\\())",
+            "name": "storage.type",
+            "captures": {
+              "1": {
+                "name": "entity.skipped"
+              },
+              "2": {
+                "patterns": [
+                  {
+                    "match": "x",
+                    "name": "invalid.never"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "match": "U(?=(-)(x?))",
+            "name": "storage.type",
+            "captures": {
+              "1": {
+                "name": "punctuation.dash"
+              },
+              "2": {
+                "patterns": [
+                  {
+                    "match": "x",
+                    "name": "invalid.never"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "match": "(\\w+)(\\()",
+            "captures": {
+              "1": {
+                "name": "entity.call"
+              },
+              "2": {
+                "name": "punctuation.open"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "T f(v)\nU-g(v)\n"
+    ]
+  },
+  {
+    "name": "outside-capture-resumes-at-match-end",
+    "grammars": [
+      {
+        "scopeName": "source.resume",
+        "patterns": [
+          {
+            "match": "int(?=( ))",
+            "name": "storage.type",
+            "captures": {
+              "1": {
+                "patterns": [
+                  {
+                    "match": "x",
+                    "name": "invalid.never"
+                  }
+                ],
+                "name": "punctuation.space"
+              }
+            }
+          },
+          {
+            "match": "__a\\(",
+            "name": "support.attribute"
+          },
+          {
+            "match": "\\s*+(\\w+)(\\()",
+            "captures": {
+              "1": {
+                "name": "entity.call"
+              },
+              "2": {
+                "name": "punctuation.open"
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "int __a(v)\n"
+    ]
+  },
+  {
+    "name": "empty-match-lookahead-capture",
+    "grammars": [
+      {
+        "scopeName": "source.emptycap",
+        "patterns": [
+          {"match": "(?=(zz))", "captures": {"1": {"name": "empty.look"}}},
+          {"match": "b", "name": "letter.b"}
+        ]
+      }
+    ],
+    "sources": ["zz", "a zz b", "zzb"]
+  },
+  {
+    "name": "nested-captures-past-match-end",
+    "grammars": [
+      {
+        "scopeName": "source.nestedcap",
+        "patterns": [
+          {"match": "x(?=((a)b))", "name": "keyword.x", "captures": {"1": {"name": "outer"}, "2": {"name": "inner"}}},
+          {"match": "(?=(c))(?=(cd))", "captures": {"1": {"name": "c1"}, "2": {"name": "c2"}}},
+          {"match": "(?=((e)f))", "captures": {"1": {"name": "outer.empty"}, "2": {"name": "inner.empty"}}}
+        ]
+      }
+    ],
+    "sources": ["xab", "cd", "ef", "xab cd"]
+  },
+  {
+    "name": "recursive-empty-begin",
+    "grammars": [
+      {
+        "scopeName": "source.emptybegin",
+        "patterns": [{"include": "#r"}],
+        "repository": {
+          "r": {"begin": "(?=(zz))", "end": "b", "name": "meta.r", "patterns": [{"include": "#r"}]}
+        }
+      }
+    ],
+    "sources": ["zz\nzz\nzzb", "a zz b zz"]
+  },
+  {
+    "name": "recursive-empty-begin-in-capture",
+    "grammars": [
+      {
+        "scopeName": "source.emptybegin.capture",
+        "patterns": [
+          {"match": "<(zz(?:b|zz)*)>", "name": "meta.tag", "captures": {"1": {"patterns": [{"include": "#r"}]}}}
+        ],
+        "repository": {
+          "r": {"begin": "(?=(zz))", "end": "b", "name": "meta.r", "patterns": [{"include": "#r"}]}
+        }
+      }
+    ],
+    "sources": ["<zz> <zzbzz>", "<zzzz>"]
+  },
+  {
+    "name": "empty-match-pops-enclosing-rule",
+    "grammars": [
+      {
+        "scopeName": "source.safepop",
+        "patterns": [
+          {"begin": "\\{", "end": "\\}", "name": "meta.block", "patterns": [{"match": "(?=zz)", "name": "empty.mark"}, {"match": "x", "name": "letter.x"}]},
+          {"match": "x", "name": "outer.x"}
+        ]
+      }
+    ],
+    "sources": ["{ zz }\n}x", "{ a\nzz x\n} x", "x{zz}x"]
   }
 ]

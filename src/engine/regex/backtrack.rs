@@ -9,6 +9,7 @@ use super::ast::{
     PerlClassKind, RegexFlags, parse,
 };
 use super::bytecode::{BytecodeScratch, CompileError, Program};
+use super::case_fold::CaseVariants;
 use super::{AnchorContext, MatchResult, Matcher, is_unicode_word_char};
 
 pub(crate) const DEFAULT_STEP_BUDGET: usize = 100_000;
@@ -21,13 +22,19 @@ const INITIAL_FANOUT_CAPACITY: usize = 16;
 pub struct StepBudget {
     limit: usize,
     remaining: usize,
+    /// Nested subroutine calls in the recursive evaluator.
+    call_depth: u32,
 }
+
+/// Subroutine nesting limit, matching the bytecode VM's call stack.
+const MAX_SUBROUTINE_DEPTH: u32 = 128;
 
 impl StepBudget {
     pub fn new(steps: usize) -> Self {
         Self {
             limit: steps,
             remaining: steps,
+            call_depth: 0,
         }
     }
 
@@ -36,6 +43,16 @@ impl StepBudget {
             return Err(BudgetExceeded);
         }
         self.remaining -= 1;
+        Ok(())
+    }
+
+    /// Charges `steps` units of work at once.
+    pub(crate) fn charge(&mut self, steps: usize) -> Result<(), BudgetExceeded> {
+        if self.remaining < steps {
+            self.remaining = 0;
+            return Err(BudgetExceeded);
+        }
+        self.remaining -= steps;
         Ok(())
     }
 
@@ -66,20 +83,62 @@ pub struct FallbackReport {
 #[derive(Debug, Clone)]
 pub struct FallbackMatcher {
     parsed: Arc<ParsedRegex>,
-    bytecode: OnceLock<Option<Arc<Program>>>,
+    bytecode: OnceLock<Option<SelectionProgram>>,
+    /// Groups the owning pattern replays after selection. When present,
+    /// selection may compile with these capture slots so that one program
+    /// also serves capture replay instead of compiling the pattern twice.
+    shared_captures: Option<Box<[u32]>>,
     special: Option<SpecialFallbackMatcher>,
     start_hint: StartHint,
     budget: usize,
-    /// Process-unique id keying scan-local prefilter cursors.
-    prefilter_slot: u32,
+    /// Process-unique id keying scan-local prefilter cursors. Assigned on
+    /// first execution so construction does not build the prefilter.
+    prefilter_slot: OnceLock<u32>,
+}
+
+#[derive(Debug, Clone)]
+struct SelectionProgram {
+    program: Arc<Program>,
+    shares_captures: bool,
+}
+
+/// Capture layout requested for one anchored attempt. Selection defers the
+/// choice until the attempt survives its cheap rejections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaptureCount {
+    Exact(usize),
+    Selection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StartHint {
     Unanchored,
-    LineStart,
-    TextStart,
-    Continuation,
+    /// Every branch begins with one of these anchors, so a match can only
+    /// start where one of them holds (`(^|\G)x` needs no per-column scan).
+    Anchored(StartAnchors),
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct StartAnchors {
+    line_start: bool,
+    text_start: bool,
+    continuation: bool,
+}
+
+impl StartAnchors {
+    /// Mirrors `anchor_matches` for `^`, `\A`, and `\G`.
+    fn allows(self, start: usize, ctx: AnchorContext) -> bool {
+        (start == 0 && (self.line_start || (self.text_start && ctx.allow_a)))
+            || (self.continuation && ctx.allow_g && start == ctx.g_pos)
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            line_start: self.line_start || other.line_start,
+            text_start: self.text_start || other.text_start,
+            continuation: self.continuation || other.continuation,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -458,63 +517,136 @@ impl FallbackMatcher {
 
     pub(crate) fn from_parsed(parsed: Arc<ParsedRegex>, budget: usize) -> Self {
         let start_hint = start_hint(&parsed.ast);
-        static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
-            std::sync::atomic::AtomicU32::new(0);
-        let prefilter_slot = if parsed.prefilter().is_enabled() {
-            NEXT_PREFILTER_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        } else {
-            u32::MAX
-        };
         let special = SpecialFallbackMatcher::from_source(&parsed.source);
         Self {
             parsed,
             bytecode: OnceLock::new(),
+            shared_captures: None,
             special,
             start_hint,
             budget,
-            prefilter_slot,
+            prefilter_slot: OnceLock::new(),
         }
+    }
+
+    fn prefilter_slot(&self) -> u32 {
+        static NEXT_PREFILTER_SLOT: std::sync::atomic::AtomicU32 =
+            std::sync::atomic::AtomicU32::new(0);
+        *self.prefilter_slot.get_or_init(|| {
+            if self.parsed.prefilter().is_enabled() {
+                NEXT_PREFILTER_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            } else {
+                u32::MAX
+            }
+        })
     }
 
     pub fn parsed(&self) -> &ParsedRegex {
         &self.parsed
     }
 
+    /// Takes ownership of the owning pattern's live capture layout when it
+    /// replays captures, returning an empty layout in that case and `live`
+    /// otherwise.
+    pub(crate) fn share_capture_layout(&mut self, live: Box<[u32]>) -> Box<[u32]> {
+        if live.iter().any(|group| *group != 0) {
+            self.shared_captures = Some(live);
+            Box::default()
+        } else {
+            live
+        }
+    }
+
+    pub(crate) fn shared_capture_layout(&self) -> Option<&[u32]> {
+        self.shared_captures.as_deref()
+    }
+
+    /// The selection program when it was compiled with the shared capture
+    /// layout and so can replay captures directly.
+    pub(crate) fn shared_capture_program(&self) -> Option<Arc<Program>> {
+        self.bytecode.get_or_init(|| self.compile_bytecode());
+        self.bytecode
+            .get()?
+            .as_ref()
+            .filter(|selection| selection.shares_captures)
+            .map(|selection| Arc::clone(&selection.program))
+    }
+
+    /// Whether the required-literal prefilter still admits a match starting
+    /// at `start` or later on this line. The prefilter searches the suffix
+    /// from `start`, so `false` also holds for every later start.
+    pub(crate) fn selection_prefilter_viable(
+        &self,
+        line: &str,
+        start: usize,
+        scratch: &mut BytecodeScratch,
+    ) -> bool {
+        scratch.prefilter_cursors().may_match(
+            self.prefilter_slot(),
+            self.parsed.prefilter(),
+            line,
+            start,
+        )
+    }
+
     fn bytecode(&self) -> Option<&Program> {
         self.bytecode
-            .get_or_init(|| {
-                self.parsed
-                    .analysis()
-                    .bytecode_beneficial()
-                    .then(|| {
-                        // Subroutine calls need capture slots and routine
-                        // entries even for position selection; compile with
-                        // the minimal internal layout so those patterns still
-                        // avoid the recursive VM. Selection discards captures.
-                        // Backreference patterns need only the referenced
-                        // groups for position selection. Keeping them on the
-                        // bytecode path lets hot C/C++ declaration patterns
-                        // use the deterministic separator and literal-trie
-                        // specializations before replaying winner captures.
-                        Program::compile(&self.parsed)
-                            .or_else(|error| match error {
-                                CompileError::Backreference
-                                | CompileError::Subroutine
-                                | CompileError::Conditional => {
-                                    Program::compile_captures_with_analysis(
-                                        &self.parsed,
-                                        self.parsed.analysis(),
-                                        &[],
-                                    )
-                                }
-                                other => Err(other),
-                            })
-                            .ok()
-                            .map(Arc::new)
-                    })
-                    .flatten()
+            .get_or_init(|| self.compile_bytecode())
+            .as_ref()
+            .map(|selection| selection.program.as_ref())
+    }
+
+    fn compile_bytecode(&self) -> Option<SelectionProgram> {
+        if !self.parsed.analysis().bytecode_beneficial() {
+            return None;
+        }
+        // One program can serve both selection and capture replay when the
+        // replayed groups do not change its selection shape. Patterns whose
+        // matching reads capture state keep their dedicated selection layout.
+        // Subroutine calls only write captures, so they can share.
+        let features = &self.parsed.features;
+        let reads_captures = features.backreference || features.conditional;
+        if !reads_captures
+            && let Some(live) = self.shared_captures.as_deref()
+            && let Some(Ok(program)) =
+                Program::compile_selection_captures(&self.parsed, self.parsed.analysis(), live)
+        {
+            return Some(SelectionProgram {
+                program: Arc::new(program),
+                shares_captures: true,
+            });
+        }
+        // Subroutine calls need capture slots and routine entries even for
+        // position selection; compile with the minimal internal layout so
+        // those patterns still avoid the recursive VM. Selection discards
+        // captures. Backreference patterns need only the referenced groups
+        // for position selection. Keeping them on the bytecode path lets hot
+        // C/C++ declaration patterns use the deterministic separator and
+        // literal-trie specializations before replaying winner captures.
+        // The position-only layout has no capture slots, so these features
+        // can never compile there. Skip the doomed attempt instead of
+        // discarding a partial compile of a large pattern.
+        let position = if reads_captures || features.subroutine {
+            Err(CompileError::Subroutine)
+        } else {
+            Program::compile(&self.parsed)
+        };
+        position
+            .or_else(|error| match error {
+                CompileError::Backreference
+                | CompileError::Subroutine
+                | CompileError::Conditional => Program::compile_captures_with_analysis(
+                    &self.parsed,
+                    self.parsed.analysis(),
+                    &[],
+                ),
+                other => Err(other),
             })
-            .as_deref()
+            .ok()
+            .map(|program| SelectionProgram {
+                program: Arc::new(program),
+                shares_captures: false,
+            })
     }
 
     fn active_bytecode(&self) -> Option<&Program> {
@@ -535,11 +667,16 @@ impl FallbackMatcher {
         let bytes = analysis
             .start_bytes()
             .filter(|_| !analysis.start_nullable())?;
-        Some(
-            (0u8..=u8::MAX)
-                .filter(|byte| bytes.contains(*byte))
-                .collect(),
-        )
+        // Ascending byte order, read straight from the bitmap words.
+        let mut out = Vec::with_capacity(bytes.len);
+        for (word_index, &word) in bytes.bits.iter().enumerate() {
+            let mut word = word;
+            while word != 0 {
+                out.push((word_index * 64) as u8 + word.trailing_zeros() as u8);
+                word &= word - 1;
+            }
+        }
+        Some(out)
     }
 
     pub fn try_find(
@@ -557,18 +694,7 @@ impl FallbackMatcher {
         from: usize,
         ctx: AnchorContext,
     ) -> Result<FallbackReport, FallbackError> {
-        let capture_count = if self.active_bytecode().is_some() {
-            0
-        } else if self
-            .parsed
-            .analysis()
-            .capture()
-            .selection_requires_captures()
-        {
-            self.parsed.capture_count as usize + 1
-        } else {
-            0
-        };
+        let capture_count = self.selection_capture_count();
         let mut report = self.try_find_with_capture_count(line, from, ctx, capture_count)?;
         if let Some(result) = &mut report.result {
             result.captures.clear();
@@ -593,30 +719,18 @@ impl FallbackMatcher {
             });
         }
         let mut budget = StepBudget::new(self.budget);
+        // One scratch per search: attempts reset it, so later starts reuse
+        // its stack capacity instead of allocating afresh.
+        let mut scratch = BytecodeScratch::default();
+        // A nullable pattern can match empty wherever its zero-width
+        // assertions hold (for example `x|(?<=T)` or `a|$`), so only a
+        // pattern that must consume a start byte may skip other positions.
         if self.start_hint == StartHint::Unanchored
+            && !self.parsed.analysis().start_nullable()
             && let Some(start_bytes) = self.parsed.analysis().start_bytes()
         {
-            // Nullable patterns (e.g. `a?`, optional prefixes) can match empty
-            // at `from` even when no start-byte candidate exists later.
-            if self.parsed.analysis().start_nullable()
-                && let Some(result) = self.try_match_at_start_with_capture_count(
-                    line,
-                    from,
-                    ctx,
-                    &mut budget,
-                    capture_count,
-                )?
-            {
-                return Ok(FallbackReport {
-                    result: Some(result),
-                    steps: budget.used(),
-                });
-            }
             let hay = line.as_bytes();
             let mut cursor = from;
-            if self.parsed.analysis().start_nullable() {
-                cursor = cursor.saturating_add(1);
-            }
             while cursor < hay.len() {
                 let Some(relative) = start_bytes.find(&hay[cursor..]) else {
                     break;
@@ -629,6 +743,7 @@ impl FallbackMatcher {
                         ctx,
                         &mut budget,
                         capture_count,
+                        &mut scratch,
                     )?
                 {
                     return Ok(FallbackReport {
@@ -638,36 +753,19 @@ impl FallbackMatcher {
                 }
                 cursor = start.saturating_add(1);
             }
-            if has_zero_width_line_end_branch(&self.parsed.ast) {
-                let line_end = line.strip_suffix('\n').map_or(line.len(), str::len);
-                if line_end >= from
-                    && let Some(result) = self.try_match_at_start_with_capture_count(
-                        line,
-                        line_end,
-                        ctx,
-                        &mut budget,
-                        capture_count,
-                    )?
-                {
-                    return Ok(FallbackReport {
-                        result: Some(result),
-                        steps: budget.used(),
-                    });
-                }
-            }
             return Ok(FallbackReport {
                 result: None,
                 steps: budget.used(),
             });
         }
-        let positions = self.start_positions(line, from, ctx);
-        for start in positions {
+        for start in self.start_positions(line, from, ctx) {
             if let Some(result) = self.try_match_at_start_with_capture_count(
                 line,
                 start,
                 ctx,
                 &mut budget,
                 capture_count,
+                &mut scratch,
             )? {
                 return Ok(FallbackReport {
                     result: Some(result),
@@ -690,7 +788,20 @@ impl FallbackMatcher {
         ctx: AnchorContext,
         scratch: &mut BytecodeScratch,
     ) -> Result<FallbackReport, FallbackError> {
-        let capture_count = if self.active_bytecode().is_some() {
+        // Resolve the selection layout only after the cheap per-start
+        // rejections: deciding it may compile bytecode, which is wasted for a
+        // candidate whose prefilter or start bytes never admit an attempt.
+        self.try_find_at_with_capture_count_and_scratch(
+            line,
+            start,
+            ctx,
+            CaptureCount::Selection,
+            Some(scratch),
+        )
+    }
+
+    fn selection_capture_count(&self) -> usize {
+        if self.active_bytecode().is_some() {
             0
         } else if self
             .parsed
@@ -701,14 +812,7 @@ impl FallbackMatcher {
             self.parsed.capture_count as usize + 1
         } else {
             0
-        };
-        self.try_find_at_with_capture_count_and_scratch(
-            line,
-            start,
-            ctx,
-            capture_count,
-            Some(scratch),
-        )
+        }
     }
 
     pub(crate) fn try_find_at(
@@ -721,7 +825,7 @@ impl FallbackMatcher {
             line,
             start,
             ctx,
-            self.parsed.capture_count as usize + 1,
+            CaptureCount::Exact(self.parsed.capture_count as usize + 1),
             None,
         )
     }
@@ -731,7 +835,7 @@ impl FallbackMatcher {
         line: &str,
         start: usize,
         ctx: AnchorContext,
-        capture_count: usize,
+        capture_count: CaptureCount,
         scratch: Option<&mut BytecodeScratch>,
     ) -> Result<FallbackReport, FallbackError> {
         if !line.is_char_boundary(start) {
@@ -740,7 +844,7 @@ impl FallbackMatcher {
         let mut scratch = scratch;
         let prefilter_viable = match scratch.as_deref_mut() {
             Some(scratch) => scratch.prefilter_cursors().may_match(
-                self.prefilter_slot,
+                self.prefilter_slot(),
                 self.parsed.prefilter(),
                 line,
                 start,
@@ -753,26 +857,13 @@ impl FallbackMatcher {
                 steps: 0,
             });
         }
-        match self.start_hint {
-            StartHint::LineStart if start != 0 => {
-                return Ok(FallbackReport {
-                    result: None,
-                    steps: 0,
-                });
-            }
-            StartHint::TextStart if start != 0 || !ctx.allow_a => {
-                return Ok(FallbackReport {
-                    result: None,
-                    steps: 0,
-                });
-            }
-            StartHint::Continuation if !ctx.allow_g || start != ctx.g_pos => {
-                return Ok(FallbackReport {
-                    result: None,
-                    steps: 0,
-                });
-            }
-            _ => {}
+        if let StartHint::Anchored(anchors) = self.start_hint
+            && !anchors.allows(start, ctx)
+        {
+            return Ok(FallbackReport {
+                result: None,
+                steps: 0,
+            });
         }
         if let Some(bytes) = self.parsed.analysis().start_bytes()
             && !self.parsed.analysis().start_nullable()
@@ -786,6 +877,10 @@ impl FallbackMatcher {
                 steps: 0,
             });
         }
+        let capture_count = match capture_count {
+            CaptureCount::Exact(count) => count,
+            CaptureCount::Selection => self.selection_capture_count(),
+        };
         if let Some(special) = self.special {
             return Ok(FallbackReport {
                 result: special.match_at(line, start, capture_count),
@@ -793,11 +888,17 @@ impl FallbackMatcher {
             });
         }
         let mut budget = StepBudget::new(self.budget);
+        let mut local_scratch;
+        let scratch = match scratch {
+            Some(scratch) => scratch,
+            None => {
+                local_scratch = BytecodeScratch::default();
+                &mut local_scratch
+            }
+        };
         let result = if capture_count == 0
             && let Some(program) = self.active_bytecode()
         {
-            let mut local_scratch = BytecodeScratch::default();
-            let scratch = scratch.unwrap_or(&mut local_scratch);
             let end = match position_engine_mode() {
                 PositionEngineMode::Recursive => {
                     recursive_position_end(&self.parsed, line, start, ctx, &mut budget)?
@@ -834,6 +935,7 @@ impl FallbackMatcher {
                 ctx,
                 &mut budget,
                 capture_count,
+                scratch,
             )?
         };
         Ok(FallbackReport {
@@ -842,14 +944,29 @@ impl FallbackMatcher {
         })
     }
 
-    fn start_positions(&self, line: &str, from: usize, ctx: AnchorContext) -> Vec<usize> {
-        match self.start_hint {
-            StartHint::Unanchored => char_boundaries_from(line, from),
-            StartHint::LineStart if from == 0 => vec![0],
-            StartHint::TextStart if ctx.allow_a && from == 0 => vec![0],
-            StartHint::Continuation if ctx.allow_g && ctx.g_pos >= from => vec![ctx.g_pos],
-            StartHint::LineStart | StartHint::TextStart | StartHint::Continuation => Vec::new(),
-        }
+    fn start_positions<'a>(
+        &self,
+        line: &'a str,
+        from: usize,
+        ctx: AnchorContext,
+    ) -> impl Iterator<Item = usize> + 'a {
+        let (every, anchored) = match self.start_hint {
+            StartHint::Unanchored => (true, [None, None]),
+            // Position 0 precedes `g_pos`, preserving leftmost-first order.
+            StartHint::Anchored(anchors) => (
+                false,
+                [0, ctx.g_pos]
+                    .map(|start| (start >= from && anchors.allows(start, ctx)).then_some(start)),
+            ),
+        };
+        let [first, second] = anchored;
+        let second = second.filter(|start| Some(*start) != first);
+        every
+            .then(|| char_boundaries_from(line, from))
+            .into_iter()
+            .flatten()
+            .chain(first)
+            .chain(second)
     }
 
     fn try_match_at_start_with_capture_count(
@@ -859,6 +976,7 @@ impl FallbackMatcher {
         ctx: AnchorContext,
         budget: &mut StepBudget,
         capture_count: usize,
+        scratch: &mut BytecodeScratch,
     ) -> Result<Option<MatchResult>, FallbackError> {
         if let Some(special) = self.special {
             return Ok(special.match_at(line, start, capture_count));
@@ -871,19 +989,14 @@ impl FallbackMatcher {
                     recursive_position_end(&self.parsed, line, start, ctx, budget)?
                 }
                 PositionEngineMode::Candidate => program
-                    .execute(line, start, ctx, budget, &mut BytecodeScratch::default())
+                    .execute(line, start, ctx, budget, scratch)
                     .map_err(|_| FallbackError::BudgetExceeded {
                         steps: budget.used(),
                     })?,
                 PositionEngineMode::Shadow => {
                     let mut candidate_budget = StepBudget::new(self.budget);
-                    let candidate = program.execute(
-                        line,
-                        start,
-                        ctx,
-                        &mut candidate_budget,
-                        &mut BytecodeScratch::default(),
-                    );
+                    let candidate =
+                        program.execute(line, start, ctx, &mut candidate_budget, scratch);
                     let recursive = recursive_position_end(&self.parsed, line, start, ctx, budget)?;
                     if candidate.as_ref().ok().copied() != Some(recursive) {
                         eprintln!(
@@ -945,26 +1058,31 @@ pub(crate) struct StartByteSet {
 }
 
 impl StartByteSet {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             bits: [0; 4],
             len: 0,
         }
     }
 
-    fn insert(&mut self, byte: u8) {
+    pub(crate) fn insert(&mut self, byte: u8) {
         if !self.contains(byte) {
             self.bits[byte as usize >> 6] |= 1u64 << (byte & 63);
             self.len += 1;
         }
     }
 
-    fn extend(&mut self, other: &Self) {
-        for byte in 0..=u8::MAX {
-            if other.contains(byte) {
-                self.insert(byte);
-            }
+    pub(crate) fn extend(&mut self, other: &Self) {
+        // Word-wise union: large literal alternations merge one set per
+        // branch, so a per-byte loop dominated start-byte analysis.
+        for (word, other) in self.bits.iter_mut().zip(other.bits) {
+            *word |= other;
         }
+        self.len = self
+            .bits
+            .iter()
+            .map(|word| word.count_ones() as usize)
+            .sum();
     }
 
     pub(crate) fn contains(&self, byte: u8) -> bool {
@@ -1064,17 +1182,6 @@ pub(crate) fn first_start_bytes(ast: &Ast) -> Option<StartBytes> {
     }
 }
 
-fn has_zero_width_line_end_branch(ast: &Ast) -> bool {
-    match ast {
-        Ast::Anchor(AnchorKind::LineEnd) => true,
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => {
-            has_zero_width_line_end_branch(child)
-        }
-        Ast::Alternation(branches) => branches.iter().any(has_zero_width_line_end_branch),
-        _ => false,
-    }
-}
-
 pub(crate) fn concat_start_bytes(nodes: &[Ast]) -> Option<StartBytes> {
     let mut out = StartBytes {
         bytes: StartByteSet::empty(),
@@ -1104,7 +1211,7 @@ fn alternation_start_bytes(branches: &[Ast]) -> Option<StartBytes> {
     Some(out)
 }
 
-fn class_start_bytes(class: &CharClass) -> Option<StartByteSet> {
+pub(crate) fn class_start_bytes(class: &CharClass) -> Option<StartByteSet> {
     if class.negated {
         return None;
     }
@@ -1648,15 +1755,23 @@ fn match_node(
             matched,
             unmatched,
         } => {
+            let is_set = |group: u32| {
+                usize::try_from(group)
+                    .ok()
+                    .and_then(|group| state.captures.get(group))
+                    .is_some_and(Option::is_some)
+            };
             let group = match condition {
-                Backref::Number(group) => usize::try_from(*group).ok(),
-                Backref::Name(name) => parsed
-                    .named_captures
-                    .get(name)
-                    .and_then(|group| usize::try_from(*group).ok()),
-            }
-            .and_then(|group| state.captures.get(group))
-            .is_some_and(Option::is_some);
+                Backref::Number(group) => is_set(*group),
+                // A shared name holds when any group of that name matched.
+                Backref::Name(name) => match parsed.duplicate_names.get(name) {
+                    Some(groups) => groups.iter().any(|group| is_set(*group)),
+                    None => parsed
+                        .named_captures
+                        .get(name)
+                        .is_some_and(|group| is_set(*group)),
+                },
+            };
             match_node(
                 if group { matched } else { unmatched },
                 line,
@@ -1676,7 +1791,16 @@ fn match_node(
             let Some(group) = group else {
                 return Ok(VmStates::empty());
             };
-            match_node(group, line, state, ctx, flags, budget, parsed)
+            // Oniguruma rejects recursion that can re-enter without consuming
+            // input, such as `(\g<1>)?`; bound the nesting so it fails
+            // instead of overflowing the stack.
+            if budget.call_depth >= MAX_SUBROUTINE_DEPTH {
+                return Ok(VmStates::empty());
+            }
+            budget.call_depth += 1;
+            let states = match_node(group, line, state, ctx, flags, budget, parsed);
+            budget.call_depth -= 1;
+            states
         }
         Ast::Flags {
             flags: local,
@@ -2468,27 +2592,31 @@ fn match_backref(
     flags: RegexFlags,
     _budget: &mut StepBudget,
 ) -> Result<VmStates, BudgetExceeded> {
-    let index = match backref {
-        Backref::Number(index) => *index as usize,
-        Backref::Name(name) => parsed.named_captures.get(name).copied().unwrap_or(0) as usize,
+    let backref_end = |index: usize| {
+        let range = state.captures.get(index)?.as_ref()?;
+        match_literal_end(line, state.pos, line.get(range.clone())?, flags)
     };
-    let Some(Some(range)) = state.captures.get(index) else {
-        return Ok(VmStates::empty());
+    let end = match backref {
+        Backref::Number(index) => backref_end(*index as usize),
+        // Oniguruma tries same-named groups from the last one, skips unset
+        // groups, and commits to the first whose text matches.
+        Backref::Name(name) => match parsed.duplicate_names.get(name) {
+            Some(groups) => groups
+                .iter()
+                .rev()
+                .find_map(|group| backref_end(*group as usize)),
+            None => backref_end(parsed.named_captures.get(name).copied().unwrap_or(0) as usize),
+        },
     };
-    let Some(captured) = line.get(range.clone()) else {
-        return Ok(VmStates::empty());
-    };
-    if let Some(end) = match_literal_end(line, state.pos, captured, flags) {
-        Ok(VmStates::one(VmState { pos: end, ..state }))
-    } else {
-        Ok(VmStates::empty())
-    }
+    Ok(end.map_or_else(VmStates::empty, |end| {
+        VmStates::one(VmState { pos: end, ..state })
+    }))
 }
 
 fn ast_exact_literal(ast: &Ast) -> Option<String> {
     match ast {
         Ast::Empty => Some(String::new()),
-        Ast::Literal(literal) => Some(literal.clone()),
+        Ast::Literal(literal) => Some(literal.as_str().to_owned()),
         Ast::Concat(nodes) => {
             let mut out = String::new();
             for node in nodes {
@@ -2512,36 +2640,34 @@ fn push_limited(out: &mut VmStates, states: VmStates) {
 }
 
 pub(crate) fn class_contains(class: &CharClass, ch: char, flags: RegexFlags) -> bool {
-    let union_contains =
-        |atoms: &[ClassAtom]| atoms.iter().any(|atom| atom_contains(atom, ch, flags));
-    let matched = union_contains(&class.atoms)
+    let matched = if flags.case_insensitive && class.bracketed {
+        // Oniguruma folds a bracketed class once: it builds the literal set,
+        // nested classes and intersections included, and admits a scalar
+        // when one of its case variants is in that set. Only the top-level
+        // negation applies afterwards.
+        CaseVariants::new(ch)
+            .iter()
+            .any(|variant| class_positive_contains(class, variant))
+    } else {
+        class_positive_contains(class, ch)
+    };
+    matched != class.negated
+}
+
+/// Case-sensitive membership in `class` ignoring its top-level negation.
+pub(crate) fn class_positive_contains(class: &CharClass, ch: char) -> bool {
+    let union_contains = |atoms: &[ClassAtom]| atoms.iter().any(|atom| atom_contains(atom, ch));
+    union_contains(&class.atoms)
         && class
             .intersections
             .iter()
-            .all(|atoms| union_contains(atoms));
-    if class.negated { !matched } else { matched }
+            .all(|atoms| union_contains(atoms))
 }
 
-pub(crate) fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bool {
+fn atom_contains(atom: &ClassAtom, ch: char) -> bool {
     match atom {
-        ClassAtom::Char(expected) => char_eq(*expected, ch, flags),
-        ClassAtom::Range(start, end) => {
-            let in_folded_range =
-                |value: char, start: char, end: char| start <= value && value <= end;
-            if flags.case_insensitive {
-                in_folded_range(
-                    ch.to_lowercase().next().unwrap_or(ch),
-                    start.to_lowercase().next().unwrap_or(*start),
-                    end.to_lowercase().next().unwrap_or(*end),
-                ) || in_folded_range(
-                    ch.to_uppercase().next().unwrap_or(ch),
-                    start.to_uppercase().next().unwrap_or(*start),
-                    end.to_uppercase().next().unwrap_or(*end),
-                )
-            } else {
-                start <= &ch && &ch <= end
-            }
-        }
+        ClassAtom::Char(expected) => *expected == ch,
+        ClassAtom::Range(start, end) => start <= &ch && &ch <= end,
         ClassAtom::Perl(kind) => perl_class_contains(*kind, ch),
         ClassAtom::Posix { name, negated } => {
             let contains = posix_class_contains(name, ch);
@@ -2551,7 +2677,7 @@ pub(crate) fn atom_contains(atom: &ClassAtom, ch: char, flags: RegexFlags) -> bo
             let contains = unicode_class_contains(name, ch);
             if *negated { !contains } else { contains }
         }
-        ClassAtom::Nested(class) => class_contains(class, ch, flags),
+        ClassAtom::Nested(class) => class_positive_contains(class, ch) != class.negated,
     }
 }
 
@@ -2572,123 +2698,261 @@ pub(crate) fn perl_class_contains(kind: PerlClassKind, ch: char) -> bool {
 }
 
 pub(crate) fn posix_class_contains(name: &str, ch: char) -> bool {
-    if name.eq_ignore_ascii_case("alnum") {
-        ch.is_alphanumeric()
-    } else if name.eq_ignore_ascii_case("alpha") {
-        ch.is_alphabetic()
-    } else if name.eq_ignore_ascii_case("ascii") {
-        ch.is_ascii()
-    } else if name.eq_ignore_ascii_case("blank") {
-        matches!(ch, '\t' | ' ')
-    } else if name.eq_ignore_ascii_case("cntrl") {
-        ch.is_control()
-    } else if name.eq_ignore_ascii_case("digit") {
-        ch.is_ascii_digit()
-    } else if name.eq_ignore_ascii_case("graph") {
-        !ch.is_whitespace() && !ch.is_control()
-    } else if name.eq_ignore_ascii_case("lower") {
-        ch.is_lowercase()
-    } else if name.eq_ignore_ascii_case("print") {
-        !ch.is_control()
-    } else if name.eq_ignore_ascii_case("punct") {
-        ch.is_ascii_punctuation()
-    } else if name.eq_ignore_ascii_case("space") {
-        ch.is_whitespace()
-    } else if name.eq_ignore_ascii_case("upper") {
-        ch.is_uppercase()
-    } else if name.eq_ignore_ascii_case("word") {
-        is_word_char(ch)
-    } else if name.eq_ignore_ascii_case("xdigit") {
-        ch.is_ascii_hexdigit()
-    } else {
-        false
-    }
+    posix_class_predicate(name)(ch)
+}
+
+pub(crate) type CharPredicate = fn(char) -> bool;
+
+/// Resolves a POSIX bracket class name (ASCII case-insensitive) once, so
+/// callers probing many characters do not repeat the name comparison.
+/// Unknown names match nothing.
+pub(crate) fn posix_class_predicate(name: &str) -> CharPredicate {
+    const CLASSES: [(&str, CharPredicate); 14] = [
+        ("alnum", |ch| ch.is_alphanumeric()),
+        ("alpha", |ch| ch.is_alphabetic()),
+        ("ascii", |ch| ch.is_ascii()),
+        ("blank", |ch| matches!(ch, '\t' | ' ')),
+        ("cntrl", |ch| ch.is_control()),
+        ("digit", |ch| ch.is_ascii_digit()),
+        ("graph", |ch| !ch.is_whitespace() && !ch.is_control()),
+        ("lower", |ch| ch.is_lowercase()),
+        ("print", |ch| !ch.is_control()),
+        ("punct", |ch| ch.is_ascii_punctuation()),
+        ("space", |ch| ch.is_whitespace()),
+        ("upper", |ch| ch.is_uppercase()),
+        ("word", is_word_char),
+        ("xdigit", |ch| ch.is_ascii_hexdigit()),
+    ];
+    CLASSES
+        .iter()
+        .find(|(class, _)| *class == name)
+        .or_else(|| {
+            CLASSES
+                .iter()
+                .find(|(class, _)| class.eq_ignore_ascii_case(name))
+        })
+        .map_or(|_| false, |(_, predicate)| *predicate)
 }
 
 pub(crate) fn unicode_class_contains(name: &str, ch: char) -> bool {
-    use unicode_general_category::{GeneralCategory as Gc, get_general_category};
-    use unicode_script::UnicodeScript;
+    unicode_property(name).contains(name, ch)
+}
 
-    let category = get_general_category(ch);
-    let is_letter = matches!(
-        category,
-        Gc::LowercaseLetter
-            | Gc::ModifierLetter
-            | Gc::OtherLetter
-            | Gc::TitlecaseLetter
-            | Gc::UppercaseLetter
-    );
-    let is_mark = matches!(
-        category,
-        Gc::EnclosingMark | Gc::NonspacingMark | Gc::SpacingMark
-    );
-    let is_number = matches!(
-        category,
-        Gc::DecimalNumber | Gc::LetterNumber | Gc::OtherNumber
-    );
-    let is_punctuation = matches!(
-        category,
-        Gc::ClosePunctuation
-            | Gc::ConnectorPunctuation
-            | Gc::DashPunctuation
-            | Gc::FinalPunctuation
-            | Gc::InitialPunctuation
-            | Gc::OpenPunctuation
-            | Gc::OtherPunctuation
-    );
-    let is_symbol = matches!(
-        category,
-        Gc::CurrencySymbol | Gc::MathSymbol | Gc::ModifierSymbol | Gc::OtherSymbol
-    );
-    if name.eq_ignore_ascii_case("l") || name.eq_ignore_ascii_case("letter") {
-        is_letter
-    } else if name.eq_ignore_ascii_case("alphabetic") {
-        ch.is_alphabetic()
-    } else if name.eq_ignore_ascii_case("alnum") {
-        ch.is_alphanumeric()
-    } else if name.eq_ignore_ascii_case("alpha") {
-        ch.is_alphabetic()
-    } else if name.eq_ignore_ascii_case("ascii") {
-        ch.is_ascii()
-    } else if name.eq_ignore_ascii_case("blank") {
-        matches!(ch, '\t' | ' ')
-    } else if name.eq_ignore_ascii_case("cntrl") {
-        ch.is_control()
-    } else if name.eq_ignore_ascii_case("digit") {
-        ch.is_ascii_digit()
-    } else if name.eq_ignore_ascii_case("graph") {
-        !ch.is_whitespace() && !ch.is_control()
-    } else if name.eq_ignore_ascii_case("lower") {
-        ch.is_lowercase()
-    } else if name.eq_ignore_ascii_case("print") {
-        !ch.is_control()
-    } else if name.eq_ignore_ascii_case("punct") {
-        ch.is_ascii_punctuation()
-    } else if name.eq_ignore_ascii_case("space") {
-        ch.is_whitespace()
-    } else if name.eq_ignore_ascii_case("upper") {
-        ch.is_uppercase()
-    } else if name.eq_ignore_ascii_case("xdigit") {
-        ch.is_ascii_hexdigit()
-    } else if name.eq_ignore_ascii_case("n") || name.eq_ignore_ascii_case("number") {
-        is_number
-    } else if name.eq_ignore_ascii_case("m") || name.eq_ignore_ascii_case("mark") {
-        is_mark
-    } else if name.eq_ignore_ascii_case("p") || name.eq_ignore_ascii_case("punctuation") {
-        is_punctuation
-    } else if name.eq_ignore_ascii_case("s") || name.eq_ignore_ascii_case("symbol") {
-        is_symbol
-    } else if name.eq_ignore_ascii_case(category.abbreviation()) {
-        true
-    } else if name.eq_ignore_ascii_case("decimal_number") {
-        category == Gc::DecimalNumber
-    } else if name.eq_ignore_ascii_case("z") || name.eq_ignore_ascii_case("separator") {
-        ch.is_whitespace()
-    } else if name.eq_ignore_ascii_case("word") {
-        is_word_char(ch)
+/// Property selected by a `\p{…}` name. Resolving the name first means a
+/// query computes only the Unicode table lookup that property needs, instead
+/// of a general-category search for every name plus two script searches for
+/// every non-matching category name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnicodeProperty {
+    Letter,
+    Alphabetic,
+    Alnum,
+    Ascii,
+    Blank,
+    Cntrl,
+    Digit,
+    Graph,
+    Lower,
+    Print,
+    Punct,
+    Space,
+    Upper,
+    Xdigit,
+    Number,
+    Mark,
+    Punctuation,
+    Symbol,
+    Category(unicode_general_category::GeneralCategory),
+    DecimalNumber,
+    Separator,
+    Word,
+    XidStart,
+    XidContinue,
+    Script,
+}
+
+/// Every general category, for resolving two-letter abbreviations.
+const GENERAL_CATEGORIES: [unicode_general_category::GeneralCategory; 30] = {
+    use unicode_general_category::GeneralCategory as Gc;
+    [
+        Gc::ClosePunctuation,
+        Gc::ConnectorPunctuation,
+        Gc::Control,
+        Gc::CurrencySymbol,
+        Gc::DashPunctuation,
+        Gc::DecimalNumber,
+        Gc::EnclosingMark,
+        Gc::FinalPunctuation,
+        Gc::Format,
+        Gc::InitialPunctuation,
+        Gc::LetterNumber,
+        Gc::LineSeparator,
+        Gc::LowercaseLetter,
+        Gc::MathSymbol,
+        Gc::ModifierLetter,
+        Gc::ModifierSymbol,
+        Gc::NonspacingMark,
+        Gc::OpenPunctuation,
+        Gc::OtherLetter,
+        Gc::OtherNumber,
+        Gc::OtherPunctuation,
+        Gc::OtherSymbol,
+        Gc::ParagraphSeparator,
+        Gc::PrivateUse,
+        Gc::SpaceSeparator,
+        Gc::SpacingMark,
+        Gc::Surrogate,
+        Gc::TitlecaseLetter,
+        Gc::Unassigned,
+        Gc::UppercaseLetter,
+    ]
+};
+
+/// Resolves names in the evaluator's precedence order. A category
+/// abbreviation is checked where the evaluator compared it with the
+/// character's own category; no later name (a long property name, `XID_*`,
+/// or a script name) is also a two-letter category abbreviation, which
+/// `unicode_property_resolution_matches_the_reference_evaluator` checks.
+fn unicode_property(name: &str) -> UnicodeProperty {
+    let is = |candidate: &str| name.eq_ignore_ascii_case(candidate);
+    if is("l") || is("letter") {
+        UnicodeProperty::Letter
+    } else if is("alphabetic") || is("alpha") {
+        UnicodeProperty::Alphabetic
+    } else if is("alnum") {
+        UnicodeProperty::Alnum
+    } else if is("ascii") {
+        UnicodeProperty::Ascii
+    } else if is("blank") {
+        UnicodeProperty::Blank
+    } else if is("cntrl") {
+        UnicodeProperty::Cntrl
+    } else if is("digit") {
+        UnicodeProperty::Digit
+    } else if is("graph") {
+        UnicodeProperty::Graph
+    } else if is("lower") {
+        UnicodeProperty::Lower
+    } else if is("print") {
+        UnicodeProperty::Print
+    } else if is("punct") {
+        UnicodeProperty::Punct
+    } else if is("space") {
+        UnicodeProperty::Space
+    } else if is("upper") {
+        UnicodeProperty::Upper
+    } else if is("xdigit") {
+        UnicodeProperty::Xdigit
+    } else if is("n") || is("number") {
+        UnicodeProperty::Number
+    } else if is("m") || is("mark") {
+        UnicodeProperty::Mark
+    } else if is("p") || is("punctuation") {
+        UnicodeProperty::Punctuation
+    } else if is("s") || is("symbol") {
+        UnicodeProperty::Symbol
+    } else if let Some(category) = GENERAL_CATEGORIES
+        .iter()
+        .find(|category| is(category.abbreviation()))
+    {
+        UnicodeProperty::Category(*category)
+    } else if is("decimal_number") {
+        UnicodeProperty::DecimalNumber
+    } else if is("z") || is("separator") {
+        UnicodeProperty::Separator
+    } else if is("word") {
+        UnicodeProperty::Word
+    } else if let Some(start) = xid_property(name) {
+        if start {
+            UnicodeProperty::XidStart
+        } else {
+            UnicodeProperty::XidContinue
+        }
     } else {
-        ch.script().full_name().eq_ignore_ascii_case(name)
-            || ch.script().short_name().eq_ignore_ascii_case(name)
+        UnicodeProperty::Script
+    }
+}
+
+impl UnicodeProperty {
+    fn contains(self, name: &str, ch: char) -> bool {
+        use unicode_general_category::{GeneralCategory as Gc, get_general_category};
+        use unicode_script::UnicodeScript;
+
+        match self {
+            Self::Letter => matches!(
+                get_general_category(ch),
+                Gc::LowercaseLetter
+                    | Gc::ModifierLetter
+                    | Gc::OtherLetter
+                    | Gc::TitlecaseLetter
+                    | Gc::UppercaseLetter
+            ),
+            Self::Alphabetic => ch.is_alphabetic(),
+            Self::Alnum => ch.is_alphanumeric(),
+            Self::Ascii => ch.is_ascii(),
+            Self::Blank => matches!(ch, '\t' | ' '),
+            Self::Cntrl => ch.is_control(),
+            Self::Digit => ch.is_ascii_digit(),
+            Self::Graph => !ch.is_whitespace() && !ch.is_control(),
+            Self::Lower => ch.is_lowercase(),
+            Self::Print => !ch.is_control(),
+            Self::Punct => ch.is_ascii_punctuation(),
+            Self::Space | Self::Separator => ch.is_whitespace(),
+            Self::Upper => ch.is_uppercase(),
+            Self::Xdigit => ch.is_ascii_hexdigit(),
+            Self::Number => matches!(
+                get_general_category(ch),
+                Gc::DecimalNumber | Gc::LetterNumber | Gc::OtherNumber
+            ),
+            Self::Mark => matches!(
+                get_general_category(ch),
+                Gc::EnclosingMark | Gc::NonspacingMark | Gc::SpacingMark
+            ),
+            Self::Punctuation => matches!(
+                get_general_category(ch),
+                Gc::ClosePunctuation
+                    | Gc::ConnectorPunctuation
+                    | Gc::DashPunctuation
+                    | Gc::FinalPunctuation
+                    | Gc::InitialPunctuation
+                    | Gc::OpenPunctuation
+                    | Gc::OtherPunctuation
+            ),
+            Self::Symbol => matches!(
+                get_general_category(ch),
+                Gc::CurrencySymbol | Gc::MathSymbol | Gc::ModifierSymbol | Gc::OtherSymbol
+            ),
+            Self::Category(category) => get_general_category(ch) == category,
+            Self::DecimalNumber => get_general_category(ch) == Gc::DecimalNumber,
+            Self::Word => is_word_char(ch),
+            Self::XidStart => unicode_ident::is_xid_start(ch),
+            Self::XidContinue => unicode_ident::is_xid_continue(ch),
+            Self::Script => {
+                let script = ch.script();
+                script.full_name().eq_ignore_ascii_case(name)
+                    || script.short_name().eq_ignore_ascii_case(name)
+            }
+        }
+    }
+}
+
+/// Oniguruma matches property names loosely, ignoring case, spaces,
+/// underscores, and hyphens. Returns `Some(true)` for XID_Start and
+/// `Some(false)` for XID_Continue.
+fn xid_property(name: &str) -> Option<bool> {
+    let mut normalized = [0u8; 11];
+    let mut len = 0;
+    for byte in name
+        .bytes()
+        .filter(|byte| !matches!(byte, b' ' | b'_' | b'-'))
+    {
+        *normalized.get_mut(len)? = byte.to_ascii_lowercase();
+        len += 1;
+    }
+    match &normalized[..len] {
+        b"xids" | b"xidstart" => Some(true),
+        b"xidc" | b"xidcontinue" => Some(false),
+        _ => None,
     }
 }
 
@@ -2788,6 +3052,64 @@ pub(crate) fn unicode_case_eq(left: char, right: char) -> bool {
     left.to_lowercase().eq(right.to_lowercase()) || left.to_uppercase().eq(right.to_uppercase())
 }
 
+/// Full Unicode lowercase and uppercase mappings of one scalar, NUL-padded.
+///
+/// `unicode_case_eq` re-derives these
+/// mappings (a binary search each) for every comparison. Keying the
+/// comparison lets hot loops map each input scalar once and compare it
+/// against pattern-side keys prepared at compile time. NUL padding is
+/// unambiguous: only U+0000 maps to a sequence containing NUL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CaseFoldKey {
+    ch: char,
+    lower: [char; 3],
+    upper: [char; 3],
+}
+
+impl CaseFoldKey {
+    pub(crate) fn ch(&self) -> char {
+        self.ch
+    }
+
+    /// Identical full case mappings, which make `unicode_case_eq` agree
+    /// for every third scalar.
+    pub(crate) fn same_mappings(&self, other: &Self) -> bool {
+        self.lower == other.lower && self.upper == other.upper
+    }
+
+    #[inline]
+    pub(crate) fn new(ch: char) -> Self {
+        if ch.is_ascii() {
+            return Self {
+                ch,
+                lower: [ch.to_ascii_lowercase(), '\0', '\0'],
+                upper: [ch.to_ascii_uppercase(), '\0', '\0'],
+            };
+        }
+        let mut lower = ['\0'; 3];
+        for (slot, mapped) in lower.iter_mut().zip(ch.to_lowercase()) {
+            *slot = mapped;
+        }
+        let mut upper = ['\0'; 3];
+        for (slot, mapped) in upper.iter_mut().zip(ch.to_uppercase()) {
+            *slot = mapped;
+        }
+        Self { ch, lower, upper }
+    }
+
+    /// Exactly `unicode_case_eq(self.ch, other.ch)`.
+    #[inline]
+    pub(crate) fn case_eq(&self, other: &Self) -> bool {
+        if self.ch == other.ch {
+            return true;
+        }
+        if self.ch == '\u{131}' || other.ch == '\u{131}' {
+            return false;
+        }
+        self.lower == other.lower || self.upper == other.upper
+    }
+}
+
 #[inline]
 pub(crate) fn char_at(line: &str, pos: usize) -> Option<(char, usize)> {
     let byte = *line.as_bytes().get(pos)?;
@@ -2804,25 +3126,46 @@ fn grapheme_end(line: &str, position: usize) -> Option<usize> {
     Some(position + grapheme.len())
 }
 
-fn char_boundaries_from(line: &str, from: usize) -> Vec<usize> {
-    line.char_indices()
-        .map(|(index, _)| index)
-        .filter(|index| *index >= from)
+/// Every character boundary from `from` through the line end. Callers have
+/// already rejected a `from` that is not a boundary.
+fn char_boundaries_from(line: &str, from: usize) -> impl Iterator<Item = usize> + '_ {
+    line[from..]
+        .char_indices()
+        .map(move |(index, _)| from + index)
         .chain(std::iter::once(line.len()))
-        .collect()
 }
 
 fn start_hint(ast: &Ast) -> StartHint {
+    start_anchors(ast).map_or(StartHint::Unanchored, StartHint::Anchored)
+}
+
+/// Anchors one of which every match must satisfy at its start, or `None`
+/// when some branch can begin elsewhere.
+fn start_anchors(ast: &Ast) -> Option<StartAnchors> {
     match ast {
-        Ast::Anchor(AnchorKind::LineStart) => StartHint::LineStart,
-        Ast::Anchor(AnchorKind::TextStart) => StartHint::TextStart,
-        Ast::Anchor(AnchorKind::Continuation) => StartHint::Continuation,
+        Ast::Anchor(AnchorKind::LineStart) => Some(StartAnchors {
+            line_start: true,
+            ..StartAnchors::default()
+        }),
+        Ast::Anchor(AnchorKind::TextStart) => Some(StartAnchors {
+            text_start: true,
+            ..StartAnchors::default()
+        }),
+        Ast::Anchor(AnchorKind::Continuation) => Some(StartAnchors {
+            continuation: true,
+            ..StartAnchors::default()
+        }),
         Ast::Concat(nodes) => nodes
             .iter()
             .find(|node| !matches!(node, Ast::Empty))
-            .map_or(StartHint::Unanchored, start_hint),
-        Ast::Group { child, .. } | Ast::Flags { child, .. } => start_hint(child),
-        _ => StartHint::Unanchored,
+            .and_then(start_anchors),
+        Ast::Alternation(branches) => branches
+            .iter()
+            .try_fold(StartAnchors::default(), |all, branch| {
+                Some(all.union(start_anchors(branch)?))
+            }),
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => start_anchors(child),
+        _ => None,
     }
 }
 
@@ -2871,6 +3214,253 @@ mod tests {
         }
     }
 
+    /// The evaluator before property names were resolved up front.
+    fn unicode_class_contains_reference(name: &str, ch: char) -> bool {
+        use unicode_general_category::{GeneralCategory as Gc, get_general_category};
+        use unicode_script::UnicodeScript;
+
+        let category = get_general_category(ch);
+        let is_letter = matches!(
+            category,
+            Gc::LowercaseLetter
+                | Gc::ModifierLetter
+                | Gc::OtherLetter
+                | Gc::TitlecaseLetter
+                | Gc::UppercaseLetter
+        );
+        let is_mark = matches!(
+            category,
+            Gc::EnclosingMark | Gc::NonspacingMark | Gc::SpacingMark
+        );
+        let is_number = matches!(
+            category,
+            Gc::DecimalNumber | Gc::LetterNumber | Gc::OtherNumber
+        );
+        let is_punctuation = matches!(
+            category,
+            Gc::ClosePunctuation
+                | Gc::ConnectorPunctuation
+                | Gc::DashPunctuation
+                | Gc::FinalPunctuation
+                | Gc::InitialPunctuation
+                | Gc::OpenPunctuation
+                | Gc::OtherPunctuation
+        );
+        let is_symbol = matches!(
+            category,
+            Gc::CurrencySymbol | Gc::MathSymbol | Gc::ModifierSymbol | Gc::OtherSymbol
+        );
+        if name.eq_ignore_ascii_case("l") || name.eq_ignore_ascii_case("letter") {
+            is_letter
+        } else if name.eq_ignore_ascii_case("alphabetic") {
+            ch.is_alphabetic()
+        } else if name.eq_ignore_ascii_case("alnum") {
+            ch.is_alphanumeric()
+        } else if name.eq_ignore_ascii_case("alpha") {
+            ch.is_alphabetic()
+        } else if name.eq_ignore_ascii_case("ascii") {
+            ch.is_ascii()
+        } else if name.eq_ignore_ascii_case("blank") {
+            matches!(ch, '\t' | ' ')
+        } else if name.eq_ignore_ascii_case("cntrl") {
+            ch.is_control()
+        } else if name.eq_ignore_ascii_case("digit") {
+            ch.is_ascii_digit()
+        } else if name.eq_ignore_ascii_case("graph") {
+            !ch.is_whitespace() && !ch.is_control()
+        } else if name.eq_ignore_ascii_case("lower") {
+            ch.is_lowercase()
+        } else if name.eq_ignore_ascii_case("print") {
+            !ch.is_control()
+        } else if name.eq_ignore_ascii_case("punct") {
+            ch.is_ascii_punctuation()
+        } else if name.eq_ignore_ascii_case("space") {
+            ch.is_whitespace()
+        } else if name.eq_ignore_ascii_case("upper") {
+            ch.is_uppercase()
+        } else if name.eq_ignore_ascii_case("xdigit") {
+            ch.is_ascii_hexdigit()
+        } else if name.eq_ignore_ascii_case("n") || name.eq_ignore_ascii_case("number") {
+            is_number
+        } else if name.eq_ignore_ascii_case("m") || name.eq_ignore_ascii_case("mark") {
+            is_mark
+        } else if name.eq_ignore_ascii_case("p") || name.eq_ignore_ascii_case("punctuation") {
+            is_punctuation
+        } else if name.eq_ignore_ascii_case("s") || name.eq_ignore_ascii_case("symbol") {
+            is_symbol
+        } else if name.eq_ignore_ascii_case(category.abbreviation()) {
+            true
+        } else if name.eq_ignore_ascii_case("decimal_number") {
+            category == Gc::DecimalNumber
+        } else if name.eq_ignore_ascii_case("z") || name.eq_ignore_ascii_case("separator") {
+            ch.is_whitespace()
+        } else if name.eq_ignore_ascii_case("word") {
+            is_word_char(ch)
+        } else if let Some(start) = xid_property(name) {
+            if start {
+                unicode_ident::is_xid_start(ch)
+            } else {
+                unicode_ident::is_xid_continue(ch)
+            }
+        } else {
+            ch.script().full_name().eq_ignore_ascii_case(name)
+                || ch.script().short_name().eq_ignore_ascii_case(name)
+        }
+    }
+
+    #[test]
+    fn unicode_property_resolution_matches_the_reference_evaluator() {
+        use unicode_script::UnicodeScript;
+
+        let mut names = vec![
+            "l",
+            "L",
+            "letter",
+            "Letter",
+            "alphabetic",
+            "alnum",
+            "alpha",
+            "ascii",
+            "blank",
+            "cntrl",
+            "digit",
+            "graph",
+            "lower",
+            "print",
+            "punct",
+            "space",
+            "upper",
+            "xdigit",
+            "n",
+            "number",
+            "m",
+            "mark",
+            "p",
+            "punctuation",
+            "s",
+            "symbol",
+            "decimal_number",
+            "z",
+            "separator",
+            "word",
+            "XID_Start",
+            "xidc",
+            "Xid-Continue",
+            "Latin",
+            "latn",
+            "Greek",
+            "Han",
+            "Hiragana",
+            "Cyrillic",
+            "Common",
+            "Yi",
+            "unknown_property",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+        for category in GENERAL_CATEGORIES {
+            names.push(category.abbreviation().to_owned());
+            names.push(category.abbreviation().to_ascii_lowercase());
+            names.push(category.abbreviation().to_ascii_uppercase());
+        }
+        // Every scalar below U+3000 and a stride of the rest cover each
+        // property's ASCII, Latin, and astral behavior.
+        let scalars = (0..=0x10ffffu32)
+            .filter(|scalar| *scalar < 0x3000 || scalar % 13 == 0)
+            .filter_map(char::from_u32);
+        for ch in scalars {
+            for name in &names {
+                assert_eq!(
+                    unicode_class_contains(name, ch),
+                    unicode_class_contains_reference(name, ch),
+                    "{name} {ch:?}"
+                );
+            }
+        }
+        // No script name collides with a category abbreviation, so resolving
+        // abbreviations before script names is exact.
+        for ch in (0..=0x10ffffu32).filter_map(char::from_u32) {
+            let script = ch.script();
+            for category in GENERAL_CATEGORIES {
+                assert!(
+                    !script
+                        .full_name()
+                        .eq_ignore_ascii_case(category.abbreviation())
+                );
+                assert!(
+                    !script
+                        .short_name()
+                        .eq_ignore_ascii_case(category.abbreviation())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn selection_rejected_by_prefilter_does_not_compile_bytecode() {
+        let matcher = FallbackMatcher::new(r"(?=\w)(?:alpha|beta)+ *keyword");
+        let mut scratch = BytecodeScratch::default();
+        let report = matcher
+            .try_find_at_without_captures_with_scratch("alpha beta", 0, ctx(), &mut scratch)
+            .unwrap();
+        assert_eq!(report.result, None);
+        assert!(matcher.bytecode.get().is_none());
+
+        let report = matcher
+            .try_find_at_without_captures_with_scratch("alpha keyword", 0, ctx(), &mut scratch)
+            .unwrap();
+        let result = report.result.expect("selection match");
+        assert_eq!(result.start..result.end, 0..13);
+        assert!(matcher.bytecode.get().is_some());
+    }
+
+    #[test]
+    fn unicode_case_folded_tries_keep_non_transitive_case_pairs() {
+        // `ϑ` and `ϴ` are both case-equal to `θ` but not to each other.
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, span) in [
+            (r"(?i)(?:(?:ϴ|θ)y|éz|eq|e)(?!x)", "ϑy!", 0..3),
+            (r"(?i)(?:ϴx|θy|éz|eq)", "ϑy", 0..3),
+            (r"(?i)(?:éz|θy|eq)", "ΘY", 0..3),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let mut scratch = BytecodeScratch::default();
+            let found = matcher
+                .try_find_at_without_captures_with_scratch(line, 0, ctx(), &mut scratch)
+                .unwrap()
+                .result
+                .map(|result| result.start..result.end);
+            assert_eq!(found, Some(span), "{pattern} on {line:?}");
+        }
+    }
+
+    #[test]
+    fn backreference_and_subroutine_selection_use_capture_layout_bytecode() {
+        for (pattern, line, span) in [
+            (r"(?=\w)(\w)x\1", "zaxa", 1..4),
+            (r"(?=\w)(a|b)\g<1>c", "zabc", 1..4),
+            (r"(?=\w)(a)?(?(1)b|c)", "zc", 1..2),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let mut scratch = BytecodeScratch::default();
+            let found = (0..=line.len()).find_map(|start| {
+                matcher
+                    .try_find_at_without_captures_with_scratch(line, start, ctx(), &mut scratch)
+                    .unwrap()
+                    .result
+            });
+            let found = found.unwrap_or_else(|| panic!("{pattern} should match {line:?}"));
+            assert_eq!(found.start..found.end, span, "{pattern}");
+            if matcher.parsed.analysis().bytecode_beneficial() {
+                assert!(
+                    matcher.bytecode.get().is_some_and(Option::is_some),
+                    "{pattern}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn matches_literals_and_captures() {
         let matcher = FallbackMatcher::new(r"(foo)\1");
@@ -2905,6 +3495,51 @@ mod tests {
     }
 
     #[test]
+    fn nullable_start_filter_does_not_skip_a_later_lookbehind() {
+        let matcher = FallbackMatcher::new(r"x|(?<=T)");
+        let result = matcher.find("= Ty", 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 3..3);
+        let matcher = FallbackMatcher::new(r"(?<=\S)(?<![=])|(?=\n)");
+        let result = matcher.find("= Typst\n", 0, ctx()).unwrap();
+        assert_eq!(result.start..result.end, 3..3);
+    }
+
+    #[test]
+    fn anchor_alternation_only_starts_at_its_anchors() {
+        let matcher = FallbackMatcher::new(r"(^|\G)(?!y)");
+        assert_eq!(
+            matcher.start_hint,
+            StartHint::Anchored(StartAnchors {
+                line_start: true,
+                continuation: true,
+                ..StartAnchors::default()
+            })
+        );
+        let at_g = AnchorContext {
+            allow_a: false,
+            allow_g: true,
+            g_pos: 2,
+        };
+        // Nullable, so every column used to be tried; only `^` and `\G` can hold.
+        let result = matcher.find("abcy", 0, at_g).unwrap();
+        assert_eq!(result.start..result.end, 0..0);
+        let result = matcher.find("abcy", 1, at_g).unwrap();
+        assert_eq!(result.start..result.end, 2..2);
+        assert!(matcher.find("abyc", 1, at_g).is_none());
+
+        // `\G` at column 0 is the same start as `^`, tried once.
+        let matcher = FallbackMatcher::new(r"(^|\G)x");
+        let at_zero = AnchorContext { g_pos: 0, ..at_g };
+        assert_eq!(matcher.find("xx", 0, at_zero).unwrap().start, 0);
+        assert!(matcher.find("xx", 1, at_zero).is_none());
+
+        // One unanchored branch keeps the per-column scan.
+        let matcher = FallbackMatcher::new(r"(^|a)b");
+        assert_eq!(matcher.start_hint, StartHint::Unanchored);
+        assert_eq!(matcher.find("xab", 0, ctx()).unwrap().start, 1);
+    }
+
+    #[test]
     fn supports_named_backrefs() {
         let matcher = FallbackMatcher::new(r"(?<x>a)\k<x>");
         let result = matcher.find("zaa", 0, ctx()).unwrap();
@@ -2919,10 +3554,96 @@ mod tests {
     }
 
     #[test]
+    fn folded_ascii_classes_admit_kelvin_and_long_s_on_every_path() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, span) in [
+            (r"(?i)(?:[[:ascii:]]x|yz)", "\u{212a}x", 0..4),
+            (r"(?i:[[:ascii:]])*(?-i:\x{212a})|zz", "\u{212a}", 0..3),
+            (r"(?i)(?:[[[:ascii:]]]x|yz)", "\u{17f}x", 0..3),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let mut scratch = BytecodeScratch::default();
+            let selected = matcher
+                .try_find_at_without_captures_with_scratch(line, 0, ctx(), &mut scratch)
+                .unwrap()
+                .result
+                .map(|result| result.start..result.end);
+            assert_eq!(selected, Some(span.clone()), "{pattern} on {line:?}");
+            let found = matcher
+                .find(line, 0, ctx())
+                .map(|result| result.start..result.end);
+            assert_eq!(found, Some(span), "{pattern} on {line:?}");
+        }
+    }
+
+    #[test]
+    fn unbounded_zero_width_recursion_fails_without_overflowing() {
+        for pattern in [r"(\g<1>)?", r"(\g<1>+)?", r"(\g<1>++)", r"(?<n>a|\g<n>)"] {
+            let matcher = FallbackMatcher::new(pattern);
+            let _ = matcher.try_find_at("a", 0, ctx());
+        }
+        let nested = FallbackMatcher::new(r"(?<n>\((?:[^()]|\g<n>)*\))");
+        let line = format!("{}{}", "(".repeat(100), ")".repeat(100));
+        let found = nested
+            .find(&line, 0, ctx())
+            .map(|result| result.start..result.end);
+        assert_eq!(found, Some(0..line.len()));
+    }
+
+    #[test]
+    fn plus_after_an_interval_repeats_it() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, expected) in [
+            (r"^a{1,2}+a$", "aa", true),
+            (r"^a{2}+$", "aaaa", true),
+            (r"^a{2}+$", "aaa", false),
+            (r"^a{1,}+a$", "aa", true),
+            (r"^a{,2}+a$", "aa", true),
+            (r"^a++a$", "aa", false),
+        ] {
+            let found = FallbackMatcher::new(pattern).find(line, 0, ctx()).is_some();
+            assert_eq!(found, expected, "{pattern} on {line:?}");
+        }
+    }
+
+    #[test]
+    fn duplicate_names_in_backrefs_and_conditionals_follow_oniguruma() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, expected) in [
+            (r"(?<x>a)(?<x>b)\k<x>", "abab", Some(0..3)),
+            (r"(?<x>a)(?<x>ab)\k<x>", "aababx", Some(0..5)),
+            (r"(?<x>a)(?<x>ab)\k<x>b", "aabab", None),
+            (r"(?<x>ab)(?<x>a)\k<x>b", "abaab", Some(0..5)),
+            (r"(?:(?<x>a)|(?<x>b))\k<x>", "bb", Some(0..2)),
+            (r"(?:(?<x>a)|(?<x>b))\k<x>", "ab", None),
+            (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "ax", Some(0..2)),
+            (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "bx", Some(0..2)),
+            (r"(?:(?<n>a)|(?<n>b))(?(<n>)x|y)", "ay", None),
+            (r"(?<a>x)(?<a>y)?(?(<a>)z|w)", "xw", None),
+        ] {
+            let matcher = FallbackMatcher::new(pattern);
+            let found = matcher
+                .find(line, 0, ctx())
+                .map(|result| result.start..result.end);
+            assert_eq!(found, expected, "{pattern} on {line:?}");
+        }
+    }
+
+    #[test]
     fn supports_oniguruma_print_property() {
         let matcher = FallbackMatcher::new(r"^\p{print}+$");
         assert!(matcher.find("café λ🚀", 0, ctx()).is_some());
         assert!(matcher.find("bad\0", 0, ctx()).is_none());
+    }
+
+    #[test]
+    fn supports_oniguruma_xid_properties_with_loose_names() {
+        let label = FallbackMatcher::new(r"^<[_\p{XIDS}][-.:_\p{XIDC}]*>$");
+        assert!(label.find("<intro-2.東京>", 0, ctx()).is_some());
+        assert!(label.find("<2intro>", 0, ctx()).is_none());
+        let loose = FallbackMatcher::new(r"^\p{xid start}\p{Xid-Continue}+$");
+        assert!(loose.find("a1_λ", 0, ctx()).is_some());
+        assert!(loose.find("1a", 0, ctx()).is_none());
     }
 
     #[test]
@@ -3029,6 +3750,74 @@ mod tests {
         assert!(unicode_case_eq('ß', 'ẞ'));
         assert!(!unicode_case_eq('i', 'İ'));
         assert!(!unicode_case_eq('i', 'ı'));
+    }
+
+    /// Scalars that exercise ASCII, Latin-1, Cyrillic, Greek final sigma,
+    /// multi-scalar mappings, dotless/dotted i, Kelvin/long s folds, and
+    /// mismatched Unicode table versions.
+    fn case_probe_scalars() -> Vec<char> {
+        let mut scalars: Vec<char> = ('\0'..='\u{24f}')
+            .chain('\u{370}'..='\u{3ff}')
+            .chain('\u{400}'..='\u{52f}')
+            .chain('\u{1e00}'..='\u{1fff}')
+            .chain('\u{2100}'..='\u{218f}')
+            .chain('\u{24b6}'..='\u{24e9}')
+            .chain('\u{a640}'..='\u{a7ff}')
+            .chain('\u{ff21}'..='\u{ff5a}')
+            .chain(['\u{10400}', '\u{10428}', '\u{1e900}', '\u{1e922}'])
+            .collect();
+        scalars.sort_unstable();
+        scalars.dedup();
+        scalars
+    }
+
+    #[test]
+    fn case_fold_keys_agree_with_unicode_case_comparator() {
+        let scalars = case_probe_scalars();
+        let keys: Vec<CaseFoldKey> = scalars.iter().copied().map(CaseFoldKey::new).collect();
+        for (left, left_key) in scalars.iter().zip(&keys) {
+            for (right, right_key) in scalars.iter().zip(&keys) {
+                assert_eq!(
+                    left_key.case_eq(right_key),
+                    unicode_case_eq(*left, *right),
+                    "{left:?} vs {right:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn case_insensitive_classes_fold_their_literal_set_once() {
+        // Expectations checked against vscode-oniguruma.
+        for (pattern, line, expected) in [
+            (r"(?i)[a-{]", "A", true),
+            (r"(?i)[a-{]", "\\", false),
+            (r"(?i)[a-{]", "`", false),
+            (r"(?i)[Z-a]", "_", true),
+            (r"(?i)[Z-a]", "b", false),
+            (r"(?i)[@-C]", "c", true),
+            (r"(?i)[a-z]", "\u{212a}", true),
+            (r"(?i)[\x{2100}-\x{2200}]", "k", true),
+            (r"(?i)[σ-σ]", "ς", true),
+            (r"(?i)[h-j]", "\u{131}", false),
+            (r"(?i)[A-Z&&a-z]", "a", false),
+            (r"(?i)[^A-Z&&a-z]", "a", true),
+            (r"(?i)[\x{2120}-\x{2130}&&k]", "K", false),
+            (r"(?i)[^[^a]]", "A", false),
+            (r"(?i)[\w&&[^a]]", "A", true),
+            (r"(?i)[^a-z]", "K", false),
+            (r"(?i)[^k]", "\u{212a}", false),
+            (r"(?i)[\p{Lu}]", "a", true),
+            (r"(?i)[^\p{Lu}]", "a", false),
+            (r"(?i)[[:upper:]]", "a", true),
+            (r"(?i)[^[:upper:]]", "a", false),
+            // Escapes outside brackets are not folded.
+            (r"(?i)\p{Lu}", "a", false),
+            (r"(?i)\P{Lu}", "A", false),
+        ] {
+            let found = FallbackMatcher::new(pattern).find(line, 0, ctx()).is_some();
+            assert_eq!(found, expected, "{pattern} on {line:?}");
+        }
     }
 
     #[test]

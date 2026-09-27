@@ -2,14 +2,14 @@
   "schemaVersion": 2,
   "vscodeCommit": "fc3def6774c76082adf699d366f31a557ce5573f",
   "oracle": {
-    "vscodeTextmate": "9.2.0",
+    "vscodeTextmate": "9.3.2",
     "vscodeOniguruma": "1.7.0"
   },
-  "sharedRootGrammars": 65,
-  "scopeEquivalent": 65,
-  "scopeDivergent": 0,
-  "styleEquivalent": 65,
-  "styleDivergent": 0,
+  "sharedRootGrammars": 66,
+  "scopeEquivalent": 62,
+  "scopeDivergent": 4,
+  "styleEquivalent": 63,
+  "styleDivergent": 3,
   "entries": [
     {
       "language": "vb",
@@ -138,30 +138,559 @@
         {
           "name": "basic",
           "lines": 22,
-          "comparedTokens": 149,
-          "scopeMismatchLines": 0,
-          "styleMismatchLines": 0,
-          "firstMismatch": null
+          "comparedTokens": 163,
+          "scopeMismatchLines": 9,
+          "styleMismatchLines": 3,
+          "firstMismatch": {
+            "lineNumber": 5,
+            "line": "T doubled(const T &value) {",
+            "syntaxmate": [
+              [
+                0,
+                1,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.qualified-type.cpp",
+                  "entity.name.type.cpp"
+                ]
+              ],
+              [
+                1,
+                2,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp"
+                ]
+              ],
+              [
+                2,
+                9,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "entity.name.function.definition.cpp"
+                ]
+              ],
+              [
+                9,
+                10,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "punctuation.section.parameters.begin.bracket.round.cpp"
+                ]
+              ],
+              [
+                10,
+                15,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "storage.modifier.specifier.const.cpp"
+                ]
+              ],
+              [
+                15,
+                16,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp"
+                ]
+              ],
+              [
+                16,
+                17,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "entity.name.type.parameter.cpp"
+                ]
+              ],
+              [
+                17,
+                18,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp"
+                ]
+              ],
+              [
+                18,
+                19,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "storage.modifier.reference.cpp"
+                ]
+              ],
+              [
+                19,
+                24,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "variable.parameter.cpp"
+                ]
+              ],
+              [
+                24,
+                25,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "punctuation.section.parameters.end.bracket.round.cpp"
+                ]
+              ],
+              [
+                25,
+                26,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp"
+                ]
+              ],
+              [
+                26,
+                27,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "punctuation.section.block.begin.bracket.curly.function.definition.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                1,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.qualified_type.cpp",
+                  "entity.name.type.cpp"
+                ]
+              ],
+              [
+                1,
+                2,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp"
+                ]
+              ],
+              [
+                2,
+                9,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "entity.name.function.definition.cpp"
+                ]
+              ],
+              [
+                9,
+                10,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "punctuation.section.parameters.begin.bracket.round.cpp"
+                ]
+              ],
+              [
+                10,
+                15,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "storage.modifier.specifier.const.cpp"
+                ]
+              ],
+              [
+                15,
+                16,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp"
+                ]
+              ],
+              [
+                16,
+                17,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "entity.name.type.parameter.cpp"
+                ]
+              ],
+              [
+                17,
+                18,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp"
+                ]
+              ],
+              [
+                18,
+                19,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "storage.modifier.reference.cpp"
+                ]
+              ],
+              [
+                19,
+                24,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "meta.function.definition.parameters",
+                  "meta.parameter.cpp",
+                  "variable.parameter.cpp"
+                ]
+              ],
+              [
+                24,
+                25,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "punctuation.section.parameters.end.bracket.round.cpp"
+                ]
+              ],
+              [
+                25,
+                26,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp"
+                ]
+              ],
+              [
+                26,
+                27,
+                [
+                  "source.cpp",
+                  "meta.function.definition.cpp",
+                  "meta.head.function.definition.cpp",
+                  "punctuation.section.block.begin.bracket.curly.function.definition.cpp"
+                ]
+              ]
+            ]
+          }
         },
         {
           "name": "libcxx_vector",
           "lines": 40,
-          "comparedTokens": 278,
-          "scopeMismatchLines": 0,
+          "comparedTokens": 297,
+          "scopeMismatchLines": 14,
           "styleMismatchLines": 0,
-          "firstMismatch": null
+          "firstMismatch": {
+            "lineNumber": 8,
+            "line": "_LIBCPP_BEGIN_NAMESPACE_STD",
+            "syntaxmate": [
+              [
+                0,
+                27,
+                [
+                  "source.cpp",
+                  "variable.other.unknown._LIBCPP_BEGIN_NAMESPACE_STD.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                28,
+                [
+                  "source.cpp"
+                ]
+              ]
+            ]
+          }
         },
         {
           "name": "stress",
           "lines": 244,
-          "comparedTokens": 2709,
-          "scopeMismatchLines": 0,
-          "styleMismatchLines": 0,
-          "firstMismatch": null
+          "comparedTokens": 2966,
+          "scopeMismatchLines": 155,
+          "styleMismatchLines": 14,
+          "firstMismatch": {
+            "lineNumber": 27,
+            "line": "#define MARK_STRINGIZE(token) MARK_STRINGIZE_INNER(token)",
+            "syntaxmate": [
+              [
+                0,
+                1,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "keyword.control.directive.define.cpp",
+                  "punctuation.definition.directive.cpp"
+                ]
+              ],
+              [
+                1,
+                7,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "keyword.control.directive.define.cpp"
+                ]
+              ],
+              [
+                7,
+                8,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp"
+                ]
+              ],
+              [
+                8,
+                22,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "entity.name.function.preprocessor.cpp"
+                ]
+              ],
+              [
+                22,
+                23,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.definition.parameters.begin.preprocessor.cpp"
+                ]
+              ],
+              [
+                23,
+                28,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "meta.function.preprocessor.parameters.cpp",
+                  "variable.parameter.preprocessor.cpp"
+                ]
+              ],
+              [
+                28,
+                29,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.definition.parameters.end.preprocessor.cpp"
+                ]
+              ],
+              [
+                29,
+                30,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp"
+                ]
+              ],
+              [
+                30,
+                50,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "entity.name.function.call.upper-case.cpp",
+                  "entity.name.function.call.cpp"
+                ]
+              ],
+              [
+                50,
+                51,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.section.arguments.begin.bracket.round.function.call.cpp",
+                  "punctuation.section.arguments.begin.bracket.round.function.call.upper-case.cpp"
+                ]
+              ],
+              [
+                51,
+                56,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "variable.lower-case.cpp",
+                  "variable.other.unknown.token.cpp"
+                ]
+              ],
+              [
+                56,
+                57,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.section.arguments.end.bracket.round.function.call.cpp",
+                  "punctuation.section.arguments.begin.bracket.round.function.call.upper-case.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                1,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "keyword.control.directive.define.cpp",
+                  "punctuation.definition.directive.cpp"
+                ]
+              ],
+              [
+                1,
+                7,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "keyword.control.directive.define.cpp"
+                ]
+              ],
+              [
+                7,
+                8,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp"
+                ]
+              ],
+              [
+                8,
+                22,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "entity.name.function.preprocessor.cpp"
+                ]
+              ],
+              [
+                22,
+                23,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.definition.parameters.begin.preprocessor.cpp"
+                ]
+              ],
+              [
+                23,
+                28,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "meta.function.preprocessor.parameters.cpp",
+                  "variable.parameter.preprocessor.cpp"
+                ]
+              ],
+              [
+                28,
+                29,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.definition.parameters.end.preprocessor.cpp"
+                ]
+              ],
+              [
+                29,
+                30,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp"
+                ]
+              ],
+              [
+                30,
+                50,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "entity.name.function.call.cpp"
+                ]
+              ],
+              [
+                50,
+                51,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.section.arguments.begin.bracket.round.function.call.cpp"
+                ]
+              ],
+              [
+                51,
+                56,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp"
+                ]
+              ],
+              [
+                56,
+                57,
+                [
+                  "source.cpp",
+                  "meta.preprocessor.macro.cpp",
+                  "punctuation.section.arguments.end.bracket.round.function.call.cpp"
+                ]
+              ]
+            ]
+          }
         }
       ],
-      "scopeEquivalent": true,
-      "styleEquivalent": true
+      "scopeEquivalent": false,
+      "styleEquivalent": false
     },
     {
       "language": "cpp-macro",
@@ -170,22 +699,435 @@
         {
           "name": "basic",
           "lines": 19,
-          "comparedTokens": 195,
-          "scopeMismatchLines": 0,
+          "comparedTokens": 221,
+          "scopeMismatchLines": 12,
           "styleMismatchLines": 0,
-          "firstMismatch": null
+          "firstMismatch": {
+            "lineNumber": 2,
+            "line": "    constexpr auto label = u8\"café λ 東京 🚀 𝌆\"; \\",
+            "syntaxmate": [
+              [
+                0,
+                4,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                4,
+                13,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "storage.modifier.specifier.functional.pre-parameters.constexpr.cpp"
+                ]
+              ],
+              [
+                13,
+                14,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                14,
+                18,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "storage.type.primitive.cpp",
+                  "storage.type.built-in.primitive.cpp"
+                ]
+              ],
+              [
+                18,
+                19,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                19,
+                24,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "variable.lower-case.cpp",
+                  "variable.other.unknown.label.cpp"
+                ]
+              ],
+              [
+                24,
+                25,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                25,
+                26,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "keyword.operator.assignment.cpp"
+                ]
+              ],
+              [
+                26,
+                27,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                27,
+                29,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.begin.cpp",
+                  "meta.encoding.cpp"
+                ]
+              ],
+              [
+                29,
+                30,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.begin.cpp"
+                ]
+              ],
+              [
+                30,
+                45,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp"
+                ]
+              ],
+              [
+                45,
+                46,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.end.cpp"
+                ]
+              ],
+              [
+                46,
+                47,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "punctuation.terminator.statement.cpp"
+                ]
+              ],
+              [
+                47,
+                48,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                48,
+                50,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "constant.character.escape.line-continuation.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                4,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                4,
+                13,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "storage.modifier.specifier.functional.pre-parameters.constexpr.cpp"
+                ]
+              ],
+              [
+                13,
+                14,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                14,
+                18,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "storage.type.primitive.cpp",
+                  "storage.type.built-in.primitive.cpp"
+                ]
+              ],
+              [
+                18,
+                25,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                25,
+                26,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "keyword.operator.assignment.cpp"
+                ]
+              ],
+              [
+                26,
+                27,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                27,
+                29,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.begin.cpp",
+                  "meta.encoding.cpp"
+                ]
+              ],
+              [
+                29,
+                30,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.begin.cpp"
+                ]
+              ],
+              [
+                30,
+                45,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp"
+                ]
+              ],
+              [
+                45,
+                46,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.end.cpp"
+                ]
+              ],
+              [
+                46,
+                47,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "punctuation.terminator.statement.cpp"
+                ]
+              ],
+              [
+                47,
+                48,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp"
+                ]
+              ],
+              [
+                48,
+                50,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.block.cpp",
+                  "constant.character.escape.line-continuation.cpp"
+                ]
+              ]
+            ]
+          }
         },
         {
           "name": "stress",
           "lines": 214,
-          "comparedTokens": 2088,
-          "scopeMismatchLines": 0,
-          "styleMismatchLines": 0,
-          "firstMismatch": null
+          "comparedTokens": 2198,
+          "scopeMismatchLines": 104,
+          "styleMismatchLines": 8,
+          "firstMismatch": {
+            "lineNumber": 2,
+            "line": "#line 100 \"cpp-macro-stress.cpp\"",
+            "syntaxmate": [
+              [
+                0,
+                1,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "keyword.control.directive.line.cpp",
+                  "punctuation.definition.directive.cpp"
+                ]
+              ],
+              [
+                1,
+                5,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "keyword.control.directive.line.cpp"
+                ]
+              ],
+              [
+                5,
+                6,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp"
+                ]
+              ],
+              [
+                6,
+                9,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "constant.numeric.decimal.cpp"
+                ]
+              ],
+              [
+                9,
+                10,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp"
+                ]
+              ],
+              [
+                10,
+                11,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.begin.cpp"
+                ]
+              ],
+              [
+                11,
+                31,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "string.quoted.double.cpp"
+                ]
+              ],
+              [
+                31,
+                32,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.end.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                1,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "keyword.control.directive.line.cpp",
+                  "punctuation.definition.directive.cpp"
+                ]
+              ],
+              [
+                1,
+                5,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "keyword.control.directive.line.cpp"
+                ]
+              ],
+              [
+                5,
+                10,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp"
+                ]
+              ],
+              [
+                10,
+                11,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.begin.cpp"
+                ]
+              ],
+              [
+                11,
+                31,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "string.quoted.double.cpp"
+                ]
+              ],
+              [
+                31,
+                32,
+                [
+                  "source.cpp.embedded.macro",
+                  "meta.preprocessor.line.cpp",
+                  "string.quoted.double.cpp",
+                  "punctuation.definition.string.end.cpp"
+                ]
+              ]
+            ]
+          }
         }
       ],
-      "scopeEquivalent": true,
-      "styleEquivalent": true
+      "scopeEquivalent": false,
+      "styleEquivalent": false
     },
     {
       "language": "csharp",
@@ -298,6 +1240,268 @@
       ],
       "scopeEquivalent": true,
       "styleEquivalent": true
+    },
+    {
+      "language": "cuda",
+      "scopeName": "source.cuda-cpp",
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 19,
+          "comparedTokens": 160,
+          "scopeMismatchLines": 16,
+          "styleMismatchLines": 2,
+          "firstMismatch": {
+            "lineNumber": 0,
+            "line": "#include <cuda_runtime.h>",
+            "syntaxmate": [
+              [
+                0,
+                1,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "keyword.control.directive.include.cpp",
+                  "punctuation.definition.directive.cpp"
+                ]
+              ],
+              [
+                1,
+                8,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "keyword.control.directive.include.cpp"
+                ]
+              ],
+              [
+                8,
+                9,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp"
+                ]
+              ],
+              [
+                9,
+                10,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "string.quoted.other.lt-gt.include.cpp",
+                  "punctuation.definition.string.begin.cpp"
+                ]
+              ],
+              [
+                10,
+                24,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "string.quoted.other.lt-gt.include.cpp"
+                ]
+              ],
+              [
+                24,
+                25,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "string.quoted.other.lt-gt.include.cpp",
+                  "punctuation.definition.string.end.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                1,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "keyword.control.directive.include.cuda-cpp",
+                  "punctuation.definition.directive.cuda-cpp"
+                ]
+              ],
+              [
+                1,
+                8,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "keyword.control.directive.include.cuda-cpp"
+                ]
+              ],
+              [
+                8,
+                9,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp"
+                ]
+              ],
+              [
+                9,
+                10,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "string.quoted.other.lt-gt.include.cuda-cpp",
+                  "punctuation.definition.string.begin.cuda-cpp"
+                ]
+              ],
+              [
+                10,
+                24,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "string.quoted.other.lt-gt.include.cuda-cpp"
+                ]
+              ],
+              [
+                24,
+                25,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "string.quoted.other.lt-gt.include.cuda-cpp",
+                  "punctuation.definition.string.end.cuda-cpp"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "stress",
+          "lines": 141,
+          "comparedTokens": 1877,
+          "scopeMismatchLines": 122,
+          "styleMismatchLines": 43,
+          "firstMismatch": {
+            "lineNumber": 0,
+            "line": "#include <cuda_runtime.h>",
+            "syntaxmate": [
+              [
+                0,
+                1,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "keyword.control.directive.include.cpp",
+                  "punctuation.definition.directive.cpp"
+                ]
+              ],
+              [
+                1,
+                8,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "keyword.control.directive.include.cpp"
+                ]
+              ],
+              [
+                8,
+                9,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp"
+                ]
+              ],
+              [
+                9,
+                10,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "string.quoted.other.lt-gt.include.cpp",
+                  "punctuation.definition.string.begin.cpp"
+                ]
+              ],
+              [
+                10,
+                24,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "string.quoted.other.lt-gt.include.cpp"
+                ]
+              ],
+              [
+                24,
+                25,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cpp",
+                  "string.quoted.other.lt-gt.include.cpp",
+                  "punctuation.definition.string.end.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                1,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "keyword.control.directive.include.cuda-cpp",
+                  "punctuation.definition.directive.cuda-cpp"
+                ]
+              ],
+              [
+                1,
+                8,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "keyword.control.directive.include.cuda-cpp"
+                ]
+              ],
+              [
+                8,
+                9,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp"
+                ]
+              ],
+              [
+                9,
+                10,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "string.quoted.other.lt-gt.include.cuda-cpp",
+                  "punctuation.definition.string.begin.cuda-cpp"
+                ]
+              ],
+              [
+                10,
+                24,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "string.quoted.other.lt-gt.include.cuda-cpp"
+                ]
+              ],
+              [
+                24,
+                25,
+                [
+                  "source.cuda-cpp",
+                  "meta.preprocessor.include.cuda-cpp",
+                  "string.quoted.other.lt-gt.include.cuda-cpp",
+                  "punctuation.definition.string.end.cuda-cpp"
+                ]
+              ]
+            ]
+          }
+        }
+      ],
+      "scopeEquivalent": false,
+      "styleEquivalent": false
     },
     {
       "language": "dart",
@@ -502,7 +1706,24 @@
     {
       "language": "ignore",
       "scopeName": "source.ignore",
-      "fixtures": [],
+      "fixtures": [
+        {
+          "name": "basic",
+          "lines": 21,
+          "comparedTokens": 21,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        },
+        {
+          "name": "stress",
+          "lines": 170,
+          "comparedTokens": 170,
+          "scopeMismatchLines": 0,
+          "styleMismatchLines": 0,
+          "firstMismatch": null
+        }
+      ],
       "scopeEquivalent": true,
       "styleEquivalent": true
     },
@@ -1032,13 +2253,66 @@
         {
           "name": "stress",
           "lines": 243,
-          "comparedTokens": 777,
-          "scopeMismatchLines": 0,
+          "comparedTokens": 779,
+          "scopeMismatchLines": 3,
           "styleMismatchLines": 0,
-          "firstMismatch": null
+          "firstMismatch": {
+            "lineNumber": 89,
+            "line": ".. cpp:function:: render",
+            "syntaxmate": [
+              [
+                0,
+                17,
+                [
+                  "source.rst",
+                  "keyword.control"
+                ]
+              ],
+              [
+                17,
+                18,
+                [
+                  "source.rst"
+                ]
+              ],
+              [
+                18,
+                24,
+                [
+                  "source.rst",
+                  "variable.lower-case.cpp",
+                  "variable.other.unknown.render.cpp"
+                ]
+              ]
+            ],
+            "vscode": [
+              [
+                0,
+                17,
+                [
+                  "source.rst",
+                  "keyword.control"
+                ]
+              ],
+              [
+                17,
+                18,
+                [
+                  "source.rst"
+                ]
+              ],
+              [
+                18,
+                24,
+                [
+                  "source.rst"
+                ]
+              ]
+            ]
+          }
         }
       ],
-      "scopeEquivalent": true,
+      "scopeEquivalent": false,
       "styleEquivalent": true
     },
     {

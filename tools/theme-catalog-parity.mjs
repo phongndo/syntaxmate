@@ -12,6 +12,7 @@ const fixtureRoot = path.join(root, 'tests/fixtures/textmate')
 const output = path.join(root, 'benchmarks/textmate/theme-parity.json')
 const check = process.argv.includes('--check')
 const themeName = 'github-dark-high-contrast'
+const oraclePins = JSON.parse(await fs.readFile(path.join(root, 'tools/golden-oracle/package.json'), 'utf8')).dependencies
 const theme = JSON.parse(await fs.readFile(path.join(root, `assets/themes/${themeName}.json`), 'utf8'))
 const files = await recursiveGoldens(fixtureRoot)
 const coverage = await fs.readFile(path.join(root, 'assets/grammars/coverage.toml'), 'utf8')
@@ -91,7 +92,11 @@ for (let index = 0; index < stacks.length; index++) {
 }
 const report = `${JSON.stringify({
   schemaVersion: 1,
-  oracle: { vscodeTextmate: '9.2.0', vscodeOniguruma: '1.7.0', semanticHighlighting: false },
+  oracle: {
+    vscodeTextmate: oraclePins['vscode-textmate'],
+    vscodeOniguruma: oraclePins['vscode-oniguruma'],
+    semanticHighlighting: false,
+  },
   theme: themeName,
   fixtureFiles: files.length,
   publicLanguages,

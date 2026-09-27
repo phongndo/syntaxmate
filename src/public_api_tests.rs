@@ -3,6 +3,37 @@ use crate::{
     Theme, Tokenizer, TokenizerOptions, render_html, style_document,
 };
 
+#[cfg(feature = "diagnostics")]
+#[test]
+fn zero_line_cache_entries_disables_replay() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(
+            r#"{"scopeName":"source.cache","patterns":[{"match":"word","name":"word.cache"}]}"#,
+        )
+        .unwrap();
+    let mut cached = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let mut uncached = Tokenizer::new(
+        &registry,
+        root,
+        TokenizerOptions {
+            line_cache_entries: 0,
+            ..TokenizerOptions::default()
+        },
+    )
+    .unwrap();
+    cached.set_diagnostics_enabled(true);
+    uncached.set_diagnostics_enabled(true);
+    let source = "word\nword\nword\nword";
+    for _ in 0..2 {
+        assert_eq!(cached.tokenize(source), uncached.tokenize(source));
+    }
+    assert!(cached.take_diagnostics().line_cache_hits > 0);
+    let counters = uncached.take_diagnostics();
+    assert_eq!(counters.line_cache_hits, 0, "{counters:#?}");
+    assert_eq!(counters.line_cache_evictions, 0, "{counters:#?}");
+}
+
 #[test]
 fn cached_budget_exhaustion_remains_degraded() {
     let mut registry = GrammarRegistry::new();

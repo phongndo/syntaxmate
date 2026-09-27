@@ -24,6 +24,7 @@ const unicodePositiveVariants = {
   Ll: 'a', Lm: 'ʰ', Lo: '文', lower: 'a', Lt: 'ǅ', Lu: 'A', M: '\u0301',
   Mc: 'ा', Mn: '\u0301', Nl: 'Ⅻ', P: '!', Pc: '_', print: 'A', S: '+',
   Sc: '$', Sm: '+', So: '🚀', upper: 'A', word: 'λ_7',
+  Han: '東京', Hangul: '한국', Hiragana: 'ひら', Katakana: 'カタ', XIDC: 'a1_λ', XIDS: 'λ',
 }
 const unicodeNegativeVariants = ['Mc', 'Me', 'Mn', 'No', 'Pc', 'Sc', 'Sk', 'So', 'word']
 const posixPositiveVariants = {
@@ -92,6 +93,8 @@ export const conformanceCases = Object.freeze([
   { name: 'numbered-backref', pattern: String.raw`(foo)\1`, line: 'xxfoofoo', engine: 'fallback', constructs: ['backreference.numbered'] },
   { name: 'named-backref-angle', pattern: String.raw`(?<word>foo)\k<word>`, line: 'xxfoofoo', engine: 'fallback', constructs: ['named-group.angle', 'backreference.named-angle'] },
   { name: 'duplicate-named-backref', pattern: String.raw`(?<x>a)(?<x>b)\k<x>`, line: 'abb', engine: 'fallback', constructs: ['named-group.angle', 'named-group.duplicate', 'backreference.named-angle'] },
+  { name: 'duplicate-named-backref-earlier-group', pattern: String.raw`(?<x>a)(?<x>b)\k<x>`, line: 'abab', engine: 'fallback', constructs: ['named-group.angle', 'named-group.duplicate', 'backreference.named-angle'] },
+  { name: 'duplicate-named-backref-commits', pattern: String.raw`(?<x>a)(?<x>ab)\k<x>b`, line: 'aabab', engine: 'fallback', expectMiss: true, constructs: ['named-group.angle', 'named-group.duplicate', 'backreference.named-angle'] },
 
   { name: 'global-ignore-case', pattern: String.raw`(?i)foo`, line: 'xxFOO', engine: 'fallback', constructs: ['inline-flags.global-set'] },
   { name: 'global-ignore-case-extended', pattern: '(?ix) f o o', line: 'xxFOO', engine: 'fallback', constructs: ['inline-flags.global-set', 'inline-flags.extended-set'] },
@@ -105,6 +108,10 @@ export const conformanceCases = Object.freeze([
   { name: 'scoped-im-flags-cleared', pattern: '(?im:^foo(?-im:$))', line: 'FOO', engine: 'fallback', constructs: ['inline-flags.scoped-set', 'inline-flags.scoped-clear', 'anchor.line-start'] },
   { name: 'global-flag-clearing', pattern: '(?i)foo(?-i)BAR', line: 'FOOBAR', engine: 'fallback', constructs: ['inline-flags.global-set', 'inline-flags.global-clear'] },
   { name: 'bare-flag-remainder-alternation', pattern: 'a(?i)b|c', line: 'aC', engine: 'fallback', constructs: ['inline-flags.global-set'] },
+  { name: 'ignore-case-range-excludes-bound-punctuation', pattern: String.raw`(?i)x?[]!$%\&\*+\--9<-\[\^_a-{}~]`, line: '\\', engine: 'auto', expectMiss: true, constructs: ['inline-flags.global-set'] },
+  { name: 'ignore-case-range-other-case', pattern: String.raw`(?i)[@-C]`, line: 'c', engine: 'auto', constructs: ['inline-flags.global-set'] },
+  { name: 'ignore-case-range-kelvin-sign', pattern: '(?i)[\u2100-\u2200]', line: 'k', engine: 'fallback', constructs: ['inline-flags.global-set'] },
+  { name: 'ignore-case-range-final-sigma', pattern: '(?i)[σ-σ]', line: 'ς', engine: 'fallback', constructs: ['inline-flags.global-set'] },
   { name: 'unicode-ignore-case-cyrillic', pattern: '(?i)Выбрать', line: 'ВЫБРАТЬ', engine: 'fallback', constructs: ['inline-flags.global-set'] },
 
   { name: 'unicode-property-letter', pattern: String.raw`\p{L}+`, line: '12é文', engine: 'fallback', constructs: ['unicode-property.positive'] },
@@ -136,6 +143,7 @@ export const conformanceCases = Object.freeze([
   { name: 'numbered-conditional-unmatched', pattern: String.raw`(a)?(?(1)b|c)d`, line: 'cd', engine: 'fallback', constructs: ['conditional.numbered'] },
   { name: 'named-conditional-matched', pattern: String.raw`(?<x>a)?(?(<x>)b|c)d`, line: 'abd', engine: 'fallback', constructs: ['named-group.angle', 'conditional.named-angle'] },
   { name: 'named-conditional-unmatched', pattern: String.raw`(?<x>a)?(?(<x>)b|c)d`, line: 'cd', engine: 'fallback', constructs: ['named-group.angle', 'conditional.named-angle'] },
+  { name: 'unset-group-non-ascii-line', pattern: String.raw`(a)?c`, line: 'cλ', engine: 'fallback', constructs: [] },
   { name: 'named-subroutine-call', pattern: String.raw`(?<word>ab)\g<word>`, line: 'xxabab', engine: 'fallback', constructs: ['named-group.angle', 'subroutine.angle'] },
   { name: 'absent-group-documented-degradation', pattern: '(?~a)', line: 'bbb', engine: 'fallback', constructs: ['absent-group'], expectedDegradation: 'unsupported-no-match' },
   ...inventoryVariantCases(),
@@ -275,9 +283,18 @@ function simplifyOnig(match, line) {
 }
 
 function spansEqual(syntaxmate, onig, line) {
+  if (!syntaxmate && isUnsetGroupArtifact(onig, line)) return true
   onig = normalizeOnigSpan(onig, line)
   if (!syntaxmate || !onig) return syntaxmate == null && onig == null
   return syntaxmate.start === onig.start && syntaxmate.end === onig.end
+}
+
+// vscode-oniguruma converts offsets to UTF-16 only for lines with non-ASCII
+// text, and that conversion reports an unset group as an empty span at the
+// line end. A real empty capture there looks the same, so accept the span only
+// against an unset syntaxmate capture.
+function isUnsetGroupArtifact(span, line) {
+  return span != null && span.start === line.length && span.end === line.length && /[^\x00-\x7f]/.test(line)
 }
 
 function normalizeOnigSpan(span, line) {

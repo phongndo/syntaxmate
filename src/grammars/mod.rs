@@ -32,7 +32,7 @@ static EMBEDDED_BUNDLE_BYTES: &[u8] = &[];
 pub fn embedded_bundle() -> &'static Bundle {
     EMBEDDED_BUNDLE.get_or_init(|| {
         if cfg!(feature = "bundled-grammars") {
-            Bundle::parse(embedded_bundle_bytes())
+            Bundle::parse_static(embedded_bundle_bytes())
                 .expect("embedded Syntaxmate grammar bundle should parse")
         } else {
             Bundle::default()
@@ -208,7 +208,7 @@ mod tests {
         // Full public catalog plus private dependency blobs. `coverage.toml`
         // decides which embedded blobs are public catalog entries.
         assert_eq!(bundle.languages.len(), 264);
-        assert_eq!(bundle.grammar_blobs.len(), 268);
+        assert_eq!(bundle.grammar_blobs.len(), 275);
         assert!(
             bundle
                 .grammar_blob_for_scope("source.cpp.embedded.macro")

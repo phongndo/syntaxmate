@@ -11,7 +11,7 @@
     };
 
     hk = {
-      url = "github:jdx/hk/v1.54.0";
+      url = "github:jdx/hk/v2.2.0";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -39,7 +39,7 @@
           };
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
           hkPackage = hk.packages.${system}.default.overrideAttrs {
-            # hk 1.54.0 has a Git branch test that fails with Git 2.54.
+            # hk 2.2.0 Git and project-detection tests fail in the Nix build sandbox.
             doCheck = false;
           };
         in {

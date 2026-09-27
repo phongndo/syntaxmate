@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     cell::RefCell,
     collections::BTreeMap,
     collections::HashMap,
@@ -12,6 +13,7 @@ use std::{
     time::Instant,
 };
 
+use crate::grammars::bundle::GrammarBlob;
 use crate::{
     EngineHighlightedLine as HighlightedLine, HighlightScopeTable, HighlightedText,
     LineTextFingerprint, ScopeAtomId, ScopeStackRef, SyntaxClass, SyntaxSegment,
@@ -21,10 +23,13 @@ use super::cache::{CachedLine, LineCache, LineCacheKey};
 use super::checkpoint::CheckpointTable;
 use super::counters::{EngineCounters, PatternHotspot};
 use super::grammar::{
-    CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError, InjectionPriority,
-    RuleBody, RuleRef, load_dev_grammar_from_str, normalize_injection_selectors,
+    CaptureEntry, CaptureSpec, CompiledGrammar, GrammarLoadError, GrammarValidationError,
+    GrammarWalkSummary, InjectionPriority, RuleBody, RuleRef, load_dev_grammar_from_str,
+    normalize_injection_selectors,
 };
-use super::hashing::{self, FastMap};
+use super::grammar_closure::{AvailabilityStep, ClosureMemberTraits};
+use super::grammar_ir::decode_compiled_grammar;
+use super::hashing::{self, FastMap, FastSet, StrMap};
 use super::line::{LineChunks, next_char_boundary};
 use super::regex::captures::substitute_end_pattern;
 use super::regex::{
@@ -151,28 +156,51 @@ impl OutputScopeTableBuilder {
             return table;
         }
 
-        let mut stacks = Vec::with_capacity(self.output_stacks.len());
+        let mut stacks: Vec<Arc<[ScopeAtomId]>> = Vec::with_capacity(self.output_stacks.len());
         let mut atoms = Vec::<Arc<str>>::new();
-        let mut atom_ids = hashing::fast_map();
-        let mut resolved_ids = Vec::new();
-        for engine_stack in &self.output_stacks {
-            scope_stacks.resolve_ids_into(*engine_stack, &mut resolved_ids);
-            let stack_atoms = resolved_ids
-                .iter()
-                .map(|&scope| {
-                    if let Some(atom) = atom_ids.get(&scope) {
-                        return *atom;
-                    }
+        // Scope IDs are dense interner indexes, so a vector replaces one hash
+        // lookup per stack element.
+        let mut atom_ids = vec![u32::MAX; scope_names.len()];
+        let mut suffix = Vec::new();
+        let mut stack_atoms = Vec::new();
+        for (output_index, engine_stack) in self.output_stacks.iter().enumerate() {
+            // Deeply nested documents produce many stacks that differ from an
+            // already-emitted ancestor by one or two scopes. Walk only up to
+            // the nearest emitted ancestor and copy its atoms instead of
+            // resolving the full parent chain for every stack.
+            suffix.clear();
+            let mut cursor = *engine_stack;
+            let prefix = loop {
+                if cursor == scope_stacks.empty() {
+                    break None;
+                }
+                if cursor != *engine_stack
+                    && let Some(ancestor) = self.engine_to_output.get(&cursor)
+                    && (ancestor.0 as usize) < output_index
+                {
+                    break Some(ancestor.0 as usize);
+                }
+                if let Some(scope) = scope_stacks.top_scope(cursor) {
+                    suffix.push(scope);
+                }
+                cursor = scope_stacks.parent(cursor);
+            };
+            stack_atoms.clear();
+            if let Some(prefix) = prefix {
+                stack_atoms.extend_from_slice(&stacks[prefix]);
+            }
+            for &scope in suffix.iter().rev() {
+                let slot = &mut atom_ids[scope.0 as usize];
+                if *slot == u32::MAX {
                     let name = scope_names
                         .get_arc(scope)
                         .expect("scope-stack IDs come from the scope interner");
-                    let atom = ScopeAtomId(atoms.len() as u32);
+                    *slot = atoms.len() as u32;
                     atoms.push(name);
-                    atom_ids.insert(scope, atom);
-                    atom
-                })
-                .collect::<Arc<[ScopeAtomId]>>();
-            stacks.push(stack_atoms);
+                }
+                stack_atoms.push(ScopeAtomId(*slot));
+            }
+            stacks.push(Arc::from(stack_atoms.as_slice()));
         }
         let table = Arc::new(HighlightScopeTable::from_parts(atoms, stacks));
         if cache.tables.len() >= MAX_OUTPUT_SCOPE_TABLES {
@@ -635,14 +663,13 @@ impl FrameStackInternTable {
 // neither ever clones frames — even when the stack is shared with interned
 // states, line-cache entries, and checkpoints. Exact equality is the interned
 // stack id maintained on each frame.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 struct FrameStack {
     tail: Option<Arc<FrameNode>>,
     len: usize,
     interned_id: InternedFrameStackId,
 }
 
-#[derive(Debug)]
 struct FrameNode {
     parent: Option<Arc<FrameNode>>,
     frame: Frame,
@@ -652,6 +679,19 @@ struct FrameNode {
     /// the O(depth) stack walk entirely for grammars that never use `while`
     /// (deep-stack sources otherwise pay the walk on every line).
     while_frames: usize,
+}
+
+impl Drop for FrameNode {
+    // One frame per line of nested input makes long parent chains; dropping
+    // them recursively would overflow the thread stack.
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(node) = parent {
+            parent = Arc::try_unwrap(node)
+                .ok()
+                .and_then(|mut node| node.parent.take());
+        }
+    }
 }
 
 impl FrameStack {
@@ -723,9 +763,7 @@ impl FrameStack {
         debug_assert_eq!(node.depth, self.len + 1);
         self.interned_id = node.frame.interned_stack_id;
         self.len = node.depth;
-        if let Some(old) = self.tail.replace(node) {
-            drop_frame_node(old);
-        }
+        self.tail = Some(node);
     }
 
     #[inline]
@@ -739,7 +777,6 @@ impl FrameStack {
             return;
         };
         self.tail = tail.parent.clone();
-        drop_frame_node(tail);
         self.len -= 1;
         self.refresh_interned_id_from_top();
     }
@@ -754,9 +791,7 @@ impl FrameStack {
                 cursor = Some(node);
                 break;
             }
-            let parent = node.parent.clone();
-            drop_frame_node(node);
-            cursor = parent;
+            cursor = node.parent.clone();
         }
         self.tail = cursor;
         self.len = len;
@@ -800,24 +835,32 @@ impl FrameStack {
     }
 }
 
-impl Drop for FrameStack {
-    fn drop(&mut self) {
-        if let Some(tail) = self.tail.take() {
-            drop_frame_node(tail);
-        }
+// Frame chains can be as deep as the input's nesting; derived `Debug` would
+// recurse through every parent.
+impl std::fmt::Debug for FrameStack {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameStack")
+            .field("len", &self.len)
+            .field("interned_id", &self.interned_id)
+            .field(
+                "frames",
+                &self
+                    .nodes_in_order()
+                    .into_iter()
+                    .map(|node| &node.frame)
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
     }
 }
 
-/// Drops a frame-node chain iteratively. Deep continuation stacks otherwise
-/// recurse once per frame through `Arc`/`FrameNode` drop glue, which can
-/// overflow the thread stack on adversarial nesting depths.
-fn drop_frame_node(node: Arc<FrameNode>) {
-    let mut cursor = Some(node);
-    while let Some(node) = cursor {
-        match Arc::try_unwrap(node) {
-            Ok(mut owned) => cursor = owned.parent.take(),
-            Err(_) => break,
-        }
+impl std::fmt::Debug for FrameNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FrameNode")
+            .field("frame", &self.frame)
+            .field("depth", &self.depth)
+            .field("while_frames", &self.while_frames)
+            .finish_non_exhaustive()
     }
 }
 
@@ -941,41 +984,45 @@ impl RepositoryBindings {
     }
 }
 
+/// Index into `RuleRepositoryContexts::contexts`.
+type RepositoryContextId = u32;
+const NO_REPOSITORY_CONTEXT: RepositoryContextId = RepositoryContextId::MAX;
+
 #[derive(Debug)]
 struct GrammarRuleRepositoryContexts {
-    dense: Box<[Option<Arc<RepositoryBindings>>]>,
+    /// Context index per dense rule ID, `NO_REPOSITORY_CONTEXT` when unset.
+    /// Rules overwhelmingly share a few contexts, so an index avoids one
+    /// reference-count update per rule when building and dropping the table.
+    dense: Box<[RepositoryContextId]>,
     // `CompiledGrammar` is public and its rule IDs can therefore be sparse,
     // even though both native compilers produce dense IDs. Keep those unusual
     // callers correct without putting the ordinary lookup path behind a hash.
-    sparse: Vec<(RuleId, Arc<RepositoryBindings>)>,
+    sparse: Vec<(RuleId, RepositoryContextId)>,
 }
 
 impl GrammarRuleRepositoryContexts {
     fn new(dense_len: usize) -> Self {
         Self {
-            dense: std::iter::repeat_with(|| None)
-                .take(dense_len)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
+            dense: vec![NO_REPOSITORY_CONTEXT; dense_len].into_boxed_slice(),
             sparse: Vec::new(),
         }
     }
 
-    fn get(&self, rule_id: RuleId) -> Option<&Arc<RepositoryBindings>> {
+    fn get(&self, rule_id: RuleId) -> Option<RepositoryContextId> {
         if let Some(context) = self.dense.get(rule_id.0 as usize) {
-            return context.as_ref();
+            return (*context != NO_REPOSITORY_CONTEXT).then_some(*context);
         }
         self.sparse
             .iter()
-            .find_map(|(candidate, context)| (*candidate == rule_id).then_some(context))
+            .find_map(|(candidate, context)| (*candidate == rule_id).then_some(*context))
     }
 
-    fn insert_first(&mut self, rule_id: RuleId, context: Arc<RepositoryBindings>) -> bool {
+    fn insert_first(&mut self, rule_id: RuleId, context: RepositoryContextId) -> bool {
         if let Some(slot) = self.dense.get_mut(rule_id.0 as usize) {
-            if slot.is_some() {
+            if *slot != NO_REPOSITORY_CONTEXT {
                 return false;
             }
-            *slot = Some(context);
+            *slot = context;
             return true;
         }
         if self
@@ -999,6 +1046,8 @@ impl GrammarRuleRepositoryContexts {
 #[derive(Debug)]
 struct RuleRepositoryContexts {
     grammars: Box<[Option<Box<GrammarRuleRepositoryContexts>>]>,
+    /// Every distinct context a rule was bound to; rule tables store indexes.
+    contexts: Vec<Arc<RepositoryBindings>>,
 }
 
 impl RuleRepositoryContexts {
@@ -1008,6 +1057,7 @@ impl RuleRepositoryContexts {
                 .take(grammar_count)
                 .collect::<Vec<_>>()
                 .into_boxed_slice(),
+            contexts: Vec::new(),
         }
     }
 
@@ -1020,6 +1070,28 @@ impl RuleRepositoryContexts {
             .get(grammar_id.0 as usize)
             .and_then(Option::as_deref)
             .and_then(|grammar| grammar.get(rule_id))
+            .map(|context| &self.contexts[context as usize])
+    }
+
+    fn is_bound(&self, grammar_id: GrammarId, rule_id: RuleId) -> bool {
+        self.grammars
+            .get(grammar_id.0 as usize)
+            .and_then(Option::as_deref)
+            .is_some_and(|grammar| grammar.get(rule_id).is_some())
+    }
+
+    /// Registers a context for later `insert_first` calls, or `None` once
+    /// the index space is exhausted.
+    fn add_context(&mut self, context: Arc<RepositoryBindings>) -> Option<RepositoryContextId> {
+        let id = RepositoryContextId::try_from(self.contexts.len())
+            .ok()
+            .filter(|id| *id != NO_REPOSITORY_CONTEXT)?;
+        self.contexts.push(context);
+        Some(id)
+    }
+
+    fn context(&self, context: RepositoryContextId) -> &Arc<RepositoryBindings> {
+        &self.contexts[context as usize]
     }
 
     fn has_grammar_table(&self, grammar_id: GrammarId) -> bool {
@@ -1033,8 +1105,9 @@ impl RuleRepositoryContexts {
         grammar_id: GrammarId,
         rule_id: RuleId,
         dense_len: usize,
-        context: Arc<RepositoryBindings>,
+        context: RepositoryContextId,
     ) -> bool {
+        debug_assert!((context as usize) < self.contexts.len());
         let Some(grammar) = self.grammars.get_mut(grammar_id.0 as usize) else {
             return false;
         };
@@ -1052,7 +1125,7 @@ impl RuleRepositoryContexts {
                 grammar
                     .dense
                     .iter()
-                    .filter(|context| context.is_some())
+                    .filter(|context| **context != NO_REPOSITORY_CONTEXT)
                     .count()
                     + grammar.sparse.len()
             })
@@ -1073,6 +1146,87 @@ impl RuleRepositoryContexts {
             .get(grammar_id.0 as usize)
             .and_then(Option::as_deref)
             .map_or(0, |grammar| grammar.dense.len())
+    }
+}
+
+/// Rule repository contexts that an ordinary tokenizer computes on first
+/// need rather than at construction.
+///
+/// The walk visits every rule reachable from the root, including every
+/// embedded grammar, although tokenizing a document usually consults only a
+/// few grammars. A rule can be bound to a non-empty context only when the
+/// walk reaches it below a rule that declares a local repository: contexts
+/// never cross grammar boundaries (external and `$base` entries restart from
+/// the empty context), and only such rules extend a context. Every other rule
+/// is bound to the empty context, which every consumer treats exactly like an
+/// unbound rule, so lookups for it need no walk. The first lookup of a rule
+/// that may inherit a local repository runs the complete walk and answers
+/// from the same table eager construction built.
+#[derive(Debug)]
+struct DeferredRuleRepositoryContexts {
+    table: OnceLock<RuleRepositoryContexts>,
+    walk: Option<DeferredRepositoryWalk>,
+}
+
+#[derive(Debug)]
+struct DeferredRepositoryWalk {
+    grammars: GrammarSet,
+    root: GrammarId,
+    injections: Arc<Vec<CompiledInjectionSelector>>,
+    /// Per grammar, `scoped_repository_rules` computed on first lookup.
+    scoped_rules: Box<[OnceLock<FastSet<RuleId>>]>,
+}
+
+impl DeferredRuleRepositoryContexts {
+    fn ready(table: RuleRepositoryContexts) -> Self {
+        Self {
+            table: OnceLock::from(table),
+            walk: None,
+        }
+    }
+
+    fn deferred(
+        grammars: GrammarSet,
+        root: GrammarId,
+        injections: Arc<Vec<CompiledInjectionSelector>>,
+    ) -> Self {
+        let scoped_rules = std::iter::repeat_with(OnceLock::new)
+            .take(grammars.len())
+            .collect();
+        Self {
+            table: OnceLock::new(),
+            walk: Some(DeferredRepositoryWalk {
+                grammars,
+                root,
+                injections,
+                scoped_rules,
+            }),
+        }
+    }
+
+    fn get(&self, grammar_id: GrammarId, rule_id: RuleId) -> Option<&Arc<RepositoryBindings>> {
+        if let Some(table) = self.table.get() {
+            return table.get(grammar_id, rule_id);
+        }
+        let walk = self.walk.as_ref()?;
+        let scoped_rules = walk
+            .scoped_rules
+            .get(grammar_id.0 as usize)?
+            .get_or_init(|| {
+                walk.grammars
+                    .grammar(grammar_id)
+                    .map(scoped_repository_rules)
+                    .unwrap_or_default()
+            });
+        if !scoped_rules.contains(&rule_id) {
+            return None;
+        }
+        self.table
+            .get_or_init(|| {
+                compile_rule_repository_contexts(&walk.grammars, walk.root, &walk.injections, false)
+                    .0
+            })
+            .get(grammar_id, rule_id)
     }
 }
 
@@ -1107,14 +1261,55 @@ impl RepositoryNameInterner {
     }
 }
 
+/// A bundled closure member decoded on first access.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LazyGrammar {
+    pub(crate) blob: &'static GrammarBlob,
+    pub(crate) traits: ClosureMemberTraits,
+    pub(crate) top_level_availability: Option<&'static [AvailabilityStep]>,
+    pub(crate) repository_walk_skeleton: Option<&'static [u8]>,
+}
+
+#[derive(Debug, Clone)]
+struct GrammarSlot {
+    // `None` records a lazy member whose compiled IR failed to decode; the
+    // tokenizer then treats it like any other unavailable include.
+    grammar: OnceLock<Option<Arc<CompiledGrammar>>>,
+    /// Decoded repository-walk skeleton of a lazy member.
+    walk_skeleton: OnceLock<Option<Arc<CompiledGrammar>>>,
+    lazy: Option<LazyGrammar>,
+}
+
+impl GrammarSlot {
+    fn loaded(grammar: Arc<CompiledGrammar>) -> Self {
+        Self {
+            grammar: OnceLock::from(Some(grammar)),
+            walk_skeleton: OnceLock::new(),
+            lazy: None,
+        }
+    }
+
+    #[inline]
+    fn grammar(&self, id: GrammarId) -> Option<&Arc<CompiledGrammar>> {
+        self.grammar
+            .get_or_init(|| {
+                self.lazy
+                    .and_then(|lazy| lazy.blob.compiled_grammar(id).ok())
+                    .map(Arc::new)
+            })
+            .as_ref()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct GrammarSet {
     // Arc-shared so cloning a set (one clone per tokenizer instance) shares
     // immutable compiled grammars and live root-specific repository walks.
     // Weak values let those walks be reclaimed with their tokenizers.
-    grammars: Arc<Vec<Arc<CompiledGrammar>>>,
-    scope_to_id: Arc<HashMap<String, GrammarId>>,
-    rule_repository_context_cache: Arc<Mutex<FastMap<GrammarId, Weak<RuleRepositoryContexts>>>>,
+    grammars: Arc<Vec<GrammarSlot>>,
+    scope_to_id: Arc<StrMap<String, GrammarId>>,
+    rule_repository_context_cache:
+        Arc<Mutex<FastMap<GrammarId, Weak<DeferredRuleRepositoryContexts>>>>,
 }
 
 impl GrammarSet {
@@ -1125,15 +1320,35 @@ impl GrammarSet {
     pub fn add(&mut self, grammar: CompiledGrammar) -> GrammarId {
         let id = grammar.id;
         Arc::make_mut(&mut self.scope_to_id).insert(grammar.scope_name.clone(), id);
+        self.insert_slot(id, GrammarSlot::loaded(Arc::new(grammar)))
+    }
+
+    /// Adds a bundled member that is decoded when first accessed.
+    pub(crate) fn add_lazy(&mut self, lazy: LazyGrammar) -> GrammarId {
+        let id = GrammarId(
+            u16::try_from(self.grammars.len()).expect("grammar closure fits in GrammarId"),
+        );
+        Arc::make_mut(&mut self.scope_to_id).insert(lazy.blob.scope_name.clone(), id);
+        self.insert_slot(
+            id,
+            GrammarSlot {
+                grammar: OnceLock::new(),
+                walk_skeleton: OnceLock::new(),
+                lazy: Some(lazy),
+            },
+        )
+    }
+
+    fn insert_slot(&mut self, id: GrammarId, slot: GrammarSlot) -> GrammarId {
         // A mutated set must not share root compilations produced from an
         // older grammar graph. Existing clones retain their valid cache.
         self.rule_repository_context_cache = Arc::new(Mutex::new(hashing::fast_map()));
         let index = id.0 as usize;
         let grammars = Arc::make_mut(&mut self.grammars);
         if index == grammars.len() {
-            grammars.push(Arc::new(grammar));
+            grammars.push(slot);
         } else if index < grammars.len() {
-            grammars[index] = Arc::new(grammar);
+            grammars[index] = slot;
         } else {
             panic!("grammar ids must be dense and insertion ordered");
         }
@@ -1146,8 +1361,106 @@ impl GrammarSet {
         Ok(self.add(grammar))
     }
 
+    #[inline]
     pub fn grammar(&self, id: GrammarId) -> Option<&CompiledGrammar> {
-        self.grammars.get(id.0 as usize).map(Arc::as_ref)
+        self.grammars
+            .get(id.0 as usize)
+            .and_then(|slot| slot.grammar(id))
+            .map(Arc::as_ref)
+    }
+
+    /// Grammar structure for the unbounded repository-context walk.
+    ///
+    /// An undecoded member with a recorded skeleton is walked through it
+    /// instead of being decoded: the skeleton keeps every rule, reference,
+    /// rule-local repository, and external scope name the walk reads (see
+    /// `grammar_closure::repository_walk_skeleton`), and rule IDs are
+    /// unchanged, so the walk binds the same contexts.
+    fn repository_walk_grammar(&self, id: GrammarId) -> Option<&CompiledGrammar> {
+        let slot = self.grammars.get(id.0 as usize)?;
+        if slot.grammar.get().is_none()
+            && let Some(bytes) = slot.lazy.and_then(|lazy| lazy.repository_walk_skeleton)
+            && let Some(skeleton) = slot
+                .walk_skeleton
+                .get_or_init(|| decode_compiled_grammar(id, bytes).ok().map(Arc::new))
+        {
+            return Some(skeleton);
+        }
+        self.grammar(id)
+    }
+
+    /// Number of grammars, including lazy members not yet decoded.
+    pub fn len(&self) -> usize {
+        self.grammars.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.grammars.is_empty()
+    }
+
+    /// Every available grammar in ID order, decoding lazy members.
+    pub fn iter(&self) -> impl Iterator<Item = &CompiledGrammar> {
+        (0..self.grammars.len()).filter_map(|index| self.grammar(GrammarId(index as u16)))
+    }
+
+    #[cfg(test)]
+    fn decoded_count(&self) -> usize {
+        self.grammars
+            .iter()
+            .filter(|slot| slot.grammar.get().is_some())
+            .count()
+    }
+
+    /// Whether `id` may register standalone injections through `injectTo`.
+    /// Only recorded bundle traits can rule this out without decoding.
+    fn may_inject(&self, id: GrammarId) -> bool {
+        self.grammars
+            .get(id.0 as usize)
+            .and_then(|slot| slot.lazy)
+            .is_none_or(|lazy| lazy.traits.injects)
+    }
+
+    /// Recorded top-level availability proof for a member not decoded yet.
+    ///
+    /// Evaluating any other availability node of a grammar decodes it, so the
+    /// only cached nodes of such a member are `true` entries from this proof.
+    fn undecoded_top_level_availability(
+        &self,
+        id: GrammarId,
+    ) -> Option<&'static [AvailabilityStep]> {
+        let slot = self.grammars.get(id.0 as usize)?;
+        if slot.grammar.get().is_some() {
+            return None;
+        }
+        slot.lazy?.top_level_availability
+    }
+
+    /// Whether the unbounded repository-context walk may skip an external
+    /// entry into `id` under the current `$base`.
+    ///
+    /// A skipped grammar must neither bind a non-empty context nor reach a
+    /// grammar that can: repository contexts only accumulate from rule-local
+    /// repositories and reset at every grammar boundary, so all of its rules
+    /// keep the empty context (equivalent to no entry). Its subtree must also
+    /// not change the first-visit order of walked grammars. `$base` is the only
+    /// edge out of that subtree besides external includes; under the root base
+    /// it targets the root top level, which the walk visits first.
+    fn skips_repository_context_walk(
+        &self,
+        id: GrammarId,
+        base_is_root: bool,
+        loaded: &mut LoadedWalkTraits,
+    ) -> bool {
+        let Some(slot) = self.grammars.get(id.0 as usize) else {
+            return false;
+        };
+        let traits = match slot.lazy {
+            Some(lazy) => Some(lazy.traits),
+            None => loaded.traits(self, id),
+        };
+        traits.is_some_and(|traits| {
+            !traits.repository_contexts && (base_is_root || !traits.base_reference)
+        })
     }
 
     pub fn grammar_by_scope(&self, scope: &str) -> Option<&CompiledGrammar> {
@@ -1159,10 +1472,6 @@ impl GrammarSet {
         self.scope_to_id.get(scope).copied()
     }
 
-    pub fn grammars(&self) -> &[Arc<CompiledGrammar>] {
-        self.grammars.as_slice()
-    }
-
     fn into_prepared_closure(
         self,
         root: GrammarId,
@@ -1171,13 +1480,9 @@ impl GrammarSet {
         let selected = self
             .grammars
             .iter()
-            .filter(|grammar| {
-                grammar_closure
-                    .get(grammar.id.0 as usize)
-                    .copied()
-                    .unwrap_or(false)
-            })
-            .cloned()
+            .enumerate()
+            .filter(|(index, _)| grammar_closure.get(*index).copied().unwrap_or(false))
+            .filter_map(|(index, slot)| slot.grammar(GrammarId(index as u16)).cloned())
             .collect::<Vec<_>>();
         if selected.len() == self.grammars.len() {
             return (self, root, false);
@@ -1198,7 +1503,7 @@ impl GrammarSet {
                 .collect();
             return (
                 Self {
-                    grammars: Arc::new(selected),
+                    grammars: Arc::new(selected.into_iter().map(GrammarSlot::loaded).collect()),
                     scope_to_id: Arc::new(scope_to_id),
                     rule_repository_context_cache: Arc::new(Mutex::new(hashing::fast_map())),
                 },
@@ -1224,8 +1529,8 @@ impl GrammarSet {
     fn rule_repository_contexts(
         &self,
         root: GrammarId,
-        injections: &[CompiledInjectionSelector],
-    ) -> Arc<RuleRepositoryContexts> {
+        injections: &Arc<Vec<CompiledInjectionSelector>>,
+    ) -> Arc<DeferredRuleRepositoryContexts> {
         if let Some(contexts) = self
             .rule_repository_context_cache
             .lock()
@@ -1236,10 +1541,11 @@ impl GrammarSet {
             return contexts;
         }
 
-        // Do the recursive work outside the lock. Concurrent first users may
-        // compute the same immutable value, but only one is shared.
-        let (compiled, _) = compile_rule_repository_contexts(self, root, injections, false);
-        let compiled = Arc::new(compiled);
+        let compiled = Arc::new(DeferredRuleRepositoryContexts::deferred(
+            self.clone(),
+            root,
+            Arc::clone(injections),
+        ));
         let mut cache = self
             .rule_repository_context_cache
             .lock()
@@ -1256,13 +1562,13 @@ impl GrammarSet {
         &self,
         root: GrammarId,
         injections: &[CompiledInjectionSelector],
-    ) -> Option<Arc<RuleRepositoryContexts>> {
+    ) -> Option<RuleRepositoryContexts> {
         let (contexts, complete) = compile_rule_repository_contexts(self, root, injections, true);
-        complete.then(|| Arc::new(contexts))
+        complete.then_some(contexts)
     }
 
     pub fn validate_include_graph(&self) -> Result<(), GrammarValidationError> {
-        for grammar in self.grammars.iter() {
+        for grammar in self.iter() {
             grammar.validate_local_refs()?;
             self.validate_refs_for_grammar(grammar, &grammar.top_level, "patterns")?;
             for (name, rule_ref) in &grammar.repository {
@@ -1484,6 +1790,11 @@ impl PreparedLanguage {
             rule_repository_contexts,
         );
         prototype.prepare_root_candidate();
+        // The root blueprint already owns the candidate data it needs. This
+        // construction scratch would otherwise be copied into every tokenizer;
+        // later rules can populate each tokenizer's own template cache on use.
+        *prototype.rule_candidate_templates.get_mut() = hashing::fast_map();
+        prototype.match_name_template_memo = hashing::fast_map();
         Ok(Self {
             prototype: Mutex::new(prototype),
             static_patterns,
@@ -1558,12 +1869,10 @@ fn contextualize_pending_refs<'a>(
     let Some(context) = context.filter(|context| !context.is_empty()) else {
         return PreparedPendingRefs::Borrowed(refs);
     };
-    if !refs.iter().any(
-        |rule_ref| matches!(rule_ref, RuleRef::Repository(name) if context.get(name).is_some()),
-    ) {
-        return PreparedPendingRefs::Borrowed(refs);
+    match contextualize_refs(refs, Some(context)) {
+        Cow::Borrowed(refs) => PreparedPendingRefs::Borrowed(refs),
+        Cow::Owned(refs) => PreparedPendingRefs::Owned(refs),
     }
-    PreparedPendingRefs::Owned(contextualize_refs(refs, Some(context)))
 }
 
 struct PreparedGrammarWalker<'a> {
@@ -1856,7 +2165,7 @@ fn prepared_grammar_closure(
         grammars,
         injections,
         rule_repository_contexts,
-        reachable: vec![false; grammars.grammars().len()],
+        reachable: vec![false; grammars.len()],
         pending: Vec::new(),
         visited_rules: HashSet::new(),
         visited_repositories: HashSet::new(),
@@ -1888,20 +2197,16 @@ impl PreparedPatternCache {
         let outer_slot_bytes = std::mem::size_of::<Option<PreparedGrammarPatternSlots>>();
         let pattern_slot_bytes = std::mem::size_of::<PreparedPatternSlot>();
         let outer_capacity = grammars
-            .grammars()
             .len()
             .min(MAX_PREPARED_PATTERN_SLOT_BYTES / outer_slot_bytes);
         let mut slot_bytes = outer_capacity.saturating_mul(outer_slot_bytes);
         let mut capacity = 0usize;
-        let slots = grammars
-            .grammars()
-            .iter()
-            .take(outer_capacity)
-            .enumerate()
-            .map(|(index, grammar)| {
+        let slots = (0..outer_capacity)
+            .map(|index| {
                 if !grammar_closure.get(index).copied().unwrap_or(false) {
                     return None;
                 }
+                let grammar = grammars.grammar(GrammarId(index as u16))?;
                 let remaining_bytes = MAX_PREPARED_PATTERN_SLOT_BYTES.saturating_sub(slot_bytes);
                 let slot_capacity = grammar
                     .patterns
@@ -2253,7 +2558,9 @@ pub struct TextMateTokenizer {
     unprepared_static_matcher_generation: usize,
     prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
     prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
-    dynamic_matcher_cache: FastMap<DynamicMatcherKey, Arc<CompiledPattern>>,
+    dynamic_matcher_cache: MatcherSourceTable,
+    /// Source-keyed view of `matcher_cache`; see `shared_static_matcher`.
+    static_matcher_sources: MatcherSourceTable,
     scope_names: ScopeInterner,
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
@@ -2270,9 +2577,13 @@ pub struct TextMateTokenizer {
     injection_outcome_cache: FastMap<ScopeStackId, (InjectionOutcomeId, Arc<InjectionOutcome>)>,
     prepared_injection_outcome_ids: FastMap<InjectionOutcomeId, Option<PreparedInjectionOutcomeId>>,
     inline_candidate_cache: FastMap<InlineCandidateCacheKey, Arc<CandidateSet>>,
-    include_availability_cache: RefCell<HashMap<IncludeAvailabilityNode, bool>>,
+    include_availability_cache: RefCell<FastMap<IncludeAvailabilityNode, bool>>,
     include_repository_names: RefCell<RepositoryNameInterner>,
-    rule_repository_contexts: Arc<RuleRepositoryContexts>,
+    rule_repository_contexts: Arc<DeferredRuleRepositoryContexts>,
+    rule_candidate_templates: RefCell<FastMap<(GrammarId, RuleId), Option<RuleCandidateTemplate>>>,
+    /// Static match scope template per shared candidate rule, keyed by the
+    /// rule's address; see `match_name_templates`.
+    match_name_template_memo: FastMap<usize, (Arc<CandidateRule>, Option<ScopeTemplateId>)>,
     /// Owns exact frame identities and stack edges for this tokenizer.
     frame_stack_interner: FrameStackInternTable,
     /// Repeat pushes of a known (parent stack, frame) transition skip interner lookup.
@@ -2320,7 +2631,7 @@ impl TextMateTokenizer {
         prepared_patterns: Arc<PreparedPatternCache>,
         prepared_blueprints: Arc<PreparedBlueprintCache>,
         injection_selectors: Vec<CompiledInjectionSelector>,
-        rule_repository_contexts: Arc<RuleRepositoryContexts>,
+        rule_repository_contexts: RuleRepositoryContexts,
     ) -> Self {
         Self::new_inner(
             grammars,
@@ -2328,7 +2639,9 @@ impl TextMateTokenizer {
             Some(prepared_patterns),
             Some(prepared_blueprints),
             Some(Arc::new(injection_selectors)),
-            Some(rule_repository_contexts),
+            Some(Arc::new(DeferredRuleRepositoryContexts::ready(
+                rule_repository_contexts,
+            ))),
         )
     }
 
@@ -2338,7 +2651,7 @@ impl TextMateTokenizer {
         prepared_pattern_cache: Option<Arc<PreparedPatternCache>>,
         prepared_blueprint_cache: Option<Arc<PreparedBlueprintCache>>,
         injection_selectors: Option<Arc<Vec<CompiledInjectionSelector>>>,
-        rule_repository_contexts: Option<Arc<RuleRepositoryContexts>>,
+        rule_repository_contexts: Option<Arc<DeferredRuleRepositoryContexts>>,
     ) -> Self {
         let root_scope_key = grammars
             .grammar(root)
@@ -2357,7 +2670,8 @@ impl TextMateTokenizer {
             unprepared_static_matcher_generation: 0,
             prepared_pattern_cache,
             prepared_blueprint_cache,
-            dynamic_matcher_cache: hashing::fast_map(),
+            dynamic_matcher_cache: MatcherSourceTable::default(),
+            static_matcher_sources: MatcherSourceTable::default(),
             scope_names: ScopeInterner::default(),
             scope_templates: ScopeTemplateInterner::default(),
             scope_stacks: ScopeStackInterner::default(),
@@ -2374,9 +2688,11 @@ impl TextMateTokenizer {
             injection_outcome_cache: hashing::fast_map(),
             prepared_injection_outcome_ids: hashing::fast_map(),
             inline_candidate_cache: hashing::fast_map(),
-            include_availability_cache: RefCell::new(HashMap::new()),
+            include_availability_cache: RefCell::new(hashing::fast_map()),
             include_repository_names: RefCell::new(RepositoryNameInterner::default()),
             rule_repository_contexts,
+            rule_candidate_templates: RefCell::new(hashing::fast_map()),
+            match_name_template_memo: hashing::fast_map(),
             frame_stack_interner: FrameStackInternTable::new(),
             frame_edge_cache: hashing::fast_map(),
             static_frame_identities: hashing::fast_map(),
@@ -2407,6 +2723,7 @@ impl TextMateTokenizer {
             drop(candidates);
             self.clear_candidate_cache();
             self.matcher_cache.clear();
+            self.static_matcher_sources.clear();
             self.dynamic_matcher_cache.clear();
         }
     }
@@ -2741,6 +3058,7 @@ impl TextMateTokenizer {
         let mut frame_anchor_positions = Vec::new();
         let mut loop_candidates = None;
         let mut zero_width_states = HashSet::new();
+        let mut line_pushes = LinePushes::default();
         // End rules such as `$` are zero-width at the logical line end. Keep
         // evaluating while frames remain so line-scoped rules close even when
         // callers pass a line without its terminating newline.
@@ -2823,11 +3141,28 @@ impl TextMateTokenizer {
                 candidates.active_stack_id,
                 candidates.end_stack_id,
             );
+            if line_pushes.repeats_push(&state, depth_before, cursor, result_end) {
+                // vscode-textmate stops the line when a begin rule that did
+                // not advance re-enters a rule already entered at this scan
+                // position, keeping the stack from before the push.
+                if let Some(previous_state) = zero_width_state_before {
+                    state = previous_state;
+                }
+                let stack = self.current_scope_stack_id(&state, true, None);
+                self.push_token(&mut tokens, result_start..parse_text.len(), stack);
+                cursor = parse_text.len();
+                break;
+            }
             if zero_width_match_rule {
                 // vscode-textmate stops the current line when an ordinary
                 // MatchRule wins without consuming input. Advancing one scalar
                 // would let lower-priority rules color text that the oracle
                 // leaves in the active scope (and can skip byte zero entirely).
+                // It also pops the enclosing rule (`safePop`), for the rest
+                // of the line and for later lines.
+                if !state.frames.is_empty() {
+                    state.pop_frame();
+                }
                 let stack = self.current_scope_stack_id(&state, true, None);
                 self.push_token(&mut tokens, result_start..parse_text.len(), stack);
                 cursor = parse_text.len();
@@ -2929,6 +3264,7 @@ impl TextMateTokenizer {
         self.include_availability_cache.borrow_mut().clear();
         self.include_repository_names.borrow_mut().clear();
         self.rule_repository_contexts = rule_repository_contexts;
+        self.rule_candidate_templates.borrow_mut().clear();
         self.current_scope_stack_cache.clear();
         self.clear_line_cache();
         self.clear_candidate_cache();
@@ -2994,7 +3330,7 @@ impl TextMateTokenizer {
     }
 
     pub fn configure_options(&mut self, options: crate::TokenizerOptions) {
-        self.set_line_cache_capacity(options.line_cache_entries.max(1));
+        self.set_line_cache_capacity(options.line_cache_entries);
         self.set_max_line_bytes(Some(options.max_line_bytes));
     }
 
@@ -3338,20 +3674,22 @@ impl TextMateTokenizer {
                 let end = frame.end_pattern.as_ref().map(|pattern| Candidate {
                     order: 0,
                     base_grammar_id: frame.base_grammar_id,
-                    pattern: pattern.to_string(),
-                    pattern_id: frame
-                        .end_pattern_id
-                        .map(|pattern_id| (frame.grammar_id, pattern_id)),
                     scope_prefix: frame.scope_prefix.clone(),
-                    kind: CandidateKind::End {
-                        grammar_id: frame.grammar_id,
-                        captures: Arc::clone(&frame.end_captures),
-                    },
+                    rule: Arc::new(CandidateRule {
+                        pattern: Arc::clone(pattern),
+                        pattern_id: frame
+                            .end_pattern_id
+                            .map(|pattern_id| (frame.grammar_id, pattern_id)),
+                        kind: CandidateKind::End {
+                            grammar_id: frame.grammar_id,
+                            captures: Arc::clone(&frame.end_captures),
+                        },
+                    }),
                 });
                 (
                     frame.grammar_id,
                     frame.base_grammar_id,
-                    frame.patterns.to_vec(),
+                    &*frame.patterns,
                     end,
                     frame.apply_end_pattern_last,
                 )
@@ -3359,7 +3697,13 @@ impl TextMateTokenizer {
                 let Some(grammar) = self.grammars.grammar(self.root) else {
                     return candidates;
                 };
-                (self.root, self.root, grammar.top_level.clone(), None, false)
+                (
+                    self.root,
+                    self.root,
+                    grammar.top_level.as_slice(),
+                    None,
+                    false,
+                )
             };
 
         for injection in &injections.left {
@@ -3382,7 +3726,7 @@ impl TextMateTokenizer {
         self.flatten_refs(
             grammar_id,
             base_grammar_id,
-            &refs,
+            refs,
             None,
             &mut candidates,
             &mut order,
@@ -3409,6 +3753,144 @@ impl TextMateTokenizer {
         candidates
     }
 
+    /// Candidate data for one static rule depends only on the rule and the
+    /// repository context of its first compilation path, never on the state
+    /// that reaches it. Build it once per tokenizer so flattening a large
+    /// embedded closure clones shared handles instead of re-allocating
+    /// pattern text, scope names, and contextualized child lists for every
+    /// candidate set. Order, base grammar, and scope prefix are per use.
+    fn rule_candidate_template(
+        &self,
+        grammar: &CompiledGrammar,
+        grammar_id: GrammarId,
+        rule_id: RuleId,
+    ) -> Option<RuleCandidateTemplate> {
+        if let Some(template) = self
+            .rule_candidate_templates
+            .borrow()
+            .get(&(grammar_id, rule_id))
+        {
+            return template.clone();
+        }
+        let template = self.build_rule_candidate_template(grammar, grammar_id, rule_id);
+        self.rule_candidate_templates
+            .borrow_mut()
+            .insert((grammar_id, rule_id), template.clone());
+        template
+    }
+
+    fn build_rule_candidate_template(
+        &self,
+        grammar: &CompiledGrammar,
+        grammar_id: GrammarId,
+        rule_id: RuleId,
+    ) -> Option<RuleCandidateTemplate> {
+        let rule = grammar.rule(rule_id)?;
+        let repository_context = self
+            .rule_repository_contexts
+            .get(grammar_id, rule_id)
+            .map(Arc::as_ref);
+        let candidate = |pattern: &Arc<str>, pattern_id: PatternId, kind: CandidateKind| {
+            Arc::new(CandidateRule {
+                pattern: Arc::clone(pattern),
+                pattern_id: Some((grammar_id, pattern_id)),
+                kind,
+            })
+        };
+        match &rule.body {
+            RuleBody::Match {
+                pattern,
+                captures,
+                name,
+            } => {
+                let text = grammar.shared_pattern(*pattern)?;
+                Some(RuleCandidateTemplate::Candidate(candidate(
+                    text,
+                    *pattern,
+                    CandidateKind::Match {
+                        grammar_id,
+                        name: scope_name(grammar, *name),
+                        captures: contextualize_capture_spec(captures, repository_context),
+                    },
+                )))
+            }
+            RuleBody::BeginEnd {
+                begin,
+                end,
+                begin_captures,
+                end_captures,
+                name,
+                content_name,
+                apply_end_pattern_last,
+                patterns,
+            } => {
+                let text = grammar.shared_pattern(*begin)?;
+                let end_static = grammar
+                    .shared_pattern(*end)
+                    .filter(|pattern| !pattern_has_backreference(pattern))
+                    .cloned();
+                Some(RuleCandidateTemplate::Candidate(candidate(
+                    text,
+                    *begin,
+                    CandidateKind::BeginEnd {
+                        grammar_id,
+                        rule_id: rule.id,
+                        end: *end,
+                        begin_captures: contextualize_capture_spec(
+                            begin_captures,
+                            repository_context,
+                        ),
+                        end_captures: contextualize_capture_spec(end_captures, repository_context),
+                        name: scope_name(grammar, *name),
+                        content_name: scope_name(grammar, *content_name),
+                        patterns: contextualized_ref_list(patterns, repository_context),
+                        apply_end_pattern_last: *apply_end_pattern_last,
+                        end_static,
+                    },
+                )))
+            }
+            RuleBody::BeginWhile {
+                begin,
+                while_pattern,
+                begin_captures,
+                while_captures,
+                name,
+                content_name,
+                patterns,
+            } => {
+                let text = grammar.shared_pattern(*begin)?;
+                let while_static = grammar
+                    .shared_pattern(*while_pattern)
+                    .filter(|pattern| !pattern_has_backreference(pattern))
+                    .cloned();
+                Some(RuleCandidateTemplate::Candidate(candidate(
+                    text,
+                    *begin,
+                    CandidateKind::BeginWhile {
+                        grammar_id,
+                        rule_id: rule.id,
+                        while_pattern: *while_pattern,
+                        begin_captures: contextualize_capture_spec(
+                            begin_captures,
+                            repository_context,
+                        ),
+                        while_captures: contextualize_capture_spec(
+                            while_captures,
+                            repository_context,
+                        ),
+                        name: scope_name(grammar, *name),
+                        content_name: scope_name(grammar, *content_name),
+                        patterns: contextualized_ref_list(patterns, repository_context),
+                        while_static,
+                    },
+                )))
+            }
+            RuleBody::IncludeOnly { patterns } => Some(RuleCandidateTemplate::IncludeOnly(
+                contextualized_ref_list(patterns, repository_context),
+            )),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn flatten_refs(
         &self,
@@ -3429,155 +3911,35 @@ impl TextMateTokenizer {
         for rule_ref in refs {
             match rule_ref {
                 RuleRef::Rule(rule_id) => {
-                    let Some(rule) = grammar.rule(*rule_id) else {
-                        continue;
-                    };
-                    let repository_context = self
-                        .rule_repository_contexts
-                        .get(grammar_id, *rule_id)
-                        .map(Arc::as_ref);
-                    match &rule.body {
-                        RuleBody::Match {
-                            pattern,
-                            captures,
-                            name,
-                        } => {
-                            let pattern_id = *pattern;
-                            if let Some(pattern) = grammar.pattern(*pattern) {
-                                out.push(Candidate {
-                                    order: *order,
+                    match self.rule_candidate_template(grammar, grammar_id, *rule_id) {
+                        None => {}
+                        Some(RuleCandidateTemplate::IncludeOnly(patterns)) => self.flatten_refs(
+                            grammar_id,
+                            base_grammar_id,
+                            &patterns,
+                            scope_prefix.clone(),
+                            out,
+                            order,
+                            depth + 1,
+                        ),
+                        Some(RuleCandidateTemplate::Candidate(rule)) => {
+                            if let CandidateKind::BeginEnd { patterns, .. }
+                            | CandidateKind::BeginWhile { patterns, .. } = &rule.kind
+                                && self.only_unavailable_includes(
+                                    grammar_id,
                                     base_grammar_id,
-                                    pattern: pattern.to_owned(),
-                                    pattern_id: Some((grammar_id, pattern_id)),
-                                    scope_prefix: scope_prefix.clone(),
-                                    kind: CandidateKind::Match {
-                                        grammar_id,
-                                        name: scope_name(grammar, *name),
-                                        name_template: None,
-                                        captures: contextualize_capture_spec(
-                                            captures,
-                                            repository_context,
-                                        ),
-                                    },
-                                });
-                                *order += 1;
-                            }
-                        }
-                        RuleBody::BeginEnd {
-                            begin,
-                            end,
-                            begin_captures,
-                            end_captures,
-                            name,
-                            content_name,
-                            apply_end_pattern_last,
-                            patterns,
-                        } => {
-                            let patterns = contextualize_refs(patterns, repository_context);
-                            if self.only_unavailable_includes(
-                                grammar_id,
-                                base_grammar_id,
-                                &patterns,
-                            ) {
+                                    patterns,
+                                )
+                            {
                                 continue;
                             }
-                            let begin_pattern_id = *begin;
-                            if let Some(begin) = grammar.pattern(*begin) {
-                                let end_static = grammar
-                                    .pattern(*end)
-                                    .filter(|pattern| !pattern_has_backreference(pattern))
-                                    .map(Arc::from);
-                                out.push(Candidate {
-                                    order: *order,
-                                    base_grammar_id,
-                                    pattern: begin.to_owned(),
-                                    pattern_id: Some((grammar_id, begin_pattern_id)),
-                                    scope_prefix: scope_prefix.clone(),
-                                    kind: CandidateKind::BeginEnd {
-                                        grammar_id,
-                                        rule_id: rule.id,
-                                        end: *end,
-                                        begin_captures: contextualize_capture_spec(
-                                            begin_captures,
-                                            repository_context,
-                                        ),
-                                        end_captures: contextualize_capture_spec(
-                                            end_captures,
-                                            repository_context,
-                                        ),
-                                        name: scope_name(grammar, *name).map(Arc::from),
-                                        content_name: scope_name(grammar, *content_name)
-                                            .map(Arc::from),
-                                        patterns: patterns.into(),
-                                        apply_end_pattern_last: *apply_end_pattern_last,
-                                        end_static,
-                                    },
-                                });
-                                *order += 1;
-                            }
-                        }
-                        RuleBody::BeginWhile {
-                            begin,
-                            while_pattern,
-                            begin_captures,
-                            while_captures,
-                            name,
-                            content_name,
-                            patterns,
-                        } => {
-                            let patterns = contextualize_refs(patterns, repository_context);
-                            if self.only_unavailable_includes(
-                                grammar_id,
+                            out.push(Candidate {
+                                order: *order,
                                 base_grammar_id,
-                                &patterns,
-                            ) {
-                                continue;
-                            }
-                            let begin_pattern_id = *begin;
-                            if let Some(begin) = grammar.pattern(*begin) {
-                                let while_static = grammar
-                                    .pattern(*while_pattern)
-                                    .filter(|pattern| !pattern_has_backreference(pattern))
-                                    .map(Arc::from);
-                                out.push(Candidate {
-                                    order: *order,
-                                    base_grammar_id,
-                                    pattern: begin.to_owned(),
-                                    pattern_id: Some((grammar_id, begin_pattern_id)),
-                                    scope_prefix: scope_prefix.clone(),
-                                    kind: CandidateKind::BeginWhile {
-                                        grammar_id,
-                                        rule_id: rule.id,
-                                        while_pattern: *while_pattern,
-                                        begin_captures: contextualize_capture_spec(
-                                            begin_captures,
-                                            repository_context,
-                                        ),
-                                        while_captures: contextualize_capture_spec(
-                                            while_captures,
-                                            repository_context,
-                                        ),
-                                        name: scope_name(grammar, *name).map(Arc::from),
-                                        content_name: scope_name(grammar, *content_name)
-                                            .map(Arc::from),
-                                        patterns: patterns.into(),
-                                        while_static,
-                                    },
-                                });
-                                *order += 1;
-                            }
-                        }
-                        RuleBody::IncludeOnly { patterns } => {
-                            let patterns = contextualize_refs(patterns, repository_context);
-                            self.flatten_refs(
-                                grammar_id,
-                                base_grammar_id,
-                                &patterns,
-                                scope_prefix.clone(),
-                                out,
-                                order,
-                                depth + 1,
-                            )
+                                scope_prefix: scope_prefix.clone(),
+                                rule,
+                            });
+                            *order += 1;
                         }
                     }
                 }
@@ -3668,7 +4030,7 @@ impl TextMateTokenizer {
                 grammar_id,
                 base_grammar_id,
                 refs,
-                &mut HashSet::new(),
+                &mut hashing::fast_set(),
                 0,
             )
     }
@@ -3678,7 +4040,7 @@ impl TextMateTokenizer {
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         refs: &[RuleRef],
-        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        visiting: &mut FastSet<IncludeAvailabilityNode>,
         depth: usize,
     ) -> bool {
         if depth >= MAX_INCLUDE_DEPTH {
@@ -3743,11 +4105,23 @@ impl TextMateTokenizer {
                 visiting,
                 depth + 1,
             ),
-            RuleRef::External { scope, repository } => grammar
-                .scope(*scope)
-                .and_then(|scope| self.grammars.grammar_id_by_scope(scope))
-                .and_then(|external_id| self.grammars.grammar(external_id).map(|_| external_id))
-                .is_some_and(|external_id| match repository {
+            RuleRef::External { scope, repository } => {
+                let Some(external_id) = grammar
+                    .scope(*scope)
+                    .and_then(|scope| self.grammars.grammar_id_by_scope(scope))
+                else {
+                    return false;
+                };
+                if repository.is_none()
+                    && let Some(available) =
+                        self.undecoded_top_level_available(external_id, base_grammar_id, depth + 1)
+                {
+                    return available;
+                }
+                if self.grammars.grammar(external_id).is_none() {
+                    return false;
+                }
+                match repository {
                     Some(repository) => self.repository_has_available_rule(
                         external_id,
                         base_grammar_id,
@@ -3761,8 +4135,47 @@ impl TextMateTokenizer {
                         visiting,
                         depth + 1,
                     ),
-                }),
+                }
+            }
         })
+    }
+
+    /// Answers `top_level_has_available_rule` for a member not decoded yet
+    /// from its recorded proof, recording the same cache entries.
+    ///
+    /// Each proof step is the first reference at its level and resolves to
+    /// `true`, so the full search would visit exactly these nodes. Its depth
+    /// checks run at `depth` through `depth + steps - 1`; deeper searches keep
+    /// the full path so the depth cutoff stays identical.
+    fn undecoded_top_level_available(
+        &self,
+        grammar_id: GrammarId,
+        base_grammar_id: GrammarId,
+        depth: usize,
+    ) -> Option<bool> {
+        let steps = self.grammars.undecoded_top_level_availability(grammar_id)?;
+        if depth.saturating_add(steps.len()) >= MAX_INCLUDE_DEPTH {
+            return None;
+        }
+        let mut cache = self.include_availability_cache.borrow_mut();
+        cache.insert(
+            IncludeAvailabilityNode::TopLevel(grammar_id, base_grammar_id),
+            true,
+        );
+        for step in steps {
+            let node = match step {
+                AvailabilityStep::Rule(rule_id) => {
+                    IncludeAvailabilityNode::Rule(grammar_id, base_grammar_id, *rule_id)
+                }
+                AvailabilityStep::Repository(name) => IncludeAvailabilityNode::Repository(
+                    grammar_id,
+                    base_grammar_id,
+                    self.include_repository_names.borrow_mut().intern(name).0,
+                ),
+            };
+            cache.insert(node, true);
+        }
+        Some(true)
     }
 
     fn repository_has_available_rule(
@@ -3770,7 +4183,7 @@ impl TextMateTokenizer {
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         repository: &str,
-        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        visiting: &mut FastSet<IncludeAvailabilityNode>,
         depth: usize,
     ) -> bool {
         let repository_id = self
@@ -3809,7 +4222,7 @@ impl TextMateTokenizer {
         &self,
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
-        visiting: &mut HashSet<IncludeAvailabilityNode>,
+        visiting: &mut FastSet<IncludeAvailabilityNode>,
         depth: usize,
     ) -> bool {
         let key = IncludeAvailabilityNode::TopLevel(grammar_id, base_grammar_id);
@@ -3924,8 +4337,14 @@ impl TextMateTokenizer {
             if let Some(cached) = self.injection_outcome_cache.get(&active_stack_id) {
                 cached.clone()
             } else {
-                let stack = self.resolve_scope_stack_cached(active_stack_id);
-                let outcome = self.injection_outcome(stack.as_ref());
+                let outcome = if self.injection_selectors.is_empty() {
+                    // No selector can match, so the outcome does not depend
+                    // on the (possibly deep) resolved scope stack.
+                    self.injection_outcome(&[])
+                } else {
+                    let stack = self.resolve_scope_stack_cached(active_stack_id);
+                    self.injection_outcome(stack.as_ref())
+                };
                 if self.injection_outcome_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
                     self.injection_outcome_cache.clear();
                 }
@@ -3934,40 +4353,10 @@ impl TextMateTokenizer {
                 outcome
             };
         let source = CandidateSourceKey::for_state(self.root, state);
-        let blueprint_key = CandidateBlueprintKey {
-            source: source.clone(),
-            injection_outcome: injection_outcome_id,
-        };
         let blueprint =
-            if let Some(blueprint) = self.candidate_blueprint_cache.get(&blueprint_key).cloned() {
-                blueprint
-            } else {
-                let prepared = self.prepared_blueprint_key(
-                    source,
-                    injection_outcome_id,
-                    injection_outcome.as_ref(),
-                );
-                let blueprint = match prepared {
-                    Some((cache, key)) => {
-                        let shared = cache.get_or_insert_with(key, || {
-                            let candidates = self.candidates_for_state(state, &injection_outcome);
-                            self.build_shareable_candidate_blueprint(candidates)
-                        });
-                        self.bind_shared_candidate_blueprint(shared)
-                    }
-                    None => {
-                        let candidates = self.candidates_for_state(state, &injection_outcome);
-                        let owned = self.build_candidate_blueprint(candidates);
-                        self.bind_owned_candidate_blueprint(owned)
-                    }
-                };
-                if self.candidate_blueprint_cache.len() >= MAX_CANDIDATE_BLUEPRINTS {
-                    self.candidate_blueprint_cache.clear();
-                }
-                self.candidate_blueprint_cache
-                    .insert(blueprint_key, blueprint.clone());
-                blueprint
-            };
+            self.candidate_blueprint(source, injection_outcome_id, &injection_outcome, |this| {
+                this.candidates_for_state(state, &injection_outcome)
+            });
         let candidate_set = Arc::new(CandidateSet {
             blueprint,
             active_stack_id,
@@ -3980,77 +4369,107 @@ impl TextMateTokenizer {
         candidate_set
     }
 
-    fn build_candidate_set(
+    /// Bound blueprint for one candidate source under one injection outcome.
+    ///
+    /// Candidates are a pure function of that pair, so every state and
+    /// capture retokenization that reaches it shares one blueprint (and its
+    /// compiled pattern set) for this tokenizer's lifetime.
+    fn candidate_blueprint(
         &mut self,
-        prepared: Option<(Arc<PreparedBlueprintCache>, PreparedBlueprintKey)>,
-        active_stack_id: ScopeStackId,
-        end_stack_id: ScopeStackId,
+        source: CandidateSourceKey,
+        injection_outcome_id: InjectionOutcomeId,
+        injection_outcome: &Arc<InjectionOutcome>,
         candidates: impl FnOnce(&mut Self) -> Vec<Candidate>,
-    ) -> CandidateSet {
-        let blueprint = if let Some((cache, key)) = prepared {
-            let shared = cache.get_or_insert_with(key, || {
-                let candidates = candidates(self);
-                self.build_shareable_candidate_blueprint(candidates)
-            });
-            self.bind_shared_candidate_blueprint(shared)
-        } else {
-            let candidates = candidates(self);
-            let blueprint = self.build_candidate_blueprint(candidates);
-            self.bind_owned_candidate_blueprint(blueprint)
+    ) -> BoundCandidateBlueprint {
+        let blueprint_key = CandidateBlueprintKey {
+            source,
+            injection_outcome: injection_outcome_id,
         };
-        CandidateSet {
-            blueprint,
-            active_stack_id,
-            end_stack_id,
+        if let Some(blueprint) = self.candidate_blueprint_cache.get(&blueprint_key) {
+            return blueprint.clone();
         }
+        let prepared = self.prepared_blueprint_key(
+            blueprint_key.source.clone(),
+            injection_outcome_id,
+            injection_outcome.as_ref(),
+        );
+        let blueprint = match prepared {
+            Some((cache, key)) => {
+                let shared = cache.get_or_insert_with(key, || {
+                    let candidates = candidates(self);
+                    self.build_shareable_candidate_blueprint(candidates)
+                });
+                self.bind_shared_candidate_blueprint(shared)
+            }
+            None => {
+                let candidates = candidates(self);
+                let owned = self.build_candidate_blueprint(candidates);
+                self.bind_owned_candidate_blueprint(owned)
+            }
+        };
+        if self.candidate_blueprint_cache.len() >= MAX_CANDIDATE_BLUEPRINTS {
+            self.candidate_blueprint_cache.clear();
+        }
+        self.candidate_blueprint_cache
+            .insert(blueprint_key, blueprint.clone());
+        blueprint
     }
 
     fn bind_owned_candidate_blueprint(
         &mut self,
-        mut blueprint: CandidateBlueprint,
+        blueprint: CandidateBlueprint,
     ) -> BoundCandidateBlueprint {
-        for candidate in &mut blueprint.candidates {
-            if let CandidateKind::Match {
-                name,
-                name_template,
-                ..
-            } = &mut candidate.kind
-                && let Some(name) = name.as_deref().filter(|name| !name.contains('$'))
-            {
-                *name_template = Some(
-                    self.scope_templates
-                        .intern_scope_template(name, &mut self.scope_names),
-                );
-            }
+        let blueprint = Arc::new(blueprint);
+        let match_name_templates = self.match_name_templates(&blueprint);
+        BoundCandidateBlueprint::Owned {
+            blueprint,
+            match_name_templates,
         }
-        BoundCandidateBlueprint::Owned(Arc::new(blueprint))
     }
 
     fn bind_shared_candidate_blueprint(
         &mut self,
         blueprint: Arc<CandidateBlueprint>,
     ) -> BoundCandidateBlueprint {
-        let match_name_templates = blueprint
+        let match_name_templates = self.match_name_templates(&blueprint);
+        BoundCandidateBlueprint::Shared {
+            blueprint,
+            match_name_templates,
+        }
+    }
+
+    /// Static match scopes resolved in this tokenizer's interners.
+    fn match_name_templates(
+        &mut self,
+        blueprint: &CandidateBlueprint,
+    ) -> Arc<[Option<ScopeTemplateId>]> {
+        blueprint
             .candidates
             .iter()
-            .map(|candidate| match &candidate.kind {
-                CandidateKind::Match { name, .. } => name
+            .map(|candidate| {
+                let CandidateKind::Match { name, .. } = &candidate.kind else {
+                    return None;
+                };
+                // Candidate lists share rule data, so each rule's scope is
+                // interned once. The entry keeps its rule alive, which keeps
+                // the address key unambiguous.
+                let key = Arc::as_ptr(&candidate.rule) as usize;
+                if let Some((_, template)) = self.match_name_template_memo.get(&key) {
+                    return *template;
+                }
+                let template = name
                     .as_deref()
                     .filter(|name| !name.contains('$'))
                     .map(|name| {
                         self.scope_templates
                             .intern_scope_template(name, &mut self.scope_names)
-                    }),
-                CandidateKind::BeginEnd { .. }
-                | CandidateKind::BeginWhile { .. }
-                | CandidateKind::End { .. } => None,
+                    });
+                self.match_name_template_memo
+                    .insert(key, (Arc::clone(&candidate.rule), template));
+                template
             })
             .collect::<Vec<_>>()
-            .into();
-        BoundCandidateBlueprint::Shared {
-            blueprint,
-            match_name_templates,
-        }
+            .into()
     }
 
     fn build_shareable_candidate_blueprint(
@@ -4068,19 +4487,14 @@ impl TextMateTokenizer {
     fn build_candidate_blueprint(&mut self, candidates: Vec<Candidate>) -> CandidateBlueprint {
         let mut matchers = Vec::with_capacity(candidates.len());
         for candidate in &candidates {
-            let live_captures = self.live_captures_for_candidate(candidate);
             let matcher = if let Some((grammar_id, pattern_id)) = candidate.pattern_id {
-                self.cached_matcher_with_live_captures(
-                    grammar_id,
-                    pattern_id,
-                    &candidate.pattern,
-                    live_captures,
-                )
+                self.cached_matcher_with_live_captures(grammar_id, pattern_id, candidate)
             } else {
                 if self.prepared_pattern_cache.is_some() {
                     self.unprepared_static_matcher_generation =
                         self.unprepared_static_matcher_generation.wrapping_add(1);
                 }
+                let live_captures = self.live_captures_for_candidate(candidate);
                 self.cached_dynamic_matcher_with_live_captures(&candidate.pattern, live_captures)
             };
             matchers.push(matcher);
@@ -4139,20 +4553,19 @@ impl TextMateTokenizer {
         if let Some(matcher) = self.prepared_static_matcher(grammar_id, pattern_id, pattern, None) {
             return matcher;
         }
-        let matcher = Arc::new(CompiledPattern::new(pattern));
+        let matcher = self.shared_static_matcher(grammar_id, pattern_id, pattern, None);
         self.matcher_cache.insert(key, matcher.clone());
-        if let Some(counters) = self.counters_mut() {
-            counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
-        }
         matcher
     }
 
+    /// Live captures are derived from the candidate only on a cache miss;
+    /// a static pattern slot always resolves to the matcher it was first
+    /// compiled with.
     fn cached_matcher_with_live_captures(
         &mut self,
         grammar_id: GrammarId,
         pattern_id: PatternId,
-        pattern: &str,
-        live_captures: Vec<u32>,
+        candidate: &Candidate,
     ) -> Arc<CompiledPattern> {
         let key = (grammar_id, pattern_id);
         if let Some(matcher) = self.matcher_cache.get(&key).cloned() {
@@ -4162,6 +4575,8 @@ impl TextMateTokenizer {
             }
             return matcher;
         }
+        let pattern = &*candidate.pattern;
+        let live_captures = self.live_captures_for_candidate(candidate);
         if self.prepared_pattern_cache.is_some()
             && let Some(matcher) = self.prepared_static_matcher(
                 grammar_id,
@@ -4172,11 +4587,40 @@ impl TextMateTokenizer {
         {
             return matcher;
         }
-        let matcher = Arc::new(CompiledPattern::new_with_live_captures(
-            pattern,
-            live_captures,
-        ));
+        let matcher =
+            self.shared_static_matcher(grammar_id, pattern_id, pattern, Some(live_captures));
         self.matcher_cache.insert(key, matcher.clone());
+        matcher
+    }
+
+    /// Embedded grammars frequently repeat byte-identical patterns (shared
+    /// HTML/CSS/JS rules pulled in through several hosts, or one repository
+    /// rule copied across grammars). A compiled pattern is a pure function of
+    /// its source and live capture layout, so identical keys share one
+    /// immutable matcher instead of re-parsing and re-compiling it for each
+    /// `(grammar, pattern)` slot. The map is owned by this tokenizer and is
+    /// bounded by the static pattern count of its grammar closure.
+    fn shared_static_matcher(
+        &mut self,
+        grammar_id: GrammarId,
+        pattern_id: PatternId,
+        pattern: &str,
+        live_captures: Option<Vec<u32>>,
+    ) -> Arc<CompiledPattern> {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) =
+            self.static_matcher_sources
+                .get(hash, pattern, live_captures.as_deref())
+        {
+            return Arc::clone(matcher);
+        }
+        let key_captures = live_captures.as_deref().map(Box::from);
+        let matcher = Arc::new(match live_captures {
+            Some(live_captures) => CompiledPattern::new_with_live_captures(pattern, live_captures),
+            None => CompiledPattern::new(pattern),
+        });
+        self.static_matcher_sources
+            .insert(hash, key_captures, Arc::clone(&matcher));
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(Some(grammar_id.0), Some(pattern_id.0), pattern);
         }
@@ -4184,11 +4628,8 @@ impl TextMateTokenizer {
     }
 
     fn cached_dynamic_matcher(&mut self, pattern: &str) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: vec![u32::MAX],
-        };
-        if let Some(matcher) = self.dynamic_matcher_cache.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) = self.dynamic_matcher_cache.get(hash, pattern, None) {
             return matcher.clone();
         }
         // Dynamic begin/end substitutions are source-derived and potentially
@@ -4198,7 +4639,8 @@ impl TextMateTokenizer {
             self.dynamic_matcher_cache.clear();
         }
         let matcher = Arc::new(CompiledPattern::new(pattern));
-        self.dynamic_matcher_cache.insert(key, matcher.clone());
+        self.dynamic_matcher_cache
+            .insert(hash, None, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(None, None, pattern);
         }
@@ -4210,21 +4652,23 @@ impl TextMateTokenizer {
         pattern: &str,
         live_captures: Vec<u32>,
     ) -> Arc<CompiledPattern> {
-        let key = DynamicMatcherKey {
-            pattern: pattern.to_owned(),
-            live_captures: live_captures.clone(),
-        };
-        if let Some(matcher) = self.dynamic_matcher_cache.get(&key) {
+        let hash = matcher_source_hash(pattern);
+        if let Some(matcher) = self
+            .dynamic_matcher_cache
+            .get(hash, pattern, Some(&live_captures))
+        {
             return matcher.clone();
         }
         if self.dynamic_matcher_cache.len() >= MAX_DYNAMIC_MATCHERS {
             self.dynamic_matcher_cache.clear();
         }
+        let key_captures = Some(Box::from(live_captures.as_slice()));
         let matcher = Arc::new(CompiledPattern::new_with_live_captures(
             pattern,
             live_captures,
         ));
-        self.dynamic_matcher_cache.insert(key, matcher.clone());
+        self.dynamic_matcher_cache
+            .insert(hash, key_captures, matcher.clone());
         if let Some(counters) = self.counters_mut() {
             counters.record_regex_compile(None, None, pattern);
         }
@@ -4663,7 +5107,7 @@ impl TextMateTokenizer {
                 captures,
                 ..
             } => {
-                let consumed_end = specified_outside_capture_end(result, captures);
+                let consumed_end = result.end;
                 let mut stack = active_stack;
                 if let Some(prefix) = &candidate.scope_prefix {
                     stack = self.push_scope_prefix_once_id(stack, prefix);
@@ -4692,7 +5136,7 @@ impl TextMateTokenizer {
                 apply_end_pattern_last,
                 end_static,
             } => {
-                let consumed_end = specified_outside_capture_end(result, begin_captures);
+                let consumed_end = result.end;
                 let names_static = !name.as_deref().is_some_and(|name| name.contains('$'))
                     && !content_name
                         .as_deref()
@@ -4792,7 +5236,7 @@ impl TextMateTokenizer {
                 patterns,
                 while_static,
             } => {
-                let consumed_end = specified_outside_capture_end(result, begin_captures);
+                let consumed_end = result.end;
                 let names_static = !name.as_deref().is_some_and(|name| name.contains('$'))
                     && !content_name
                         .as_deref()
@@ -4911,7 +5355,7 @@ impl TextMateTokenizer {
                 grammar_id,
                 captures,
             } => {
-                let consumed_end = specified_outside_capture_end(result, captures);
+                let consumed_end = result.end;
                 self.emit_match(
                     tokens,
                     line,
@@ -5002,31 +5446,6 @@ impl TextMateTokenizer {
             self.push_token(tokens, result.start..result.end, base_stack);
             return;
         }
-        let match_end = result.end;
-        let outside = captures
-            .entries
-            .iter()
-            .filter_map(|(group, entry)| {
-                if entry.name.is_none() && entry.patterns.is_empty() {
-                    return None;
-                }
-                let range = result.capture(*group as usize)?;
-                (match_end > result.start && range.start >= match_end && range.end > match_end)
-                    .then_some((range, entry.clone()))
-            })
-            .collect::<Vec<_>>();
-        if outside.is_empty() {
-            self.emit_capture_range(
-                tokens,
-                line,
-                result.start..result.end,
-                grammar_id,
-                base_stack,
-                captures,
-                result,
-            );
-            return;
-        }
         self.emit_capture_range(
             tokens,
             line,
@@ -5036,28 +5455,6 @@ impl TextMateTokenizer {
             captures,
             result,
         );
-        for (range, entry) in outside {
-            let range = range.start.max(match_end)..range.end;
-            let mut stack = base_stack;
-            if let Some(scope_id) = entry.name {
-                let (name, template) =
-                    self.capture_scope_application(grammar_id, scope_id, line, result);
-                stack = self.push_scope_application(stack, name.as_deref(), template);
-            }
-            if entry.patterns.is_empty() {
-                self.push_token(tokens, range, stack);
-            } else {
-                self.tokenize_inline_patterns(
-                    tokens,
-                    line,
-                    range,
-                    grammar_id,
-                    stack,
-                    &entry.patterns,
-                    true,
-                );
-            }
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5071,9 +5468,7 @@ impl TextMateTokenizer {
         capture_spec: &CaptureSpec,
         result: &MatchResult,
     ) {
-        if range.start >= range.end {
-            return;
-        }
+        // An empty match can still have lookahead captures past its end.
         if self.grammars.grammar(grammar_id).is_none() {
             self.push_token(tokens, range, base_stack);
             return;
@@ -5084,6 +5479,11 @@ impl TextMateTokenizer {
         // retokenized capture always starts from the rule/content stack plus
         // that capture's own name. Inheriting unrelated overlapping capture
         // names here adds broad `meta.head.*` scopes to C++ child tokens.
+        // Empty captures are skipped and handling stops at the first capture
+        // that starts after `range`, but a lookahead capture can still extend
+        // past it (`(?=((a)b))`). Scanning resumes at the match end;
+        // monotone token production drops any later token prefix those
+        // captures already covered.
         let mut cursor = range.start;
         let mut active = CaptureScopeStack::default();
         for (group, entry) in &capture_spec.entries {
@@ -5096,7 +5496,9 @@ impl TextMateTokenizer {
             if capture_range.start > range.end {
                 break;
             }
-            let capture_range = clamp_range(capture_range, range.clone());
+            // Earlier text is already tokenized; a lookbehind capture only
+            // covers the part inside the match.
+            let capture_range = capture_range.start.max(range.start)..capture_range.end;
             if capture_range.start >= capture_range.end {
                 continue;
             }
@@ -5106,7 +5508,6 @@ impl TextMateTokenizer {
                 .is_some_and(|(_, end)| *end <= capture_range.start)
             {
                 let (stack, end) = active.pop().expect("checked active capture");
-                let end = end.min(range.end);
                 if cursor < end {
                     self.push_token(tokens, cursor..end, stack);
                     cursor = end;
@@ -5141,7 +5542,6 @@ impl TextMateTokenizer {
         }
 
         while let Some((stack, end)) = active.pop() {
-            let end = end.min(range.end);
             if cursor < end {
                 self.push_token(tokens, cursor..end, stack);
                 cursor = end;
@@ -5171,6 +5571,7 @@ impl TextMateTokenizer {
         let mut fallback_steps = 0u64;
         let mut anchor_pos = Some(range.start);
         let mut frame_anchor_positions = Vec::new();
+        let mut line_pushes = LinePushes::default();
         let mut zero_width_states = HashSet::new();
         // Capture retokenization is bounded by the capture. Let lookbehind see
         // the original prefix, but do not let a greedy child consume text
@@ -5201,15 +5602,10 @@ impl TextMateTokenizer {
                             patterns: Arc::from(patterns),
                             compound_patterns,
                         };
-                        let prepared = self.prepared_blueprint_key(
+                        let blueprint = self.candidate_blueprint(
                             source,
                             injection_outcome_id,
-                            injection_outcome.as_ref(),
-                        );
-                        self.build_candidate_set(
-                            prepared,
-                            base_stack_id,
-                            base_stack_id,
+                            &injection_outcome,
                             |tokenizer| {
                                 let mut candidates = Vec::new();
                                 let mut order = 0usize;
@@ -5224,24 +5620,34 @@ impl TextMateTokenizer {
                                 );
                                 candidates
                             },
-                        )
+                        );
+                        CandidateSet {
+                            blueprint,
+                            active_stack_id: base_stack_id,
+                            end_stack_id: base_stack_id,
+                        }
                     } else {
                         let stacks = self.current_scope_stack_ids(&state, Some(base_stack_id));
-                        let active_scopes = self.resolve_scope_stack_cached(stacks.active_stack_id);
                         let (injection_outcome_id, injection_outcome) =
-                            self.injection_outcome(active_scopes.as_ref());
+                            if self.injection_selectors.is_empty() {
+                                self.injection_outcome(&[])
+                            } else {
+                                let active_scopes =
+                                    self.resolve_scope_stack_cached(stacks.active_stack_id);
+                                self.injection_outcome(active_scopes.as_ref())
+                            };
                         let source = CandidateSourceKey::for_state(self.root, &state);
-                        let prepared = self.prepared_blueprint_key(
+                        let blueprint = self.candidate_blueprint(
                             source,
                             injection_outcome_id,
-                            injection_outcome.as_ref(),
-                        );
-                        self.build_candidate_set(
-                            prepared,
-                            stacks.active_stack_id,
-                            stacks.end_stack_id,
+                            &injection_outcome,
                             |tokenizer| tokenizer.candidates_for_state(&state, &injection_outcome),
-                        )
+                        );
+                        CandidateSet {
+                            blueprint,
+                            active_stack_id: stacks.active_stack_id,
+                            end_stack_id: stacks.end_stack_id,
+                        }
                     };
                     let candidate_set = Arc::new(candidate_set);
                     if self.inline_candidate_cache.len() >= MAX_INLINE_CANDIDATE_SETS {
@@ -5325,12 +5731,21 @@ impl TextMateTokenizer {
                 candidate_set.active_stack_id,
                 candidate_set.end_stack_id,
             );
+            if line_pushes.repeats_push(&state, depth_before, cursor, result_end) {
+                if let Some(previous_state) = zero_width_state_before {
+                    state = previous_state;
+                }
+                let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
+                self.push_token(tokens, result_start..range.end, stack);
+                return;
+            }
             if zero_width_match_rule {
-                self.push_token(
-                    tokens,
-                    result_start..range.end,
-                    candidate_set.active_stack_id,
-                );
+                // See `tokenize_line`: stop and `safePop` the enclosing rule.
+                if !state.frames.is_empty() {
+                    state.pop_frame();
+                }
+                let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
+                self.push_token(tokens, result_start..range.end, stack);
                 return;
             }
             let zero_width_state_change =
@@ -5653,7 +6068,10 @@ impl Deref for CandidateSet {
 
 #[derive(Debug, Clone)]
 enum BoundCandidateBlueprint {
-    Owned(Arc<CandidateBlueprint>),
+    Owned {
+        blueprint: Arc<CandidateBlueprint>,
+        match_name_templates: Arc<[Option<ScopeTemplateId>]>,
+    },
     Shared {
         blueprint: Arc<CandidateBlueprint>,
         match_name_templates: Arc<[Option<ScopeTemplateId>]>,
@@ -5667,28 +6085,24 @@ impl BoundCandidateBlueprint {
 
     fn blueprint_arc(&self) -> &Arc<CandidateBlueprint> {
         match self {
-            Self::Owned(blueprint) => blueprint,
-            Self::Shared { blueprint, .. } => blueprint,
+            Self::Owned { blueprint, .. } | Self::Shared { blueprint, .. } => blueprint,
         }
     }
 
     fn shared_blueprint(&self) -> Option<&Arc<CandidateBlueprint>> {
         match self {
-            Self::Owned(_) => None,
+            Self::Owned { .. } => None,
             Self::Shared { blueprint, .. } => Some(blueprint),
         }
     }
 
     fn match_name_template(&self, index: usize) -> Option<ScopeTemplateId> {
         match self {
-            Self::Owned(blueprint) => blueprint.candidates.get(index).and_then(|candidate| {
-                if let CandidateKind::Match { name_template, .. } = &candidate.kind {
-                    *name_template
-                } else {
-                    None
-                }
-            }),
-            Self::Shared {
+            Self::Owned {
+                match_name_templates,
+                ..
+            }
+            | Self::Shared {
                 match_name_templates,
                 ..
             } => match_name_templates.get(index).copied().flatten(),
@@ -5843,10 +6257,11 @@ fn candidate_dynamic_retained_bytes(candidate: &Candidate) -> usize {
 /// blueprint. Compiled regexes are charged to the separately bounded pattern
 /// cache; the set surcharge covers its per-pattern scanner/index allocations.
 fn candidate_blueprint_retained_bytes(blueprint: &CandidateBlueprint) -> usize {
+    // Shared rule data is charged to every candidate that reaches it.
     let mut candidate_bytes = blueprint
         .candidates
         .capacity()
-        .saturating_mul(std::mem::size_of::<Candidate>());
+        .saturating_mul(std::mem::size_of::<Candidate>() + std::mem::size_of::<CandidateRule>());
     for candidate in &blueprint.candidates {
         let dynamic_bytes = candidate_dynamic_retained_bytes(candidate);
         candidate_bytes = candidate_bytes.saturating_add(dynamic_bytes);
@@ -5926,10 +6341,76 @@ impl CandidateSourceKey {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct DynamicMatcherKey {
-    pattern: String,
-    live_captures: Vec<u32>,
+/// Compiled matchers keyed by regex source and live-capture layout (`None`
+/// keeps every group live).
+///
+/// Grammar regexes can be kilobytes long, and a byte-wise hash of the full
+/// source recomputed on every probe, insert, and table growth was a visible
+/// share of first-use cost. Each source is hashed once, word at a time, and
+/// buckets keep the compiled matcher, whose own source text settles equality,
+/// so the table stores no second copy of the pattern.
+type MatcherSourceEntry = (Option<Box<[u32]>>, Arc<CompiledPattern>);
+
+#[derive(Debug, Clone, Default)]
+struct MatcherSourceTable {
+    buckets: FastMap<u64, Vec<MatcherSourceEntry>>,
+    len: usize,
+}
+
+impl MatcherSourceTable {
+    fn get(
+        &self,
+        hash: u64,
+        pattern: &str,
+        live_captures: Option<&[u32]>,
+    ) -> Option<&Arc<CompiledPattern>> {
+        self.buckets
+            .get(&hash)?
+            .iter()
+            .find(|(captures, matcher)| {
+                captures.as_deref() == live_captures && matcher.source() == pattern
+            })
+            .map(|(_, matcher)| matcher)
+    }
+
+    fn insert(
+        &mut self,
+        hash: u64,
+        live_captures: Option<Box<[u32]>>,
+        matcher: Arc<CompiledPattern>,
+    ) {
+        self.buckets
+            .entry(hash)
+            .or_default()
+            .push((live_captures, matcher));
+        self.len += 1;
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn clear(&mut self) {
+        self.buckets.clear();
+        self.len = 0;
+    }
+}
+
+/// Word-at-a-time hash of a regex source for `MatcherSourceTable`.
+fn matcher_source_hash(pattern: &str) -> u64 {
+    const K: u64 = 0xf135_7aea_2e62_a9c5;
+    let bytes = pattern.as_bytes();
+    let mut hash = (bytes.len() as u64).wrapping_mul(K);
+    let (words, remainder) = bytes.as_chunks::<8>();
+    for word in words {
+        hash = (hash ^ u64::from_le_bytes(*word))
+            .wrapping_mul(K)
+            .rotate_left(26);
+    }
+    let mut tail = [0u8; 8];
+    tail[..remainder.len()].copy_from_slice(remainder);
+    hash = (hash ^ u64::from_le_bytes(tail)).wrapping_mul(K);
+    hash ^ (hash >> 32)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -5950,22 +6431,44 @@ struct PatternHotspotKey {
     pattern: String,
 }
 
+/// One entry of a candidate list: per-use placement around the rule data
+/// that every list reaching the same rule shares.
 #[derive(Debug, Clone)]
 struct Candidate {
     order: usize,
     base_grammar_id: GrammarId,
-    pattern: String,
-    pattern_id: Option<(GrammarId, PatternId)>,
     scope_prefix: Option<Arc<str>>,
+    rule: Arc<CandidateRule>,
+}
+
+impl Deref for Candidate {
+    type Target = CandidateRule;
+
+    fn deref(&self) -> &Self::Target {
+        &self.rule
+    }
+}
+
+#[derive(Debug)]
+struct CandidateRule {
+    pattern: Arc<str>,
+    pattern_id: Option<(GrammarId, PatternId)>,
     kind: CandidateKind,
+}
+
+/// Per-tokenizer flattened form of one static rule; see
+/// `TextMateTokenizer::rule_candidate_template`.
+#[derive(Debug, Clone)]
+enum RuleCandidateTemplate {
+    Candidate(Arc<CandidateRule>),
+    IncludeOnly(Arc<[RuleRef]>),
 }
 
 #[derive(Debug, Clone)]
 enum CandidateKind {
     Match {
         grammar_id: GrammarId,
-        name: Option<String>,
-        name_template: Option<ScopeTemplateId>,
+        name: Option<Arc<str>>,
         captures: Arc<CaptureSpec>,
     },
     BeginEnd {
@@ -6166,28 +6669,44 @@ fn empty_repository_context() -> &'static Arc<RepositoryBindings> {
     EMPTY.get_or_init(|| Arc::new(RepositoryBindings::default()))
 }
 
-fn resolve_repository_in_context<'a>(
-    grammar: &'a CompiledGrammar,
-    name: &'a str,
-    context: &RepositoryBindings,
-) -> Option<&'a RuleRef> {
-    let bound_name = context.get(name).map_or(name, String::as_str);
-    grammar.repository.get(bound_name)
+fn rebinds_any_ref(refs: &[RuleRef], context: &RepositoryBindings) -> bool {
+    refs.iter().any(
+        |rule_ref| matches!(rule_ref, RuleRef::Repository(name) if context.get(name).is_some()),
+    )
 }
 
-fn contextualize_refs(refs: &[RuleRef], context: Option<&RepositoryBindings>) -> Vec<RuleRef> {
+/// Borrows `refs` unless `context` rebinds one of their repository names.
+fn contextualize_refs<'a>(
+    refs: &'a [RuleRef],
+    context: Option<&RepositoryBindings>,
+) -> Cow<'a, [RuleRef]> {
     let Some(context) = context.filter(|context| !context.is_empty()) else {
-        return refs.to_vec();
+        return Cow::Borrowed(refs);
     };
-    refs.iter()
-        .map(|rule_ref| match rule_ref {
-            RuleRef::Repository(name) => context
-                .get(name)
-                .map(|bound_name| RuleRef::Repository(bound_name.clone()))
-                .unwrap_or_else(|| rule_ref.clone()),
-            _ => rule_ref.clone(),
-        })
-        .collect()
+    if !rebinds_any_ref(refs, context) {
+        return Cow::Borrowed(refs);
+    }
+    Cow::Owned(
+        refs.iter()
+            .map(|rule_ref| match rule_ref {
+                RuleRef::Repository(name) => context
+                    .get(name)
+                    .map(|bound_name| RuleRef::Repository(bound_name.clone()))
+                    .unwrap_or_else(|| rule_ref.clone()),
+                _ => rule_ref.clone(),
+            })
+            .collect(),
+    )
+}
+
+fn contextualized_ref_list(
+    refs: &[RuleRef],
+    context: Option<&RepositoryBindings>,
+) -> Arc<[RuleRef]> {
+    match contextualize_refs(refs, context) {
+        Cow::Borrowed(refs) => Arc::from(refs),
+        Cow::Owned(refs) => Arc::from(refs),
+    }
 }
 
 fn contextualize_capture_spec(
@@ -6197,9 +6716,16 @@ fn contextualize_capture_spec(
     let Some(context) = context.filter(|context| !context.is_empty()) else {
         return Arc::clone(captures);
     };
+    if !captures
+        .entries
+        .values()
+        .any(|entry| rebinds_any_ref(&entry.patterns, context))
+    {
+        return Arc::clone(captures);
+    }
     let mut contextualized = captures.as_ref().clone();
     for entry in contextualized.entries.values_mut() {
-        entry.patterns = contextualize_refs(&entry.patterns, Some(context));
+        entry.patterns = contextualize_refs(&entry.patterns, Some(context)).into_owned();
     }
     Arc::new(contextualized)
 }
@@ -6249,7 +6775,7 @@ impl RepositoryContextBudget {
     fn charge_rule_table(&mut self, rule_count: usize) -> bool {
         self.charge(
             std::mem::size_of::<GrammarRuleRepositoryContexts>().saturating_add(
-                rule_count.saturating_mul(std::mem::size_of::<Option<Arc<RepositoryBindings>>>()),
+                rule_count.saturating_mul(std::mem::size_of::<RepositoryContextId>()),
             ),
         )
     }
@@ -6258,13 +6784,16 @@ impl RepositoryContextBudget {
         let mut bytes = if local.is_empty() {
             0
         } else {
+            // The bindings live behind an `Arc` (two counts) whose pointer
+            // occupies a slot, with room for growth, in the context table.
             std::mem::size_of::<RepositoryBindings>()
+                .saturating_add(2 * std::mem::size_of::<usize>())
+                .saturating_add(2 * std::mem::size_of::<Arc<RepositoryBindings>>())
         };
         if sparse {
             // A public, hand-built grammar can have out-of-range IDs. Charge
             // conservatively for Vec growth in the uncommon fallback table.
-            bytes =
-                bytes.saturating_add(2 * std::mem::size_of::<(RuleId, Arc<RepositoryBindings>)>());
+            bytes = bytes.saturating_add(2 * std::mem::size_of::<(RuleId, RepositoryContextId)>());
         }
         for (name, binding) in local {
             let entry_bytes = (4 * std::mem::size_of::<usize>())
@@ -6293,6 +6822,260 @@ impl RepositoryContextBudget {
     }
 }
 
+/// Rules of `grammar` whose repository context can change how their own
+/// includes resolve.
+///
+/// Consumers use a rule's context only to rename the repository includes in
+/// its patterns and captures, so a context matters only for a rule that
+/// includes a name some local repository binds, and only if the walk can
+/// bind that rule to a non-empty context. Only a rule declaring a local
+/// repository extends a context, and the walk propagates a context through
+/// rule patterns, capture patterns, repository includes, and `$self`, while
+/// `$base`, external, and injection entries restart from the empty context.
+///
+/// Each declaring rule is explored separately. Below it, until another
+/// declaring rule takes over, its own entries are the innermost overlay and
+/// decide the names they define; any other include may resolve to its raw
+/// name or to a binding from any local repository, so all are followed.
+fn scoped_repository_rules(grammar: &CompiledGrammar) -> FastSet<RuleId> {
+    fn capture_refs(spec: &CaptureSpec) -> impl Iterator<Item = &RuleRef> {
+        spec.entries
+            .values()
+            .flat_map(|entry| entry.patterns.iter())
+    }
+
+    let mut reached = hashing::fast_set();
+    let local_repositories = grammar
+        .rules
+        .iter()
+        .map(|rule| &rule.local_repository)
+        .filter(|local| !local.is_empty())
+        .collect::<Vec<_>>();
+    for origin in grammar
+        .rules
+        .iter()
+        .filter(|rule| !rule.local_repository.is_empty())
+    {
+        let innermost = &origin.local_repository;
+        let mut visited = hashing::fast_set();
+        // Repository entries expanded so far, by address (one per name).
+        let mut expanded_names = hashing::fast_set();
+        let mut expanded_top_level = false;
+        let mut rules = vec![origin.id];
+        let mut refs: Vec<&RuleRef> = Vec::new();
+        loop {
+            while let Some(rule_id) = rules.pop() {
+                if !visited.insert(rule_id) {
+                    continue;
+                }
+                reached.insert(rule_id);
+                let Some(rule) = grammar.rule(rule_id) else {
+                    continue;
+                };
+                if rule.id != origin.id && !rule.local_repository.is_empty() {
+                    // That rule is an origin of its own exploration.
+                    continue;
+                }
+                match &rule.body {
+                    RuleBody::Match { captures, .. } => refs.extend(capture_refs(captures)),
+                    RuleBody::BeginEnd {
+                        begin_captures,
+                        end_captures,
+                        patterns,
+                        ..
+                    } => {
+                        refs.extend(patterns);
+                        refs.extend(capture_refs(begin_captures));
+                        refs.extend(capture_refs(end_captures));
+                    }
+                    RuleBody::BeginWhile {
+                        begin_captures,
+                        while_captures,
+                        patterns,
+                        ..
+                    } => {
+                        refs.extend(patterns);
+                        refs.extend(capture_refs(begin_captures));
+                        refs.extend(capture_refs(while_captures));
+                    }
+                    RuleBody::IncludeOnly { patterns } => refs.extend(patterns),
+                }
+            }
+            let Some(rule_ref) = refs.pop() else {
+                break;
+            };
+            match rule_ref {
+                RuleRef::Rule(rule_id) => rules.push(*rule_id),
+                RuleRef::Repository(name) => {
+                    let mut resolve = |bound_name: &str| {
+                        if let Some(target) = grammar.repository.get(bound_name)
+                            && expanded_names.insert(std::ptr::from_ref(target) as usize)
+                        {
+                            refs.push(target);
+                        }
+                    };
+                    if let Some(bound_name) = innermost.get(name) {
+                        resolve(bound_name);
+                    } else {
+                        resolve(name);
+                        for local in &local_repositories {
+                            if let Some(bound_name) = local.get(name) {
+                                resolve(bound_name);
+                            }
+                        }
+                    }
+                }
+                RuleRef::SelfRef => {
+                    if !expanded_top_level {
+                        expanded_top_level = true;
+                        refs.extend(&grammar.top_level);
+                    }
+                }
+                RuleRef::BaseRef | RuleRef::External { .. } => {}
+            }
+        }
+    }
+    let includes_bound_name = |refs: &[RuleRef]| {
+        refs.iter().any(|rule_ref| {
+            matches!(rule_ref, RuleRef::Repository(name)
+                if local_repositories.iter().any(|local| local.contains_key(name)))
+        })
+    };
+    let captures_include_bound_name = |spec: &CaptureSpec| {
+        spec.entries
+            .values()
+            .any(|entry| includes_bound_name(&entry.patterns))
+    };
+    reached.retain(|rule_id| {
+        grammar.rule(*rule_id).is_some_and(|rule| match &rule.body {
+            RuleBody::Match { captures, .. } => captures_include_bound_name(captures),
+            RuleBody::BeginEnd {
+                begin_captures,
+                end_captures,
+                patterns,
+                ..
+            } => {
+                includes_bound_name(patterns)
+                    || captures_include_bound_name(begin_captures)
+                    || captures_include_bound_name(end_captures)
+            }
+            RuleBody::BeginWhile {
+                begin_captures,
+                while_captures,
+                patterns,
+                ..
+            } => {
+                includes_bound_name(patterns)
+                    || captures_include_bound_name(begin_captures)
+                    || captures_include_bound_name(while_captures)
+            }
+            RuleBody::IncludeOnly { patterns } => includes_bound_name(patterns),
+        })
+    });
+    reached
+}
+
+/// Closure-member traits of already-loaded grammars, derived during one
+/// unbounded repository-context walk.
+///
+/// Bundled members carry these traits precomputed; grammars loaded from
+/// source (custom assets) otherwise force the walk through every embedded
+/// grammar. The traits are exactly `grammar_closure::closure_member_traits`
+/// restricted to the member's external-include reach under this set's scope
+/// table, so the walk skips the same grammars it would skip for an equivalent
+/// bundled closure. A reach that includes a lazily decoded member is never
+/// skipped here (its recorded traits describe the bundle's scope table, which
+/// a mixed set may override). Nothing outlives the walk.
+#[derive(Default)]
+struct LoadedWalkTraits {
+    /// Per grammar: local-repository flag, `$base` flag, and external targets.
+    edges: Vec<Option<(bool, bool, Vec<GrammarId>)>>,
+    traits: Vec<Option<Option<ClosureMemberTraits>>>,
+}
+
+impl LoadedWalkTraits {
+    fn traits(&mut self, grammars: &GrammarSet, id: GrammarId) -> Option<ClosureMemberTraits> {
+        let index = id.0 as usize;
+        if self.traits.len() < grammars.len() {
+            self.traits.resize(grammars.len(), None);
+            self.edges.resize_with(grammars.len(), || None);
+        }
+        if let Some(traits) = self.traits.get(index).copied().flatten() {
+            return traits;
+        }
+        let traits = self.compute(grammars, id);
+        if let Some(slot) = self.traits.get_mut(index) {
+            *slot = Some(traits);
+        }
+        traits
+    }
+
+    fn compute(&mut self, grammars: &GrammarSet, id: GrammarId) -> Option<ClosureMemberTraits> {
+        let mut traits = ClosureMemberTraits::default();
+        let mut seen = vec![false; grammars.len()];
+        let mut pending = vec![id];
+        while let Some(member) = pending.pop() {
+            let index = member.0 as usize;
+            if !std::mem::replace(seen.get_mut(index)?, true) {
+                let slot = grammars.grammars.get(index)?;
+                if slot.lazy.is_some() {
+                    return None;
+                }
+                let (local, base, targets) = self.edges[index].get_or_insert_with(|| {
+                    let Some(grammar) = grammars.grammar(member) else {
+                        return (false, false, Vec::new());
+                    };
+                    let scanned;
+                    let summary = match &grammar.walk_summary {
+                        Some(summary) => summary,
+                        None => {
+                            scanned = scan_walk_summary(grammar);
+                            &scanned
+                        }
+                    };
+                    let mut targets = Vec::new();
+                    for scope in &summary.external_scopes {
+                        if let Some(target) = grammar
+                            .scope(*scope)
+                            .and_then(|scope| grammars.grammar_id_by_scope(scope))
+                            && !targets.contains(&target)
+                        {
+                            targets.push(target);
+                        }
+                    }
+                    (summary.local_repository, summary.base_reference, targets)
+                });
+                traits.repository_contexts |= *local;
+                traits.base_reference |= *base;
+                pending.extend(targets.iter().copied());
+            }
+        }
+        Some(traits)
+    }
+}
+
+/// Recomputes `CompiledGrammar::walk_summary` for grammars that were not
+/// compiled from source.
+fn scan_walk_summary(grammar: &CompiledGrammar) -> GrammarWalkSummary {
+    let mut summary = GrammarWalkSummary {
+        local_repository: grammar
+            .rules
+            .iter()
+            .any(|rule| !rule.local_repository.is_empty()),
+        ..GrammarWalkSummary::default()
+    };
+    super::grammar_closure::for_each_rule_ref(grammar, |rule_ref| match rule_ref {
+        RuleRef::BaseRef => summary.base_reference = true,
+        RuleRef::External { scope, .. } => {
+            if !summary.external_scopes.contains(scope) {
+                summary.external_scopes.push(*scope);
+            }
+        }
+        RuleRef::Rule(_) | RuleRef::Repository(_) | RuleRef::SelfRef => {}
+    });
+    summary
+}
+
 /// Simulate vscode-textmate's lazy `RuleFactory.getCompiledRuleId` walk.
 ///
 /// Raw rules receive an id the first time they are reached. That first walk's
@@ -6306,20 +7089,30 @@ fn compile_rule_repository_contexts<'a>(
     injections: &'a [CompiledInjectionSelector],
     bounded: bool,
 ) -> (RuleRepositoryContexts, bool) {
+    // Work items name their repository context by its index in
+    // `compiled.contexts` instead of owning an `Arc`: large closures push
+    // tens of thousands of items, and per-item reference counting dominated
+    // the walk. The table keeps every context alive, so an index identifies a
+    // context exactly as its address did.
+    type ContextId = RepositoryContextId;
+    const EMPTY_CONTEXT: ContextId = 0;
+
     enum Work<'a> {
         TopLevel {
             grammar_id: GrammarId,
             base_grammar_id: GrammarId,
-            context: Arc<RepositoryBindings>,
+            context: ContextId,
         },
         Refs {
             grammar_id: GrammarId,
             base_grammar_id: GrammarId,
             refs: &'a [RuleRef],
             index: usize,
-            context: Arc<RepositoryBindings>,
+            context: ContextId,
         },
-        RepositoryExit((GrammarId, RepositoryNameId, usize)),
+        /// Keyed by the resolved repository entry's address, which names one
+        /// `(grammar, repository name)` for the walk's lifetime.
+        RepositoryExit((usize, ContextId)),
     }
 
     fn push_refs<'a>(
@@ -6327,7 +7120,7 @@ fn compile_rule_repository_contexts<'a>(
         grammar_id: GrammarId,
         base_grammar_id: GrammarId,
         refs: &'a [RuleRef],
-        context: Arc<RepositoryBindings>,
+        context: ContextId,
     ) {
         if !refs.is_empty() {
             work.push(Work::Refs {
@@ -6340,32 +7133,53 @@ fn compile_rule_repository_contexts<'a>(
         }
     }
 
+    /// Bounded preparation charges each repository name the first time the
+    /// walk meets it.
+    fn charge_repository_name(
+        budget: &mut RepositoryContextBudget,
+        names: &mut RepositoryNameInterner,
+        name: &str,
+    ) -> bool {
+        let known = names.get(name).is_some();
+        if !budget.charge_repository(name, !known) {
+            return false;
+        }
+        if !known {
+            names.intern(name);
+        }
+        true
+    }
+
     fn push_captures<'a>(
         work: &mut Vec<Work<'a>>,
         grammar_id: GrammarId,
         captures: &'a CaptureSpec,
-        context: &Arc<RepositoryBindings>,
+        context: ContextId,
     ) {
         for entry in captures.entries.values().rev() {
-            push_refs(
-                work,
-                grammar_id,
-                grammar_id,
-                &entry.patterns,
-                Arc::clone(context),
-            );
+            push_refs(work, grammar_id, grammar_id, &entry.patterns, context);
         }
     }
 
-    let empty_context = Arc::clone(empty_repository_context());
+    // Bounded preparation keeps reading complete grammars.
+    let walk_grammar = |id| {
+        if bounded {
+            grammars.grammar(id)
+        } else {
+            grammars.repository_walk_grammar(id)
+        }
+    };
     let mut budget = RepositoryContextBudget::new(bounded);
-    if !budget.charge_context_table(grammars.grammars().len()) {
+    if !budget.charge_context_table(grammars.len()) {
         return (RuleRepositoryContexts::empty(), false);
     }
-    let mut compiled = RuleRepositoryContexts::new(grammars.grammars().len());
+    let mut compiled = RuleRepositoryContexts::new(grammars.len());
+    let empty_context = compiled.add_context(Arc::clone(empty_repository_context()));
+    debug_assert_eq!(empty_context, Some(EMPTY_CONTEXT));
     let mut compiled_top_levels = hashing::fast_set();
     let mut repository_names = RepositoryNameInterner::default();
-    let mut visiting_repositories = HashSet::new();
+    let mut visiting_repositories = hashing::fast_set();
+    let mut loaded_traits = LoadedWalkTraits::default();
     let mut work = Vec::new();
     for injection in injections.iter().rev() {
         push_refs(
@@ -6373,13 +7187,13 @@ fn compile_rule_repository_contexts<'a>(
             injection.grammar_id,
             root,
             &injection.patterns,
-            Arc::clone(&empty_context),
+            EMPTY_CONTEXT,
         );
     }
     work.push(Work::TopLevel {
         grammar_id: root,
         base_grammar_id: root,
-        context: Arc::clone(&empty_context),
+        context: EMPTY_CONTEXT,
     });
 
     while !budget.exceeded {
@@ -6398,7 +7212,7 @@ fn compile_rule_repository_contexts<'a>(
                 if !compiled_top_levels.insert(grammar_id) {
                     continue;
                 }
-                if let Some(grammar) = grammars.grammar(grammar_id) {
+                if let Some(grammar) = walk_grammar(grammar_id) {
                     push_refs(
                         &mut work,
                         grammar_id,
@@ -6427,15 +7241,15 @@ fn compile_rule_repository_contexts<'a>(
                         base_grammar_id,
                         refs,
                         index: index + 1,
-                        context: Arc::clone(&context),
+                        context,
                     });
                 }
-                let Some(grammar) = grammars.grammar(grammar_id) else {
+                let Some(grammar) = walk_grammar(grammar_id) else {
                     continue;
                 };
                 match rule_ref {
                     RuleRef::Rule(rule_id) => {
-                        if compiled.get(grammar_id, *rule_id).is_some() {
+                        if compiled.is_bound(grammar_id, *rule_id) {
                             continue;
                         }
                         let Some(rule) = grammar.rule(*rule_id) else {
@@ -6453,11 +7267,16 @@ fn compile_rule_repository_contexts<'a>(
                         let context = if rule.local_repository.is_empty() {
                             context
                         } else {
-                            RepositoryBindings::overlay(
-                                context,
+                            let overlay = RepositoryBindings::overlay(
+                                Arc::clone(compiled.context(context)),
                                 rule.local_repository.clone(),
                                 !bounded,
-                            )
+                            );
+                            let Some(id) = compiled.add_context(overlay) else {
+                                budget.exceeded = true;
+                                break;
+                            };
+                            id
                         };
                         // Never overwrite an earlier context: vscode-textmate
                         // binds a raw rule to the repository from its first
@@ -6466,12 +7285,12 @@ fn compile_rule_repository_contexts<'a>(
                             grammar_id,
                             *rule_id,
                             grammar.rules.len(),
-                            Arc::clone(&context),
+                            context,
                         );
                         debug_assert!(inserted);
                         match &rule.body {
                             RuleBody::Match { captures, .. } => {
-                                push_captures(&mut work, grammar_id, captures, &context);
+                                push_captures(&mut work, grammar_id, captures, context);
                             }
                             RuleBody::BeginEnd {
                                 begin_captures,
@@ -6484,10 +7303,10 @@ fn compile_rule_repository_contexts<'a>(
                                     grammar_id,
                                     base_grammar_id,
                                     patterns,
-                                    Arc::clone(&context),
+                                    context,
                                 );
-                                push_captures(&mut work, grammar_id, end_captures, &context);
-                                push_captures(&mut work, grammar_id, begin_captures, &context);
+                                push_captures(&mut work, grammar_id, end_captures, context);
+                                push_captures(&mut work, grammar_id, begin_captures, context);
                             }
                             RuleBody::BeginWhile {
                                 begin_captures,
@@ -6500,10 +7319,10 @@ fn compile_rule_repository_contexts<'a>(
                                     grammar_id,
                                     base_grammar_id,
                                     patterns,
-                                    Arc::clone(&context),
+                                    context,
                                 );
-                                push_captures(&mut work, grammar_id, while_captures, &context);
-                                push_captures(&mut work, grammar_id, begin_captures, &context);
+                                push_captures(&mut work, grammar_id, while_captures, context);
+                                push_captures(&mut work, grammar_id, begin_captures, context);
                             }
                             RuleBody::IncludeOnly { patterns } => {
                                 push_refs(&mut work, grammar_id, base_grammar_id, patterns, context)
@@ -6511,28 +7330,34 @@ fn compile_rule_repository_contexts<'a>(
                         }
                     }
                     RuleRef::Repository(name) => {
-                        let bound_name = context.get(name).map_or(name.as_str(), String::as_str);
-                        let known_name = repository_names.get(bound_name);
-                        if !budget.charge_repository(bound_name, known_name.is_none()) {
+                        let bindings = compiled.context(context);
+                        let bound_name = bindings.get(name).map_or(name.as_str(), String::as_str);
+                        if bounded
+                            && !charge_repository_name(
+                                &mut budget,
+                                &mut repository_names,
+                                bound_name,
+                            )
+                        {
                             break;
                         }
-                        let name_id =
-                            known_name.unwrap_or_else(|| repository_names.intern(bound_name).0);
-                        let key = (grammar_id, name_id, Arc::as_ptr(&context) as usize);
+                        // A missing entry would only enter and leave the
+                        // visiting set.
+                        let Some(target) = grammar.repository.get(bound_name) else {
+                            continue;
+                        };
+                        let key = (std::ptr::from_ref(target) as usize, context);
                         if !visiting_repositories.insert(key) {
                             continue;
                         }
                         work.push(Work::RepositoryExit(key));
-                        if let Some(target) = resolve_repository_in_context(grammar, name, &context)
-                        {
-                            push_refs(
-                                &mut work,
-                                grammar_id,
-                                base_grammar_id,
-                                std::slice::from_ref(target),
-                                context,
-                            );
-                        }
+                        push_refs(
+                            &mut work,
+                            grammar_id,
+                            base_grammar_id,
+                            std::slice::from_ref(target),
+                            context,
+                        );
                     }
                     RuleRef::SelfRef => work.push(Work::TopLevel {
                         grammar_id,
@@ -6542,7 +7367,7 @@ fn compile_rule_repository_contexts<'a>(
                     RuleRef::BaseRef => work.push(Work::TopLevel {
                         grammar_id: base_grammar_id,
                         base_grammar_id,
-                        context: Arc::clone(&empty_context),
+                        context: EMPTY_CONTEXT,
                     }),
                     RuleRef::External { scope, repository } => {
                         let Some(external_id) = grammar
@@ -6551,35 +7376,49 @@ fn compile_rule_repository_contexts<'a>(
                         else {
                             continue;
                         };
-                        let Some(external) = grammars.grammar(external_id) else {
+                        // Bounded preparation keeps its exact budget accounting.
+                        if !bounded
+                            && grammars.skips_repository_context_walk(
+                                external_id,
+                                base_grammar_id == root,
+                                &mut loaded_traits,
+                            )
+                        {
+                            continue;
+                        }
+                        let Some(external) = walk_grammar(external_id) else {
                             continue;
                         };
                         if let Some(repository) = repository {
-                            let known_name = repository_names.get(repository);
-                            if !budget.charge_repository(repository, known_name.is_none()) {
+                            if bounded
+                                && !charge_repository_name(
+                                    &mut budget,
+                                    &mut repository_names,
+                                    repository,
+                                )
+                            {
                                 break;
                             }
-                            let name_id =
-                                known_name.unwrap_or_else(|| repository_names.intern(repository).0);
-                            let key = (external_id, name_id, Arc::as_ptr(&empty_context) as usize);
+                            let Some(target) = external.repository.get(repository) else {
+                                continue;
+                            };
+                            let key = (std::ptr::from_ref(target) as usize, EMPTY_CONTEXT);
                             if !visiting_repositories.insert(key) {
                                 continue;
                             }
                             work.push(Work::RepositoryExit(key));
-                            if let Some(target) = external.repository.get(repository) {
-                                push_refs(
-                                    &mut work,
-                                    external_id,
-                                    base_grammar_id,
-                                    std::slice::from_ref(target),
-                                    Arc::clone(&empty_context),
-                                );
-                            }
+                            push_refs(
+                                &mut work,
+                                external_id,
+                                base_grammar_id,
+                                std::slice::from_ref(target),
+                                EMPTY_CONTEXT,
+                            );
                         } else {
                             work.push(Work::TopLevel {
                                 grammar_id: external_id,
                                 base_grammar_id,
-                                context: Arc::clone(&empty_context),
+                                context: EMPTY_CONTEXT,
                             });
                         }
                     }
@@ -6687,16 +7526,19 @@ pub fn tokenize_json_string_smoke(line: &str) -> Vec<ScopeSpan> {
     spans
 }
 
-fn scope_name(grammar: &CompiledGrammar, id: Option<super::state::ScopeId>) -> Option<String> {
-    id.and_then(|id| grammar.scope(id).map(str::to_owned))
+/// Shares the grammar's interned scope text.
+fn scope_name(grammar: &CompiledGrammar, id: Option<super::state::ScopeId>) -> Option<Arc<str>> {
+    id.and_then(|id| grammar.scope_names.get(id.0 as usize).cloned())
 }
 
 /// Mirrors `substitute_end_pattern`'s escape handling: a backslash consumes
 /// the next character, and only `\1`..`\9` starts a backreference.
 fn pattern_has_backreference(pattern: &str) -> bool {
-    let mut chars = pattern.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' && matches!(chars.next(), Some('1'..='9')) {
+    // Bytewise: an escaped multi-byte character leaves only continuation
+    // bytes behind, which are neither a backslash nor a digit.
+    let mut bytes = pattern.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'\\' && matches!(bytes.next(), Some(b'1'..=b'9')) {
             return true;
         }
     }
@@ -6883,21 +7725,49 @@ fn fallback_call_budget(source_bytes: usize) -> u64 {
     )
 }
 
-fn specified_outside_capture_end(result: &MatchResult, captures: &CaptureSpec) -> usize {
-    if result.start == result.end {
-        return result.end;
+/// Frames pushed on the current line with the scan position they were
+/// entered at, like vscode-textmate's `enterPos` (earlier-line frames have
+/// none). Kept in step with the state's depth after every tokenizer step.
+#[derive(Default)]
+struct LinePushes(Vec<(usize, GrammarId, RuleId)>);
+
+impl LinePushes {
+    /// Records the step that changed `state` from `depth_before` frames and
+    /// reports whether it pushed, without advancing past `cursor`, a rule
+    /// already entered at `cursor` (vscode-textmate's `hasSameRuleAs`).
+    fn repeats_push(
+        &mut self,
+        state: &TokenizerState,
+        depth_before: usize,
+        cursor: usize,
+        match_end: usize,
+    ) -> bool {
+        let depth = state.depth();
+        if depth < depth_before {
+            let popped = (depth_before - depth).min(self.0.len());
+            self.0.truncate(self.0.len() - popped);
+            return false;
+        }
+        if depth == depth_before {
+            return false;
+        }
+        let Some(frame) = state.frames.last() else {
+            return false;
+        };
+        let entry = (cursor, frame.grammar_id, frame.rule_id);
+        if match_end <= cursor
+            && self
+                .0
+                .iter()
+                .rev()
+                .take_while(|(entered, _, _)| *entered == cursor)
+                .any(|pushed| *pushed == entry)
+        {
+            return true;
+        }
+        self.0.push(entry);
+        false
     }
-    captures
-        .entries
-        .iter()
-        .filter(|(_, entry)| entry.name.is_some() || !entry.patterns.is_empty())
-        .filter_map(|(group, _)| {
-            result
-                .capture(*group as usize)
-                .filter(|range| range.start >= result.end)
-                .map(|range| range.end)
-        })
-        .fold(result.end, usize::max)
 }
 
 fn plain_compact_tokens(parse_text: &str, stack: ScopeStackId) -> Vec<CompactScopedToken> {
@@ -6963,13 +7833,19 @@ fn compile_injection_selectors(
         })
         .collect::<Vec<_>>();
 
-    for grammar in grammars.grammars() {
-        if grammar.id == root
-            || !grammar
-                .metadata
-                .inject_to
-                .iter()
-                .any(|scope| scope == &root_grammar.scope_name)
+    for index in 0..grammars.len() {
+        let id = GrammarId(index as u16);
+        if id == root || !grammars.may_inject(id) {
+            continue;
+        }
+        let Some(grammar) = grammars.grammar(id) else {
+            continue;
+        };
+        if !grammar
+            .metadata
+            .inject_to
+            .iter()
+            .any(|scope| scope == &root_grammar.scope_name)
         {
             continue;
         }
@@ -7534,7 +8410,7 @@ mod tests {
             Arc::clone(&patterns),
             Arc::clone(&blueprints),
             Vec::new(),
-            Arc::new(RuleRepositoryContexts::new(1)),
+            RuleRepositoryContexts::new(1),
         );
 
         tokenizer.prepare_root_candidate();
@@ -7717,15 +8593,16 @@ mod tests {
             candidates: vec![Candidate {
                 order: 0,
                 base_grammar_id: GrammarId(0),
-                pattern: "x".repeat(MAX_PREPARED_BLUEPRINT_BYTES),
-                pattern_id: None,
                 scope_prefix: None,
-                kind: CandidateKind::Match {
-                    grammar_id: GrammarId(0),
-                    name: None,
-                    name_template: None,
-                    captures: Arc::new(CaptureSpec::default()),
-                },
+                rule: Arc::new(CandidateRule {
+                    pattern: "x".repeat(MAX_PREPARED_BLUEPRINT_BYTES).into(),
+                    pattern_id: None,
+                    kind: CandidateKind::Match {
+                        grammar_id: GrammarId(0),
+                        name: None,
+                        captures: Arc::new(CaptureSpec::default()),
+                    },
+                }),
             }],
             matchers: Arc::from([]),
             pattern_set_search: None,
@@ -8402,8 +9279,8 @@ mod tests {
             foo_set.blueprint.blueprint_arc(),
             bar_set.blueprint.blueprint_arc()
         ));
-        assert_eq!(foo_set.candidates[0].pattern, "^FOO$");
-        assert_eq!(bar_set.candidates[0].pattern, "^BAR$");
+        assert_eq!(&*foo_set.candidates[0].pattern, "^FOO$");
+        assert_eq!(&*bar_set.candidates[0].pattern, "^BAR$");
     }
 
     #[test]
@@ -8596,6 +9473,7 @@ mod tests {
             top_level: vec![RuleRef::Rule(RuleId(0))],
             injections: Vec::new(),
             scope_names: Vec::new(),
+            walk_summary: None,
         });
 
         let (contexts, complete) = compile_rule_repository_contexts(&grammars, root, &[], true);
@@ -8644,9 +9522,10 @@ mod tests {
     fn dense_repository_contexts_preserve_sparse_public_rule_ids() {
         let context = Arc::new(RepositoryBindings::default());
         let mut contexts = RuleRepositoryContexts::new(1);
+        let id = contexts.add_context(Arc::clone(&context)).unwrap();
 
-        assert!(contexts.insert_first(GrammarId(0), RuleId(99), 1, Arc::clone(&context)));
-        assert!(!contexts.insert_first(GrammarId(0), RuleId(99), 1, Arc::clone(&context)));
+        assert!(contexts.insert_first(GrammarId(0), RuleId(99), 1, id));
+        assert!(!contexts.insert_first(GrammarId(0), RuleId(99), 1, id));
         assert!(Arc::ptr_eq(
             contexts.get(GrammarId(0), RuleId(99)).unwrap(),
             &context
@@ -8689,6 +9568,7 @@ mod tests {
             top_level: vec![RuleRef::Rule(RuleId(0)); MAX_PREPARED_GRAMMAR_PENDING_REFS + 1],
             injections: Vec::new(),
             scope_names: Vec::new(),
+            walk_summary: None,
         });
 
         assert!(PreparedLanguage::try_new(grammars, root).is_err());
@@ -8782,7 +9662,7 @@ mod tests {
                 }"##,
             )
             .unwrap();
-        let selectors = compile_injection_selectors(&set, root);
+        let selectors = Arc::new(compile_injection_selectors(&set, root));
         let first = set.rule_repository_contexts(root, &selectors);
         let cloned = set.clone();
         let second = cloned.rule_repository_contexts(root, &selectors);
@@ -8791,7 +9671,7 @@ mod tests {
         let cached = Arc::downgrade(&first);
         set.load_and_add(r#"{"scopeName":"source.later","patterns":[]}"#)
             .unwrap();
-        let selectors = compile_injection_selectors(&set, root);
+        let selectors = Arc::new(compile_injection_selectors(&set, root));
         let after_mutation = set.rule_repository_contexts(root, &selectors);
         assert!(!Arc::ptr_eq(&first, &after_mutation));
 
@@ -8882,6 +9762,106 @@ mod tests {
                 .all(|scope| !scope.starts_with("root.")),
             "{line:#?}"
         );
+    }
+
+    /// Every rule the deferred lookup answers without the walk must have a
+    /// walk-assigned context that leaves its own includes unchanged.
+    fn assert_unscoped_contexts_are_inert(grammars: &GrammarSet, root: GrammarId) {
+        let injections = compile_injection_selectors(grammars, root);
+        let (eager, complete) =
+            compile_rule_repository_contexts(grammars, root, &injections, false);
+        assert!(complete);
+        let mut checked = 0usize;
+        for grammar in grammars.iter() {
+            let scoped = scoped_repository_rules(grammar);
+            for rule in &grammar.rules {
+                if scoped.contains(&rule.id) {
+                    continue;
+                }
+                let Some(context) = eager.get(grammar.id, rule.id) else {
+                    continue;
+                };
+                let (patterns, captures): (&[RuleRef], Vec<&Arc<CaptureSpec>>) = match &rule.body {
+                    RuleBody::Match { captures, .. } => (&[], vec![captures]),
+                    RuleBody::BeginEnd {
+                        patterns,
+                        begin_captures,
+                        end_captures,
+                        ..
+                    } => (patterns, vec![begin_captures, end_captures]),
+                    RuleBody::BeginWhile {
+                        patterns,
+                        begin_captures,
+                        while_captures,
+                        ..
+                    } => (patterns, vec![begin_captures, while_captures]),
+                    RuleBody::IncludeOnly { patterns } => (patterns, Vec::new()),
+                };
+                assert_eq!(
+                    contextualize_refs(patterns, Some(context)).as_ref(),
+                    patterns,
+                    "{} rule {:?}",
+                    grammar.scope_name,
+                    rule.id
+                );
+                for spec in captures {
+                    assert_eq!(
+                        contextualize_capture_spec(spec, Some(context)).as_ref(),
+                        spec.as_ref(),
+                        "{} rule {:?}",
+                        grammar.scope_name,
+                        rule.id
+                    );
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 0);
+    }
+
+    #[test]
+    fn deferred_repository_contexts_skip_only_inert_contexts() {
+        let grammar = r##"{
+                "scopeName": "source.deferred-context",
+                "patterns": [{"include":"#shared"}, {"include":"#nested"}, {"include":"#other"}],
+                "repository": {
+                    "shared": {"begin":"<", "end":">", "patterns":[{"include":"#value"}]},
+                    "value": {"match":"x", "name":"root.value"},
+                    "other": {"begin":"\\[", "end":"\\]", "patterns":[{"include":"#plain"}]},
+                    "plain": {"match":"p", "name":"root.plain"},
+                    "nested": {
+                        "repository": {
+                            "value": {"match":"x", "name":"local.value"},
+                            "deeper": {
+                                "repository": {"plain": {"match":"q", "name":"local.plain"}},
+                                "patterns": [{"include":"#other"}, {"include":"$self"}]
+                            }
+                        },
+                        "patterns": [{"include":"#shared"}, {"include":"#deeper"}]
+                    }
+                }
+            }"##;
+        let mut grammars = GrammarSet::new();
+        let root = grammars.load_and_add(grammar).unwrap();
+        assert_unscoped_contexts_are_inert(&grammars, root);
+
+        #[cfg(feature = "bundled-grammars")]
+        for language in [
+            "html",
+            "ruby",
+            "objective-c",
+            "objective-cpp",
+            "cadence",
+            "clarity",
+            "crystal",
+            "wikitext",
+            "typst",
+            "markdown",
+            "php",
+        ] {
+            let (grammars, root) = crate::engine::load_grammar_set(language).unwrap();
+            assert_unscoped_contexts_are_inert(&grammars, root);
+        }
     }
 
     #[test]
@@ -9149,6 +10129,62 @@ mod tests {
     }
 
     #[test]
+    fn capture_retokenization_shares_blueprints_across_outer_scopes() {
+        let grammar = r##"{
+            "scopeName": "source.inline-share",
+            "patterns": [
+                {"begin":"<", "end":">", "name":"meta.angle.inline-share",
+                 "patterns":[{"include":"#pair"}]},
+                {"begin":"\\[", "end":"\\]", "name":"meta.square.inline-share",
+                 "patterns":[{"include":"#pair"}]}
+            ],
+            "repository": {
+                "pair": {
+                    "match":"(\\w+)=(\\w+)",
+                    "captures": {
+                        "1": {"patterns":[{"include":"#word"}]},
+                        "2": {"patterns":[{"include":"#word"}]}
+                    }
+                },
+                "word": {"patterns":[
+                    {"match":"[a-z]+", "name":"word.lower.inline-share"},
+                    {"match":"[0-9]+", "name":"word.digit.inline-share"}
+                ]}
+            }
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        tokenizer.set_counters_enabled(true);
+        let line = tokenizer.tokenize_line_scopes("<a=1> [b=2]", TokenizerState::default());
+        let scopes_at = |text: &str| {
+            line.tokens
+                .iter()
+                .find(|token| &"<a=1> [b=2]"[token.range.clone()] == text)
+                .map(|token| token.scopes.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            scopes_at("a"),
+            [
+                "source.inline-share",
+                "meta.angle.inline-share",
+                "word.lower.inline-share"
+            ]
+        );
+        assert_eq!(
+            scopes_at("2"),
+            [
+                "source.inline-share",
+                "meta.square.inline-share",
+                "word.digit.inline-share"
+            ]
+        );
+        // Root, the two containers, and one capture set shared by all four
+        // captures even though they retokenize under different outer scopes.
+        let counters = tokenizer.counters();
+        assert_eq!(counters.pattern_set_construction_count, 4, "{counters:#?}");
+    }
+
+    #[test]
     fn warm_candidate_entry_does_not_recompile_or_rebuild_pattern_set() {
         let grammar = r##"{
             "scopeName": "source.warm-candidates",
@@ -9199,13 +10235,19 @@ mod tests {
                 .contains(&"string.second.duplicate-pattern-id".to_owned())
         );
 
+        // Both rules keep their own static pattern slot, while byte-identical
+        // text with the same capture layout compiles once and is shared.
+        let mut keys = tokenizer.matcher_cache.keys().copied().collect::<Vec<_>>();
+        keys.sort_by_key(|(grammar_id, pattern_id)| (grammar_id.0, pattern_id.0));
+        assert_eq!(keys.len(), 2);
+        assert_ne!(keys[0], keys[1]);
+        assert!(Arc::ptr_eq(
+            &tokenizer.matcher_cache[&keys[0]],
+            &tokenizer.matcher_cache[&keys[1]]
+        ));
         let counters = tokenizer.counters();
-        assert_eq!(counters.regex_compile_count, 2, "{counters:#?}");
-        assert_eq!(counters.pattern_compile_counts.len(), 2, "{counters:#?}");
-        assert_ne!(
-            counters.pattern_compile_counts[0].pattern_id,
-            counters.pattern_compile_counts[1].pattern_id
-        );
+        assert_eq!(counters.regex_compile_count, 1, "{counters:#?}");
+        assert_eq!(counters.pattern_compile_counts.len(), 1, "{counters:#?}");
     }
 
     #[test]
@@ -9271,15 +10313,16 @@ mod tests {
         let candidate = |name: &str| Candidate {
             order: 0,
             base_grammar_id: GrammarId(0),
-            pattern: "pattern".to_owned(),
-            pattern_id: None,
             scope_prefix: None,
-            kind: CandidateKind::Match {
-                grammar_id: GrammarId(0),
-                name: Some(name.to_owned()),
-                name_template: None,
-                captures: Arc::new(CaptureSpec::default()),
-            },
+            rule: Arc::new(CandidateRule {
+                pattern: Arc::from("pattern"),
+                pattern_id: None,
+                kind: CandidateKind::Match {
+                    grammar_id: GrammarId(0),
+                    name: Some(Arc::from(name)),
+                    captures: Arc::new(CaptureSpec::default()),
+                },
+            }),
         };
 
         assert!(!candidate_requires_capture_replay(&candidate(
@@ -9351,6 +10394,66 @@ mod tests {
         let distinct = tokenizer.cached_dynamic_matcher_with_live_captures("(x)", vec![]);
         assert!(Arc::ptr_eq(&first, &reused));
         assert!(!Arc::ptr_eq(&first, &distinct));
+    }
+
+    #[test]
+    fn identical_static_patterns_share_matchers_across_grammars() {
+        let mut grammars = GrammarSet::new();
+        let root = grammars
+            .load_and_add(
+                r#"{
+                    "scopeName": "source.shared-host",
+                    "patterns": [
+                        {"begin": "<<", "end": ">>", "name": "meta.embedded.shared-host",
+                         "patterns": [{"include": "source.shared-guest"}]},
+                        {"match": "(k)(w)", "captures": {"1": {"name": "keyword.host"}}},
+                        {"match": "(n)(w)", "captures": {"1": {"name": "keyword.host"}}}
+                    ]
+                }"#,
+            )
+            .unwrap();
+        grammars
+            .load_and_add(
+                r#"{
+                    "scopeName": "source.shared-guest",
+                    "patterns": [
+                        {"match": "(k)(w)", "captures": {"1": {"name": "keyword.guest"}}},
+                        {"match": "(n)(w)", "captures": {"2": {"name": "keyword.guest"}}}
+                    ]
+                }"#,
+            )
+            .unwrap();
+        let mut tokenizer = TextMateTokenizer::new(grammars, root);
+        let line = tokenizer.tokenize_line_scopes("kw nw << kw nw >>", TokenizerState::default());
+        let scopes_at = |start: usize| {
+            line.tokens
+                .iter()
+                .find(|token| token.range.start == start)
+                .map(|token| token.scopes.clone())
+                .unwrap()
+        };
+        assert!(scopes_at(0).iter().any(|scope| scope == "keyword.host"));
+        assert!(scopes_at(3).iter().any(|scope| scope == "keyword.host"));
+        assert!(scopes_at(9).iter().any(|scope| scope == "keyword.guest"));
+        assert!(scopes_at(13).iter().any(|scope| scope == "keyword.guest"));
+
+        let matchers = |source: &str| {
+            tokenizer
+                .matcher_cache
+                .values()
+                .filter(|matcher| matcher.source() == source)
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // Same source and live capture layout: one compiled matcher.
+        let shared = matchers("(k)(w)");
+        assert_eq!(shared.len(), 2);
+        assert!(Arc::ptr_eq(&shared[0], &shared[1]));
+        // Same source, different live captures: distinct matchers.
+        let distinct = matchers("(n)(w)");
+        assert_eq!(distinct.len(), 2);
+        assert!(!Arc::ptr_eq(&distinct[0], &distinct[1]));
+        assert!(!distinct[0].has_same_live_captures(&distinct[1]));
     }
 
     #[test]
@@ -9680,6 +10783,53 @@ mod tests {
     }
 
     #[test]
+    fn output_scope_table_reuses_emitted_ancestors_in_any_order() {
+        let mut scope_names = ScopeInterner::default();
+        let mut scope_stacks = ScopeStackInterner::default();
+        let source = scope_names.intern("source.fixture");
+        let nested = scope_names.intern("meta.nested");
+        let leaf = scope_names.intern("keyword.leaf");
+        let root = scope_stacks.push(scope_stacks.empty(), source, &scope_names);
+        let mut stack = root;
+        let mut depths = Vec::new();
+        for _ in 0..3 {
+            stack = scope_stacks.push(stack, nested, &scope_names);
+            depths.push(stack);
+        }
+        let deep_leaf = scope_stacks.push(stack, leaf, &scope_names);
+        // A sibling that shares a non-emitted ancestor.
+        let other = scope_names.intern("string.other");
+        let sibling = scope_stacks.push(depths[1], other, &scope_names);
+
+        // Descendants before ancestors, and an ancestor that is never emitted.
+        let mut builder = OutputScopeTableBuilder::new();
+        let emitted = [deep_leaf, depths[0], sibling, depths[2], root];
+        let refs = emitted.map(|stack| builder.intern_engine_stack(stack));
+        let mut cache = OutputScopeTableCache::default();
+        let table = builder.finish(&scope_stacks, &scope_names, &mut cache);
+
+        for (stack, output) in emitted.iter().zip(refs) {
+            let expected = scope_stacks.resolve(*stack, &scope_names);
+            assert_eq!(
+                table.stack_names(output).collect::<Vec<_>>(),
+                expected.iter().map(String::as_str).collect::<Vec<_>>()
+            );
+        }
+        // Atoms keep first-appearance order across the emitted stacks.
+        assert_eq!(table.atom_count(), 4);
+        assert_eq!(
+            table.stack(refs[0]).unwrap(),
+            &[
+                ScopeAtomId(0),
+                ScopeAtomId(1),
+                ScopeAtomId(1),
+                ScopeAtomId(1),
+                ScopeAtomId(2)
+            ]
+        );
+    }
+
+    #[test]
     fn begin_captures_preserve_text_consumed_after_continuation_anchor() {
         let grammar = r##"{
             "scopeName": "source.fixture",
@@ -9717,6 +10867,36 @@ mod tests {
             "{:?}",
             line.tokens
         );
+    }
+
+    #[test]
+    fn source_walk_summaries_match_a_full_rule_ref_scan() {
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/grammars/languages");
+        let mut checked = 0usize;
+        for entry in std::fs::read_dir(directory).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|extension| extension != "json") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).unwrap();
+            let grammar = load_dev_grammar_from_str(GrammarId(0), &source).unwrap();
+            // External order only affects traversal order of a set union.
+            let sorted = |mut summary: GrammarWalkSummary| {
+                summary
+                    .external_scopes
+                    .sort_unstable_by_key(|scope| scope.0);
+                summary
+            };
+            assert_eq!(
+                grammar.walk_summary.clone().map(sorted),
+                Some(sorted(scan_walk_summary(&grammar))),
+                "{}",
+                path.display()
+            );
+            checked += 1;
+        }
+        assert!(checked > 100);
     }
 
     fn core_tokenizer(language: &str) -> TextMateTokenizer {
@@ -9901,5 +11081,250 @@ mod tests {
         line.tokens
             .iter()
             .any(|token| token.scopes.iter().any(|scope| scope == expected))
+    }
+}
+
+#[cfg(all(test, feature = "bundled-grammars"))]
+mod lazy_bundle_tests {
+    use super::*;
+    use crate::engine::{compiled_grammar_closure, load_grammar_set};
+
+    fn bindings(context: Option<&Arc<RepositoryBindings>>) -> BTreeMap<String, String> {
+        let mut flattened = BTreeMap::new();
+        let mut current = context.map(Arc::as_ref);
+        while let Some(bindings) = current {
+            for (name, binding) in &bindings.local {
+                flattened
+                    .entry(name.clone())
+                    .or_insert_with(|| binding.clone());
+            }
+            current = bindings.parent.as_deref();
+        }
+        flattened
+    }
+
+    fn is_decoded(grammars: &GrammarSet, id: GrammarId) -> bool {
+        grammars.grammars[id.0 as usize].grammar.get().is_some()
+    }
+
+    #[test]
+    fn lazy_bundled_sets_match_eager_closure_walks() {
+        let bundle = crate::grammars::embedded_bundle();
+        for language in &bundle.languages {
+            let name = &language.canonical;
+            let (lazy, root) = load_grammar_set(name).unwrap();
+            let mut eager = GrammarSet::new();
+            for grammar in compiled_grammar_closure(bundle, &language.scope_name).unwrap() {
+                eager.add(grammar);
+            }
+            assert_eq!(lazy.len(), eager.len(), "{name}");
+            assert_eq!(
+                Some(root),
+                eager.grammar_id_by_scope(&language.scope_name),
+                "{name}"
+            );
+
+            let lazy_injections = compile_injection_selectors(&lazy, root);
+            let eager_injections = compile_injection_selectors(&eager, root);
+            assert_eq!(
+                format!("{lazy_injections:?}"),
+                format!("{eager_injections:?}"),
+                "{name}"
+            );
+            let (lazy_contexts, _) =
+                compile_rule_repository_contexts(&lazy, root, &lazy_injections, false);
+            let (eager_contexts, _) =
+                compile_rule_repository_contexts(&eager, root, &eager_injections, false);
+            // The bounded walk never skips a grammar, so it is the reference
+            // for the unbounded walk's trait-based skips of loaded grammars.
+            let (full_contexts, full_complete) =
+                compile_rule_repository_contexts(&eager, root, &eager_injections, true);
+            assert!(full_complete, "{name}");
+            for grammar in eager.iter() {
+                for rule in &grammar.rules {
+                    let eager_bindings = bindings(eager_contexts.get(grammar.id, rule.id));
+                    assert_eq!(
+                        bindings(lazy_contexts.get(grammar.id, rule.id)),
+                        eager_bindings,
+                        "{name}: {} rule {}",
+                        grammar.scope_name,
+                        rule.id.0
+                    );
+                    assert_eq!(
+                        eager_bindings,
+                        bindings(full_contexts.get(grammar.id, rule.id)),
+                        "{name}: {} rule {} (full walk)",
+                        grammar.scope_name,
+                        rule.id.0
+                    );
+                }
+            }
+            for grammar in lazy.iter() {
+                assert_eq!(Some(grammar), eager.grammar(grammar.id), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn recorded_availability_proofs_match_the_include_search() {
+        let bundle = crate::grammars::embedded_bundle();
+        let host = r#"{"scopeName":"source.availability-host","patterns":[]}"#;
+        let tokenizer_with = |blob: usize| {
+            let mut grammars = GrammarSet::new();
+            let root = grammars.load_and_add(host).unwrap();
+            let external = grammars.add_lazy(LazyGrammar {
+                blob: &bundle.grammar_blobs[blob],
+                traits: ClosureMemberTraits::default(),
+                top_level_availability: bundle.grammar_graphs[blob]
+                    .top_level_availability
+                    .as_deref(),
+                repository_walk_skeleton: None,
+            });
+            (TextMateTokenizer::new(grammars, root), root, external)
+        };
+        let cache = |tokenizer: &TextMateTokenizer| {
+            let mut entries = tokenizer
+                .include_availability_cache
+                .borrow()
+                .iter()
+                .map(|(node, available)| (format!("{node:?}"), *available))
+                .collect::<Vec<_>>();
+            entries.sort();
+            entries
+        };
+        let mut proven = 0;
+        for (blob, graph) in bundle.grammar_graphs.iter().enumerate() {
+            if graph.top_level_availability.is_none() {
+                continue;
+            }
+            let (recorded, root, external) = tokenizer_with(blob);
+            let shortcut = recorded.undecoded_top_level_available(external, root, 1);
+            assert!(!is_decoded(recorded.grammars(), external));
+
+            let (searched, root, external) = tokenizer_with(blob);
+            assert!(searched.grammars().grammar(external).is_some());
+            let available =
+                searched.top_level_has_available_rule(external, root, &mut FastSet::default(), 1);
+            let language = &bundle.grammar_blobs[blob].language;
+            assert_eq!(shortcut, Some(available), "{language}");
+            assert_eq!(cache(&recorded), cache(&searched), "{language}");
+            proven += 1;
+        }
+        assert!(proven > 0);
+
+        // Near the include-depth cutoff the tokenizer keeps the full search.
+        let (blob, _) = bundle
+            .grammar_graphs
+            .iter()
+            .enumerate()
+            .find(|(_, graph)| {
+                graph
+                    .top_level_availability
+                    .as_ref()
+                    .is_some_and(|steps| !steps.is_empty())
+            })
+            .unwrap();
+        let (tokenizer, root, external) = tokenizer_with(blob);
+        assert_eq!(
+            tokenizer.undecoded_top_level_available(external, root, MAX_INCLUDE_DEPTH - 1),
+            None
+        );
+    }
+
+    /// Construction as it was before bundles recorded closures: decode every
+    /// member, then walk the whole closure.
+    fn eager_bundled_tokenizer(language: &str) -> TextMateTokenizer {
+        let bundle = crate::grammars::embedded_bundle();
+        let scope = &bundle
+            .grammar_blob_for_language(language)
+            .unwrap()
+            .scope_name;
+        let mut grammars = GrammarSet::new();
+        for grammar in compiled_grammar_closure(bundle, scope).unwrap() {
+            grammars.add(grammar);
+        }
+        let root = grammars.grammar_id_by_scope(scope).unwrap();
+        TextMateTokenizer::new(grammars, root)
+    }
+
+    #[test]
+    fn lazy_bundled_tokenizers_match_eager_output_on_fixtures() {
+        let manifest = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/textmate/cases.toml"),
+        )
+        .unwrap();
+        let manifest = manifest.parse::<toml::Table>().unwrap();
+        let bundle = crate::grammars::embedded_bundle();
+        let mut compared = 0;
+        for case in manifest["case"].as_array().unwrap() {
+            let language = case["language"].as_str().unwrap();
+            // Single-grammar closures take no lazy path beyond the root.
+            let Some(root) = bundle.grammar_blob_index_for_language(language) else {
+                continue;
+            };
+            if bundle.grammar_graphs[root].closure.len() < 2 {
+                continue;
+            }
+            let fixture = case["fixture"].as_str().unwrap();
+            let source = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(fixture),
+            )
+            .unwrap();
+            let (grammars, root) = load_grammar_set(language).unwrap();
+            let mut lazy = TextMateTokenizer::new(grammars, root);
+            let mut eager = eager_bundled_tokenizer(language);
+            let mut lazy_state = TokenizerState::default();
+            let mut eager_state = TokenizerState::default();
+            for (index, line) in source.lines().enumerate() {
+                let line = format!("{line}\n");
+                let lazy_line = lazy.tokenize_line_scopes_at_line(&line, lazy_state, index);
+                let eager_line = eager.tokenize_line_scopes_at_line(&line, eager_state, index);
+                assert_eq!(
+                    lazy_line.tokens,
+                    eager_line.tokens,
+                    "{fixture} line {}",
+                    index + 1
+                );
+                lazy_state = lazy_line.state;
+                eager_state = eager_line.state;
+            }
+            compared += 1;
+        }
+        assert!(compared > 0);
+    }
+
+    #[test]
+    fn bundled_tokenizer_decodes_embedded_grammars_on_first_use() {
+        let (grammars, root) = load_grammar_set("markdown").unwrap();
+        let rust = grammars.grammar_id_by_scope("source.rust").unwrap();
+        let mut tokenizer = TextMateTokenizer::new(grammars, root);
+        let total = tokenizer.grammars().len();
+        let decoded = tokenizer.grammars().decoded_count();
+        assert!(
+            decoded * 2 < total,
+            "construction decoded {decoded} of {total} closure grammars"
+        );
+        assert!(!is_decoded(tokenizer.grammars(), rust));
+
+        let mut state = TokenizerState::default();
+        for line in ["# Title", "", "plain *text*"] {
+            state = tokenizer
+                .tokenize_line_scopes(&format!("{line}\n"), state)
+                .state;
+        }
+        assert!(!is_decoded(tokenizer.grammars(), rust));
+
+        state = tokenizer.tokenize_line_scopes("```rust\n", state).state;
+        let line = tokenizer.tokenize_line_scopes("fn main() {}\n", state);
+        assert!(is_decoded(tokenizer.grammars(), rust));
+        assert!(
+            line.tokens.iter().any(|token| token
+                .scopes
+                .iter()
+                .any(|scope| scope == "keyword.other.fn.rust")),
+            "{:?}",
+            line.tokens
+        );
     }
 }

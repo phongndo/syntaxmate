@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "oracle": {
-    "vscodeTextmate": "9.2.0",
+    "vscodeTextmate": "9.3.2",
     "vscodeOniguruma": "1.7.0",
     "semanticHighlighting": false
   },
@@ -9,7 +9,7 @@
   "fixtureFiles": 546,
   "publicLanguages": 264,
   "fixtureLanguageLabels": 265,
-  "fixtureTokens": 466480,
-  "uniqueScopeStacks": 60901,
+  "fixtureTokens": 468352,
+  "uniqueScopeStacks": 61653,
   "mismatches": []
 }
