@@ -40,6 +40,16 @@ impl StepBudget {
         Ok(())
     }
 
+    /// Charges `steps` units of work at once.
+    pub(crate) fn charge(&mut self, steps: usize) -> Result<(), BudgetExceeded> {
+        if self.remaining < steps {
+            self.remaining = 0;
+            return Err(BudgetExceeded);
+        }
+        self.remaining -= steps;
+        Ok(())
+    }
+
     pub fn used(&self) -> usize {
         self.limit - self.remaining
     }

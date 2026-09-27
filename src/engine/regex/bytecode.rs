@@ -1805,6 +1805,14 @@ impl Program {
                     // per slot instead of replaying their callees' logs.
                     let generation = scratch.next_restore_generation();
                     let capture_end = scratch.capture_undo.len();
+                    let repeat_end = scratch.repeat_undo.len();
+                    // The scan is linear in the undo entries since the call,
+                    // which backtracking into a returned routine can revisit;
+                    // charge it like the steps that logged them.
+                    budget.charge(
+                        (capture_end - arena_index(frame.capture_undo_mark))
+                            + (repeat_end - arena_index(frame.repeat_undo_mark)),
+                    )?;
                     for index in arena_index(frame.capture_undo_mark)..capture_end {
                         let (slot, previous) = scratch.capture_undo[index].clone();
                         let stamp = &mut scratch.capture_restore_stamps[arena_index(slot)];
@@ -1819,7 +1827,6 @@ impl Program {
                     // A recursive call reuses its caller's loop slots. Put
                     // every slot the call changed back to its value at the
                     // call.
-                    let repeat_end = scratch.repeat_undo.len();
                     for index in arena_index(frame.repeat_undo_mark)..repeat_end {
                         let undo = scratch.repeat_undo[index];
                         let stamp = &mut scratch.repeat_restore_stamps[undo.slot()];
