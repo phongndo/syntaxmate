@@ -108,7 +108,7 @@ export const conformanceCases = Object.freeze([
   { name: 'scoped-im-flags-cleared', pattern: '(?im:^foo(?-im:$))', line: 'FOO', engine: 'fallback', constructs: ['inline-flags.scoped-set', 'inline-flags.scoped-clear', 'anchor.line-start'] },
   { name: 'global-flag-clearing', pattern: '(?i)foo(?-i)BAR', line: 'FOOBAR', engine: 'fallback', constructs: ['inline-flags.global-set', 'inline-flags.global-clear'] },
   { name: 'bare-flag-remainder-alternation', pattern: 'a(?i)b|c', line: 'aC', engine: 'fallback', constructs: ['inline-flags.global-set'] },
-  { name: 'ignore-case-range-excludes-bound-punctuation', pattern: String.raw`(?i)x?[]!$%\&*+\--9<-\[^_a-{}~]`, line: '\\', engine: 'auto', expectMiss: true, constructs: ['inline-flags.global-set'] },
+  { name: 'ignore-case-range-excludes-bound-punctuation', pattern: String.raw`(?i)x?[]!$%\&\*+\--9<-\[\^_a-{}~]`, line: '\\', engine: 'auto', expectMiss: true, constructs: ['inline-flags.global-set'] },
   { name: 'ignore-case-range-other-case', pattern: String.raw`(?i)[@-C]`, line: 'c', engine: 'auto', constructs: ['inline-flags.global-set'] },
   { name: 'ignore-case-range-kelvin-sign', pattern: '(?i)[\u2100-\u2200]', line: 'k', engine: 'fallback', constructs: ['inline-flags.global-set'] },
   { name: 'ignore-case-range-final-sigma', pattern: '(?i)[σ-σ]', line: 'ς', engine: 'fallback', constructs: ['inline-flags.global-set'] },
