@@ -5,15 +5,15 @@ use std::{ops::Range, sync::Arc};
 #[cfg(feature = "bundled-themes")]
 use crate::theme::BuiltinTextMateTheme;
 use crate::{
-    Error, HighlightScopeTable, Result, ScopeStackRef,
-    theme::{ResolvedSyntaxStyle, TextMateTheme},
-    tokenizer::{HighlightStatus, TokenizedDocument},
+    Error, Result, ScopeStackId,
+    theme::{Style, TextMateTheme},
+    tokenizer::{HighlightStatus, Scopes, Token, TokenizedDocument},
 };
 #[cfg(feature = "bundled-grammars")]
 use crate::{
     TokenizerOptions,
-    engine::{state::ScopeStackId, tokenizer::SharedScopeSink},
-    tokenizer::{Tokenizer, TokenizerState},
+    engine::{state::ScopeStackId as EngineScopeStackId, tokenizer::SharedScopeSink},
+    tokenizer::{TokenScopes, Tokenizer, TokenizerState},
 };
 
 /// A parsed TextMate theme that can be shared across highlighting sessions.
@@ -40,6 +40,7 @@ impl ThemeInner {
 }
 
 impl Theme {
+    /// Parses a TextMate JSON theme, returning [`Error::Theme`] for invalid input.
     pub fn from_json(json: &str) -> Result<Self> {
         TextMateTheme::from_json(json)
             .map(|theme| Self {
@@ -48,6 +49,7 @@ impl Theme {
             .map_err(Error::Theme)
     }
 
+    /// Loads a bundled theme by name, returning an error for an unknown name.
     #[cfg(feature = "bundled-themes")]
     pub fn bundled(name: &str) -> Result<Self> {
         let theme = BuiltinTextMateTheme::from_name(name)
@@ -57,32 +59,79 @@ impl Theme {
         })
     }
 
+    /// Returns the theme name.
     pub fn name(&self) -> &str {
         self.inner.get().name()
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = ResolvedSyntaxStyle> + '_ {
+    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = Style> + '_ {
         self.inner.get().rendering_styles()
     }
 
-    /// Resolves a style for an interned exact TextMate scope stack.
-    pub fn resolve(
-        &self,
-        table: &HighlightScopeTable,
-        stack: ScopeStackRef,
-    ) -> ResolvedSyntaxStyle {
-        self.inner.get().resolve(table, stack)
+    /// Builds a theme from ordered TextMate rules, returning [`Error::Theme`] on invalid settings.
+    pub fn from_rules(rules: &[crate::ThemeRule]) -> Result<Self> {
+        TextMateTheme::from_rules(rules)
+            .map(|theme| Self {
+                inner: ThemeInner::Owned(Arc::new(theme)),
+            })
+            .map_err(Error::Theme)
+    }
+
+    /// Returns the theme's default foreground, background, and font modifiers.
+    pub fn default_style(&self) -> Style {
+        self.inner.get().default_style()
+    }
+
+    /// Looks up a named UI color, such as `editor.background`.
+    pub fn color(&self, name: &str) -> Option<crate::RgbColor> {
+        self.inner.get().color(name)
+    }
+
+    /// Resolves the remaining ordered scope names in a borrowed view.
+    /// Whole-document views reuse the intern table's resolved-style cache.
+    pub fn resolve(&self, scopes: Scopes<'_>) -> Style {
+        self.inner.get().resolve_scopes(scopes)
     }
 
     /// Resolves a style for a standalone ordered list of scope names.
-    pub fn resolve_scope_names(&self, scopes: &[&str]) -> ResolvedSyntaxStyle {
-        let (table, stack) = HighlightScopeTable::from_scope_names(scopes);
-        self.inner.get().resolve(&table, stack)
+    pub fn resolve_scope_names(&self, scopes: &[&str]) -> Style {
+        self.inner.get().resolve_names(scopes)
+    }
+
+    /// Resolves a style together with diagnostic selector and match metadata.
+    #[cfg(feature = "diagnostics")]
+    pub fn resolve_with_match(&self, scopes: Scopes<'_>) -> crate::ThemeMatch<'_> {
+        self.inner.get().inspect_scopes(&scopes)
+    }
+
+    /// Resolves property-match flags for diagnostic tooling.
+    #[cfg(feature = "diagnostics")]
+    pub fn resolve_style(&self, scopes: Scopes<'_>) -> crate::ResolvedThemeStyle {
+        let matched = self.resolve_with_match(scopes);
+        crate::ResolvedThemeStyle {
+            foreground_matched: matched.foreground_matched,
+            background_matched: matched.background_matched,
+            modifiers_matched: matched.modifiers_matched,
+            style: matched.style,
+        }
+    }
+
+    #[cfg(all(
+        feature = "bundled-grammars",
+        feature = "bundled-themes",
+        any(feature = "html", feature = "ansi")
+    ))]
+    pub(crate) fn resolve_interned(
+        &self,
+        table: &crate::HighlightScopeTable,
+        stack: ScopeStackId,
+    ) -> Style {
+        self.inner.get().resolve(table, stack)
     }
 
     #[cfg(feature = "bundled-grammars")]
-    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> ResolvedSyntaxStyle {
+    pub(crate) fn resolve_shared_scope_names(&self, scopes: &[Arc<str>]) -> Style {
         self.inner.get().resolve_shared_scope_names(scopes)
     }
 }
@@ -97,6 +146,7 @@ pub struct Highlighter {
 
 #[cfg(feature = "bundled-grammars")]
 impl Highlighter {
+    /// Creates a highlighter backed by the bundled language catalog.
     #[cfg(feature = "bundled-grammars")]
     pub fn bundled() -> Result<Self> {
         if crate::grammars::available_languages().is_empty() {
@@ -110,6 +160,7 @@ impl Highlighter {
         })
     }
 
+    /// Creates a bundled highlighter with caller-supplied resource limits.
     #[cfg(feature = "bundled-grammars")]
     pub fn with_options(options: TokenizerOptions) -> Result<Self> {
         let mut highlighter = Self::bundled()?;
@@ -209,6 +260,7 @@ impl Highlighter {
         crate::render::render_ansi_compact(source, &tokens, status, &theme, options)
     }
 
+    /// Tokenizes and styles a document with a caller-supplied theme.
     #[cfg(feature = "bundled-grammars")]
     pub fn highlight_with_theme(
         &mut self,
@@ -260,19 +312,18 @@ impl Highlighter {
 pub fn style_document(tokenized: TokenizedDocument, theme: &Theme) -> HighlightedDocument {
     let status = tokenized.status();
     let lines = tokenized
-        .lines()
-        .iter()
+        .lines
+        .into_iter()
         .map(|line| HighlightedLine {
-            spans: line
-                .spans()
-                .iter()
-                .map(|span| HighlightedSpan {
-                    range: span.range(),
-                    scope_stack: span.scope_stack(),
-                    style: theme.resolve(line.scope_table(), span.scope_stack()),
+            tokens: line
+                .tokens
+                .into_iter()
+                .map(|token| {
+                    let style = theme.resolve(token.scopes());
+                    HighlightedToken { token, style }
                 })
                 .collect(),
-            scopes: Arc::clone(line.scope_table()),
+            status: line.status,
         })
         .collect();
     HighlightedDocument {
@@ -290,17 +341,12 @@ const MAX_INCREMENTAL_STYLE_CACHE_ENTRIES: usize = 8_192;
 #[cfg(feature = "bundled-grammars")]
 #[derive(Debug, Default)]
 struct IncrementalStyleCache {
-    styles: Vec<Option<ResolvedSyntaxStyle>>,
+    styles: Vec<Option<Style>>,
 }
 
 #[cfg(feature = "bundled-grammars")]
 impl IncrementalStyleCache {
-    fn resolve(
-        &mut self,
-        stack: ScopeStackId,
-        scopes: &[Arc<str>],
-        theme: &Theme,
-    ) -> ResolvedSyntaxStyle {
+    fn resolve(&mut self, stack: EngineScopeStackId, scopes: &[Arc<str>], theme: &Theme) -> Style {
         let index = stack.0 as usize;
         if let Some(style) = self.styles.get(index).copied().flatten() {
             return style;
@@ -322,7 +368,7 @@ struct IncrementalSpanVecSink<'a> {
     line: &'a str,
     theme: &'a Theme,
     style_cache: &'a mut IncrementalStyleCache,
-    spans: &'a mut Vec<IncrementalHighlightedSpan>,
+    spans: &'a mut Vec<HighlightedToken>,
 }
 
 #[cfg(feature = "bundled-grammars")]
@@ -335,7 +381,12 @@ impl SharedScopeSink for IncrementalSpanVecSink<'_> {
         }
     }
 
-    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+    fn push(
+        &mut self,
+        range: Range<usize>,
+        stack: EngineScopeStackId,
+        scopes: Arc<crate::types::ScopeStorage>,
+    ) {
         if let Some(span) = incremental_span(
             self.line,
             range,
@@ -358,10 +409,15 @@ struct IncrementalSpanCallbackSink<'a, F> {
 }
 
 #[cfg(feature = "bundled-grammars")]
-impl<F: FnMut(IncrementalHighlightedSpan)> SharedScopeSink for IncrementalSpanCallbackSink<'_, F> {
+impl<F: FnMut(HighlightedToken)> SharedScopeSink for IncrementalSpanCallbackSink<'_, F> {
     fn reserve(&mut self, _span_count: usize) {}
 
-    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+    fn push(
+        &mut self,
+        range: Range<usize>,
+        stack: EngineScopeStackId,
+        scopes: Arc<crate::types::ScopeStorage>,
+    ) {
         if let Some(span) = incremental_span(
             self.line,
             range,
@@ -379,18 +435,23 @@ impl<F: FnMut(IncrementalHighlightedSpan)> SharedScopeSink for IncrementalSpanCa
 fn incremental_span(
     line: &str,
     range: Range<usize>,
-    stack: ScopeStackId,
-    scopes: Arc<[Arc<str>]>,
+    stack: EngineScopeStackId,
+    scopes: Arc<crate::types::ScopeStorage>,
     theme: &Theme,
     style_cache: &mut IncrementalStyleCache,
-) -> Option<IncrementalHighlightedSpan> {
+) -> Option<HighlightedToken> {
     let start = range.start.min(line.len());
     let end = range.end.min(line.len());
     (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then(|| {
-        IncrementalHighlightedSpan {
-            range: start..end,
-            style: style_cache.resolve(stack, &scopes, theme),
-            scopes,
+        HighlightedToken {
+            style: style_cache.resolve(stack, scopes.shared_names(), theme),
+            token: Token {
+                range: start..end,
+                scopes: TokenScopes {
+                    owner: Some(scopes),
+                    stack: ScopeStackId::default(),
+                },
+            },
         }
     })
 }
@@ -410,10 +471,14 @@ pub struct HighlightSession {
 
 #[cfg(feature = "bundled-grammars")]
 impl HighlightSession {
-    pub fn highlight_line(&mut self, line: &str) -> Result<IncrementalHighlightedLine> {
+    /// Highlights one logical line without newline terminators and advances continuation state.
+    pub fn highlight_line(&mut self, line: &str) -> Result<HighlightedLine> {
         let mut spans = Vec::new();
         let status = self.highlight_line_into(line, &mut spans)?;
-        Ok(IncrementalHighlightedLine { spans, status })
+        Ok(HighlightedLine {
+            tokens: spans,
+            status,
+        })
     }
 
     /// Highlights one logical line into a caller-owned reusable span buffer.
@@ -423,7 +488,7 @@ impl HighlightSession {
     pub fn highlight_line_into(
         &mut self,
         line: &str,
-        spans: &mut Vec<IncrementalHighlightedSpan>,
+        spans: &mut Vec<HighlightedToken>,
     ) -> Result<HighlightStatus> {
         self.tokenizer.validate_line(line, &self.state)?;
         spans.clear();
@@ -445,7 +510,7 @@ impl HighlightSession {
     pub fn highlight_line_with(
         &mut self,
         line: &str,
-        sink: impl FnMut(IncrementalHighlightedSpan),
+        sink: impl FnMut(HighlightedToken),
     ) -> Result<HighlightStatus> {
         let mut sink = IncrementalSpanCallbackSink {
             line,
@@ -465,97 +530,75 @@ impl HighlightSession {
         self.state = self.tokenizer.initial_state();
     }
 
+    /// Borrows the current continuation state.
     pub fn state(&self) -> &TokenizerState {
         &self.state
     }
 }
 
+/// One styled token with a line-relative byte range and exact ordered scopes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HighlightedSpan {
-    range: Range<usize>,
-    scope_stack: ScopeStackRef,
-    style: ResolvedSyntaxStyle,
+pub struct HighlightedToken {
+    token: Token,
+    style: Style,
 }
 
-impl HighlightedSpan {
+impl HighlightedToken {
+    /// Returns the line-relative UTF-8 byte range, excluding line terminators.
     pub fn range(&self) -> Range<usize> {
-        self.range.clone()
+        self.token.range()
     }
 
-    pub fn scope_stack(&self) -> ScopeStackRef {
-        self.scope_stack
+    /// Iterates scope names from outermost to innermost without allocating.
+    pub fn scopes(&self) -> Scopes<'_> {
+        self.token.scopes()
     }
 
-    pub fn style(&self) -> ResolvedSyntaxStyle {
+    /// Returns the document-local interned key, or `None` for incremental output.
+    pub fn scope_stack(&self) -> Option<ScopeStackId> {
+        self.token.scope_stack()
+    }
+
+    /// Returns the resolved theme style.
+    pub fn style(&self) -> Style {
         self.style
     }
 }
 
+/// One styled logical line, from a document or an incremental session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HighlightedLine {
-    spans: Vec<HighlightedSpan>,
-    scopes: Arc<HighlightScopeTable>,
+    tokens: Vec<HighlightedToken>,
+    status: HighlightStatus,
 }
 
 impl HighlightedLine {
-    pub fn spans(&self) -> &[HighlightedSpan] {
-        &self.spans
+    /// Returns styled tokens in byte order.
+    pub fn tokens(&self) -> &[HighlightedToken] {
+        &self.tokens
     }
 
-    pub fn scope_names(&self, stack: ScopeStackRef) -> impl Iterator<Item = &str> {
-        self.scopes.stack_names(stack)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HighlightedDocument {
-    lines: Vec<HighlightedLine>,
-    status: HighlightStatus,
-    pub(crate) default_style: ResolvedSyntaxStyle,
-}
-
-impl HighlightedDocument {
-    pub fn lines(&self) -> &[HighlightedLine] {
-        &self.lines
-    }
-
+    /// Reports whether this line was fully tokenized within resource limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
 }
 
+/// Styled logical lines and their aggregate completion status.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IncrementalHighlightedSpan {
-    range: Range<usize>,
-    scopes: Arc<[Arc<str>]>,
-    style: ResolvedSyntaxStyle,
-}
-
-impl IncrementalHighlightedSpan {
-    pub fn range(&self) -> Range<usize> {
-        self.range.clone()
-    }
-
-    pub fn scopes(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.scopes.iter().map(AsRef::as_ref)
-    }
-
-    pub fn style(&self) -> ResolvedSyntaxStyle {
-        self.style
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IncrementalHighlightedLine {
-    spans: Vec<IncrementalHighlightedSpan>,
+pub struct HighlightedDocument {
+    lines: Vec<HighlightedLine>,
     status: HighlightStatus,
+    pub(crate) default_style: Style,
 }
 
-impl IncrementalHighlightedLine {
-    pub fn spans(&self) -> &[IncrementalHighlightedSpan] {
-        &self.spans
+impl HighlightedDocument {
+    /// Returns logical lines in source order.
+    pub fn lines(&self) -> &[HighlightedLine] {
+        &self.lines
     }
 
+    /// Reports whether the entire tokenization operation completed within limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
@@ -586,14 +629,20 @@ mod incremental_style_cache_tests {
         let expected = theme.resolve_shared_scope_names(&scopes);
         let mut cache = IncrementalStyleCache::default();
 
-        assert_eq!(cache.resolve(ScopeStackId(3), &scopes, &theme), expected);
+        assert_eq!(
+            cache.resolve(EngineScopeStackId(3), &scopes, &theme),
+            expected
+        );
         assert_eq!(cache.styles.len(), 4);
         assert_eq!(cache.styles[3], Some(expected));
-        assert_eq!(cache.resolve(ScopeStackId(3), &scopes, &theme), expected);
+        assert_eq!(
+            cache.resolve(EngineScopeStackId(3), &scopes, &theme),
+            expected
+        );
 
         assert_eq!(
             cache.resolve(
-                ScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32 - 1),
+                EngineScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32 - 1),
                 &scopes,
                 &theme,
             ),
@@ -602,7 +651,7 @@ mod incremental_style_cache_tests {
         assert_eq!(cache.styles.len(), MAX_INCREMENTAL_STYLE_CACHE_ENTRIES);
         assert_eq!(
             cache.resolve(
-                ScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32),
+                EngineScopeStackId(MAX_INCREMENTAL_STYLE_CACHE_ENTRIES as u32),
                 &scopes,
                 &theme,
             ),

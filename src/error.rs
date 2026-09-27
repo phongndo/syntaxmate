@@ -46,4 +46,5 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// Result type for fallible Syntaxmate operations.
 pub type Result<T> = std::result::Result<T, Error>;

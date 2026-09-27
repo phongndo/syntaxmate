@@ -14,9 +14,11 @@ use std::{
 };
 
 use crate::grammars::bundle::GrammarBlob;
+use crate::types::ScopeStorage;
 use crate::{
     EngineHighlightedLine as HighlightedLine, HighlightScopeTable, HighlightedText,
-    LineTextFingerprint, ScopeAtomId, ScopeStackRef, SyntaxClass, SyntaxSegment,
+    LineTextFingerprint, ScopeAtomId, ScopeStackId as OutputScopeStackId, SyntaxClass,
+    SyntaxSegment,
 };
 
 use super::cache::{CachedLine, LineCache, LineCacheKey};
@@ -98,7 +100,7 @@ pub struct ScopedToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SharedScopedToken {
     pub(crate) range: Range<usize>,
-    pub(crate) scopes: Arc<[Arc<str>]>,
+    pub(crate) scopes: Arc<ScopeStorage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,7 +111,41 @@ pub(crate) struct CompactScopedToken {
 
 pub(crate) trait SharedScopeSink {
     fn reserve(&mut self, token_count: usize);
-    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<[Arc<str>]>);
+    fn push(&mut self, range: Range<usize>, stack: ScopeStackId, scopes: Arc<ScopeStorage>);
+}
+
+/// A statically dispatched destination for document output. Scope tables are
+/// published only after every line has interned its stacks.
+pub(crate) trait DocumentOutputLine: Sized {
+    type ScopeOwner;
+    fn scope_owner(scopes: Arc<HighlightScopeTable>) -> Self::ScopeOwner;
+    fn new(fingerprint: LineTextFingerprint, capacity: usize, degraded: bool) -> Self;
+    fn push(&mut self, range: Range<usize>, class: Option<SyntaxClass>, stack: OutputScopeStackId);
+    fn finish(&mut self, scopes: &Self::ScopeOwner);
+}
+
+impl DocumentOutputLine for HighlightedLine {
+    type ScopeOwner = Arc<HighlightScopeTable>;
+
+    fn scope_owner(scopes: Arc<HighlightScopeTable>) -> Self::ScopeOwner {
+        scopes
+    }
+    fn new(fingerprint: LineTextFingerprint, capacity: usize, degraded: bool) -> Self {
+        Self {
+            fingerprint,
+            degraded,
+            segments: Vec::with_capacity(capacity),
+            scope_table: HighlightScopeTable::empty_shared(),
+        }
+    }
+
+    fn push(&mut self, range: Range<usize>, class: Option<SyntaxClass>, stack: OutputScopeStackId) {
+        push_segment(&mut self.segments, range.start, range.end, class, stack);
+    }
+
+    fn finish(&mut self, scopes: &Arc<HighlightScopeTable>) {
+        self.scope_table = Arc::clone(scopes);
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -118,25 +154,25 @@ struct OutputScopeTableCache {
 }
 
 struct OutputScopeTableBuilder {
-    engine_to_output: FastMap<ScopeStackId, ScopeStackRef>,
+    engine_to_output: FastMap<ScopeStackId, OutputScopeStackId>,
     output_stacks: Vec<ScopeStackId>,
 }
 
 impl OutputScopeTableBuilder {
     fn new() -> Self {
         let mut engine_to_output = hashing::fast_map();
-        engine_to_output.insert(ScopeStackId::default(), ScopeStackRef::default());
+        engine_to_output.insert(ScopeStackId::default(), OutputScopeStackId::default());
         Self {
             engine_to_output,
             output_stacks: vec![ScopeStackId::default()],
         }
     }
 
-    fn intern_engine_stack(&mut self, stack: ScopeStackId) -> ScopeStackRef {
+    fn intern_engine_stack(&mut self, stack: ScopeStackId) -> OutputScopeStackId {
         if let Some(output) = self.engine_to_output.get(&stack) {
             return *output;
         }
-        let output = ScopeStackRef(self.output_stacks.len() as u32);
+        let output = OutputScopeStackId(self.output_stacks.len() as u32);
         self.output_stacks.push(stack);
         self.engine_to_output.insert(stack, output);
         output
@@ -229,6 +265,7 @@ pub(crate) struct SharedTokenizedLine {
 
 #[derive(Debug, Clone)]
 struct CompactTokenizedLine {
+    degraded: bool,
     tokens: CompactLineTokens,
     state: TokenizerState,
     entry_state_id: StateId,
@@ -2588,7 +2625,7 @@ pub struct TextMateTokenizer {
     scope_templates: ScopeTemplateInterner,
     scope_stacks: ScopeStackInterner,
     current_scope_stack_cache: FastMap<CurrentScopeStackKey, CachedCurrentScopeStackIds>,
-    resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<[Arc<str>]>>,
+    resolved_scope_stack_cache: FastMap<ScopeStackId, Arc<ScopeStorage>>,
     scope_resolution_scratch: Vec<ScopeId>,
     output_scope_table_cache: OutputScopeTableCache,
     capture_scope_templates: FastMap<(GrammarId, ScopeId), ScopeTemplateId>,
@@ -2758,16 +2795,19 @@ impl TextMateTokenizer {
     }
 
     pub fn tokenize_source(&mut self, source: &str) -> HighlightedText {
+        HighlightedText {
+            lines: self.tokenize_source_output(source),
+        }
+    }
+
+    pub(crate) fn tokenize_source_output<L: DocumentOutputLine>(&mut self, source: &str) -> Vec<L> {
         let previous_budget = self
             .fallback_call_budget_remaining
             .replace(fallback_call_budget(source.len()));
         let mut state = TokenizerState::default();
-        let mut lines = Vec::with_capacity(source.len().div_ceil(40).max(1));
+        let mut lines =
+            Vec::with_capacity(memchr::memchr_iter(b'\n', source.as_bytes()).count() + 1);
         let mut scope_table = OutputScopeTableBuilder::new();
-        // Reuse one placeholder while the result-wide scope table is built.
-        // Constructing `Arc::default()` here for every line used to perform
-        // several immediately discarded heap allocations per source line.
-        let empty_scope_table = HighlightScopeTable::empty_shared();
         for (line_index, chunk) in LineChunks::new(source).enumerate() {
             let tokenized = self.tokenize_line_compact_at_line(chunk.parse_text, state, line_index);
             state = tokenized.state.clone();
@@ -2776,13 +2816,14 @@ impl TextMateTokenizer {
             } else {
                 tokenized.parse_fingerprint
             };
-            lines.push(self.build_highlighted_line(
+            let line: L = self.build_output_line(
                 chunk.text,
                 fingerprint,
                 &tokenized.tokens,
                 &mut scope_table,
-                &empty_scope_table,
-            ));
+                tokenized.degraded,
+            );
+            lines.push(line);
         }
         self.fallback_call_budget_remaining = previous_budget;
         let scope_table = scope_table.finish(
@@ -2790,10 +2831,11 @@ impl TextMateTokenizer {
             &self.scope_names,
             &mut self.output_scope_table_cache,
         );
+        let owner = L::scope_owner(scope_table);
         for line in &mut lines {
-            line.scope_table = Arc::clone(&scope_table);
+            line.finish(&owner);
         }
-        HighlightedText { lines }
+        lines
     }
 
     fn tokenize_viewport_compact(
@@ -2853,6 +2895,17 @@ impl TextMateTokenizer {
         visible: Range<usize>,
         checkpoints: &mut CheckpointTable,
     ) -> HighlightedText {
+        HighlightedText {
+            lines: self.highlight_viewport_output(source, visible, checkpoints),
+        }
+    }
+
+    pub(crate) fn highlight_viewport_output<L: DocumentOutputLine>(
+        &mut self,
+        source: &str,
+        visible: Range<usize>,
+        checkpoints: &mut CheckpointTable,
+    ) -> Vec<L> {
         let visible_start = visible.start;
         let previous_budget = self
             .fallback_call_budget_remaining
@@ -2860,7 +2913,6 @@ impl TextMateTokenizer {
         let tokenized = self.tokenize_viewport_compact(source, visible, checkpoints);
         self.fallback_call_budget_remaining = previous_budget;
         let mut scope_table = OutputScopeTableBuilder::new();
-        let empty_scope_table = HighlightScopeTable::empty_shared();
         let mut lines = tokenized
             .iter()
             .zip(LineChunks::new(source).skip(visible_start))
@@ -2870,12 +2922,12 @@ impl TextMateTokenizer {
                 } else {
                     tokenized.parse_fingerprint
                 };
-                self.build_highlighted_line(
+                self.build_output_line::<L>(
                     chunk.text,
                     fingerprint,
                     &tokenized.tokens,
                     &mut scope_table,
-                    &empty_scope_table,
+                    tokenized.degraded,
                 )
             })
             .collect::<Vec<_>>();
@@ -2884,10 +2936,11 @@ impl TextMateTokenizer {
             &self.scope_names,
             &mut self.output_scope_table_cache,
         );
+        let owner = L::scope_owner(scope_table);
         for line in &mut lines {
-            line.scope_table = Arc::clone(&scope_table);
+            line.finish(&owner);
         }
-        HighlightedText { lines }
+        lines
     }
 
     pub fn tokenize_line_scopes(
@@ -3013,6 +3066,7 @@ impl TextMateTokenizer {
             self.record_degraded_line();
             let stack = self.current_scope_stack_id(&state, true, None);
             return CompactTokenizedLine {
+                degraded: true,
                 tokens: plain_compact_tokens(parse_text, stack).into(),
                 state,
                 entry_state_id,
@@ -3028,6 +3082,7 @@ impl TextMateTokenizer {
             self.record_degraded_line();
             let stack = self.current_scope_stack_id(&state, true, None);
             return CompactTokenizedLine {
+                degraded: true,
                 tokens: plain_compact_tokens(parse_text, stack).into(),
                 state,
                 entry_state_id,
@@ -3046,6 +3101,7 @@ impl TextMateTokenizer {
                     self.record_degraded_line();
                 }
                 return CompactTokenizedLine {
+                    degraded: cached.degraded,
                     tokens: CompactLineTokens::Shared(cached.tokens),
                     state: exit_state,
                     entry_state_id,
@@ -3251,6 +3307,7 @@ impl TextMateTokenizer {
             CompactLineTokens::Owned(tokens)
         };
         CompactTokenizedLine {
+            degraded: self.line_degraded,
             tokens,
             state,
             entry_state_id,
@@ -3560,19 +3617,22 @@ impl TextMateTokenizer {
         }
     }
 
-    fn build_highlighted_line(
+    fn build_output_line<L: DocumentOutputLine>(
         &self,
         text: &str,
         fingerprint: LineTextFingerprint,
         scoped_tokens: &[CompactScopedToken],
         scope_table: &mut OutputScopeTableBuilder,
-        empty_scope_table: &Arc<HighlightScopeTable>,
-    ) -> HighlightedLine {
-        let mut line = HighlightedLine {
-            fingerprint,
-            segments: Vec::with_capacity(scoped_tokens.len()),
-            scope_table: Arc::clone(empty_scope_table),
-        };
+        degraded: bool,
+    ) -> L {
+        // A standalone newline token is clipped out of public line output.
+        let capacity = scoped_tokens.len()
+            - usize::from(
+                scoped_tokens
+                    .last()
+                    .is_some_and(|token| token.range.start >= text.len()),
+            );
+        let mut line = L::new(fingerprint, capacity, degraded);
         for token in scoped_tokens {
             let start = token.range.start.min(text.len());
             let end = token.range.end.min(text.len());
@@ -3581,7 +3641,7 @@ impl TextMateTokenizer {
             }
             let class = self.scope_stacks.class(token.stack);
             let stack = scope_table.intern_engine_stack(token.stack);
-            push_segment(&mut line.segments, start, end, class, stack);
+            line.push(start..end, class, stack);
         }
         line
     }
@@ -4366,7 +4426,7 @@ impl TextMateTokenizer {
                     self.injection_outcome(&[])
                 } else {
                     let stack = self.resolve_scope_stack_cached(active_stack_id);
-                    self.injection_outcome(stack.as_ref())
+                    self.injection_outcome(stack.shared_names())
                 };
                 if self.injection_outcome_cache.len() >= MAX_SCOPE_STACK_CACHE_ENTRIES {
                     self.injection_outcome_cache.clear();
@@ -5669,7 +5729,7 @@ impl TextMateTokenizer {
                             } else {
                                 let active_scopes =
                                     self.resolve_scope_stack_cached(stacks.active_stack_id);
-                                self.injection_outcome(active_scopes.as_ref())
+                                self.injection_outcome(active_scopes.shared_names())
                             };
                         let source = CandidateSourceKey::for_state(self.root, &state);
                         let blueprint = self.candidate_blueprint(
@@ -5915,7 +5975,7 @@ impl TextMateTokenizer {
         self.current_scope_stack_cache.entry(key).or_insert(value);
     }
 
-    fn resolve_scope_stack_cached(&mut self, stack: ScopeStackId) -> Arc<[Arc<str>]> {
+    fn resolve_scope_stack_cached(&mut self, stack: ScopeStackId) -> Arc<ScopeStorage> {
         if let Some(scopes) = self.resolved_scope_stack_cache.get(&stack).cloned() {
             return scopes;
         }
@@ -5933,6 +5993,7 @@ impl TextMateTokenizer {
                     .expect("scope-stack IDs come from the scope interner")
             })
             .collect::<Arc<[Arc<str>]>>();
+        let scopes = Arc::new(ScopeStorage::Shared(scopes));
         self.resolved_scope_stack_cache
             .insert(stack, Arc::clone(&scopes));
         scopes
@@ -7821,7 +7882,7 @@ fn push_segment(
     start: usize,
     end: usize,
     class: Option<SyntaxClass>,
-    scope_stack: ScopeStackRef,
+    scope_stack: OutputScopeStackId,
 ) {
     if start >= end {
         return;
@@ -10873,7 +10934,7 @@ mod tests {
 
         let mut builder = OutputScopeTableBuilder::new();
         let output = builder.intern_engine_stack(high_stack);
-        assert_eq!(output, ScopeStackRef(1));
+        assert_eq!(output, OutputScopeStackId(1));
         assert_eq!(builder.intern_engine_stack(high_stack), output);
 
         let mut cache = OutputScopeTableCache::default();

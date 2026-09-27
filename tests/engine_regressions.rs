@@ -34,16 +34,9 @@ fn scopes(document: &TokenizedDocument) -> ScopeLines {
         .lines()
         .iter()
         .map(|line| {
-            line.spans()
+            line.tokens()
                 .iter()
-                .map(|span| {
-                    (
-                        span.range(),
-                        line.scope_names(span.scope_stack())
-                            .map(str::to_owned)
-                            .collect(),
-                    )
-                })
+                .map(|span| (span.range(), span.scopes().map(str::to_owned).collect()))
                 .collect()
         })
         .collect()

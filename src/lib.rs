@@ -14,6 +14,7 @@
 //! ```
 
 #![forbid(unsafe_code)]
+#![warn(missing_docs)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, doc(auto_cfg))]
 
@@ -55,28 +56,23 @@ pub use error::{Error, Result};
 #[cfg(feature = "bundled-grammars")]
 pub use highlighter::{HighlightSession, Highlighter};
 pub use highlighter::{
-    HighlightedDocument, HighlightedLine, HighlightedSpan, IncrementalHighlightedLine,
-    IncrementalHighlightedSpan, Theme, style_document,
+    HighlightedDocument, HighlightedLine, HighlightedToken, Theme, style_document,
 };
 pub use render::RenderedOutput;
 #[cfg(feature = "ansi")]
 pub use render::{AnsiOptions, render_ansi, render_ansi_to};
 #[cfg(feature = "html")]
 pub use render::{HtmlOptions, html_stylesheet, render_html, render_html_to};
-pub use theme::{
-    ResolvedSyntaxStyle as Style, ResolvedThemeStyle, RgbColor, SyntaxModifiers as FontModifiers,
-    TextMateTheme, ThemeMatch, ThemeSelectorScore,
-};
+pub use theme::{FontModifiers, RgbColor, Style};
+#[cfg(feature = "diagnostics")]
+pub use theme::{ResolvedThemeStyle, ThemeMatch, ThemeSelectorScore};
 pub use tokenizer::{
-    CheckpointTable, DocumentLine, GrammarId, GrammarLimits, GrammarRegistry, HighlightStatus,
-    PreparedLanguage, PreparedLanguageStats, ScopedToken, TokenSpan, TokenizedDocument,
-    TokenizedLine, Tokenizer, TokenizerState,
+    CheckpointTable, GrammarId, GrammarLimits, GrammarRegistry, HighlightStatus, PreparedLanguage,
+    PreparedLanguageStats, Scopes, Token, TokenizedDocument, TokenizedLine, Tokenizer,
+    TokenizerState,
 };
-pub use types::{
-    DEFAULT_LINE_CACHE_ENTRIES, DEFAULT_MAX_LINE_BYTES, HighlightScopeTable, ScopeAtomId,
-    ScopeStackRef, ThemeRule, TokenizerOptions,
-};
-pub use types::{HighlightScopeTable as ScopeTable, ScopeStackRef as ScopeStackId};
+pub(crate) use types::{HighlightScopeTable, ScopeAtomId};
+pub use types::{ScopeStackId, ThemeRule, TokenizerOptions};
 
 // Internal engine modules use these compact output types directly. They are
 // deliberately not part of the top-level documented facade.
@@ -84,21 +80,6 @@ pub(crate) use types::{
     HighlightedLine as EngineHighlightedLine, HighlightedText, LineTextFingerprint, SyntaxClass,
     SyntaxSegment,
 };
-/// Returns the canonical bundled language ID for an ID or alias.
-pub fn canonical_language(language: &str) -> Option<String> {
-    grammars::canonical_language(language)
-}
-
-/// Detects a bundled language from a path.
-pub fn detect_language_from_path(path: impl AsRef<std::path::Path>) -> Option<String> {
-    grammars::detect_language_from_path(&path.as_ref().to_string_lossy())
-}
-
-/// Lists the bundled public language IDs.
-pub fn available_languages() -> Vec<String> {
-    grammars::available_languages()
-}
-
 #[cfg(test)]
 #[path = "../tests/engine_capture_quality.rs"]
 mod engine_capture_quality;
@@ -114,6 +95,7 @@ mod textmate_golden;
 #[path = "../tests/theme_golden.rs"]
 mod theme_golden;
 
+/// Feature-gated engine inspection APIs, outside the stable compatibility contract.
 #[cfg(feature = "diagnostics")]
 pub mod diagnostics {
     use std::ops::Range;
@@ -124,35 +106,53 @@ pub mod diagnostics {
     };
     use crate::{Error, Result};
 
+    /// Matcher selection for diagnostic regex execution.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum RegexEngine {
+        /// Selects a matcher using the normal engine routing rules.
         Auto,
+        /// Requires the DFA matcher.
         Dfa,
+        /// Uses the budgeted fallback matcher.
         Fallback,
     }
 
+    /// Anchor context for one diagnostic regex search.
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     pub struct RegexAnchorContext {
+        /// Whether the start-of-file anchor may match.
         pub allow_start_of_file: bool,
+        /// Byte position allowed to match the continuation anchor, if any.
         pub continuation_position: Option<usize>,
     }
 
+    /// Human-readable regex parsing and routing information.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct RegexInspection {
+        /// Parsed expression rendered as diagnostic text.
         pub parsed: String,
+        /// Pattern after compatibility translation.
         pub translated_pattern: String,
+        /// Diagnostic anchor-handling strategy.
         pub anchor_strategy: String,
+        /// Selected matcher route.
         pub route: String,
     }
 
+    /// Result and execution metadata from a diagnostic regex search.
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct RegexMatchReport {
+        /// Name of the matcher used.
         pub engine: &'static str,
+        /// Matched byte range, or `None` when no match was found.
         pub matched: Option<Range<usize>>,
+        /// Capture byte ranges, including the full match at index zero.
         pub captures: Vec<Option<Range<usize>>>,
+        /// Fallback execution steps, when the matcher reports them.
         pub steps: Option<usize>,
     }
 
+    /// Inspects regex parsing, translation, and matcher routing.
     pub fn inspect_regex(pattern: &str) -> RegexInspection {
         let parsed = parse(pattern);
         let translation = translate(pattern);
@@ -164,6 +164,7 @@ pub mod diagnostics {
         }
     }
 
+    /// Searches from a byte offset with explicit anchors, matcher choice, and fallback step budget.
     pub fn match_regex(
         pattern: &str,
         line: &str,

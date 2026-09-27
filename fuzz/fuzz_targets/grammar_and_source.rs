@@ -26,13 +26,13 @@ fuzz_target!(|data: &[u8]| {
         let source_lines = source.split('\n').collect::<Vec<_>>();
         assert_eq!(document.lines().len(), source_lines.len());
         for (line, text) in document.lines().iter().zip(&source_lines) {
-            for span in line.spans() {
+            for span in line.tokens() {
                 let range = span.range();
                 assert!(range.start <= range.end);
                 assert!(range.end <= text.len());
                 assert!(text.is_char_boundary(range.start));
                 assert!(text.is_char_boundary(range.end));
-                for _ in line.scope_names(span.scope_stack()) {}
+                for _ in span.scopes() {}
             }
         }
 
@@ -58,13 +58,12 @@ fuzz_target!(|data: &[u8]| {
 
             let complete = &document.lines()[line_index];
             let complete_scopes = complete
-                .spans()
+                .tokens()
                 .iter()
                 .map(|span| {
                     (
                         span.range(),
-                        complete
-                            .scope_names(span.scope_stack())
+                        span.scopes()
                             .map(str::to_owned)
                             .collect::<Vec<_>>(),
                     )
@@ -94,26 +93,24 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(viewport.lines().len(), end - start);
             for (actual, expected) in viewport.lines().iter().zip(&document.lines()[start..end]) {
                 let actual = actual
-                    .spans()
+                    .tokens()
                     .iter()
                     .map(|span| {
                         (
                             span.range(),
-                            actual
-                                .scope_names(span.scope_stack())
+                            span.scopes()
                                 .map(str::to_owned)
                                 .collect::<Vec<_>>(),
                         )
                     })
                     .collect::<Vec<_>>();
                 let expected = expected
-                    .spans()
+                    .tokens()
                     .iter()
                     .map(|span| {
                         (
                             span.range(),
-                            expected
-                                .scope_names(span.scope_stack())
+                            span.scopes()
                                 .map(str::to_owned)
                                 .collect::<Vec<_>>(),
                         )

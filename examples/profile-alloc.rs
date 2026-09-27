@@ -19,7 +19,7 @@ use std::{
 };
 
 use syntaxmate::{
-    HighlightSession, HighlightStatus, Highlighter, IncrementalHighlightedLine, PreparedLanguage,
+    HighlightSession, HighlightStatus, HighlightedLine, Highlighter, PreparedLanguage,
     TokenizedDocument, TokenizedLine, Tokenizer, TokenizerOptions,
 };
 
@@ -268,9 +268,9 @@ fn measure_document(document: &TokenizedDocument) -> OutputMeasurement {
     let mut items = 0;
     for (line_index, line) in document.lines().iter().enumerate() {
         digest.begin_line(line_index);
-        for span in line.spans() {
+        for span in line.tokens() {
             items += 1;
-            digest.push(span.range(), line.scope_names(span.scope_stack()));
+            digest.push(span.range(), span.scopes());
         }
     }
     OutputMeasurement {
@@ -295,13 +295,13 @@ fn measure_tokenized_line(
 fn measure_highlighted_line(
     digest: &mut OutputDigestBuilder,
     line_index: usize,
-    line: &IncrementalHighlightedLine,
+    line: &HighlightedLine,
 ) -> usize {
     digest.begin_line(line_index);
-    for span in line.spans() {
+    for span in line.tokens() {
         digest.push(span.range(), span.scopes());
     }
-    line.spans().len()
+    line.tokens().len()
 }
 
 fn incremental_token_pass(

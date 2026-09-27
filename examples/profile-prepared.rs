@@ -131,11 +131,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let document = tokenizer.tokenize(black_box(&source));
         for line in document.lines() {
-            for span in line.spans() {
+            for span in line.tokens() {
                 tokens += 1;
                 digest = hash_u64(digest, span.range().start as u64);
                 digest = hash_u64(digest, span.range().end as u64);
-                for scope in line.scope_names(span.scope_stack()) {
+                for scope in span.scopes() {
                     digest = hash_bytes(digest, scope.as_bytes());
                     digest = hash_bytes(digest, &[0xff]);
                 }

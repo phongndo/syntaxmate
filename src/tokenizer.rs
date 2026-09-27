@@ -1,10 +1,12 @@
 use std::{ops::Range, sync::Arc};
 
+use crate::types::ScopeStorage;
+
 use crate::engine::checkpoint::CheckpointTable as EngineCheckpointTable;
 
 use crate::{
-    Error, HighlightScopeTable, Result, ScopeStackRef, TokenizerOptions,
-    engine::state::ScopeStackId,
+    Error, HighlightScopeTable, Result, ScopeStackId, TokenizerOptions,
+    engine::state::ScopeStackId as EngineScopeStackId,
     engine::tokenizer::{
         GrammarSet as EngineGrammarSet, PreparedLanguage as EnginePreparedLanguage,
         SharedScopeSink, TextMateTokenizer, TokenizerState as EngineTokenizerState,
@@ -16,7 +18,7 @@ static NEXT_TOKENIZER_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::Atom
 
 struct ScopedTokenVecSink<'a> {
     line: &'a str,
-    tokens: &'a mut Vec<ScopedToken>,
+    tokens: &'a mut Vec<Token>,
 }
 
 impl SharedScopeSink for ScopedTokenVecSink<'_> {
@@ -28,7 +30,7 @@ impl SharedScopeSink for ScopedTokenVecSink<'_> {
         }
     }
 
-    fn push(&mut self, range: Range<usize>, _stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+    fn push(&mut self, range: Range<usize>, _stack: EngineScopeStackId, scopes: Arc<ScopeStorage>) {
         if let Some(token) = scoped_token(self.line, range, scopes) {
             self.tokens.push(token);
         }
@@ -40,31 +42,34 @@ struct ScopedTokenCallbackSink<'a, F> {
     callback: F,
 }
 
-impl<F: FnMut(ScopedToken)> SharedScopeSink for ScopedTokenCallbackSink<'_, F> {
+impl<F: FnMut(Token)> SharedScopeSink for ScopedTokenCallbackSink<'_, F> {
     fn reserve(&mut self, _token_count: usize) {}
 
-    fn push(&mut self, range: Range<usize>, _stack: ScopeStackId, scopes: Arc<[Arc<str>]>) {
+    fn push(&mut self, range: Range<usize>, _stack: EngineScopeStackId, scopes: Arc<ScopeStorage>) {
         if let Some(token) = scoped_token(self.line, range, scopes) {
             (self.callback)(token);
         }
     }
 }
 
-fn scoped_token(line: &str, range: Range<usize>, scopes: Arc<[Arc<str>]>) -> Option<ScopedToken> {
+fn scoped_token(line: &str, range: Range<usize>, scopes: Arc<ScopeStorage>) -> Option<Token> {
     let start = range.start.min(line.len());
     let end = range.end.min(line.len());
-    (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then_some(
-        ScopedToken {
-            range: start..end,
-            scopes,
+    (start < end && line.is_char_boundary(start) && line.is_char_boundary(end)).then_some(Token {
+        range: start..end,
+        scopes: TokenScopes {
+            owner: Some(scopes),
+            stack: ScopeStackId::default(),
         },
-    )
+    })
 }
 
 /// Resource limits applied while constructing a custom grammar registry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GrammarLimits {
+    /// Maximum bytes accepted for one grammar JSON input; defaults to 4 MiB.
     pub max_grammar_bytes: usize,
+    /// Maximum grammars in the registry; defaults to 4,096.
     pub max_grammars: usize,
 }
 
@@ -92,10 +97,12 @@ impl Default for GrammarRegistry {
 }
 
 impl GrammarRegistry {
+    /// Creates an empty grammar registry with default resource limits.
     pub fn new() -> Self {
         Self::with_limits(GrammarLimits::default())
     }
 
+    /// Creates an empty registry with the supplied limits, clamped to at least one.
     pub fn with_limits(mut limits: GrammarLimits) -> Self {
         limits.max_grammars = limits.max_grammars.min(u16::MAX as usize);
         Self {
@@ -133,6 +140,7 @@ impl GrammarRegistry {
         })
     }
 
+    /// Returns the number of registered grammars.
     pub fn grammar_count(&self) -> usize {
         self.inner.len()
     }
@@ -303,6 +311,7 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
+    /// Creates a tokenizer for a root grammar owned by `registry`.
     pub fn new(
         registry: &GrammarRegistry,
         root: GrammarId,
@@ -367,37 +376,9 @@ impl Tokenizer {
         line: &str,
         state: &mut TokenizerState,
     ) -> Result<TokenizedLine> {
-        self.validate_line(line, state)?;
-        let line_index = state.anchor_line_index();
-        let tokenized = if self
-            .inner
-            .max_line_bytes()
-            .is_some_and(|max_line_bytes| line.len() >= max_line_bytes)
-        {
-            // The parser adds one synthetic newline, so a line at the byte
-            // limit is already too large. Skip it without filling the buffer.
-            self.inner
-                .tokenize_line_shared_scopes_skipped(line, state.inner.clone(), line_index)
-        } else {
-            self.parse_line_buffer.clear();
-            self.parse_line_buffer.push_str(line);
-            self.parse_line_buffer.push('\n');
-            self.inner.tokenize_line_shared_scopes(
-                &self.parse_line_buffer,
-                state.inner.clone(),
-                line_index,
-            )
-        };
-        state.finish_line(tokenized.state);
-        let tokens = tokenized
-            .tokens
-            .into_iter()
-            .filter_map(|token| scoped_token(line, token.range, token.scopes))
-            .collect();
-        Ok(TokenizedLine {
-            tokens,
-            status: self.take_status(),
-        })
+        let mut tokens = Vec::new();
+        let status = self.tokenize_line_into(line, state, &mut tokens)?;
+        Ok(TokenizedLine { tokens, status })
     }
 
     /// Tokenizes one logical line into a caller-owned reusable buffer.
@@ -409,7 +390,7 @@ impl Tokenizer {
         &mut self,
         line: &str,
         state: &mut TokenizerState,
-        tokens: &mut Vec<ScopedToken>,
+        tokens: &mut Vec<Token>,
     ) -> Result<HighlightStatus> {
         self.validate_line(line, state)?;
         tokens.clear();
@@ -426,7 +407,7 @@ impl Tokenizer {
         &mut self,
         line: &str,
         state: &mut TokenizerState,
-        sink: impl FnMut(ScopedToken),
+        sink: impl FnMut(Token),
     ) -> Result<HighlightStatus> {
         self.validate_line(line, state)?;
         let mut sink = ScopedTokenCallbackSink {
@@ -504,10 +485,18 @@ impl Tokenizer {
 
     /// Tokenizes a complete UTF-8 source document.
     pub fn tokenize(&mut self, source: &str) -> TokenizedDocument {
-        let (highlighted, status) = self.tokenize_compact(source);
-        self.finish_document(highlighted, status)
+        let lines = self.inner.tokenize_source_output(source);
+        TokenizedDocument {
+            lines,
+            status: self.take_status(),
+        }
     }
 
+    #[cfg(all(
+        feature = "bundled-grammars",
+        feature = "bundled-themes",
+        any(feature = "html", feature = "ansi")
+    ))]
     pub(crate) fn tokenize_compact(
         &mut self,
         source: &str,
@@ -534,34 +523,13 @@ impl Tokenizer {
         if checkpoints.owner != self.id {
             return Err(Error::StateMismatch);
         }
-        let highlighted =
+        let lines =
             self.inner
-                .highlight_viewport(source, visible_lines, &mut checkpoints.inner);
-        let status = self.take_status();
-        Ok(self.finish_document(highlighted, status))
-    }
-
-    fn finish_document(
-        &mut self,
-        highlighted: crate::HighlightedText,
-        status: HighlightStatus,
-    ) -> TokenizedDocument {
-        let lines = highlighted
-            .lines
-            .into_iter()
-            .map(|line| DocumentLine {
-                spans: line
-                    .segments
-                    .into_iter()
-                    .map(|segment| TokenSpan {
-                        range: segment.byte_start..segment.byte_end,
-                        scope_stack: segment.scope_stack,
-                    })
-                    .collect(),
-                scopes: line.scope_table,
-            })
-            .collect();
-        TokenizedDocument { lines, status }
+                .highlight_viewport_output(source, visible_lines, &mut checkpoints.inner);
+        Ok(TokenizedDocument {
+            lines,
+            status: self.take_status(),
+        })
     }
 
     fn take_status(&mut self) -> HighlightStatus {
@@ -573,11 +541,13 @@ impl Tokenizer {
     }
 
     #[cfg(feature = "diagnostics")]
+    /// Enables or disables tokenizer diagnostic counters.
     pub fn set_diagnostics_enabled(&mut self, enabled: bool) {
         self.inner.set_counters_enabled(enabled);
     }
 
     #[cfg(feature = "diagnostics")]
+    /// Returns accumulated diagnostic counters and resets them.
     pub fn take_diagnostics(&mut self) -> crate::diagnostics::EngineCounters {
         self.inner.take_counters()
     }
@@ -650,10 +620,12 @@ pub struct TokenizerState {
 }
 
 impl TokenizerState {
+    /// Returns whether the continuation stack is empty; this does not imply document start.
     pub fn is_initial(&self) -> bool {
         self.inner.is_initial()
     }
 
+    /// Returns the number of active continuation frames.
     pub fn depth(&self) -> usize {
         self.inner.depth()
     }
@@ -676,18 +648,22 @@ pub struct CheckpointTable {
 }
 
 impl CheckpointTable {
+    /// Returns the checkpoint spacing in logical lines.
     pub fn interval(&self) -> usize {
         self.inner.interval()
     }
 
+    /// Returns the number of retained checkpoints.
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
+    /// Returns whether the collection is empty.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
+    /// Invalidates checkpoints at and after the zero-based edited line.
     pub fn invalidate_from(&mut self, line_index: usize) {
         self.inner.invalidate_from(line_index);
     }
@@ -696,97 +672,204 @@ impl CheckpointTable {
 /// Whether configured safety budgets allowed complete tokenization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HighlightStatus {
+    /// Tokenization completed within configured resource limits.
     Complete,
+    /// Some matching was skipped or stopped by resource limits.
     Degraded,
 }
 
 impl HighlightStatus {
+    /// Returns whether tokenization completed within resource limits.
     pub fn is_complete(self) -> bool {
         self == Self::Complete
     }
 }
 
-/// One token from the incremental line API.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScopedToken {
-    range: Range<usize>,
-    scopes: Arc<[Arc<str>]>,
+/// Owned scope storage; each token keeps its scopes alive independently of its line.
+#[derive(Debug, Clone)]
+pub(crate) struct TokenScopes {
+    // Filled by DocumentOutputLine::finish before document output leaves the engine.
+    pub(crate) owner: Option<Arc<ScopeStorage>>,
+    pub(crate) stack: ScopeStackId,
 }
 
-impl ScopedToken {
+impl TokenScopes {
+    pub(crate) fn view(&self) -> Scopes<'_> {
+        Scopes {
+            storage: self,
+            position: 0,
+        }
+    }
+}
+
+impl PartialEq for TokenScopes {
+    fn eq(&self, other: &Self) -> bool {
+        self.view().eq(other.view())
+    }
+}
+
+impl Eq for TokenScopes {}
+
+/// A borrowed iterator over exact, ordered TextMate scope names.
+///
+/// Scope storage is shared with the owning token. Iteration allocates nothing
+/// and works identically for whole-document and incremental output.
+#[derive(Debug, Clone)]
+pub struct Scopes<'a> {
+    pub(crate) storage: &'a TokenScopes,
+    position: usize,
+}
+
+impl<'a> Scopes<'a> {
+    pub(crate) fn name(&self, index: usize) -> Option<&'a str> {
+        let index = self.position + index;
+        match self
+            .storage
+            .owner
+            .as_deref()
+            .expect("finished scope storage")
+        {
+            ScopeStorage::Table(table) => table
+                .stack(self.storage.stack)
+                .and_then(|atoms| atoms.get(index))
+                .and_then(|atom| table.atom(*atom)),
+            ScopeStorage::Shared(scopes) => scopes.get(index).map(AsRef::as_ref),
+        }
+    }
+}
+
+impl<'a> Iterator for Scopes<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let name = self.name(0)?;
+        self.position += 1;
+        Some(name)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for Scopes<'_> {
+    fn len(&self) -> usize {
+        let total = match self
+            .storage
+            .owner
+            .as_deref()
+            .expect("finished scope storage")
+        {
+            ScopeStorage::Table(table) => table.stack(self.storage.stack).unwrap_or_default().len(),
+            ScopeStorage::Shared(scopes) => scopes.len(),
+        };
+        total - self.position
+    }
+}
+
+impl std::iter::FusedIterator for Scopes<'_> {}
+
+/// One token with a line-relative UTF-8 byte range and exact ordered scopes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    pub(crate) range: Range<usize>,
+    pub(crate) scopes: TokenScopes,
+}
+
+impl Token {
+    /// Returns the line-relative UTF-8 byte range, excluding line terminators.
     pub fn range(&self) -> Range<usize> {
         self.range.clone()
     }
 
-    pub fn scopes(&self) -> impl ExactSizeIterator<Item = &str> {
-        self.scopes.iter().map(AsRef::as_ref)
+    /// Iterates scope names from outermost to innermost without allocating.
+    pub fn scopes(&self) -> Scopes<'_> {
+        self.scopes.view()
+    }
+
+    /// Returns the interned key for document output, or `None` for incremental output.
+    /// Keys may only be compared within the same document's scope table.
+    pub fn scope_stack(&self) -> Option<ScopeStackId> {
+        match self.scopes.owner.as_deref() {
+            Some(ScopeStorage::Shared(_)) => None,
+            _ => Some(self.scopes.stack),
+        }
     }
 }
 
+/// One tokenized logical line, from a document or an incremental call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenizedLine {
-    tokens: Vec<ScopedToken>,
-    status: HighlightStatus,
+    pub(crate) tokens: Vec<Token>,
+    pub(crate) status: HighlightStatus,
 }
 
 impl TokenizedLine {
-    pub fn tokens(&self) -> &[ScopedToken] {
+    /// Returns tokens in byte order.
+    pub fn tokens(&self) -> &[Token] {
         &self.tokens
     }
 
+    /// Reports whether this line was fully tokenized within resource limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
 }
 
-/// One exact-scope span in a complete tokenized document.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TokenSpan {
-    range: Range<usize>,
-    scope_stack: ScopeStackRef,
+impl crate::engine::tokenizer::DocumentOutputLine for TokenizedLine {
+    type ScopeOwner = Arc<ScopeStorage>;
+
+    fn scope_owner(scopes: Arc<HighlightScopeTable>) -> Self::ScopeOwner {
+        Arc::new(ScopeStorage::Table(scopes))
+    }
+
+    fn new(_: crate::LineTextFingerprint, capacity: usize, degraded: bool) -> Self {
+        Self {
+            tokens: Vec::with_capacity(capacity),
+            status: if degraded {
+                HighlightStatus::Degraded
+            } else {
+                HighlightStatus::Complete
+            },
+        }
+    }
+
+    fn push(&mut self, range: Range<usize>, _: Option<crate::SyntaxClass>, stack: ScopeStackId) {
+        if let Some(last) = self.tokens.last_mut()
+            && last.scope_stack() == Some(stack)
+            && last.range.end == range.start
+        {
+            last.range.end = range.end;
+            return;
+        }
+        self.tokens.push(Token {
+            range,
+            scopes: TokenScopes { owner: None, stack },
+        });
+    }
+
+    fn finish(&mut self, scopes: &Self::ScopeOwner) {
+        for token in &mut self.tokens {
+            token.scopes.owner = Some(Arc::clone(scopes));
+        }
+    }
 }
 
-impl TokenSpan {
-    pub fn range(&self) -> Range<usize> {
-        self.range.clone()
-    }
-
-    pub fn scope_stack(&self) -> ScopeStackRef {
-        self.scope_stack
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DocumentLine {
-    spans: Vec<TokenSpan>,
-    scopes: Arc<HighlightScopeTable>,
-}
-
-impl DocumentLine {
-    pub fn spans(&self) -> &[TokenSpan] {
-        &self.spans
-    }
-
-    pub fn scope_names(&self, stack: ScopeStackRef) -> impl Iterator<Item = &str> {
-        self.scopes.stack_names(stack)
-    }
-
-    pub fn scope_table(&self) -> &Arc<HighlightScopeTable> {
-        &self.scopes
-    }
-}
-
+/// Tokenized logical lines and their aggregate completion status.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenizedDocument {
-    lines: Vec<DocumentLine>,
+    pub(crate) lines: Vec<TokenizedLine>,
     status: HighlightStatus,
 }
 
 impl TokenizedDocument {
-    pub fn lines(&self) -> &[DocumentLine] {
+    /// Returns logical lines in source order.
+    pub fn lines(&self) -> &[TokenizedLine] {
         &self.lines
     }
 
+    /// Reports whether the entire tokenization operation completed within limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
@@ -1121,24 +1204,17 @@ mod tests {
         }
     }
 
-    fn token_scopes(tokens: &[ScopedToken]) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
+    fn token_scopes(tokens: &[Token]) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
         tokens
             .iter()
             .map(|token| (token.range(), token.scopes().map(str::to_owned).collect()))
             .collect()
     }
 
-    fn document_line_scopes(line: &DocumentLine) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
-        line.spans()
+    fn document_line_scopes(line: &TokenizedLine) -> Vec<(std::ops::Range<usize>, Vec<String>)> {
+        line.tokens()
             .iter()
-            .map(|span| {
-                (
-                    span.range(),
-                    line.scope_names(span.scope_stack())
-                        .map(str::to_owned)
-                        .collect(),
-                )
-            })
+            .map(|span| (span.range(), span.scopes().map(str::to_owned).collect()))
             .collect()
     }
 

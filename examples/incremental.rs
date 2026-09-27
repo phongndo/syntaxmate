@@ -6,7 +6,7 @@ fn main() -> syntaxmate::Result<()> {
 
     for line in ["fn main() {", "    println!(\"hello\");", "}"] {
         let highlighted = session.highlight_line(line)?;
-        println!("{} span(s)", highlighted.spans().len());
+        println!("{} span(s)", highlighted.tokens().len());
     }
     Ok(())
 }

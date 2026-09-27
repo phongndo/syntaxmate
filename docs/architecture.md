@@ -35,6 +35,13 @@ lifetime of reusable work.
 
 ## Public contract
 
+The public output families are `TokenizedDocument` → `TokenizedLine` → `Token`
+and `HighlightedDocument` → `HighlightedLine` → `HighlightedToken`. Incremental
+calls return those same line and token types. Each token owns shared scope
+storage and exposes a borrowed `Scopes` iterator, keeping intern tables private.
+`Theme` is the single theme facade; selector inspection requires `diagnostics`.
+See the [migration table](../CHANGELOG.md#migrating-from-01) for removed names.
+
 Exact ordered scopes, UTF-8 byte ranges, resolved styles, detection metadata,
 and completion status are observable. Regex bytecode, rule IDs, cache layout,
 bundle encoding, and diagnostics are implementation details. Keep new API
