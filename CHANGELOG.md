@@ -34,8 +34,9 @@
   vscode-textmate does. The bundled GraphQL grammar no longer stays inside a
   type block for the rest of the document.
 - Stop re-entering a begin rule that matched without advancing at the same
-  position, and drop deeply nested tokenizer states without recursion. A
-  self-including zero-width `begin` no longer overflows the stack.
+  position, and drop or format deeply nested tokenizer states without
+  recursion. A self-including zero-width `begin` no longer overflows the
+  stack.
 - Fold case for bracketed classes as Oniguruma does: under `(?i)` a character
   matches when one of its case variants is in the class, with intersections,
   nested classes, and properties evaluated first. `(?i)[^a-{]` now matches
@@ -46,7 +47,8 @@
   - `a{1,2}+` repeats the interval instead of being possessive;
   - recursive subroutine calls keep their caller's loop counts;
   - subroutine capture replay no longer panics after backtracking into a
-    returned call;
+    returned call, and recursion that never consumes input, such as
+    `(\g<1>)?`, fails instead of overflowing the stack;
   - Unicode case-insensitive keyword sets containing characters such as `θ`,
     `ϑ`, and `ϴ` no longer miss matches.
 
