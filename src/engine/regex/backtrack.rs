@@ -1093,12 +1093,6 @@ pub(crate) struct StartBytes {
 }
 
 pub(crate) fn expand_case_insensitive_start_bytes(bytes: &mut StartByteSet) {
-    // The Kelvin sign (E2 84 AA) and long s (C5 BF) fold to `k` and `s`.
-    for (lead, letter) in [(0xe2, b'k'), (0xc5, b's')] {
-        if bytes.contains(lead) {
-            bytes.insert(letter);
-        }
-    }
     for byte in b'a'..=b'z' {
         if bytes.contains(byte) || bytes.contains(byte.to_ascii_uppercase()) {
             bytes.insert(byte);
