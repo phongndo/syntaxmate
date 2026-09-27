@@ -40,16 +40,16 @@ include = [
 
 [features]
 default = ["bundled-grammars", "bundled-themes", "html", "ansi"]
-bundled-grammars = []
+bundled-grammars = ["dep:miniz_oxide"]
 bundled-themes = []
 html = []
 ansi = []
 diagnostics = []
-bundle-tools = ["dep:toml"]
+bundle-tools = ["dep:toml", "dep:miniz_oxide"]
 
 [dependencies]
 memchr = "2.7"
-miniz_oxide = "0.9.1"
+miniz_oxide = { version = "0.9.1", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = { version = "1.1", optional = true }
