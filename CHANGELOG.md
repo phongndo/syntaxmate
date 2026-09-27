@@ -5,8 +5,8 @@
 - Implement `PartialEq`, `Eq`, and `Hash` for `TokenizerState`, allowing editors
   to stop incremental re-highlighting when continuation states converge. Keep
   embedded base-grammar context distinct when reusing static frame identities.
-- Shrink the embedded grammar bundle with compressed string and scope tables,
-  and reduce first-use allocations by retaining one indexed string buffer.
+- Borrow uncompressed bundle string and scope tables to reduce cold-start latency
+  and retained heap, trading a larger bundle for no metadata decompression.
   Custom-grammar-only builds no longer depend on `miniz_oxide`.
 - Reduce HTML output by inheriting default colors from the wrapper and merging
   equal adjacent runs. Keep full colors when rendering without a wrapper.

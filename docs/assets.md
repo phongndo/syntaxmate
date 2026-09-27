@@ -16,12 +16,15 @@ so updates remain reviewable and reproducible.
 - Runtime bundle: [assets/grammars.bundle](../assets/grammars.bundle), generated
   by the [bundle builder](../tools/build-bundle.rs).
 
-The string table is compressed once and decoded into one buffer containing UTF-8
-text and an offset index. Scopes retain string IDs instead of duplicate strings;
-the scope-ID section is also compressed. Metadata sections record their codec
-and exact decoded length, which the reader bounds and validates before use.
-Repository-walk skeletons remain uncompressed so the runtime can borrow their
-embedded bytes without retaining another decoded buffer.
+The string table and scope-ID table are uncompressed. The runtime borrows their
+embedded bytes, including the string offset index, without allocating per string
+or decompressing metadata at first use. The reader validates table bounds,
+UTF-8, string boundaries, and scope IDs before exposing them. Tool parsing of
+non-static input owns each table in one buffer. Repository-walk skeletons also
+remain uncompressed so the runtime can borrow their embedded bytes.
+
+The private v4 format was redefined before release to remove metadata compression,
+prioritizing cold-start latency and retained heap over bundle and binary size.
 
 The bundle uses independently compressed compiled grammars and records each
 grammar's dependency closure, so a tokenizer decodes a closure member only when

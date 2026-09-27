@@ -162,7 +162,7 @@ pub fn grammar_registry() -> BundleGrammarRegistry {
 }
 
 pub fn parse_embedded_bundle() -> Result<Bundle, BundleError> {
-    Bundle::parse(embedded_bundle_bytes())
+    Bundle::parse_static(embedded_bundle_bytes())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
