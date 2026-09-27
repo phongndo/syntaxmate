@@ -247,10 +247,10 @@ fn program_counter(index: usize) -> Result<ProgramCounter, CompileError> {
 
 fn vm_slot(index: usize) -> Result<VmSlot, CompileError> {
     // The top bit is reserved for `RepeatUndo`'s stalled flag and the slot
-    // below it for call credits.
+    // below it for jump entries.
     u32::try_from(index)
         .ok()
-        .filter(|slot| *slot < CREDIT_UNDO_SLOT)
+        .filter(|slot| *slot < JUMP_UNDO_SLOT)
         .ok_or(CompileError::TableOverflow)
 }
 
@@ -1225,22 +1225,24 @@ struct RepeatUndo {
 
 const REPEAT_UNDO_STALLED: u32 = 1 << 31;
 
-/// `RepeatUndo` slot marking a call frame's `nested_scanned` credit rather
-/// than a repeat; `vm_slot` never hands it out.
-const CREDIT_UNDO_SLOT: VmSlot = REPEAT_UNDO_STALLED - 1;
+/// `RepeatUndo` slot marking a returned call's jump entry rather than a
+/// repeat write; `vm_slot` never hands it out.
+const JUMP_UNDO_SLOT: VmSlot = REPEAT_UNDO_STALLED - 1;
 
 impl RepeatUndo {
-    /// Restores call frame `frame`'s (zero-based) `nested_scanned` credit.
-    fn credit(frame: u32, previous: u32) -> Self {
+    /// Logged when a call returns: the entries from `mark` up to this one
+    /// leave every repeat slot as it was at the call.
+    fn jump(mark: u32) -> Self {
         Self {
-            last_position: arena_index(frame),
-            count: previous,
-            slot_and_stalled: CREDIT_UNDO_SLOT,
+            last_position: arena_index(mark),
+            count: 0,
+            slot_and_stalled: JUMP_UNDO_SLOT,
         }
     }
 
-    fn is_credit(self) -> bool {
-        self.slot_and_stalled == CREDIT_UNDO_SLOT
+    /// The call's undo mark if this is a jump entry.
+    fn jump_target(self) -> Option<usize> {
+        (self.slot_and_stalled == JUMP_UNDO_SLOT).then_some(self.last_position)
     }
 
     fn new(slot: VmSlot, state: RepeatState) -> Self {
@@ -1335,8 +1337,6 @@ struct CallFrame {
     return_pc: ProgramCounter,
     capture_undo_mark: u32,
     repeat_undo_mark: u32,
-    /// Undo entries already scanned by returns of calls this frame made.
-    nested_scanned: u32,
     /// The caller's `BytecodeScratch::call_frame` value.
     parent: u32,
     depth: u32,
@@ -1350,7 +1350,7 @@ const _: () = {
     assert!(std::mem::size_of::<Instruction>() == 24);
     assert!(std::mem::size_of::<BacktrackFrame>() == 32);
     assert!(std::mem::size_of::<AssertionFrame>() == 64);
-    assert!(std::mem::size_of::<CallFrame>() == 24);
+    assert!(std::mem::size_of::<CallFrame>() == 20);
     assert!(std::mem::size_of::<RepeatState>() == 16);
     assert!(std::mem::size_of::<RepeatUndo>() == 16);
     assert!(std::mem::size_of::<GuardCell>() == 16);
@@ -1373,6 +1373,9 @@ pub(crate) struct BytecodeScratch {
     repeat_restore_stamps: Vec<u32>,
     capture_restore_stamps: Vec<u32>,
     restore_generation: u32,
+    /// Repeat slots a `Return` restores, and their values at the call.
+    restore_slots: Vec<VmSlot>,
+    restore_values: Vec<RepeatState>,
     /// One-based index of the current call frame; 0 outside subroutines.
     call_frame: u32,
     cuts: Vec<u32>,
@@ -1804,7 +1807,6 @@ impl Program {
                             return_pc: *next,
                             capture_undo_mark: arena_mark(scratch.capture_undo.len())?,
                             repeat_undo_mark: arena_mark(scratch.repeat_undo.len())?,
-                            nested_scanned: 0,
                             parent: scratch.call_frame,
                             depth,
                         };
@@ -1817,34 +1819,17 @@ impl Program {
                     debug_assert!(scratch.call_frame > 0, "Return outside subroutine");
                     let frame = scratch.calls[arena_index(scratch.call_frame - 1)];
                     scratch.call_frame = frame.parent;
-                    // Recursive calls to the same capturing group overwrite
-                    // an enclosing pending start. Restore pending captures on
-                    // return; completed captures remain observable. Restores
-                    // are logged so backtracking into the routine undoes them.
-                    // Each slot is restored at most once, from its oldest
-                    // undo entry, so nested returns add at most one log entry
-                    // per slot instead of replaying their callees' logs.
+                    // Restores are logged so backtracking into the routine
+                    // undoes them, and each slot is restored at most once.
+                    // Every visited undo entry is charged: backtracking into a
+                    // returned routine makes its next return scan again.
                     let generation = scratch.next_restore_generation();
+                    // Recursive calls to the same capturing group overwrite
+                    // an enclosing pending start. Restore pending captures
+                    // from their oldest entry; completed captures remain
+                    // observable.
                     let capture_end = scratch.capture_undo.len();
-                    let repeat_end = scratch.repeat_undo.len();
-                    // The scan is linear in the undo entries since the call,
-                    // which backtracking into a returned routine can revisit;
-                    // charge it like the steps that logged them. Entries a
-                    // nested return already scanned are charged there, so
-                    // deep nesting does not pay for them once per level.
-                    let scanned = (capture_end - arena_index(frame.capture_undo_mark))
-                        + (repeat_end - arena_index(frame.repeat_undo_mark));
-                    budget.charge(scanned.saturating_sub(arena_index(frame.nested_scanned)))?;
-                    if let Some(caller) = frame.parent.checked_sub(1) {
-                        // Logged like a repeat write so backtracking past this
-                        // return also takes the caller's credit back.
-                        let credit = &mut scratch.calls[arena_index(caller)].nested_scanned;
-                        let previous = *credit;
-                        *credit = credit.saturating_add(u32::try_from(scanned).unwrap_or(u32::MAX));
-                        scratch
-                            .repeat_undo
-                            .push(RepeatUndo::credit(caller, previous));
-                    }
+                    budget.charge(capture_end - arena_index(frame.capture_undo_mark))?;
                     for index in arena_index(frame.capture_undo_mark)..capture_end {
                         let (slot, previous) = scratch.capture_undo[index].clone();
                         let stamp = &mut scratch.capture_restore_stamps[arena_index(slot)];
@@ -1858,19 +1843,38 @@ impl Program {
                     }
                     // A recursive call reuses its caller's loop slots. Put
                     // every slot the call changed back to its value at the
-                    // call.
-                    for index in arena_index(frame.repeat_undo_mark)..repeat_end {
+                    // call: scanning newest first, the oldest entry per slot
+                    // wins. A nested call's entries and its own restores
+                    // leave every slot as it was at that call, so its jump
+                    // entry skips them.
+                    let mark = arena_index(frame.repeat_undo_mark);
+                    let mut index = scratch.repeat_undo.len();
+                    let mut visited = 0usize;
+                    scratch.restore_slots.clear();
+                    while index > mark {
+                        index -= 1;
+                        visited += 1;
                         let undo = scratch.repeat_undo[index];
-                        if undo.is_credit() {
+                        if let Some(target) = undo.jump_target() {
+                            index = target;
                             continue;
                         }
-                        let stamp = &mut scratch.repeat_restore_stamps[undo.slot()];
-                        if *stamp == generation {
-                            continue;
+                        let slot = undo.slot();
+                        if scratch.repeat_restore_stamps[slot] != generation {
+                            scratch.repeat_restore_stamps[slot] = generation;
+                            scratch.restore_slots.push(undo.vm_slot());
                         }
-                        *stamp = generation;
-                        set_repeat(scratch, undo.vm_slot(), undo.state());
+                        scratch.restore_values[slot] = undo.state();
                     }
+                    budget.charge(visited)?;
+                    for index in 0..scratch.restore_slots.len() {
+                        let slot = scratch.restore_slots[index];
+                        let value = scratch.restore_values[arena_index(slot)];
+                        set_repeat(scratch, slot, value);
+                    }
+                    scratch
+                        .repeat_undo
+                        .push(RepeatUndo::jump(frame.repeat_undo_mark));
                     pc = frame.return_pc;
                 }
                 Instruction::Split {
@@ -2616,6 +2620,8 @@ impl BytecodeScratch {
         self.capture_undo.clear();
         self.calls.clear();
         self.repeat_restore_stamps.resize(repeat_slots, 0);
+        self.restore_values
+            .resize(repeat_slots, RepeatState::default());
         self.capture_restore_stamps.resize(capture_slots, 0);
         self.call_frame = 0;
         self.cuts.clear();
@@ -2653,9 +2659,7 @@ fn enter_repeat(scratch: &mut BytecodeScratch, slot: VmSlot, position: usize) {
 fn undo_repeats_to(scratch: &mut BytecodeScratch, mark: u32) {
     while scratch.repeat_undo.len() > arena_index(mark) {
         let undo = scratch.repeat_undo.pop().expect("repeat undo above mark");
-        if undo.is_credit() {
-            scratch.calls[undo.last_position].nested_scanned = undo.count;
-        } else {
+        if undo.jump_target().is_none() {
             scratch.repeats[undo.slot()] = undo.state();
         }
     }
@@ -4667,7 +4671,7 @@ mod tests {
         assert_eq!(std::mem::size_of::<Instruction>(), 24);
         assert_eq!(std::mem::size_of::<BacktrackFrame>(), 32);
         assert_eq!(std::mem::size_of::<AssertionFrame>(), 64);
-        assert_eq!(std::mem::size_of::<CallFrame>(), 24);
+        assert_eq!(std::mem::size_of::<CallFrame>(), 20);
         assert_eq!(std::mem::size_of::<RepeatState>(), 16);
         assert_eq!(std::mem::size_of::<ResumeAction>(), 8);
         assert_eq!(std::mem::size_of::<AssertDirection>(), 8);
@@ -5785,23 +5789,35 @@ mod tests {
     }
 
     #[test]
-    fn backtracking_takes_back_nested_return_credit() {
-        // The first branch returns from `k` once per `a`, crediting `n`.
-        // When it fails, that credit must go with it, or `n`'s later returns
-        // rescan their growing undo log for free.
-        let pattern = r"\g<n>z|(?<n>(?:\g<k>)*b|(?:ac?)*)|(?<k>a)";
-        let parsed = parse(pattern);
-        let live = (1..=parsed.capture_count).collect::<Vec<_>>();
-        let program = Program::compile_captures(&parsed, &live).expect("capture program");
-        let mut budget = StepBudget::new(100_000);
-        let result = program.execute_captures(
+    fn subroutine_returns_charge_every_scanned_undo_entry() {
+        let run = |pattern: &str, line: &str| {
+            let parsed = parse(pattern);
+            let live = (1..=parsed.capture_count).collect::<Vec<_>>();
+            let program = Program::compile_captures(&parsed, &live).expect("capture program");
+            let mut budget = StepBudget::new(100_000);
+            let result = program.execute_captures(
+                line,
+                0,
+                context(),
+                &mut budget,
+                &mut BytecodeScratch::default(),
+            );
+            (result.is_ok(), budget.used())
+        };
+        // Backtracking into a returned routine makes its next return scan
+        // the routine's entries again, and every rescan is charged.
+        let (finished, used) = run(
+            r"\g<n>z|(?<n>(?:\g<k>)*b|(?:ac?)*)|(?<k>a)",
             &"a".repeat(3_000),
-            0,
-            context(),
-            &mut budget,
-            &mut BytecodeScratch::default(),
         );
-        assert!(result.is_err(), "used {} steps", budget.used());
+        assert!(!finished, "used {used} steps");
+        // A returned callee's entries are skipped rather than rescanned, so
+        // retrying the caller stays cheap.
+        let (finished, used) = run(
+            r"\A\g<n>z|(?<n>\g<k>a*)|(?<k>(?>(?:bc?)*))",
+            &format!("{}{}", "b".repeat(3_000), "a".repeat(3_000)),
+        );
+        assert!(finished && used < 100_000, "used {used} steps");
     }
 
     #[test]
