@@ -21,7 +21,7 @@ ANSI output, and no native Oniguruma dependency.
 
 ```toml
 [dependencies]
-syntaxmate = "0.1"
+syntaxmate = "0.2"
 ```
 
 ```rust
