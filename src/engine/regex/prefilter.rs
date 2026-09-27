@@ -1122,9 +1122,9 @@ impl RequiredFactor {
     fn find(&self, haystack: &[u8]) -> Option<usize> {
         let first = self.items.first()?;
         // A failed candidate can rescan the bytes after it (`<[^>]*>` over a
-        // run of `<`). Once rescanning exceeds the line length, unbounded
-        // items remember their last maximal run so later candidates inside
-        // it reuse its end. The budget only guards unusual orders; an
+        // run of `<`). Once rescanning exceeds the line length, items
+        // remember their last maximal run so later candidates inside it
+        // reuse its end. The budget only guards unusual orders; an
         // earlier position is always a sound prefilter answer.
         let mut runs: Option<Box<[ItemRun]>> = None;
         let mut scanned_total = 0usize;
@@ -1178,7 +1178,8 @@ impl RequiredFactor {
         (true, position - start)
     }
 
-    /// `matches_at`, reusing each unbounded item's last maximal run.
+    /// `matches_at`, reusing each item's last maximal run; a bounded item
+    /// takes at most its `max` bytes of it.
     fn matches_at_with_runs(
         &self,
         haystack: &[u8],
@@ -1188,21 +1189,15 @@ impl RequiredFactor {
         let mut position = start;
         let mut scanned = 0usize;
         for (item, run) in self.items.iter().zip(runs) {
-            let count = if item.max == FACTOR_UNBOUNDED {
-                if !(run.start <= position && position <= run.end) {
-                    let end = item.run_end(haystack, position, usize::MAX);
-                    scanned += end - position + 1;
-                    *run = ItemRun {
-                        start: position,
-                        end,
-                    };
-                }
-                run.end - position
-            } else {
-                let end = item.run_end(haystack, position, item.max as usize);
+            if !(run.start <= position && position <= run.end) {
+                let end = item.run_end(haystack, position, usize::MAX);
                 scanned += end - position + 1;
-                end - position
-            };
+                *run = ItemRun {
+                    start: position,
+                    end,
+                };
+            }
+            let count = (run.end - position).min(item.max as usize);
             if count < item.min as usize {
                 return (false, scanned);
             }
@@ -1802,6 +1797,8 @@ mod tests {
         // Every `<` starts a candidate whose check would scan to the line
         // end; cached item runs keep the answer exact.
         assert_eq!(factor.find("<".repeat(100_000).as_bytes()), None);
+        let bounded = required_factor(&parse("<[^>]{0,20}>").ast).expect("byte-run factor");
+        assert_eq!(bounded.find("<".repeat(100_000).as_bytes()), None);
         assert_eq!(factor.find(b"x<y>"), Some(1));
         assert_eq!(factor.find(b"x<y"), None);
     }
@@ -1841,6 +1838,8 @@ mod tests {
             "ab{0,2}c",
             "[ab]+c{2}",
             r"<[^>]*>\s*x",
+            "<[^>]{0,3}>",
+            "a[^b]{0,2}b[^c]*c",
         ] {
             let Some(factor) = required_factor(&parse(pattern).ast) else {
                 continue;
