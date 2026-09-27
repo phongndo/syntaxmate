@@ -418,6 +418,7 @@ pub struct ParsedRegex {
     /// Every group of each name used by more than one group, ascending.
     pub duplicate_names: BTreeMap<String, Vec<u32>>,
     pub diagnostics: Vec<String>,
+    pub(crate) first_diagnostic_position: Option<usize>,
     analysis: OnceLock<RegexAnalysis>,
 }
 
@@ -538,6 +539,7 @@ struct Parser<'a> {
     features: RegexFeatures,
     flags: RegexFlags,
     diagnostics: Vec<String>,
+    first_diagnostic_position: Option<usize>,
     depth: usize,
 }
 
@@ -564,6 +566,7 @@ impl<'a> Parser<'a> {
             features: RegexFeatures::default(),
             flags: RegexFlags::default(),
             diagnostics: Vec::new(),
+            first_diagnostic_position: None,
             depth: 0,
         }
     }
@@ -572,8 +575,7 @@ impl<'a> Parser<'a> {
         let mut ast = self.parse_alternation(None);
         if self.pos < self.bytes.len() {
             let at = self.char_index(self.pos);
-            self.diagnostics
-                .push(format!("trailing input at char {at}"));
+            self.diagnostic(at, format!("trailing input at char {at}"));
         }
         if self.features.subroutine {
             let mut paths = BTreeMap::new();
@@ -593,6 +595,7 @@ impl<'a> Parser<'a> {
             named_captures: self.named_captures,
             duplicate_names: self.duplicate_names,
             diagnostics: self.diagnostics,
+            first_diagnostic_position: self.first_diagnostic_position,
             analysis: OnceLock::new(),
         }
     }
@@ -811,7 +814,7 @@ impl<'a> Parser<'a> {
             '\\' => self.parse_escape(false),
             ')' => {
                 let at = self.char_index(self.pos - 1);
-                self.diagnostics.push(format!("unmatched ')' at char {at}"));
+                self.diagnostic(at, format!("unmatched ')' at char {at}"));
                 Ast::Unsupported("unmatched ')'".to_owned())
             }
             _ => self.parse_literal_run(self.pos - ch.len_utf8()),
@@ -899,8 +902,10 @@ impl<'a> Parser<'a> {
     fn parse_group(&mut self) -> Ast {
         if self.depth >= MAX_PARSE_DEPTH {
             self.skip_balanced('(', ')');
-            self.diagnostics
-                .push("maximum group nesting depth exceeded".to_string());
+            self.diagnostic(
+                self.char_index(self.pos),
+                "maximum group nesting depth exceeded".to_string(),
+            );
             return Ast::Unsupported("nesting too deep".to_string());
         }
         self.depth += 1;
@@ -1101,8 +1106,10 @@ impl<'a> Parser<'a> {
         self.expect(')');
         condition.map_or_else(
             || {
-                self.diagnostics
-                    .push(format!("unsupported conditional test ({raw})"));
+                self.diagnostic(
+                    self.char_index(self.pos),
+                    format!("unsupported conditional test ({raw})"),
+                );
                 Ast::Unsupported("conditional-test".to_owned())
             },
             |condition| Ast::Conditional {
@@ -1162,8 +1169,10 @@ impl<'a> Parser<'a> {
     fn parse_class_body(&mut self) -> CharClass {
         if self.depth >= MAX_PARSE_DEPTH {
             self.skip_balanced('[', ']');
-            self.diagnostics
-                .push("maximum class nesting depth exceeded".to_string());
+            self.diagnostic(
+                self.char_index(self.pos),
+                "maximum class nesting depth exceeded".to_string(),
+            );
             return CharClass::default();
         }
         self.depth += 1;
@@ -1596,13 +1605,17 @@ impl<'a> Parser<'a> {
         &self.source[start..self.pos]
     }
 
+    fn diagnostic(&mut self, position: usize, message: String) {
+        self.first_diagnostic_position.get_or_insert(position);
+        self.diagnostics.push(message);
+    }
+
     fn expect(&mut self, expected: char) {
         if self.peek() == Some(expected) {
             self.bump();
         } else {
             let at = self.char_index(self.pos);
-            self.diagnostics
-                .push(format!("expected '{expected}' at char {at}"));
+            self.diagnostic(at, format!("expected '{expected}' at char {at}"));
         }
     }
 

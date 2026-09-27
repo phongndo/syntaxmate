@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replace string-only grammar, theme, bundle, render, and diagnostic errors with
+  structured payloads and matchable kinds. Preserve JSON and writer source
+  chains, and retain `Clone`, `PartialEq`, and `Eq`. Add opt-in
+  `GrammarRegistry::validate_regexes()` for pattern/position diagnostics without
+  changing permissive loading or tokenization.
+
 - Prepare the breaking 0.2 API: unify document and incremental token/line types,
   expose allocation-free `Scopes` views, and consolidate theme construction and
   resolution on `Theme`. Document output now reports completion per line.
@@ -85,6 +91,12 @@ operation (including any checkpoint replay).
 
 | Old API | 0.2 replacement |
 | --- | --- |
+| `Error::Grammar(String)` | `GrammarError`: `scope_name()` and `kind()`; include targets, regex positions, registry limit values, and foreign IDs are matchable |
+| `Error::Theme(String)` | `ThemeError::kind()` distinguishes JSON, color values, and rule failures |
+| `Error::Render(String)` | `RenderError::kind()` distinguishes `SourceMismatch` and `Writer`; writer failures chain to `fmt::Error` |
+| `Error::Bundle(String)`, bundled decode errors under `Grammar` | `BundleError::kind()` and `language()` |
+| `Error::Diagnostic(String)` | `DiagnosticError` exposes kind, pattern, invalid byte offset, and executed steps |
+| Parsing error display text for JSON locations | `JsonError::line()` / `column()`; follow `std::error::Error::source()` to the original `serde_json::Error` |
 | `DocumentLine` | `TokenizedLine` |
 | `TokenSpan`, `ScopedToken` | `Token` |
 | `HighlightedSpan`, `IncrementalHighlightedSpan` | `HighlightedToken` |

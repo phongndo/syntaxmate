@@ -1751,6 +1751,7 @@ impl GrammarSet {
                             "include",
                             format!("unknown external grammar {scope_text}"),
                         )
+                        .with_include(Some(scope_text.to_owned()), repository.clone())
                     })?;
                     if let Some(repository) = repository
                         && !external.repository.contains_key(repository)
@@ -1760,7 +1761,8 @@ impl GrammarSet {
                             format!("{path}[{index}]"),
                             "include",
                             format!("unknown external include {scope_text}#{repository}"),
-                        ));
+                        )
+                        .with_include(Some(scope_text.to_owned()), Some(repository.clone())));
                     }
                 }
                 other => {

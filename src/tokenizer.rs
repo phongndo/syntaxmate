@@ -118,26 +118,75 @@ impl GrammarRegistry {
     /// constructing a tokenizer.
     pub fn add_json(&mut self, json: &str) -> Result<GrammarId> {
         if json.len() > self.limits.max_grammar_bytes {
-            return Err(Error::Grammar(format!(
-                "grammar is {} bytes, exceeding the {} byte limit",
-                json.len(),
-                self.limits.max_grammar_bytes
+            return Err(Error::Grammar(crate::GrammarError::new(
+                None,
+                crate::GrammarErrorKind::LimitExceeded(crate::LimitExceeded::new(
+                    crate::GrammarResource::GrammarBytes,
+                    self.limits.max_grammar_bytes,
+                    json.len(),
+                )),
             )));
         }
         if self.inner.len() >= self.limits.max_grammars {
-            return Err(Error::Grammar(format!(
-                "grammar registry reached its {} grammar limit",
-                self.limits.max_grammars
+            return Err(Error::Grammar(crate::GrammarError::new(
+                None,
+                crate::GrammarErrorKind::LimitExceeded(crate::LimitExceeded::new(
+                    crate::GrammarResource::GrammarCount,
+                    self.limits.max_grammars,
+                    self.inner.len() + 1,
+                )),
             )));
         }
         let id = self
             .inner
             .load_and_add(json)
-            .map_err(|error| Error::Grammar(error.to_string()))?;
+            .map_err(crate::error::grammar_load_error)?;
         Ok(GrammarId {
             registry: self.id,
             inner: id,
         })
+    }
+
+    /// Checks every registered regex for parser diagnostics, returning the first.
+    ///
+    /// This opt-in check does not change loading or tokenization. The engine is
+    /// permissive and can skip malformed or unsupported constructs. A diagnostic
+    /// may describe unsupported syntax rather than invalid Oniguruma syntax.
+    /// Positions count Unicode scalar values from zero within the pattern.
+    ///
+    /// ```
+    /// use syntaxmate::{Error, GrammarErrorKind, GrammarRegistry};
+    /// let mut registry = GrammarRegistry::new();
+    /// registry.add_json(r#"{"scopeName":"source.demo","patterns":[{"match":"é)"}]}"#)?;
+    /// match registry.validate_regexes() {
+    ///     Err(Error::Grammar(error)) => {
+    ///         assert_eq!(error.scope_name(), Some("source.demo"));
+    ///         if let GrammarErrorKind::InvalidRegex(regex) = error.kind() {
+    ///             assert_eq!(regex.pattern(), "é)");
+    ///             assert_eq!(regex.position(), 1);
+    ///         }
+    ///     }
+    ///     result => panic!("expected a regex diagnostic: {result:?}"),
+    /// }
+    /// # Ok::<(), syntaxmate::Error>(())
+    /// ```
+    pub fn validate_regexes(&self) -> Result<()> {
+        for grammar in self.inner.iter() {
+            for pattern in &grammar.patterns {
+                let parsed = crate::engine::regex::parse(pattern);
+                if let Some(position) = parsed.first_diagnostic_position {
+                    return Err(Error::Grammar(crate::GrammarError::new(
+                        Some(grammar.scope_name.clone()),
+                        crate::GrammarErrorKind::InvalidRegex(crate::RegexError::new(
+                            pattern.to_string(),
+                            position,
+                            parsed.diagnostics[0].clone(),
+                        )),
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Returns the number of registered grammars.
@@ -149,7 +198,7 @@ impl GrammarRegistry {
     pub fn validate(&self) -> Result<()> {
         self.inner
             .validate_include_graph()
-            .map_err(|error| Error::Grammar(error.to_string()))
+            .map_err(crate::error::grammar_validation_error)
     }
 }
 
@@ -160,9 +209,10 @@ pub struct GrammarId {
     inner: crate::engine::state::GrammarId,
 }
 
-fn preparation_limit_error(detail: &str) -> Error {
-    Error::Grammar(format!(
-        "grammar exceeds PreparedLanguage preparation bounds ({detail}); use Tokenizer directly"
+fn preparation_limit_error(scope: Option<String>, detail: &str) -> Error {
+    Error::Grammar(crate::GrammarError::new(
+        scope,
+        crate::GrammarErrorKind::PreparationLimit(detail.to_owned()),
     ))
 }
 
@@ -188,12 +238,22 @@ impl PreparedLanguage {
     /// remains available for such inputs.
     pub fn new(registry: &GrammarRegistry, root: GrammarId) -> Result<Self> {
         if root.registry != registry.id || registry.inner.grammar(root.inner).is_none() {
-            return Err(Error::Grammar(
-                "root grammar does not belong to this registry".to_owned(),
-            ));
+            return Err(Error::Grammar(crate::GrammarError::new(
+                None,
+                crate::GrammarErrorKind::ForeignGrammarId,
+            )));
         }
-        let inner = EnginePreparedLanguage::try_new(registry.inner.clone(), root.inner)
-            .map_err(preparation_limit_error)?;
+        let inner = EnginePreparedLanguage::try_new(registry.inner.clone(), root.inner).map_err(
+            |detail| {
+                preparation_limit_error(
+                    registry
+                        .inner
+                        .grammar(root.inner)
+                        .map(|grammar| grammar.scope_name.clone()),
+                    detail,
+                )
+            },
+        )?;
         Ok(Self {
             inner: Arc::new(inner),
         })
@@ -207,8 +267,11 @@ impl PreparedLanguage {
         let canonical = crate::grammars::canonical_language(language)
             .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
         let (grammars, root) = crate::engine::load_grammar_set(&canonical)?;
-        let inner =
-            EnginePreparedLanguage::try_new(grammars, root).map_err(preparation_limit_error)?;
+        let scope = grammars
+            .grammar(root)
+            .map(|grammar| grammar.scope_name.clone());
+        let inner = EnginePreparedLanguage::try_new(grammars, root)
+            .map_err(|detail| preparation_limit_error(scope, detail))?;
         Ok(Self {
             inner: Arc::new(inner),
         })
@@ -318,9 +381,10 @@ impl Tokenizer {
         options: TokenizerOptions,
     ) -> Result<Self> {
         if root.registry != registry.id || registry.inner.grammar(root.inner).is_none() {
-            return Err(Error::Grammar(
-                "root grammar does not belong to this registry".to_owned(),
-            ));
+            return Err(Error::Grammar(crate::GrammarError::new(
+                None,
+                crate::GrammarErrorKind::ForeignGrammarId,
+            )));
         }
         Ok(Self::from_engine(
             TextMateTokenizer::new(registry.inner.clone(), root.inner),

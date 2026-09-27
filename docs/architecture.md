@@ -42,6 +42,12 @@ storage and exposes a borrowed `Scopes` iterator, keeping intern tables private.
 `Theme` is the single theme facade; selector inspection requires `diagnostics`.
 See the [migration table](../CHANGELOG.md#migrating-from-01) for removed names.
 
+Fallible public operations return structured [`Error`](../src/error.rs) payloads.
+Match their kinds and access context through their accessors; display text is
+for people. Engine errors stay private and are mapped at the facade. Explicit
+registry validation reports missing includes; opt-in `validate_regexes()` reports
+parser diagnostics while loading and tokenization remain permissive.
+
 Exact ordered scopes, UTF-8 byte ranges, resolved styles, detection metadata,
 and completion status are observable. Regex bytecode, rule IDs, cache layout,
 bundle encoding, and diagnostics are implementation details. Keep new API

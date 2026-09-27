@@ -150,9 +150,11 @@ impl Highlighter {
     #[cfg(feature = "bundled-grammars")]
     pub fn bundled() -> Result<Self> {
         if crate::grammars::available_languages().is_empty() {
-            return Err(Error::Bundle(
+            return Err(Error::Bundle(crate::BundleError::new(
+                crate::BundleErrorKind::EmptyCatalog,
+                None,
                 "the bundled language catalog is empty".to_owned(),
-            ));
+            )));
         }
         Ok(Self {
             options: TokenizerOptions::default(),
