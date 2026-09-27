@@ -1112,9 +1112,12 @@ impl RequiredFactor {
     /// candidate start once verification exceeds a linear budget.
     fn find(&self, haystack: &[u8]) -> Option<usize> {
         let first = self.items.first()?;
-        // Each candidate can rescan the bytes after it (`<[^>]*>` over a run
-        // of `<`). An earlier position is always a sound prefilter answer, so
-        // stop verifying instead of going quadratic.
+        // Each failed candidate would otherwise rescan the bytes after it
+        // (`<[^>]*>` over a run of `<`). Items remember their last maximal
+        // run, so later candidates inside it reuse its end; the budget only
+        // guards unusual orders, and an earlier position is always a sound
+        // prefilter answer.
+        let mut runs = None;
         let mut budget = haystack.len().saturating_mul(4).saturating_add(64);
         let mut from = 0usize;
         while from < haystack.len() {
@@ -1124,7 +1127,8 @@ impl RequiredFactor {
                 None => find_byte_set_bitmap(rest, &first.set)?,
             };
             let start = from + relative;
-            let (matched, scanned) = self.matches_at(haystack, start);
+            let runs = runs.get_or_insert([ItemRun::EMPTY; FACTOR_MAX_ITEMS]);
+            let (matched, scanned) = self.matches_at(haystack, start, runs);
             if matched || scanned >= budget {
                 return Some(start);
             }
@@ -1135,25 +1139,54 @@ impl RequiredFactor {
     }
 
     /// Whether a run occurrence starts at `start`, and how many bytes the
-    /// check examined.
-    fn matches_at(&self, haystack: &[u8], start: usize) -> (bool, usize) {
+    /// check scanned.
+    fn matches_at(
+        &self,
+        haystack: &[u8],
+        start: usize,
+        runs: &mut [ItemRun; FACTOR_MAX_ITEMS],
+    ) -> (bool, usize) {
         let mut position = start;
-        for item in &self.items {
-            let mut count = 0u32;
-            while count < item.max
-                && haystack
-                    .get(position)
-                    .is_some_and(|byte| item.contains(*byte))
-            {
-                count += 1;
-                position += 1;
+        let mut scanned = 0usize;
+        for (item, run) in self.items.iter().zip(runs.iter_mut()) {
+            if !(run.start <= position && position <= run.end) {
+                let mut end = position;
+                while haystack.get(end).is_some_and(|byte| item.contains(*byte)) {
+                    end += 1;
+                }
+                scanned += end - position + 1;
+                *run = ItemRun {
+                    start: position,
+                    end,
+                };
             }
-            if count < item.min {
-                return (false, position - start + 1);
+            let available = run.end - position;
+            let count = if item.max == FACTOR_UNBOUNDED {
+                available
+            } else {
+                available.min(item.max as usize)
+            };
+            if count < item.min as usize {
+                return (false, scanned);
             }
+            position += count;
         }
-        (true, position - start)
+        (true, scanned)
     }
+}
+
+/// A maximal run of one factor item's bytes, `start..end`.
+#[derive(Clone, Copy)]
+struct ItemRun {
+    start: usize,
+    end: usize,
+}
+
+impl ItemRun {
+    const EMPTY: Self = Self {
+        start: usize::MAX,
+        end: 0,
+    };
 }
 
 /// Most selective mandatory byte-class run of a pattern. Callers must only
@@ -1729,11 +1762,69 @@ mod tests {
     #[test]
     fn required_factor_search_stays_linear() {
         let factor = required_factor(&parse("<[^>]*>").ast).expect("byte-run factor");
-        // Every `<` starts a candidate whose check scans to the line end;
-        // past the linear budget the search reports a possible occurrence.
-        assert!(factor.find("<".repeat(100_000).as_bytes()).is_some());
+        // Every `<` starts a candidate whose check would scan to the line
+        // end; cached item runs keep the answer exact.
+        assert_eq!(factor.find("<".repeat(100_000).as_bytes()), None);
         assert_eq!(factor.find(b"x<y>"), Some(1));
         assert_eq!(factor.find(b"x<y"), None);
+    }
+
+    #[test]
+    fn required_factor_search_matches_a_direct_scan() {
+        // Greedy verification from each start, without cached runs.
+        fn direct(factor: &RequiredFactor, haystack: &[u8]) -> Option<usize> {
+            (0..haystack.len()).find(|&start| {
+                let mut position = start;
+                factor.items.iter().all(|item| {
+                    let mut count = 0u32;
+                    while count < item.max
+                        && haystack
+                            .get(position)
+                            .is_some_and(|byte| item.contains(*byte))
+                    {
+                        count += 1;
+                        position += 1;
+                    }
+                    count >= item.min
+                })
+            })
+        }
+        let mut seed = 0x2545_f491_u32;
+        let mut next = |bound: u32| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed % bound
+        };
+        let mut checked = 0;
+        for pattern in [
+            "<[^>]*>",
+            "a{2,3}b",
+            r"x *\(",
+            "ab{0,2}c",
+            "[ab]+c{2}",
+            r"<[^>]*>\s*x",
+        ] {
+            let Some(factor) = required_factor(&parse(pattern).ast) else {
+                continue;
+            };
+            checked += 1;
+            for _ in 0..500 {
+                let haystack = (0..next(24))
+                    .map(|_| b"<>abcxy("[next(8) as usize])
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    factor.find(&haystack),
+                    direct(&factor, &haystack),
+                    "{pattern} on {:?}",
+                    String::from_utf8_lossy(&haystack)
+                );
+            }
+        }
+        assert!(
+            checked >= 3,
+            "only {checked} patterns have byte-run factors"
+        );
     }
 
     /// Every start where the pattern matches must remain viable under its
