@@ -246,10 +246,11 @@ fn program_counter(index: usize) -> Result<ProgramCounter, CompileError> {
 }
 
 fn vm_slot(index: usize) -> Result<VmSlot, CompileError> {
-    // The top bit is reserved for `RepeatUndo`'s stalled flag.
+    // The top bit is reserved for `RepeatUndo`'s stalled flag and the slot
+    // below it for call credits.
     u32::try_from(index)
         .ok()
-        .filter(|slot| *slot < REPEAT_UNDO_STALLED)
+        .filter(|slot| *slot < CREDIT_UNDO_SLOT)
         .ok_or(CompileError::TableOverflow)
 }
 
@@ -1224,7 +1225,24 @@ struct RepeatUndo {
 
 const REPEAT_UNDO_STALLED: u32 = 1 << 31;
 
+/// `RepeatUndo` slot marking a call frame's `nested_scanned` credit rather
+/// than a repeat; `vm_slot` never hands it out.
+const CREDIT_UNDO_SLOT: VmSlot = REPEAT_UNDO_STALLED - 1;
+
 impl RepeatUndo {
+    /// Restores call frame `frame`'s (zero-based) `nested_scanned` credit.
+    fn credit(frame: u32, previous: u32) -> Self {
+        Self {
+            last_position: arena_index(frame),
+            count: previous,
+            slot_and_stalled: CREDIT_UNDO_SLOT,
+        }
+    }
+
+    fn is_credit(self) -> bool {
+        self.slot_and_stalled == CREDIT_UNDO_SLOT
+    }
+
     fn new(slot: VmSlot, state: RepeatState) -> Self {
         debug_assert!(slot < REPEAT_UNDO_STALLED);
         Self {
@@ -1818,10 +1836,14 @@ impl Program {
                         + (repeat_end - arena_index(frame.repeat_undo_mark));
                     budget.charge(scanned.saturating_sub(arena_index(frame.nested_scanned)))?;
                     if let Some(caller) = frame.parent.checked_sub(1) {
-                        let caller = &mut scratch.calls[arena_index(caller)];
-                        caller.nested_scanned = caller
-                            .nested_scanned
-                            .saturating_add(u32::try_from(scanned).unwrap_or(u32::MAX));
+                        // Logged like a repeat write so backtracking past this
+                        // return also takes the caller's credit back.
+                        let credit = &mut scratch.calls[arena_index(caller)].nested_scanned;
+                        let previous = *credit;
+                        *credit = credit.saturating_add(u32::try_from(scanned).unwrap_or(u32::MAX));
+                        scratch
+                            .repeat_undo
+                            .push(RepeatUndo::credit(caller, previous));
                     }
                     for index in arena_index(frame.capture_undo_mark)..capture_end {
                         let (slot, previous) = scratch.capture_undo[index].clone();
@@ -1839,6 +1861,9 @@ impl Program {
                     // call.
                     for index in arena_index(frame.repeat_undo_mark)..repeat_end {
                         let undo = scratch.repeat_undo[index];
+                        if undo.is_credit() {
+                            continue;
+                        }
                         let stamp = &mut scratch.repeat_restore_stamps[undo.slot()];
                         if *stamp == generation {
                             continue;
@@ -2628,7 +2653,11 @@ fn enter_repeat(scratch: &mut BytecodeScratch, slot: VmSlot, position: usize) {
 fn undo_repeats_to(scratch: &mut BytecodeScratch, mark: u32) {
     while scratch.repeat_undo.len() > arena_index(mark) {
         let undo = scratch.repeat_undo.pop().expect("repeat undo above mark");
-        scratch.repeats[undo.slot()] = undo.state();
+        if undo.is_credit() {
+            scratch.calls[undo.last_position].nested_scanned = undo.count;
+        } else {
+            scratch.repeats[undo.slot()] = undo.state();
+        }
     }
 }
 
@@ -5753,6 +5782,26 @@ mod tests {
             .expect("nested match");
         assert_eq!(matched.end, line.len());
         assert!(budget.used() < 20_000, "{}", budget.used());
+    }
+
+    #[test]
+    fn backtracking_takes_back_nested_return_credit() {
+        // The first branch returns from `k` once per `a`, crediting `n`.
+        // When it fails, that credit must go with it, or `n`'s later returns
+        // rescan their growing undo log for free.
+        let pattern = r"\g<n>z|(?<n>(?:\g<k>)*b|(?:ac?)*)|(?<k>a)";
+        let parsed = parse(pattern);
+        let live = (1..=parsed.capture_count).collect::<Vec<_>>();
+        let program = Program::compile_captures(&parsed, &live).expect("capture program");
+        let mut budget = StepBudget::new(100_000);
+        let result = program.execute_captures(
+            &"a".repeat(3_000),
+            0,
+            context(),
+            &mut budget,
+            &mut BytecodeScratch::default(),
+        );
+        assert!(result.is_err(), "used {} steps", budget.used());
     }
 
     #[test]
