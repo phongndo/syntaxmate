@@ -1341,6 +1341,10 @@ pub(crate) struct BytecodeScratch {
     repeat_undo: Vec<RepeatUndo>,
     capture_undo: Vec<(VmSlot, CaptureState)>,
     calls: Vec<CallFrame>,
+    /// Per-slot marks of the `Return` restore that last visited the slot.
+    repeat_restore_stamps: Vec<u32>,
+    capture_restore_stamps: Vec<u32>,
+    restore_generation: u32,
     /// One-based index of the current call frame; 0 outside subroutines.
     call_frame: u32,
     cuts: Vec<u32>,
@@ -1788,24 +1792,33 @@ impl Program {
                     // an enclosing pending start. Restore pending captures on
                     // return; completed captures remain observable. Restores
                     // are logged so backtracking into the routine undoes them.
-                    let capture_mark = arena_index(frame.capture_undo_mark);
-                    for index in capture_mark..scratch.capture_undo.len() {
-                        let (slot, previous) = &scratch.capture_undo[index];
-                        if let CaptureState::Open(start) = *previous
-                            && !scratch.capture_undo[capture_mark..index]
-                                .iter()
-                                .any(|(earlier, _)| earlier == slot)
-                        {
-                            set_capture(scratch, *slot, CaptureState::Open(start));
+                    // Each slot is restored at most once, from its oldest
+                    // undo entry, so nested returns add at most one log entry
+                    // per slot instead of replaying their callees' logs.
+                    let generation = scratch.next_restore_generation();
+                    let capture_end = scratch.capture_undo.len();
+                    for index in arena_index(frame.capture_undo_mark)..capture_end {
+                        let (slot, previous) = scratch.capture_undo[index].clone();
+                        let stamp = &mut scratch.capture_restore_stamps[arena_index(slot)];
+                        if *stamp == generation {
+                            continue;
+                        }
+                        *stamp = generation;
+                        if let CaptureState::Open(start) = previous {
+                            set_capture(scratch, slot, CaptureState::Open(start));
                         }
                     }
                     // A recursive call reuses its caller's loop slots. Put
                     // every slot the call changed back to its value at the
-                    // call: replaying the undo entries newest first leaves the
-                    // oldest value per slot.
-                    let repeat_mark = arena_index(frame.repeat_undo_mark);
-                    for index in (repeat_mark..scratch.repeat_undo.len()).rev() {
+                    // call.
+                    let repeat_end = scratch.repeat_undo.len();
+                    for index in arena_index(frame.repeat_undo_mark)..repeat_end {
                         let undo = scratch.repeat_undo[index];
+                        let stamp = &mut scratch.repeat_restore_stamps[undo.slot()];
+                        if *stamp == generation {
+                            continue;
+                        }
+                        *stamp = generation;
                         set_repeat(scratch, undo.vm_slot(), undo.state());
                     }
                     pc = frame.return_pc;
@@ -2535,12 +2548,25 @@ fn ordered_fanout_score(ast: &Ast) -> usize {
 }
 
 impl BytecodeScratch {
+    /// A generation no restore stamp holds yet.
+    fn next_restore_generation(&mut self) -> u32 {
+        self.restore_generation = self.restore_generation.wrapping_add(1);
+        if self.restore_generation == 0 {
+            self.repeat_restore_stamps.fill(0);
+            self.capture_restore_stamps.fill(0);
+            self.restore_generation = 1;
+        }
+        self.restore_generation
+    }
+
     fn reset(&mut self, repeat_slots: usize, capture_slots: usize) {
         self.backtrack.clear();
         self.assertions.clear();
         self.repeat_undo.clear();
         self.capture_undo.clear();
         self.calls.clear();
+        self.repeat_restore_stamps.resize(repeat_slots, 0);
+        self.capture_restore_stamps.resize(capture_slots, 0);
         self.call_frame = 0;
         self.cuts.clear();
         self.repeats.resize(repeat_slots, RepeatState::default());
@@ -5653,6 +5679,32 @@ mod tests {
             )
             .unwrap();
         assert_eq!(end, Some(18));
+    }
+
+    #[test]
+    fn deep_recursion_restores_each_slot_once_per_return() {
+        // Replaying every callee undo entry on return doubled the log per
+        // nesting level; 60 levels would never finish.
+        let pattern = r"(?<n>\((?:[^()]|\g<n>)*\))";
+        let line = format!("{}{}", "(".repeat(60), ")".repeat(60));
+        let program = Program::compile_captures(&parse(pattern), &[]).expect("selection program");
+        let mut scratch = BytecodeScratch::default();
+        let end = program
+            .execute(
+                &line,
+                0,
+                context(),
+                &mut StepBudget::new(100_000),
+                &mut scratch,
+            )
+            .unwrap();
+        assert_eq!(end, Some(line.len()));
+        assert!(
+            scratch.repeat_undo.len() < 10_000,
+            "{}",
+            scratch.repeat_undo.len()
+        );
+        assert_capture_replay(pattern, &line, 0, &[1]);
     }
 
     #[test]
