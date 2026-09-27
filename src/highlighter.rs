@@ -65,8 +65,8 @@ impl Theme {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = Style> + '_ {
-        self.inner.get().rendering_styles()
+    pub(crate) fn rendering_rules(&self) -> impl Iterator<Item = (&str, Style, bool)> {
+        self.inner.get().rendering_rules()
     }
 
     /// Builds a theme from ordered TextMate rules, returning [`Error::Theme`] on invalid settings.

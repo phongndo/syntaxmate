@@ -18,8 +18,10 @@
   equal adjacent runs. Keep full colors when rendering without a wrapper.
   ANSI output now omits the theme default background unless
   `AnsiOptions::include_default_background` is set.
-- Add class-based HTML through `HtmlOptions::class_prefix` and `html_stylesheet`,
-  plus `render_html_to` and `render_ansi_to` for `fmt::Write` sinks. Option struct
+- Add theme-independent scope classes through `HtmlOptions::class_prefix` and
+  `html_stylesheet`: render HTML once and switch themes by replacing CSS.
+  Nested scopes preserve parent selectors; unsupported selectors are skipped.
+  Add `render_html_to` and `render_ansi_to` for `fmt::Write` sinks. Option struct
   literals should use `..Default::default()` or supply the new fields.
 - Restore allocation guardrails for prepared tokenizers and bundled construction
   by dropping construction-only rule templates and borrowing embedded repository
