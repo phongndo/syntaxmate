@@ -61,6 +61,11 @@ impl Theme {
         self.inner.get().name()
     }
 
+    #[cfg(feature = "html")]
+    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = ResolvedSyntaxStyle> + '_ {
+        self.inner.get().rendering_styles()
+    }
+
     /// Resolves a style for an interned exact TextMate scope stack.
     pub fn resolve(
         &self,
@@ -270,7 +275,11 @@ pub fn style_document(tokenized: TokenizedDocument, theme: &Theme) -> Highlighte
             scopes: Arc::clone(line.scope_table()),
         })
         .collect();
-    HighlightedDocument { lines, status }
+    HighlightedDocument {
+        lines,
+        status,
+        default_style: theme.inner.get().default_style(),
+    }
 }
 
 #[cfg(feature = "bundled-grammars")]
@@ -502,6 +511,7 @@ impl HighlightedLine {
 pub struct HighlightedDocument {
     lines: Vec<HighlightedLine>,
     status: HighlightStatus,
+    pub(crate) default_style: ResolvedSyntaxStyle,
 }
 
 impl HighlightedDocument {

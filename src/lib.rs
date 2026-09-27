@@ -58,9 +58,9 @@ pub use highlighter::{
 };
 pub use render::RenderedOutput;
 #[cfg(feature = "ansi")]
-pub use render::{AnsiOptions, render_ansi};
+pub use render::{AnsiOptions, render_ansi, render_ansi_to};
 #[cfg(feature = "html")]
-pub use render::{HtmlOptions, render_html};
+pub use render::{HtmlOptions, html_stylesheet, render_html, render_html_to};
 pub use theme::{
     ResolvedSyntaxStyle as Style, ResolvedThemeStyle, RgbColor, SyntaxModifiers as FontModifiers,
     TextMateTheme, ThemeMatch, ThemeSelectorScore,
