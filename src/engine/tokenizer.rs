@@ -682,6 +682,19 @@ struct FrameNode {
     while_frames: usize,
 }
 
+impl Drop for FrameNode {
+    // One frame per line of nested input makes long parent chains; dropping
+    // them recursively would overflow the thread stack.
+    fn drop(&mut self) {
+        let mut parent = self.parent.take();
+        while let Some(node) = parent {
+            parent = Arc::try_unwrap(node)
+                .ok()
+                .and_then(|mut node| node.parent.take());
+        }
+    }
+}
+
 impl FrameStack {
     #[inline]
     fn is_empty(&self) -> bool {
@@ -3043,6 +3056,7 @@ impl TextMateTokenizer {
         let mut frame_anchor_positions = Vec::new();
         let mut loop_candidates = None;
         let mut zero_width_states = HashSet::new();
+        let mut line_pushes = LinePushes::default();
         // End rules such as `$` are zero-width at the logical line end. Keep
         // evaluating while frames remain so line-scoped rules close even when
         // callers pass a line without its terminating newline.
@@ -3125,6 +3139,18 @@ impl TextMateTokenizer {
                 candidates.active_stack_id,
                 candidates.end_stack_id,
             );
+            if line_pushes.repeats_push(&state, depth_before, cursor, result_end) {
+                // vscode-textmate stops the line when a begin rule that did
+                // not advance re-enters a rule already entered at this scan
+                // position, keeping the stack from before the push.
+                if let Some(previous_state) = zero_width_state_before {
+                    state = previous_state;
+                }
+                let stack = self.current_scope_stack_id(&state, true, None);
+                self.push_token(&mut tokens, result_start..parse_text.len(), stack);
+                cursor = parse_text.len();
+                break;
+            }
             if zero_width_match_rule {
                 // vscode-textmate stops the current line when an ordinary
                 // MatchRule wins without consuming input. Advancing one scalar
@@ -5538,6 +5564,7 @@ impl TextMateTokenizer {
         let mut fallback_steps = 0u64;
         let mut anchor_pos = Some(range.start);
         let mut frame_anchor_positions = Vec::new();
+        let mut line_pushes = LinePushes::default();
         let mut zero_width_states = HashSet::new();
         // Capture retokenization is bounded by the capture. Let lookbehind see
         // the original prefix, but do not let a greedy child consume text
@@ -5697,6 +5724,14 @@ impl TextMateTokenizer {
                 candidate_set.active_stack_id,
                 candidate_set.end_stack_id,
             );
+            if line_pushes.repeats_push(&state, depth_before, cursor, result_end) {
+                if let Some(previous_state) = zero_width_state_before {
+                    state = previous_state;
+                }
+                let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
+                self.push_token(tokens, result_start..range.end, stack);
+                return;
+            }
             if zero_width_match_rule {
                 self.push_token(
                     tokens,
@@ -7680,6 +7715,51 @@ fn fallback_call_budget(source_bytes: usize) -> u64 {
             .unwrap_or(u64::MAX)
             .saturating_mul(FALLBACK_STEPS_PER_SOURCE_BYTE),
     )
+}
+
+/// Frames pushed on the current line with the scan position they were
+/// entered at, like vscode-textmate's `enterPos` (earlier-line frames have
+/// none). Kept in step with the state's depth after every tokenizer step.
+#[derive(Default)]
+struct LinePushes(Vec<(usize, GrammarId, RuleId)>);
+
+impl LinePushes {
+    /// Records the step that changed `state` from `depth_before` frames and
+    /// reports whether it pushed, without advancing past `cursor`, a rule
+    /// already entered at `cursor` (vscode-textmate's `hasSameRuleAs`).
+    fn repeats_push(
+        &mut self,
+        state: &TokenizerState,
+        depth_before: usize,
+        cursor: usize,
+        match_end: usize,
+    ) -> bool {
+        let depth = state.depth();
+        if depth < depth_before {
+            let popped = (depth_before - depth).min(self.0.len());
+            self.0.truncate(self.0.len() - popped);
+            return false;
+        }
+        if depth == depth_before {
+            return false;
+        }
+        let Some(frame) = state.frames.last() else {
+            return false;
+        };
+        let entry = (cursor, frame.grammar_id, frame.rule_id);
+        if match_end <= cursor
+            && self
+                .0
+                .iter()
+                .rev()
+                .take_while(|(entered, _, _)| *entered == cursor)
+                .any(|pushed| *pushed == entry)
+        {
+            return true;
+        }
+        self.0.push(entry);
+        false
+    }
 }
 
 fn plain_compact_tokens(parse_text: &str, stack: ScopeStackId) -> Vec<CompactScopedToken> {

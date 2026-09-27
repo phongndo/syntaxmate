@@ -172,5 +172,33 @@
       }
     ],
     "sources": ["xab", "cd", "ef", "xab cd"]
+  },
+  {
+    "name": "recursive-empty-begin",
+    "grammars": [
+      {
+        "scopeName": "source.emptybegin",
+        "patterns": [{"include": "#r"}],
+        "repository": {
+          "r": {"begin": "(?=(zz))", "end": "b", "name": "meta.r", "patterns": [{"include": "#r"}]}
+        }
+      }
+    ],
+    "sources": ["zz\nzz\nzzb", "a zz b zz"]
+  },
+  {
+    "name": "recursive-empty-begin-in-capture",
+    "grammars": [
+      {
+        "scopeName": "source.emptybegin.capture",
+        "patterns": [
+          {"match": "<(zz(?:b|zz)*)>", "name": "meta.tag", "captures": {"1": {"patterns": [{"include": "#r"}]}}}
+        ],
+        "repository": {
+          "r": {"begin": "(?=(zz))", "end": "b", "name": "meta.r", "patterns": [{"include": "#r"}]}
+        }
+      }
+    ],
+    "sources": ["<zz> <zzbzz>", "<zzzz>"]
   }
 ]
