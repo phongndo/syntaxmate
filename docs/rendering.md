@@ -40,33 +40,66 @@ document, use `Highlighter::highlight_html_with_options`.
 
 ### CSS classes
 
-Set `class_prefix` to emit classes instead of inline styles. Generate the
-stylesheet once from the same theme, using the same prefix:
+Set `class_prefix` to render theme-independent scope classes. Render once and
+switch themes by replacing the stylesheet, keeping the same prefix:
 
 ```rust
 use syntaxmate::{Highlighter, HtmlOptions, Theme, html_stylesheet, render_html};
 
 let source = "fn main() {}";
-let theme = Theme::bundled("github-dark")?;
 let mut highlighter = Highlighter::bundled()?;
-let document = highlighter.highlight_with_theme("rust", source, &theme)?;
+let document = highlighter.highlight("rust", source, "github-dark")?;
 let options = HtmlOptions {
     class_prefix: Some("code".to_owned()),
     ..HtmlOptions::default()
 };
-let css = html_stylesheet(&theme, "code");
 let html = render_html(source, &document, &options)?;
+let dark_css = html_stylesheet(&Theme::bundled("github-dark")?, "code");
+let light_css = html_stylesheet(&Theme::bundled("github-light")?, "code");
 assert!(!html.as_str().contains("style="));
-assert!(css.contains(".sm-code-"));
+assert_ne!(dark_css, light_css);
 # Ok::<(), syntaxmate::Error>(())
 ```
 
-Include the CSS in your page or an external stylesheet. Classes describe
-resolved color properties and font modifiers, so combinations inherited from
-multiple TextMate rules work without converting scope selectors into CSS.
-Scope and theme names never enter class names. The prefix is encoded into a
-safe CSS identifier; see [`html_stylesheet`](https://docs.rs/syntaxmate/latest/syntaxmate/fn.html_stylesheet.html)
-for the naming scheme. The existing `class` option still adds a class to `<pre>`.
+Include one stylesheet in your page, or use media queries to select between
+them. Scope classes contain no theme colors. Nested spans preserve the ordered
+scope stack, and adjacent tokens share their outer spans within each line.
+One encoded class per scope preserves atom order and repeated atoms without
+repeating the prefix for every atom. CSS attribute prefix matching also avoids
+emitting a separate class for every dotted prefix of a scope. For example,
+`keyword.control.rust` becomes `sm-code-s-keyword-control-rust`, and a theme's
+`keyword.control` selector matches it with `[class|="sm-code-s-keyword-control"]`.
+Literal hyphens and other punctuation are encoded so they cannot masquerade as
+scope separators or inject HTML/CSS. See
+[`html_stylesheet`](https://docs.rs/syntaxmate/latest/syntaxmate/fn.html_stylesheet.html)
+for the exact encoding and supported selector subset.
+
+The wrapper receives `sm-code-root` plus the existing `class` option. When
+`include_wrapper` is false, add `sm-code-root` to your own container to supply
+defaults and anchor the selectors. Keep generated scope spans' classes intact;
+adding classes to them would break the attribute matching. Plain inner spans
+apply font modifiers to text, so nested scopes can clear underline and
+strikethrough without an ancestor continuing to decorate them.
+
+Parent selectors become CSS descendants, and comma lists become equivalent
+separate rules. Unsupported selectors are skipped as documented in the API.
+Zero-specificity `:where()` rules follow TextMate rank order; CSS inheritance
+then applies scope levels from outer to inner. This is an approximation for
+custom themes, especially unsupported selectors or interfering page styles.
+Class output requires CSS custom properties and `:where()` support, and is
+larger than the default inline output because it retains the scope structure.
+Use inline output when exact resolution or compact HTML matters more than
+switching stylesheets.
+
+The regression measurement parses generated HTML and CSS and emulates the
+emitted cascade, comparing foreground, effective background, and all font
+modifiers for each Unicode character with inline resolution. It covers every
+bundled theme and the Rust, TSX, HTML, Markdown, PHP, and CSS stress fixtures,
+and prints fidelity and uncompressed byte sizes:
+
+```sh
+cargo test --all-features --locked bundled_css_fidelity_and_size -- --nocapture
+```
 
 ## ANSI
 

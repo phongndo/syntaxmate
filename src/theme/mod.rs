@@ -443,13 +443,22 @@ impl TextMateTheme {
         self.default_style
     }
 
+    // Ascending rank; the bool preserves explicit font resets versus inheritance.
     #[cfg(feature = "html")]
-    pub(crate) fn rendering_styles(&self) -> impl Iterator<Item = Style> + '_ {
-        std::iter::once(self.default_style).chain(self.rules.iter().map(|rule| Style {
-            foreground: rule.foreground,
-            background: rule.background,
-            modifiers: rule.modifiers.unwrap_or_default(),
-        }))
+    pub(crate) fn rendering_rules(&self) -> impl Iterator<Item = (&str, Style, bool)> {
+        let mut rules = self.rules.iter().collect::<Vec<_>>();
+        rules.sort_by(|a, b| compare_specificity(a, b));
+        rules.into_iter().map(|rule| {
+            (
+                rule.selector_text.as_str(),
+                Style {
+                    foreground: rule.foreground,
+                    background: rule.background,
+                    modifiers: rule.modifiers.unwrap_or_default(),
+                },
+                rule.modifiers.is_some(),
+            )
+        })
     }
 
     pub fn color(&self, name: &str) -> Option<RgbColor> {

@@ -9,10 +9,14 @@ fn main() -> syntaxmate::Result<()> {
         class_prefix: Some("example".to_owned()),
         ..HtmlOptions::default()
     };
-    let css = html_stylesheet(&theme, "example");
+    let dark_css = html_stylesheet(&theme, "example");
+    let light_css = html_stylesheet(&Theme::bundled("github-light")?, "example");
     let mut output = String::new();
     let status = render_html_to(source, &document, &options, &mut output)?;
     assert!(status.is_complete());
-    println!("<style>{css}</style>\n{output}");
+    // Both stylesheets target the same HTML; the browser chooses the theme.
+    println!(
+        "<style>{light_css}@media (prefers-color-scheme: dark){{{dark_css}}}</style>\n{output}"
+    );
     Ok(())
 }

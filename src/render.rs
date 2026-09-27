@@ -49,14 +49,16 @@ impl RenderedOutput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HtmlOptions {
     /// Wrap output in `<pre><code>...</code></pre>`, carrying default colors on `<pre>`.
-    /// Without a wrapper, spans retain their full colors for standalone embedding.
+    /// Without a wrapper, inline spans retain full colors; class mode needs a
+    /// container with the wrapper class described by [`html_stylesheet`].
     pub include_wrapper: bool,
     /// Class placed on the `<pre>` wrapper. Ignored without a wrapper.
     pub class: Option<String>,
     /// Add a `data-scopes` attribute containing the exact TextMate scope stack.
     pub include_scopes: bool,
-    /// Emit CSS classes instead of inline styles when set. Pass the same prefix to
-    /// [`html_stylesheet`]. Prefixes are encoded safely; scope names never become classes.
+    /// Emit nested, theme-independent scope classes instead of inline styles.
+    /// Pass the same prefix to [`html_stylesheet`]; prefixes and scopes are encoded
+    /// safely. Switch themes by replacing the stylesheet without rendering again.
     pub class_prefix: Option<String>,
 }
 
@@ -78,8 +80,9 @@ impl Default for HtmlOptions {
 /// Pass the source that produced `document`. Invalid ranges and mismatched
 /// logical line counts return an error, but different text with compatible
 /// ranges is not detected; the document does not retain the original source.
-/// Default colors are inherited from the wrapper; without it, runs retain full
-/// colors. Adjacent runs with identical output merge within each logical line.
+/// In inline mode, default colors are inherited from the wrapper; without it,
+/// runs retain full colors. Adjacent runs with identical output merge within
+/// each logical line. Class mode is described by [`html_stylesheet`].
 /// Font modifiers stay on runs so tokens can clear default decorations.
 /// See [`render_html_to`] to write output without allocating a complete string.
 #[cfg(feature = "html")]
@@ -213,11 +216,10 @@ fn write_html_start(
                 .class
                 .as_ref()
                 .is_some_and(|class| !class.is_empty())
-                && colors != Style::default()
             {
                 output.write_char(' ')?;
             }
-            write_html_classes(colors, prefix, output)?;
+            write!(output, "{prefix}-root")?;
         }
         output.write_char('"')?;
     }
@@ -244,6 +246,9 @@ fn render_html_line<'a>(
     prefix: Option<&str>,
     output: &mut dyn Write,
 ) -> fmt::Result {
+    if let Some(prefix) = prefix {
+        return render_scope_line(text, spans, options, prefix, output);
+    }
     let mut cursor = 0;
     let mut active: Option<(Style, Option<String>)> = None;
     for (range, mut style, scopes) in spans {
@@ -283,15 +288,7 @@ fn render_html_line<'a>(
             }
             if let Some((style, scopes)) = &next {
                 output.write_str("<span")?;
-                if let Some(prefix) = prefix {
-                    if *style != Style::default() {
-                        output.write_str(" class=\"")?;
-                        write_html_classes(*style, prefix, output)?;
-                        output.write_char('"')?;
-                    }
-                } else {
-                    write_html_style(*style, output)?;
-                }
+                write_html_style(*style, output)?;
                 if let Some(scopes) = scopes {
                     write!(output, " data-scopes=\"{scopes}\"")?;
                 }
@@ -308,38 +305,195 @@ fn render_html_line<'a>(
     escape_html_text(&text[cursor..], output)
 }
 
-/// Generates CSS for HTML rendered with [`HtmlOptions::class_prefix`].
+#[cfg(feature = "html")]
+fn render_scope_line<'a>(
+    text: &str,
+    spans: impl Iterator<Item = (Range<usize>, Style, impl Iterator<Item = &'a str>)>,
+    options: &HtmlOptions,
+    prefix: &str,
+    output: &mut dyn Write,
+) -> fmt::Result {
+    let mut active = Vec::new();
+    let mut leaf_open = false;
+    let mut cursor = 0;
+    for (range, _, scopes) in spans {
+        if range.is_empty() {
+            continue;
+        }
+        let scopes = scopes.collect::<Vec<_>>();
+        if cursor < range.start {
+            close_scope_spans(&mut active, &mut leaf_open, 0, output)?;
+            write_scope_text(&text[cursor..range.start], output)?;
+        }
+        let shared = active
+            .iter()
+            .zip(&scopes)
+            .take_while(|(a, b)| a == b)
+            .count();
+        if shared != active.len() || shared != scopes.len() || !leaf_open {
+            close_scope_spans(&mut active, &mut leaf_open, shared, output)?;
+            for scope in &scopes[shared..] {
+                write!(
+                    output,
+                    "<span class=\"{prefix}-s-{}\">",
+                    encode_scope(scope)
+                )?;
+                active.push(*scope);
+            }
+            output.write_str("<span")?;
+            if options.include_scopes {
+                output.write_str(" data-scopes=\"")?;
+                for (index, scope) in scopes.iter().enumerate() {
+                    if index != 0 {
+                        output.write_char(' ')?;
+                    }
+                    escape_html_attribute(scope, output)?;
+                }
+                output.write_char('"')?;
+            }
+            output.write_char('>')?;
+            leaf_open = true;
+        }
+        escape_html_text(&text[range.clone()], output)?;
+        cursor = range.end;
+    }
+    close_scope_spans(&mut active, &mut leaf_open, 0, output)?;
+    if cursor < text.len() {
+        write_scope_text(&text[cursor..], output)?;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "html")]
+fn close_scope_spans(
+    active: &mut Vec<&str>,
+    leaf_open: &mut bool,
+    shared: usize,
+    output: &mut dyn Write,
+) -> fmt::Result {
+    if *leaf_open {
+        output.write_str("</span>")?;
+        *leaf_open = false;
+    }
+    for _ in shared..active.len() {
+        output.write_str("</span>")?;
+    }
+    active.truncate(shared);
+    Ok(())
+}
+
+#[cfg(feature = "html")]
+fn write_scope_text(text: &str, output: &mut dyn Write) -> fmt::Result {
+    output.write_str("<span>")?;
+    escape_html_text(text, output)?;
+    output.write_str("</span>")
+}
+
+/// Generates a swappable theme stylesheet for [`HtmlOptions::class_prefix`].
 ///
-/// Pass the same theme used to style the document and the same prefix used to
-/// render it. Classes are `sm-{prefix}-fg-{rrggbb}`, `sm-{prefix}-bg-{rrggbb}`,
-/// and `sm-{prefix}-m-{hex}` (bold=1, italic=2, underline=4, strikethrough=8).
-/// Prefix bytes other than ASCII letters, digits, and hyphens become `_xx` hex
-/// escapes, including underscores. The fixed `sm-` start ensures valid CSS
-/// identifiers even for empty or numeric prefixes. No scope or theme names
-/// enter the CSS. Rules cover all theme colors and modifier combinations.
+/// Only the prefix must match the rendered HTML; the theme can be changed freely.
+/// The wrapper class is `sm-{encoded_prefix}-root`. Supply that class on your own
+/// container when `include_wrapper` is false. Prefix bytes except ASCII letters,
+/// digits, and hyphens become `_xx` hex escapes (including underscores).
+/// Each scope level has one class, `sm-{encoded_prefix}-s-{encoded_scope}`:
+/// dots become hyphens; other non-alphanumeric scope bytes become `_xx` escapes.
+/// CSS `|=` attribute selectors preserve ordered, dotted scope-prefix matching.
+/// Do not add other classes to the generated scope spans.
+///
+/// Parent selectors become descendants; comma lists become separate equivalent
+/// rules. Exclusions (`-` or `-scope`), child combinators (`>`), wildcards, and priority
+/// prefixes (`L:`/`R:`) are skipped. Other syntax rejected by [`Theme::from_json`]
+/// cannot reach this renderer. Rules use zero-specificity `:where()` selectors
+/// ordered by TextMate target depth, nearest-first parent lengths/count, then
+/// source order. This approximates TextMate through CSS inheritance and cascade;
+/// unsupported selectors and surrounding page CSS can differ from inline output.
+/// Font decorations use inherited custom properties applied only to text spans,
+/// allowing inner scopes to clear them. Requires CSS custom properties and `:where()`.
 #[cfg(feature = "html")]
 pub fn html_stylesheet(theme: &Theme, class_prefix: &str) -> String {
     let prefix = encode_class_prefix(class_prefix);
-    let mut rules = std::collections::BTreeSet::new();
-    for style in theme.rendering_styles() {
-        for (kind, property, color) in [
-            ("fg", "color", style.foreground),
-            ("bg", "background-color", style.background),
-        ] {
-            if let Some(color) = color {
-                let hex = format!("{:02x}{:02x}{:02x}", color.red, color.green, color.blue);
-                rules.insert(format!(".{prefix}-{kind}-{hex}{{{property}:#{hex};}}\n"));
-            }
+    let mut output = String::new();
+    write!(output, ":where(.{prefix}-root){{").unwrap();
+    write_scope_declarations(theme.default_style(), true, &prefix, &mut output).unwrap();
+    output.push_str("}\n");
+    writeln!(output, ":where(.{prefix}-root) span:not([class]){{font-weight:var(--{prefix}-weight);font-style:var(--{prefix}-style);text-decoration:var(--{prefix}-decoration);}}").unwrap();
+    for (selector, style, modifiers_set) in theme.rendering_rules() {
+        let Some(scopes) = css_scope_selector(selector) else {
+            continue;
+        };
+        write!(output, ":where(.{prefix}-root").unwrap();
+        for scope in scopes {
+            write!(output, " [class|=\"{prefix}-s-{}\"]", encode_scope(scope)).unwrap();
         }
-    }
-    let mut output: String = rules.into_iter().collect();
-    for bits in 1..16 {
-        let mut declarations = String::new();
-        write_css_modifiers(bits, &mut declarations).expect("writing to a String cannot fail");
-        writeln!(output, ".{prefix}-m-{bits:x}{{{declarations}}}")
-            .expect("writing to a String cannot fail");
+        output.push_str("){");
+        write_scope_declarations(style, modifiers_set, &prefix, &mut output).unwrap();
+        output.push_str("}\n");
     }
     output
+}
+
+#[cfg(feature = "html")]
+fn css_scope_selector(selector: &str) -> Option<Vec<&str>> {
+    let scopes = selector.split_whitespace().collect::<Vec<_>>();
+    (!scopes.is_empty()
+        && scopes.iter().all(|scope| {
+            *scope != ">"
+                && !scope.starts_with('-')
+                && !scope.contains('*')
+                && !scope.starts_with("L:")
+                && !scope.starts_with("R:")
+        }))
+    .then_some(scopes)
+}
+
+#[cfg(feature = "html")]
+fn encode_scope(scope: &str) -> String {
+    let mut encoded = String::new();
+    for byte in scope.bytes() {
+        match byte {
+            b'.' => encoded.push('-'),
+            byte if byte.is_ascii_alphanumeric() => encoded.push(char::from(byte)),
+            byte => write!(encoded, "_{byte:02x}").unwrap(),
+        }
+    }
+    encoded
+}
+
+#[cfg(feature = "html")]
+fn write_scope_declarations(
+    style: Style,
+    modifiers_set: bool,
+    prefix: &str,
+    output: &mut dyn Write,
+) -> fmt::Result {
+    for (property, color) in [
+        ("color", style.foreground),
+        ("background-color", style.background),
+    ] {
+        if let Some(color) = color {
+            write!(
+                output,
+                "{property}:#{:02x}{:02x}{:02x};",
+                color.red, color.green, color.blue
+            )?;
+        }
+    }
+    if modifiers_set {
+        let bits = modifier_bits(style.modifiers);
+        write!(
+            output,
+            "--{prefix}-weight:{};--{prefix}-style:{};--{prefix}-decoration:{};",
+            if bits & 1 != 0 { "bold" } else { "normal" },
+            if bits & 2 != 0 { "italic" } else { "normal" },
+            match bits & 12 {
+                4 => "underline",
+                8 => "line-through",
+                12 => "underline line-through",
+                _ => "none",
+            }
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(feature = "html")]
@@ -368,25 +522,6 @@ fn modifier_bits(modifiers: FontModifiers) -> u8 {
     .fold(0, |bits, (index, flag)| {
         bits | (u8::from(modifiers.contains(flag)) << index)
     })
-}
-
-#[cfg(feature = "html")]
-fn write_html_classes(style: Style, prefix: &str, output: &mut dyn Write) -> fmt::Result {
-    let mut separator = "";
-    for (kind, color) in [("fg", style.foreground), ("bg", style.background)] {
-        if let Some(color) = color {
-            write!(output, "{separator}{prefix}-{kind}-")?;
-            write_html_hex_byte(color.red, output)?;
-            write_html_hex_byte(color.green, output)?;
-            write_html_hex_byte(color.blue, output)?;
-            separator = " ";
-        }
-    }
-    let bits = modifier_bits(style.modifiers);
-    if bits != 0 {
-        write!(output, "{separator}{prefix}-m-{bits:x}")?;
-    }
-    Ok(())
 }
 
 #[cfg(feature = "html")]
@@ -1054,63 +1189,38 @@ mod tests {
     }
 
     #[test]
-    fn class_css_covers_colors_and_combined_modifiers_without_inline_styles() {
+    fn scope_classes_are_theme_independent_and_merge_shared_ancestors() {
         let theme = custom_theme();
         let source = "abc x";
         let document = custom_document(source, &theme);
         let css = html_stylesheet(&theme, "test");
-        assert!(css.contains(".sm-test-fg-abcdef{color:#abcdef;}"));
-        assert!(css.contains(".sm-test-bg-778899{background-color:#778899;}"));
-        assert!(css.contains(".sm-test-m-f{font-weight:bold;font-style:italic;text-decoration:underline line-through;}"));
+        assert!(css.contains(":where(.sm-test-root){color:#112233;background-color:#040506;"));
+        assert!(css.contains("[class|=\"sm-test-s-first\"]){color:#abcdef;}"));
+        assert!(css.contains("[class|=\"sm-test-s-second\"]){color:#abcdef;}"));
+        assert!(css.contains("--sm-test-decoration:underline line-through;"));
         for include_wrapper in [true, false] {
-            let html = render_html(
-                source,
-                &document,
-                &HtmlOptions {
-                    class: None,
-                    class_prefix: Some("test".to_owned()),
-                    include_wrapper,
-                    ..HtmlOptions::default()
-                },
-            )
-            .unwrap();
-            assert!(!html.as_str().contains("style="));
-            assert!(html.as_str().contains("sm-test-m-f"));
-            assert!(html.as_str().contains("sm-test-bg-778899"));
-            for attribute in html.as_str().split("class=\"").skip(1) {
-                for class in attribute.split('"').next().unwrap().split_whitespace() {
-                    assert!(
-                        css.contains(&format!(".{class}{{")),
-                        "missing CSS for {class}"
-                    );
-                }
-            }
-        }
-        // Property classes also cover styles assembled from independently matched rules.
-        let theme = Theme::from_json(
-            r##"{"tokenColors":[
-            {"scope":"source","settings":{"foreground":"#123456","fontStyle":"bold"}},
-            {"scope":"first","settings":{"background":"#654321"}}
-        ]}"##,
-        )
-        .unwrap();
-        let document = custom_document("a", &theme);
-        let html = render_html(
-            "a",
-            &document,
-            &HtmlOptions {
-                class_prefix: Some("".to_owned()),
+            let options = HtmlOptions {
+                class: None,
+                class_prefix: Some("test".to_owned()),
+                include_wrapper,
                 ..HtmlOptions::default()
-            },
-        )
-        .unwrap();
-        assert!(
-            html.as_str()
-                .contains("sm--fg-123456 sm--bg-654321 sm--m-1")
-        );
-        let css = html_stylesheet(&theme, "");
-        assert!(css.contains(".sm--fg-123456{color:#123456;}"));
-        assert!(css.contains(".sm--bg-654321{background-color:#654321;}"));
+            };
+            let html = render_html(source, &document, &options).unwrap();
+            let other = custom_document(source, &Theme::bundled("github-light").unwrap());
+            assert_eq!(html, render_html(source, &other, &options).unwrap());
+            assert!(!html.as_str().contains("style="));
+            assert!(!html.as_str().contains("abcdef"));
+            assert_eq!(
+                html.as_str()
+                    .matches("class=\"sm-test-s-source-test\"")
+                    .count(),
+                1
+            );
+            assert!(
+                html.as_str()
+                    .contains("<span class=\"sm-test-s-first-test\"><span>a</span></span>")
+            );
+        }
     }
 
     #[test]
@@ -1150,12 +1260,18 @@ mod tests {
                 .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
         );
         assert_ne!(encode_class_prefix("_22"), encode_class_prefix("\""));
-        assert!(html.as_str().contains(&format!("{encoded}-fg-112233")));
+        assert!(html.as_str().contains(&format!("{encoded}-root")));
+        assert!(html.as_str().contains(&format!(
+            "{encoded}-s-{}",
+            encode_scope("scope\"/><script>&'\0")
+        )));
+        assert_ne!(encode_scope("a.b"), encode_scope("a-b"));
+        assert_ne!(encode_scope("_22"), encode_scope("\""));
         let css = html_stylesheet(&theme, prefix);
         assert!(!css.contains("<script>"));
         assert!(!css.contains("}body{"));
         assert!(!css.contains("/*"));
-        assert!(css.contains(&format!(".{encoded}-fg-112233{{color:#112233;}}")));
+        assert!(css.contains(&format!(":where(.{encoded}-root){{color:#112233;")));
     }
 
     #[test]
@@ -1446,3 +1562,12 @@ mod tests {
         assert!(ansi.largest_write < 100);
     }
 }
+
+#[cfg(all(
+    test,
+    feature = "html",
+    feature = "bundled-grammars",
+    feature = "bundled-themes"
+))]
+#[path = "render/css_tests.rs"]
+mod css_tests;
