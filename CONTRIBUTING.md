@@ -11,6 +11,9 @@ supported Rust version is in [Cargo.toml](Cargo.toml). Node is needed for asset
 and oracle tooling, not normal library builds or tests; see the
 [oracle setup](tools/golden-oracle/README.md).
 
+Run checks from a Git checkout, not an unpacked crate; the published archive
+omits development assets and test targets. See the [package policy](docs/releasing.md#published-package).
+
 Run from the repository root:
 
 ```sh

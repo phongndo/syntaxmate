@@ -10,7 +10,10 @@
   each tokenizer. Refresh the [catalog reference measurements](benchmarks/textmate/catalog-performance.json).
 - Honor `TokenizerOptions::line_cache_entries = 0` by disabling line-result
   caching completely.
-- Raise the MSRV from Rust 1.88 to 1.98; this requires a minor release.
+- Keep the verified MSRV at Rust 1.88 while using a newer development toolchain.
+- Slim the published crate by omitting raw grammar sources and checkout-only
+  development targets; retain bundled assets and all license notices.
+- Document only user-facing features on docs.rs, with feature availability labels.
 - Refresh bundled grammars from `@shikijs/langs` 3.23.0 to 4.4.3. Highlighting
   changes for 52 upstream-updated grammars, including a rewritten C++ grammar
   whose declarations, calls, and attributes scope differently, and `coq` now
