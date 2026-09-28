@@ -48,6 +48,7 @@ jobs:
           --skip textmate_golden::manifest_golden_cases_match_or_are_allowlisted
           --skip textmate_golden::manifest_golden_cases_have_no_budget_degradation
           --skip textmate_golden::manifest_golden_cases_replay_incremental_state_deterministically
+          --skip textmate_golden::manifest_golden_cases_edge_inputs_match_bundled_and_incremental_output
       - run: cargo run --bin syntaxmate-bundle --features bundle-tools --locked -- --check
       - run: cargo run --release --example bundle-measure --locked -- --assert-max-bundle-bytes 9000000
 
@@ -175,6 +176,7 @@ jobs:
       - run: node tools/generate-textmate-cases.mjs --check
       - run: node tools/generate-goldens.mjs --check
       - run: node tools/generate-engine-regressions.mjs --check
+      - run: node tools/generate-language-edge-goldens.mjs --check
       - run: node tools/generate-theme-goldens.mjs --check
       - run: node tools/theme-selector-conformance.mjs
       - run: node tools/theme-catalog-parity.mjs --check
@@ -340,6 +342,7 @@ jobs:
           --skip textmate_golden::manifest_golden_cases_match_or_are_allowlisted
           --skip textmate_golden::manifest_golden_cases_have_no_budget_degradation
           --skip textmate_golden::manifest_golden_cases_replay_incremental_state_deterministically
+          --skip textmate_golden::manifest_golden_cases_edge_inputs_match_bundled_and_incremental_output
 
   dependency-review:
     if: github.event_name == 'pull_request'

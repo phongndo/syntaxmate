@@ -264,6 +264,7 @@ impl RegexMatcher {
         ctx: AnchorContext,
         materialize_specialized_captures: bool,
         scratch: &mut bytecode::BytecodeScratch,
+        prevalidated: bool,
     ) -> Result<Option<MatchResult>, FallbackError> {
         match self {
             Self::Automata(matcher) => matcher.find_at_for_selection_with_scratch(
@@ -272,9 +273,10 @@ impl RegexMatcher {
                 ctx,
                 materialize_specialized_captures,
                 scratch,
+                prevalidated,
             ),
             Self::Fallback(matcher) => matcher
-                .try_find_at_without_captures_with_scratch(line, start, ctx, scratch)
+                .try_find_at_for_selection(line, start, ctx, scratch, prevalidated)
                 .map(|report| report.result),
         }
     }
@@ -515,6 +517,37 @@ mod tests {
         assert_eq!(matched.captures[0], Some(0..line.len()));
         assert_eq!(matched.captures[1], Some(0.."🛰".len()));
         assert_eq!(matched.captures[2], Some("🛰".len()..line.len()));
+    }
+
+    #[test]
+    fn selection_preserves_completed_live_captures() {
+        for (source, line) in [
+            (r"(\w+)(?=:)(:|;)", "éλ:"),
+            (r"()(a|ab)(?=;)", "ab;"),
+            (r"(?<n>a|b)x\g<n>(?=;)", "axb;"),
+        ] {
+            let pattern = Arc::new(CompiledPattern::new(source));
+            let set = dfa::PatternSetMatcher::from_compiled(&[pattern]);
+            let mut scratch = bytecode::BytecodeScratch::default();
+            // Reuse scratch across failed and successful searches: only the
+            // successful program's captures may escape selection.
+            for text in ["!?", line, "", line] {
+                scratch.begin_line(text);
+                let (selected, degraded) = set.find_with_context_and_scratch(
+                    text,
+                    0,
+                    AnchorContext::line_start(),
+                    &mut scratch,
+                );
+                assert!(!degraded);
+                let expected = RegexMatcher::new(source).find(text, 0, AnchorContext::line_start());
+                assert_eq!(
+                    selected.map(|(_, result)| result),
+                    expected,
+                    "{source:?} on {text:?}"
+                );
+            }
+        }
     }
 
     #[test]

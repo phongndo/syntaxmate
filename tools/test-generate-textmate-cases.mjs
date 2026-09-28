@@ -39,7 +39,12 @@ try {
         { include: 'source.missing#optional' },
         { include: 'source.dep#entry' },
         { include: 'source.yaml' },
+        {
+          patterns: [{ include: '#child' }],
+          repository: { child: { include: 'source.local' } },
+        },
       ],
+      repository: { child: { include: 'source.shadowed' } },
     }),
     grammar(grammars, 'dep', {
       scopeName: 'source.dep',
@@ -51,6 +56,8 @@ try {
       scopeName: 'source.leaf',
       patterns: [],
     }),
+    grammar(grammars, 'local', { scopeName: 'source.local', patterns: [] }),
+    grammar(grammars, 'shadowed', { scopeName: 'source.shadowed', patterns: [] }),
     grammar(grammars, 'yaml', {
       scopeName: 'source.yaml',
       patterns: [{ include: 'source.yaml.1.2' }],
@@ -110,6 +117,8 @@ kept = [
   assert.match(first, /scope = "source\.yaml"\ngrammar = "grammars\/yaml\.tmLanguage\.json"/)
   assert.doesNotMatch(first, /scope = "source\.yaml\.1\.2"/)
   assert.doesNotMatch(first, /source\.missing/)
+  assert.match(first, /scope = "source\.local"/)
+  assert.doesNotMatch(first, /scope = "source\.shadowed"/)
   assert.ok(first.indexOf('scope = "source.dep"') < first.indexOf('scope = "source.leaf"'))
 
   await runGenerator(options)

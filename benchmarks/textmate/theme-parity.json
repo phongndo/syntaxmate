@@ -6,10 +6,10 @@
     "semanticHighlighting": false
   },
   "theme": "github-dark-high-contrast",
-  "fixtureFiles": 546,
+  "fixtureFiles": 547,
   "publicLanguages": 264,
   "fixtureLanguageLabels": 265,
-  "fixtureTokens": 468352,
-  "uniqueScopeStacks": 61653,
+  "fixtureTokens": 468647,
+  "uniqueScopeStacks": 61762,
   "mismatches": []
 }

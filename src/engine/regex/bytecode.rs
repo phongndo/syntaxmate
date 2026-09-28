@@ -3074,6 +3074,19 @@ impl<'a> Compiler<'a> {
                     exit
                 } else if *min == 1 && *max == Some(1) {
                     self.compile_node(node, flags, exit)?
+                } else if *min == 0 && *max == Some(1) {
+                    // An optional body cannot iterate. Its ordered choice
+                    // needs capture rollback, but no repeat counter, progress
+                    // guard, or repeat undo entries.
+                    let body = self.compile_node(node, flags, exit)?;
+                    let guard = self.split_guards;
+                    self.split_guards = guard.checked_add(1).ok_or(CompileError::TableOverflow)?;
+                    let (preferred, alternate) = if *greedy { (body, exit) } else { (exit, body) };
+                    self.push(Instruction::Split {
+                        preferred,
+                        alternate,
+                        guard,
+                    })
                 } else {
                     let slot = self.repeat_slots;
                     self.repeat_slots = self
@@ -5403,6 +5416,59 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn optional_groups_preserve_order_captures_and_atomicity() {
+        let patterns = [
+            r"(a)?a",
+            r"(a)??a",
+            r"(a)?+a",
+            r"((ab|a))?b",
+            r"((ab|a))??b",
+            r"((ab|a))?+b",
+            r"((a?)?)*b",
+            r"((?=a))?a",
+            r"((?=a))??a",
+            r"((a)?b)?\2",
+            r"(a)?(?(1)b|c)",
+            r"(?<n>a(?:\g<n>)?b)",
+            r"(?:(é|λ))?λ",
+            r"(?i:(s|k))?K",
+        ];
+        let lines = [
+            "", "a", "aa", "ab", "aab", "aba", "abb", "aabb", "b", "c", "éλ", "λ", "ſK",
+        ];
+        for pattern in patterns {
+            let parsed = parse(pattern);
+            let live = (1..=parsed.capture_count).collect::<Vec<_>>();
+            for line in lines {
+                for start in line
+                    .char_indices()
+                    .map(|(index, _)| index)
+                    .chain(std::iter::once(line.len()))
+                {
+                    assert_capture_replay(pattern, line, start, &live);
+                }
+            }
+        }
+
+        // vscode-oniguruma leaves the skipped inner lazy capture unset here.
+        // The recursive comparison engine instead reports an empty capture,
+        // so check the oracle's result directly for this nullable case.
+        let parsed = parse(r"((a?)??)*b");
+        let program = Program::compile_captures(&parsed, &[1, 2]).unwrap();
+        let matched = program
+            .execute_captures(
+                "ab",
+                1,
+                context(),
+                &mut StepBudget::new(100_000),
+                &mut BytecodeScratch::default(),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(matched.captures, vec![Some(1..2), Some(1..1), None]);
     }
 
     #[test]

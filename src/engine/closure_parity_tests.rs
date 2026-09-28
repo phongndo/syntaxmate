@@ -13,12 +13,37 @@ use super::{
 use crate::grammars;
 
 #[test]
+fn dependency_walk_follows_rule_local_repository_includes() {
+    let sources = [
+        r##"{"scopeName":"source.host","patterns":[{"include":"#container"}],"repository":{
+            "child":{"include":"source.shadowed"},
+            "container":{"patterns":[{"include":"#child"}],"repository":{
+                "child":{"include":"source.embedded"}
+            }}
+        }}"##,
+        r#"{"scopeName":"source.embedded","patterns":[{"match":"x"}]}"#,
+        r#"{"scopeName":"source.shadowed","patterns":[{"match":"y"}]}"#,
+    ];
+    let compiled: Vec<_> = sources
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            super::grammar::load_dev_grammar_from_str(super::state::GrammarId(index as u16), source)
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        grammar_closure::dependency_closure(&compiled, 0),
+        vec![0, 1]
+    );
+}
+
+#[test]
 fn compiled_dependency_walk_matches_representative_json_contracts() {
     let bundle = grammars::embedded_bundle();
     let sources = reference_grammars();
     // Embedded-heavy roots exercise broad external closures; Wikitext also
-    // guards the local-repository boundary that must not expand into every
-    // fenced language in the catalog.
+    // checks dependencies reached through nested rule-local repositories.
     for language_id in ["asciidoc", "markdown", "mdx", "php", "wikitext", "yaml"] {
         let language = bundle
             .languages
@@ -148,15 +173,21 @@ fn collect_external_scopes(
     let Some(object) = grammar.as_object() else {
         return;
     };
-    let repository = object.get("repository").and_then(Value::as_object);
+    let repository: BTreeMap<_, _> = object
+        .get("repository")
+        .and_then(Value::as_object)
+        .into_iter()
+        .flatten()
+        .map(|(name, rule)| (name.as_str(), rule))
+        .collect();
     let mut visited_local = BTreeSet::new();
     if let Some(name) = repository_rule {
-        if let Some(rule) = repository.and_then(|repository| repository.get(name)) {
+        if let Some(rule) = repository.get(name) {
             collect_rule_dependencies(
                 rule,
                 grammar_scope,
                 root_scope,
-                repository,
+                &repository,
                 bundle,
                 pending,
                 &mut visited_local,
@@ -168,7 +199,7 @@ fn collect_external_scopes(
                 patterns,
                 grammar_scope,
                 root_scope,
-                repository,
+                &repository,
                 bundle,
                 pending,
                 &mut visited_local,
@@ -182,7 +213,7 @@ fn collect_external_scopes(
                     rule,
                     grammar_scope,
                     root_scope,
-                    repository,
+                    &repository,
                     bundle,
                     pending,
                     &mut visited_local,
@@ -192,14 +223,14 @@ fn collect_external_scopes(
     }
 }
 
-fn collect_pattern_dependencies(
-    patterns: &Value,
+fn collect_pattern_dependencies<'a>(
+    patterns: &'a Value,
     grammar_scope: &str,
     root_scope: &str,
-    repository: Option<&serde_json::Map<String, Value>>,
+    repository: &BTreeMap<&'a str, &'a Value>,
     bundle: &grammars::bundle::Bundle,
     pending: &mut Vec<(String, Option<String>)>,
-    visited_local: &mut BTreeSet<String>,
+    visited_local: &mut BTreeSet<usize>,
 ) {
     let Some(patterns) = patterns.as_array() else {
         return;
@@ -217,28 +248,33 @@ fn collect_pattern_dependencies(
     }
 }
 
-fn collect_rule_dependencies(
-    rule: &Value,
+fn collect_rule_dependencies<'a>(
+    rule: &'a Value,
     grammar_scope: &str,
     root_scope: &str,
-    repository: Option<&serde_json::Map<String, Value>>,
+    repository: &BTreeMap<&'a str, &'a Value>,
     bundle: &grammars::bundle::Bundle,
     pending: &mut Vec<(String, Option<String>)>,
-    visited_local: &mut BTreeSet<String>,
+    visited_local: &mut BTreeSet<usize>,
 ) {
+    if !visited_local.insert(rule as *const Value as usize) {
+        return;
+    }
     let Some(rule) = rule.as_object() else {
         return;
     };
+    let mut repository = repository.clone();
+    if let Some(local) = rule.get("repository").and_then(Value::as_object) {
+        repository.extend(local.iter().map(|(name, rule)| (name.as_str(), rule)));
+    }
     if let Some(include) = rule.get("include").and_then(Value::as_str) {
         if let Some(name) = include.strip_prefix('#') {
-            if visited_local.insert(name.to_owned())
-                && let Some(local) = repository.and_then(|repository| repository.get(name))
-            {
+            if let Some(local) = repository.get(name) {
                 collect_rule_dependencies(
                     local,
                     grammar_scope,
                     root_scope,
-                    repository,
+                    &repository,
                     bundle,
                     pending,
                     visited_local,
@@ -265,7 +301,7 @@ fn collect_rule_dependencies(
             patterns,
             grammar_scope,
             root_scope,
-            repository,
+            &repository,
             bundle,
             pending,
             visited_local,

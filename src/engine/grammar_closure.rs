@@ -91,9 +91,9 @@ pub fn top_level_availability_chain(grammar: &CompiledGrammar) -> Option<Vec<Ava
 
 /// Indexes of the grammars in `root`'s external-include closure, ascending.
 ///
-/// This is vscode-textmate's dependency processor: it follows rule patterns
-/// and repository entries but not capture-only includes or rule-local
-/// repositories, and only the root contributes its inline injections.
+/// Follows compiled rule patterns and repository entries, including lexical
+/// rule-local repositories, but not
+/// capture-only includes. Only the root contributes its inline injections.
 pub fn dependency_closure(grammars: &[CompiledGrammar], root: usize) -> Vec<usize> {
     let scope_indexes = grammars
         .iter()
@@ -363,16 +363,10 @@ impl DependencyWalk<'_, '_> {
                 self.rule_refs(patterns);
             }
             RuleRef::Repository(name) => {
-                // vscode-textmate's dependency processor walks the grammar's
-                // top-level repository, but does not expand repositories
-                // declared inside an include-only rule. The compiler gives
-                // those lexical overlays a collision-free internal name;
-                // following them here would load large unrelated closures
-                // (notably every fenced language reachable from Wikitext) and
-                // change the established bundled-closure contract.
-                if name.starts_with("$mark.local.")
-                    || !self.visited_repositories.insert(name.clone())
-                {
+                // The compiler gives lexical repository overlays unique names.
+                // Their external includes are dependencies too (for example,
+                // Wikitext's syntaxhighlight rules live in local repositories).
+                if !self.visited_repositories.insert(name.clone()) {
                     return;
                 }
                 let grammar = self.grammar;
