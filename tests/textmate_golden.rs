@@ -396,6 +396,131 @@ fn manifest_golden_cases_have_no_budget_degradation() {
     }
 }
 
+#[cfg(feature = "bundled-grammars")]
+#[derive(Deserialize)]
+struct LanguageEdgeGolden {
+    language: String,
+    variant: String,
+    source: String,
+    scopes: Vec<Vec<String>>,
+    lines: Vec<Vec<(usize, usize, usize)>>,
+}
+
+#[test]
+#[cfg(feature = "bundled-grammars")]
+fn manifest_golden_cases_edge_inputs_match_bundled_and_incremental_output() {
+    let tiers: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(repo_path("benchmarks/textmate/promotion-tiers.json")).unwrap(),
+    )
+    .unwrap();
+    let languages: HashSet<&str> = ["B", "C"]
+        .into_iter()
+        .flat_map(|tier| tiers["tiers"][tier].as_array().unwrap())
+        .map(|language| language.as_str().unwrap())
+        .collect();
+    let text = fs::read_to_string(repo_path(
+        "tests/fixtures/textmate/edge-inputs.golden.jsonl",
+    ))
+    .unwrap();
+    let variants = ["line-edges", "unicode", "truncated-recovery"];
+    let mut seen = HashSet::new();
+    let shard = configured_shard();
+    let mut failures = Vec::new();
+    for record in text.lines() {
+        let golden: LanguageEdgeGolden = serde_json::from_str(record).unwrap();
+        assert!(languages.contains(golden.language.as_str()));
+        assert!(variants.contains(&golden.variant.as_str()));
+        assert!(seen.insert((golden.language.clone(), golden.variant.clone())));
+        if shard.is_some_and(|shard| language_shard(&golden.language, shard.total) != shard.index) {
+            continue;
+        }
+        let label = format!("{}/{}", golden.language, golden.variant);
+        // Whole-document tokenization uses the source's real line endings;
+        // incremental tokenization supplies TextMate's synthetic newline.
+        // End every generated document with LF so both contracts agree.
+        assert!(golden.source.ends_with('\n'), "{label}");
+        assert_eq!(
+            golden.lines.len(),
+            golden.source.split('\n').count(),
+            "{label}"
+        );
+        let expected: Vec<_> = golden
+            .lines
+            .iter()
+            .map(|line| {
+                line.iter()
+                    .map(|&(start, end, scope)| (start..end, golden.scopes[scope].clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let mut tokenizer = crate::Tokenizer::for_bundled_language(
+            &golden.language,
+            crate::TokenizerOptions::default(),
+        )
+        .unwrap();
+        for cached in [false, true] {
+            let document = tokenizer.tokenize(&golden.source);
+            if !document.status().is_complete() {
+                failures.push(format!(
+                    "{label}: degraded whole document (cached={cached})"
+                ));
+            }
+            let actual: Vec<_> =
+                document
+                    .lines()
+                    .iter()
+                    .map(|line| {
+                        coalesce_scope_tokens(line.tokens().iter().map(|token| {
+                            (token.range(), token.scopes().map(str::to_owned).collect())
+                        }))
+                    })
+                    .collect();
+            if actual != expected {
+                let line = actual.iter().zip(&expected).position(|(a, b)| a != b);
+                failures.push(format!(
+                    "{label}: whole document mismatch (cached={cached}), first line {line:?}"
+                ));
+            }
+        }
+        let mut incremental = crate::Tokenizer::for_bundled_language(
+            &golden.language,
+            crate::TokenizerOptions {
+                line_cache_entries: 0,
+                ..crate::TokenizerOptions::default()
+            },
+        )
+        .unwrap();
+        let mut state = incremental.initial_state();
+        for (index, line) in golden.source.split('\n').enumerate() {
+            let mut replay_state = state.clone();
+            let output = incremental.tokenize_line(line, &mut state).unwrap();
+            let replay = incremental.tokenize_line(line, &mut replay_state).unwrap();
+            assert_eq!(
+                output.tokens(),
+                replay.tokens(),
+                "{label} line {index}: replay"
+            );
+            assert_eq!(state, replay_state, "{label} line {index}: continuation");
+            let actual = coalesce_scope_tokens(
+                output
+                    .tokens()
+                    .iter()
+                    .map(|token| (token.range(), token.scopes().map(str::to_owned).collect())),
+            );
+            if !output.status().is_complete() || actual != expected[index] {
+                failures.push(format!("{label} line {index}: incremental mismatch or degradation\nactual: {actual:?}\nexpected: {:?}", expected[index]));
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        seen.len(),
+        languages.len() * variants.len(),
+        "missing language edge coverage"
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
 #[test]
 fn bsl_basic_and_stress_are_exact_and_budget_safe_in_the_full_grammar_set() {
     let cases = load_manifest()
@@ -740,23 +865,14 @@ fn wikitext_basic_and_stress_match_oracle_exactly() {
 }
 
 fn wikitext_cases() -> [CaseSpec; 2] {
-    ["basic", "stress"].map(|fixture| CaseSpec {
-        language: "wikitext".to_owned(),
-        scope: "source.wikitext".to_owned(),
-        grammar: "assets/grammars/languages/wikitext.tmLanguage.json".to_owned(),
-        fixture: format!("tests/fixtures/textmate/wikitext/{fixture}.wiki"),
-        golden: format!("tests/fixtures/textmate/wikitext/{fixture}.golden.jsonl"),
-        embedded: [
-            ("source.css", "css"),
-            ("source.js", "javascript"),
-            ("text.html.basic", "html"),
-        ]
-        .map(|(scope, grammar)| EmbeddedSpec {
-            scope: scope.to_owned(),
-            grammar: format!("assets/grammars/languages/{grammar}.tmLanguage.json"),
-        })
-        .to_vec(),
-    })
+    // Keep dependency membership in the generated manifest. Local repositories
+    // reach embedded languages that a hand-maintained list can silently omit.
+    load_manifest()
+        .into_iter()
+        .filter(|case| case.language == "wikitext")
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("Wikitext must retain basic and stress cases")
 }
 
 #[test]

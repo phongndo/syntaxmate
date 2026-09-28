@@ -105,6 +105,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             create_tokenizer()?.tokenize(&source)
         };
+        if !document.status().is_complete() {
+            return Err("tokenization degraded; refusing to report throughput".into());
+        }
         token_count += document
             .lines()
             .iter()

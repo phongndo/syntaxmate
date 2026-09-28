@@ -2864,7 +2864,7 @@ impl TextMateTokenizer {
         let mut scope_table = OutputScopeTableBuilder::new();
         for (line_index, chunk) in LineChunks::new(source).enumerate() {
             let tokenized = self.tokenize_line_compact_at_line(chunk.parse_text, state, line_index);
-            state = tokenized.state.clone();
+            state = tokenized.state;
             let fingerprint = if chunk.parse_text.ends_with('\n') {
                 tokenized.parse_fingerprint.without_trailing_byte(b'\n')
             } else {
@@ -3109,10 +3109,6 @@ impl TextMateTokenizer {
         let is_first_line = line_index == 0;
         self.line_degraded = false;
         self.record_line_tokenized();
-        // Explicitly invalidate scan-local occurrence cursors even when a
-        // caller reuses the same String allocation for different line text.
-        // Pointer/length identity alone is insufficient in that API pattern.
-        self.regex_scratch.begin_line(parse_text);
         let parse_fingerprint = LineTextFingerprint::from_text(parse_text);
         let entry_state_id = self.intern_state(&state);
         if force_degraded || self.fallback_call_budget_remaining == Some(0) {
@@ -3146,26 +3142,35 @@ impl TextMateTokenizer {
         }
         let cache_key = self.line_cache_key(entry_state_id, parse_fingerprint, is_first_line);
         if self.line_cache.is_enabled() {
-            if let Some(cached) = self.line_cache.get(&cache_key)
-                && cached.text.as_ref() == parse_text
-                && let Some(exit_state) = self.state_for_id(cached.exit).cloned()
+            if let Some((tokens, exit, degraded)) = self
+                .line_cache
+                .get_with(&cache_key, |cached| {
+                    (cached.text.as_ref() == parse_text)
+                        .then(|| (Arc::clone(&cached.tokens), cached.exit, cached.degraded))
+                })
+                .flatten()
+                && let Some(exit_state) = self.state_for_id(exit).cloned()
             {
                 self.record_line_cache_hit();
-                if cached.degraded {
+                if degraded {
                     self.record_degraded_line();
                 }
                 return CompactTokenizedLine {
-                    degraded: cached.degraded,
-                    tokens: CompactLineTokens::Shared(cached.tokens),
+                    degraded,
+                    tokens: CompactLineTokens::Shared(tokens),
                     state: exit_state,
                     entry_state_id,
-                    exit_state_id: cached.exit,
+                    exit_state_id: exit,
                     parse_fingerprint,
                 };
             }
             self.record_line_cache_miss();
         }
 
+        // Cache hits do not execute regexes. Initialize scratch only when
+        // matching, but always invalidate it here: callers can reuse one
+        // String allocation for different text with identical pointer/length.
+        self.regex_scratch.begin_line(parse_text);
         let mut tokens = Vec::with_capacity(parse_text.len().div_ceil(2).min(256));
         let mut cursor = 0usize;
         let (suppressed_begin_rules, while_anchor_pos) =
@@ -8183,25 +8188,13 @@ fn scope_path_matches<T: AsRef<str>>(path: &str, stack: &[T]) -> bool {
 }
 
 fn scope_component_matches(component: &str, scope: &str) -> bool {
-    if component.contains('*') {
-        return wildcard_scope_component_matches(component, scope);
-    }
+    // Injection selectors use literal dot-prefix matching in vscode-textmate.
+    // An asterisk is not a glob; treating it as one can wrongly suppress an
+    // injection when it appears in the selector's exclusions.
     scope == component
         || scope
             .strip_prefix(component)
             .is_some_and(|rest| rest.starts_with('.'))
-}
-
-fn wildcard_scope_component_matches(component: &str, scope: &str) -> bool {
-    let component_parts = component.split('.').collect::<Vec<_>>();
-    let scope_parts = scope.split('.').collect::<Vec<_>>();
-    if component_parts.len() > scope_parts.len() {
-        return false;
-    }
-    component_parts
-        .iter()
-        .zip(scope_parts.iter())
-        .all(|(component, scope)| *component == "*" || component == scope)
 }
 
 #[cfg(test)]
@@ -11238,8 +11231,8 @@ mod tests {
             "text.html.basic".to_owned(),
             "meta.tag.script.begin.html".to_owned(),
         ];
-        assert!(selector_matches("meta.tag.*.*.html", &html_stack));
-        assert!(!selector_matches(
+        assert!(!selector_matches("meta.tag.*.*.html", &html_stack));
+        assert!(selector_matches(
             "text.html - (meta.tag.*.*.html)",
             &html_stack
         ));

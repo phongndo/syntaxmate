@@ -400,6 +400,11 @@ def render(root=ROOT):
             f"**{more_supported} more are supported** by real bundled grammars and the "
             "catalog-wide smoke/budget gate.",
             "",
+            "The Tier column records historical promotion groups, not quality or speed "
+            "grades. The B/C groups additionally have oracle-backed Unicode, mixed "
+            "line-ending, and truncated-input recovery coverage through the "
+            "[language edge tests](../tests/fixtures/textmate/README.md#language-edge-cases).",
+            "",
             "For this ledger, *validated* means `cases.toml` contains both `basic` and "
             "`stress` source/golden pairs (10–30 and 140–260 source lines respectively), "
             "every golden record has `stoppedEarly: false`, "

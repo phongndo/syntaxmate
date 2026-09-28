@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+- Add oracle-backed Unicode, mixed-line-ending, and truncated-input recovery
+  checks for every B/C promotion-group language, covering bundled, cached, and
+  uncached incremental tokenization.
+- Match TextMate's literal injection-selector semantics for asterisks, fixing
+  missing invalid-angle-bracket scopes in Angular HTML attributes.
+- Include dependencies reached through rule-local repositories in generated
+  bundles, restoring embedded Python highlighting in Wikitext syntaxhighlight
+  blocks and retaining those dependencies in subset bundles. Loading the
+  previously omitted grammars increases bundled Wikitext construction plus
+  tokenization from 2.62 to 4.82 ms on the catalog fixture (median of five
+  alternating runs, 30 iterations each).
+- Reject incomplete tokenization in the cold-throughput benchmark.
+- Reduce cached-line overhead by avoiding unused source-text/state clones and
+  regex scratch initialization on cache hits. Across the 160 B/C languages,
+  five alternating process-cold sweeps of 30 iterations using source-asset
+  closures measured 36.27 → 36.85 MB/s aggregate (+1.6%), with unchanged
+  benchmark scope digests.
+- Reduce uncached regex work by reusing captures already computed during
+  candidate selection, skipping duplicate candidate guards, and compiling
+  optional groups as ordered choices instead of counted loops. Preserve
+  capture rollback, lazy and possessive matching, and Unicode scope ranges.
+  Seven alternating steady-state samples on a Ryzen 9 9950X measured 1.5–2.9%
+  higher HTML throughput on the Markdown, TypeScript, C++, Rust, and C stress
+  fixtures, with line caching disabled and unchanged scope/HTML digests.
+
 ## 0.2.0 - 2026-09-27
 
 - Replace string-only grammar, theme, bundle, render, and diagnostic errors with

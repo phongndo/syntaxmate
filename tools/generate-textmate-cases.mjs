@@ -432,22 +432,24 @@ function collectExternalIncludes(grammar, repositoryRule = null) {
   // Repository includes are a shared graph. Permanent memoization is both
   // cycle protection and necessary to avoid exponentially revisiting common
   // Markdown repositories.
-  const visitedLocal = new Set()
+  const visitedRules = new Set()
 
-  const visitPatterns = patterns => {
+  const visitPatterns = (patterns, repository) => {
     if (!Array.isArray(patterns)) return
-    for (const rule of patterns) visitRule(rule)
+    for (const rule of patterns) visitRule(rule, repository)
   }
-  const visitRule = rule => {
-    if (!rule || typeof rule !== 'object' || Array.isArray(rule)) return
+  const visitRule = (rule, repository) => {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule) || visitedRules.has(rule)) return
+    visitedRules.add(rule)
+    // The dependency processor overlays rule-local repositories before
+    // following child patterns/includes. Track rule identity, not a bare
+    // repository name: nested bindings can shadow the same name.
+    const local = rule.repository ? { ...repository, ...rule.repository } : repository
     if (typeof rule.include === 'string') {
       const include = rule.include
       if (include.startsWith('#')) {
         const name = include.slice(1)
-        if (!visitedLocal.has(name) && repository[name]) {
-          visitedLocal.add(name)
-          visitRule(repository[name])
-        }
+        if (local[name]) visitRule(local[name], local)
       } else if (include !== '$self' && include !== '$base') {
         found.add(include)
       }
@@ -455,13 +457,13 @@ function collectExternalIncludes(grammar, repositoryRule = null) {
     }
     // Match vscode-textmate dependency discovery: capture maps are not part
     // of the ordinary pattern graph and do not activate external grammars.
-    visitPatterns(rule.patterns)
+    visitPatterns(rule.patterns, local)
   }
 
-  if (repositoryRule !== null) visitRule(repository[repositoryRule])
+  if (repositoryRule !== null) visitRule(repository[repositoryRule], repository)
   else {
-    visitPatterns(grammar?.patterns)
-    for (const injection of Object.values(grammar?.injections ?? {})) visitRule(injection)
+    visitPatterns(grammar?.patterns, repository)
+    for (const injection of Object.values(grammar?.injections ?? {})) visitRule(injection, repository)
   }
   return found
 }

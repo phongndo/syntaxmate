@@ -74,17 +74,34 @@ python3 tools/check-language-docs.py --write
 python3 tools/check-language-docs.py --check
 ```
 
-## Triage
+## Language edge cases
+
+[edge-inputs.golden.jsonl](edge-inputs.golden.jsonl) adds three edited documents for
+every language in the historical B/C promotion groups: mixed CRLF/LF and blank
+lines, Unicode appended to existing lines, and truncated lines followed by the
+original source to exercise recovery. These are robustness checks built from
+the basic fixtures, not a claim of exhaustive language-syntax coverage.
+
+The oracle loads the complete source-grammar catalog. The Rust test uses the
+shipped bundle and checks exact UTF-8 ranges and ordered scopes, completion,
+cached whole-document output, incremental output, and continuation replay.
+Scope-table indexes in the JSONL only deduplicate identical scope stacks; the
+full expected spans are retained. Documents end in LF to respect the distinct
+whole-document and incremental EOF contracts.
+
+Regenerate with `node tools/generate-language-edge-goldens.mjs`, or use `--check`
+to verify the committed output against the pinned oracle. The test runs with
+the existing `textmate_golden::manifest_golden_cases_` shards; it rejects missing
+or duplicated language/scenario pairs.
+
+## Ad-hoc oracle output
+
+Use `node tools/golden-dump.mjs --help` for ad-hoc reference output and write
+outside committed fixture paths. To check a language's maintained fixtures:
 
 ```sh
-node tools/triage-language.mjs rust --golden
+node tools/generate-goldens.mjs --case rust --check
 ```
-
-`--golden` compares against committed reference output; omit it to generate a
-fresh temporary oracle. Triage also checks degradation/budget counters and
-stress throughput. Use `--kind stress` to focus a fixture kind or `--keep-temp`
-to retain diagnostics. For ad-hoc reference output use
-`node tools/golden-dump.mjs --help` and write outside committed fixture paths.
 
 ## Non-obvious fixture choices
 

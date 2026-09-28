@@ -213,5 +213,48 @@
       }
     ],
     "sources": ["{ zz }\n}x", "{ a\nzz x\n} x", "x{zz}x"]
+  },
+  {
+    "name": "injection-selector-literal-asterisks",
+    "grammars": [
+      {
+        "scopeName": "source.injection-asterisk",
+        "patterns": [
+          {
+            "begin": "<",
+            "end": ">",
+            "name": "meta.tag.script.begin.html",
+            "patterns": [
+              {
+                "match": "[xy]",
+                "name": "base.letter"
+              }
+            ]
+          }
+        ],
+        "injections": {
+          "L:source.injection-asterisk - (meta.tag.*.*.html)": {
+            "patterns": [
+              {
+                "match": "x",
+                "name": "injected.x"
+              }
+            ]
+          },
+          "L:meta.tag.*.*.html": {
+            "patterns": [
+              {
+                "match": "y",
+                "name": "incorrect.wildcard"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "sources": [
+      "<xy>\n",
+      "<x\n y>\n"
+    ]
   }
 ]

@@ -78,7 +78,6 @@ impl Hasher for LineCacheHasher {
 impl<K, V> LineCache<K, V>
 where
     K: Clone + Eq + Hash,
-    V: Clone,
 {
     pub fn new(capacity: usize) -> Self {
         Self {
@@ -124,12 +123,14 @@ where
         self.lru.clear();
     }
 
-    pub fn get(&mut self, key: &K) -> Option<V> {
+    /// Extract a hit while its value is borrowed, without cloning retained
+    /// fields (such as source text) that the caller only needs to inspect.
+    pub fn get_with<R>(&mut self, key: &K, map: impl FnOnce(&V) -> R) -> Option<R> {
         let last_used = self.next_tick();
         let value = {
             let entry = self.entries.get_mut(key)?;
             entry.last_used = last_used;
-            entry.value.clone()
+            map(&entry.value)
         };
         self.lru.push_back((key.clone(), last_used));
         self.compact_lru_if_needed();
@@ -207,10 +208,10 @@ mod tests {
         let mut cache = LineCache::new(2);
         assert!(!cache.insert("a", 1));
         assert!(!cache.insert("b", 2));
-        assert_eq!(cache.get(&"a"), Some(1));
+        assert_eq!(cache.get_with(&"a", |value| *value), Some(1));
         assert!(cache.insert("c", 3));
-        assert_eq!(cache.get(&"b"), None);
-        assert_eq!(cache.get(&"a"), Some(1));
-        assert_eq!(cache.get(&"c"), Some(3));
+        assert_eq!(cache.get_with(&"b", |value| *value), None);
+        assert_eq!(cache.get_with(&"a", |value| *value), Some(1));
+        assert_eq!(cache.get_with(&"c", |value| *value), Some(3));
     }
 }

@@ -1,5 +1,48 @@
 use syntaxmate::{GrammarRegistry, Tokenizer, TokenizerOptions};
 
+#[test]
+fn cached_lines_do_not_leave_stale_regex_cursors_in_reused_input_buffers() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(
+            r#"{
+        "scopeName": "source.reused",
+        "patterns": [{"match":"(?=z)z", "name":"keyword.z"}]
+    }"#,
+        )
+        .unwrap();
+    let mut cached = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let mut input = String::with_capacity(8);
+    for source in ["aa", "aa", "az", "az", "za", "aa"] {
+        input.clear();
+        input.push_str(source);
+        let actual = cached
+            .tokenize_line(&input, &mut cached.initial_state())
+            .unwrap();
+        let mut fresh = Tokenizer::new(
+            &registry,
+            root,
+            TokenizerOptions {
+                line_cache_entries: 0,
+                ..TokenizerOptions::default()
+            },
+        )
+        .unwrap();
+        let expected = fresh
+            .tokenize_line(source, &mut fresh.initial_state())
+            .unwrap();
+        assert!(actual.status().is_complete());
+        assert_eq!(actual.tokens(), expected.tokens(), "{source}");
+        assert_eq!(
+            actual
+                .tokens()
+                .iter()
+                .any(|token| token.scopes().any(|scope| scope == "keyword.z")),
+            source.contains('z')
+        );
+    }
+}
+
 fn line_scopes_complete(
     source: &str,
     grammar: &str,

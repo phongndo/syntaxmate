@@ -1085,6 +1085,39 @@ mod tests {
     }
 
     #[test]
+    fn subset_retains_languages_embedded_through_local_repositories() {
+        let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/grammars");
+        let bytes = build_bundle(&assets, 0, Some("wikitext")).unwrap();
+        let subset = syntaxmate::Catalog::from_bytes(&bytes).unwrap();
+        assert_eq!(subset.languages(), ["wikitext"]);
+        assert!(
+            subset
+                .licenses()
+                .iter()
+                .any(|license| license.language == "python")
+        );
+        assert!(subset.language("python").is_none());
+        let source = "<syntaxhighlight lang=\"python\">\nreturn True\n</syntaxhighlight>\n";
+        let document = syntaxmate::Highlighter::new(&subset)
+            .tokenize("wikitext", source)
+            .unwrap();
+        assert!(document.status().is_complete());
+        assert!(document.lines()[1].tokens().iter().any(|token| {
+            token
+                .scopes()
+                .any(|scope| scope == "keyword.control.flow.python")
+        }));
+        #[cfg(feature = "bundled-grammars")]
+        assert_eq!(
+            document,
+            syntaxmate::Highlighter::bundled()
+                .unwrap()
+                .tokenize("wikitext", source)
+                .unwrap()
+        );
+    }
+
+    #[test]
     fn subset_retains_private_dependencies_and_output() {
         let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/grammars");
         let bytes = build_bundle(&assets, 0, Some("cpp")).unwrap();

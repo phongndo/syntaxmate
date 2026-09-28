@@ -779,14 +779,29 @@ impl FallbackMatcher {
         })
     }
 
-    /// Search-only variant used while selecting among a set of rules. Capture
-    /// extraction is replayed only for the winning pattern by the tokenizer.
+    /// Unvalidated selection entry used by the regex differential tests.
+    #[cfg(test)]
     pub(crate) fn try_find_at_without_captures_with_scratch(
         &self,
         line: &str,
         start: usize,
         ctx: AnchorContext,
         scratch: &mut BytecodeScratch,
+    ) -> Result<FallbackReport, FallbackError> {
+        self.try_find_at_for_selection(line, start, ctx, scratch, false)
+    }
+
+    /// The candidate dispatcher can prove the UTF-8 boundary, start-byte
+    /// membership, and required-literal viability before entering the VM.
+    /// Completed shared captures travel with the winner; other patterns still
+    /// leave capture extraction to the tokenizer's replay path.
+    pub(crate) fn try_find_at_for_selection(
+        &self,
+        line: &str,
+        start: usize,
+        ctx: AnchorContext,
+        scratch: &mut BytecodeScratch,
+        prevalidated: bool,
     ) -> Result<FallbackReport, FallbackError> {
         // Resolve the selection layout only after the cheap per-start
         // rejections: deciding it may compile bytecode, which is wasted for a
@@ -797,6 +812,7 @@ impl FallbackMatcher {
             ctx,
             CaptureCount::Selection,
             Some(scratch),
+            prevalidated,
         )
     }
 
@@ -827,6 +843,7 @@ impl FallbackMatcher {
             ctx,
             CaptureCount::Exact(self.parsed.capture_count as usize + 1),
             None,
+            false,
         )
     }
 
@@ -837,20 +854,22 @@ impl FallbackMatcher {
         ctx: AnchorContext,
         capture_count: CaptureCount,
         scratch: Option<&mut BytecodeScratch>,
+        prevalidated: bool,
     ) -> Result<FallbackReport, FallbackError> {
-        if !line.is_char_boundary(start) {
+        if !prevalidated && !line.is_char_boundary(start) {
             return Err(FallbackError::InvalidStart { from: start });
         }
         let mut scratch = scratch;
-        let prefilter_viable = match scratch.as_deref_mut() {
-            Some(scratch) => scratch.prefilter_cursors().may_match(
-                self.prefilter_slot(),
-                self.parsed.prefilter(),
-                line,
-                start,
-            ),
-            None => self.parsed.prefilter().may_match(line, start),
-        };
+        let prefilter_viable = prevalidated
+            || match scratch.as_deref_mut() {
+                Some(scratch) => scratch.prefilter_cursors().may_match(
+                    self.prefilter_slot(),
+                    self.parsed.prefilter(),
+                    line,
+                    start,
+                ),
+                None => self.parsed.prefilter().may_match(line, start),
+            };
         if !prefilter_viable {
             return Ok(FallbackReport {
                 result: None,
@@ -865,7 +884,8 @@ impl FallbackMatcher {
                 steps: 0,
             });
         }
-        if let Some(bytes) = self.parsed.analysis().start_bytes()
+        if !prevalidated
+            && let Some(bytes) = self.parsed.analysis().start_bytes()
             && !self.parsed.analysis().start_nullable()
             && line
                 .as_bytes()
@@ -923,10 +943,28 @@ impl FallbackMatcher {
                     recursive
                 }
             };
-            end.map(|end| MatchResult {
-                start,
-                end,
-                captures: Vec::new(),
+            end.map(|end| {
+                // The successful program still owns scratch's capture slots.
+                // Copy them now, before another candidate/search can reuse the
+                // scratch, instead of executing this same program again.
+                let captures = if capture_engine_mode() == PositionEngineMode::Candidate
+                    && self
+                        .bytecode
+                        .get()
+                        .and_then(Option::as_ref)
+                        .is_some_and(|selection| selection.shares_captures)
+                {
+                    let mut captures = vec![None; self.parsed.capture_count as usize + 1];
+                    program.copy_capture_slots_into(start, end, scratch, &mut captures);
+                    captures
+                } else {
+                    Vec::new()
+                };
+                MatchResult {
+                    start,
+                    end,
+                    captures,
+                }
             })
         } else {
             self.try_match_at_start_with_capture_count(

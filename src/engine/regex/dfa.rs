@@ -1527,6 +1527,7 @@ impl AutomataMatcher {
         ctx: AnchorContext,
         materialize_specialized_captures: bool,
         scratch: &mut super::bytecode::BytecodeScratch,
+        prevalidated: bool,
     ) -> Result<Option<MatchResult>, super::FallbackError> {
         if !anchor_permits_at(self.translation.anchor_strategy, start, ctx, line) {
             return Ok(None);
@@ -1558,7 +1559,7 @@ impl AutomataMatcher {
                 matcher.match_at_without_captures(line, start)
             }),
             NativeEngine::Vm(matcher) => matcher
-                .try_find_at_without_captures_with_scratch(line, start, ctx, scratch)
+                .try_find_at_for_selection(line, start, ctx, scratch, prevalidated)
                 .map(|report| report.result),
         }
     }
@@ -2338,7 +2339,9 @@ impl PatternSetMatcher {
                     exhausted.insert(idx, start);
                     continue;
                 }
-                let (result, killed) = self.match_entry_at(idx, line, start, ctx, scratch);
+                // Dispatch proved the start byte and UTF-8 boundary; the
+                // required-literal check above proved the remaining guard.
+                let (result, killed) = self.match_entry_at(idx, line, start, ctx, scratch, true);
                 budget_killed |= killed;
                 if let Some(result) = result {
                     return (Some((idx, result)), budget_killed);
@@ -2413,7 +2416,7 @@ impl PatternSetMatcher {
         }
         let replay = if selected.pattern < self.entries.len() {
             let (result, killed) =
-                self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch);
+                self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch, false);
             budget_killed |= killed;
             #[cfg(test)]
             {
@@ -2472,7 +2475,7 @@ impl PatternSetMatcher {
             return Some((Some((selected.pattern, result)), false));
         }
         let (result, budget_killed) =
-            self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch);
+            self.match_entry_at(selected.pattern, line, selected.start, ctx, scratch, false);
         Some((
             result.map(|result| (selected.pattern, result)),
             budget_killed,
@@ -2501,6 +2504,7 @@ impl PatternSetMatcher {
         start: usize,
         ctx: AnchorContext,
         scratch: &mut super::bytecode::BytecodeScratch,
+        prevalidated: bool,
     ) -> (Option<MatchResult>, bool) {
         let Some(entry) = self.entries.get(index) else {
             return (None, false);
@@ -2525,6 +2529,7 @@ impl PatternSetMatcher {
                 ctx,
                 pattern.needs_capture_replay_after_selection(),
                 scratch,
+                prevalidated,
             ) {
                 Ok(result) => (result, false),
                 Err(super::FallbackError::BudgetExceeded { .. }) => (None, true),
