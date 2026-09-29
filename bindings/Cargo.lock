@@ -207,6 +207,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "syntaxmate-ffi"
+version = "0.2.0"
+dependencies = [
+ "syntaxmate-boundary",
+]
+
+[[package]]
 name = "syntaxmate-wasm"
 version = "0.2.0"
 dependencies = [
