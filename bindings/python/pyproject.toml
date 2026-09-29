@@ -9,7 +9,7 @@ description = "Fast TextMate syntax highlighting to HTML, ANSI, or token arrays"
 readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "third-party/**/*"]
 keywords = ["syntax-highlighting", "textmate", "html", "ansi"]
 classifiers = [
     "Programming Language :: Python :: 3",

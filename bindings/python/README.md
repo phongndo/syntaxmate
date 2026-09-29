@@ -132,6 +132,11 @@ Measured on Linux x86-64 (2026-09-28, Rust 1.98.1, stripped release build): the
 default wheel is 2.9 MB (4.7 MB extension), and the wheel without embedded
 grammars is 1.0 MB.
 
+Wheels carry the license and provenance records of the bundled themes and
+grammars under `*.dist-info/licenses/third-party/`. `third-party/` holds
+symlinks into `assets/` because maturin rejects `../` paths in `license-files`;
+the sdist stores their contents.
+
 The tests include the shared [conformance fixtures](../conformance/README.md):
 every case must match the reference HTML, class-mode HTML, ANSI, token buffers
 in all three offset units, scopes, and session output exactly.
