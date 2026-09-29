@@ -105,3 +105,10 @@ jobs:
           mkdir sdist-src && tar -xzf sdist/*.tar.gz -C sdist-src --strip-components=1
           cd sdist-src && ../.venv/bin/maturin build --release --out ../sdist-wheel
           ls -l ../sdist-wheel
+      # Outside the repository no rust-toolchain.toml applies, as for users.
+      - name: pip install the sdist in a fresh venv
+        run: |
+          python -m venv "$RUNNER_TEMP/sdist-venv"
+          "$RUNNER_TEMP/sdist-venv/bin/pip" install --quiet "$PWD"/sdist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/sdist-venv/bin/python" -c "import syntaxmate; print(syntaxmate.Highlighter().html('fn main() {}', 'rust')[:40])"

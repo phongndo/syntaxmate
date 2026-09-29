@@ -60,6 +60,29 @@ The files are exported as `syntaxmate/syntaxmate.wasm` and
 are also exported. The full bundle is about 2.5 MB; ship a subset when you
 need only a few languages.
 
+### Bundling for Node
+
+Unbundled, the Node entry loads `dist/syntaxmate_bg.wasm` and
+`grammars.bundle` from the installed package. Rollup and esbuild do not copy
+those files when they inline the module, so a bundled program must ship them
+and say where they are. Import still succeeds without them; the first API call
+throws until WebAssembly is initialized.
+
+```js
+import { createHighlighter } from 'syntaxmate'
+
+const assets = new URL('./assets/', import.meta.url)
+const highlighter = await createHighlighter({
+  wasm: new URL('syntaxmate.wasm', assets),
+  bundle: new URL('grammars.bundle', assets),
+})
+```
+
+Copy `syntaxmate/syntaxmate.wasm` and `syntaxmate/grammars.bundle` into that
+directory as part of the build. `init(wasm)` and `initSync(wasm)` accept a
+path, URL, bytes, or `WebAssembly.Module`, and `loadBundle(path)` or
+`Highlighter.fromBundle(bytes)` load the grammars separately.
+
 Decoding the bundle dominates startup. On one Ryzen 9 9950X with Node 24
 (2026-09-28), import plus the first `html()` call took about 45 ms with the full
 bundle, of which about 29 ms was `fromBundle`, and about 22 ms with a 65 KB
@@ -154,17 +177,24 @@ Syntaxmate version, then pass its bytes, path, or URL as `bundle`.
 ## Build
 
 The package builds with `wasm-bindgen-cli`, not `wasm-pack`, so the output
-layout is explicit. From the repository root, the `wasm` Nix shell provides the
-pinned toolchain with the `wasm32-unknown-unknown` target, a matching
-`wasm-bindgen-cli`, `binaryen`, and Node:
+layout is explicit. It needs:
+
+- Rust with the `wasm32-unknown-unknown` target
+  (`rustup target add wasm32-unknown-unknown`);
+- `wasm-bindgen-cli` at exactly the `wasm-bindgen` version pinned in
+  [Cargo.toml](Cargo.toml)
+  (`cargo install wasm-bindgen-cli --version <version> --locked`);
+- Node 24 or later;
+- optionally binaryen's `wasm-opt`.
 
 ```sh
-nix develop .#wasm -c sh -c 'cd bindings/wasm && npm run build && npm test'
+cd bindings/wasm
+npm run build
+npm test
 ```
 
-Without Nix, install the target (`rustup target add wasm32-unknown-unknown`),
-`wasm-bindgen-cli` at the `wasm-bindgen` version in
-[Cargo.toml](Cargo.toml), and optionally `wasm-opt`.
+On the repository's Nix setup, the `wasm` shell provides all of these:
+`nix develop .#wasm -c sh -c 'cd bindings/wasm && npm run build && npm test'`.
 
 `npm run build` runs [scripts/build.mjs](scripts/build.mjs). It compiles with
 the `wasm-release` profile, generates `dist/` with `wasm-bindgen --target web`,

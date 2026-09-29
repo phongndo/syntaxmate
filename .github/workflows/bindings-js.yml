@@ -110,3 +110,59 @@ jobs:
           name: npm-package
           path: bindings/wasm
       - run: npm test
+
+  # Consume the packed tarball the way an npm user does, including a bundled
+  # program deployed without node_modules (see "Bundling for Node").
+  consumer:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: consumer
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/package
+      - name: Create a consumer project
+        working-directory: .
+        run: |
+          mkdir consumer
+          cd consumer
+          echo '{ "name": "consumer", "private": true, "type": "module" }' > package.json
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/package/*.tgz esbuild@0.25
+      - name: Use the installed package
+        run: |
+          cat > smoke.mjs <<'EOF'
+          import assert from 'node:assert/strict'
+          import { createHighlighter, SyntaxmateError } from 'syntaxmate'
+          const h = await createHighlighter()
+          const source = 'let s = "😀 日本";'
+          assert.match(h.html(source, { lang: 'rust', theme: 'github-dark' }), /<pre/)
+          const tokens = h.tokens(source, { lang: 'rust', theme: 'github-dark' })
+          for (const token of tokens) assert.ok(token.length > 0 && source.slice(token.start, token.start + token.length).length === token.length)
+          assert.throws(() => h.html('x', { lang: 'nope', theme: 'github-dark' }), SyntaxmateError)
+          console.log('installed package OK')
+          EOF
+          node smoke.mjs
+      - name: Run a bundled program away from node_modules
+        run: |
+          cat > app.mjs <<'EOF'
+          import { createHighlighter } from 'syntaxmate'
+          const assets = new URL('./assets/', import.meta.url)
+          const h = await createHighlighter({
+            wasm: new URL('syntaxmate.wasm', assets),
+            bundle: new URL('grammars.bundle', assets),
+          })
+          console.log('bundled program OK', h.html('fn main() {}', { lang: 'rust', theme: 'github-dark' }).length)
+          EOF
+          npx esbuild app.mjs --bundle --platform=node --format=esm --outfile=deploy/app.mjs
+          mkdir deploy/assets
+          cp node_modules/syntaxmate/dist/syntaxmate_bg.wasm deploy/assets/syntaxmate.wasm
+          cp node_modules/syntaxmate/grammars.bundle deploy/assets/
+          mv deploy "$RUNNER_TEMP/deploy"
+          node "$RUNNER_TEMP/deploy/app.mjs"

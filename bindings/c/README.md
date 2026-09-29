@@ -34,10 +34,15 @@ toolchain and are untested there.
 | --- | --- |
 | Shared | `-I<prefix>/include -L<prefix>/lib -lsyntaxmate` |
 | Static | `-I<prefix>/include <prefix>/lib/libsyntaxmate.a -lpthread -ldl -lm` on Linux; the archive alone on macOS |
-| pkg-config | `pkg-config --cflags --libs syntaxmate`; `--static` adds the archive's system libraries |
+| pkg-config | `pkg-config --cflags --libs syntaxmate` (shared) |
 | CMake | `find_package(syntaxmate 0.2 REQUIRED)` and link `syntaxmate::syntaxmate`; before 1.0 a version request matches only the same minor version |
 
 The C++ wrapper needs only `syntaxmate.hpp` and the same library.
+
+`pkg-config --static --libs syntaxmate` adds the archive's system libraries
+(`-lpthread -ldl -lm` on Linux) but still emits `-lsyntaxmate`, which the
+linker resolves to the shared library when both are installed. To link
+statically, name the archive as in the Static row.
 
 The shared library exports only the `sm_*` functions. The static archive also
 carries the Rust standard library with global symbols, so linking two Rust
@@ -167,11 +172,17 @@ Failures throw `syntaxmate::error`, whose `kind()` is an `error_kind`.
 
 ## Tests
 
-From the repository root:
+From the repository root, with Rust, a C99 and C++17 compiler, and
+[cbindgen](https://github.com/mozilla/cbindgen) 0.29.4 on `PATH`
+(`cargo install cbindgen --version 0.29.4 --locked`):
 
 ```sh
-nix develop -c nix shell nixpkgs#rust-cbindgen -c make -C bindings/c check
+make -C bindings/c check
 ```
+
+The header check compares against cbindgen's output, which can change between
+cbindgen releases, so use the pinned version. On the repository's Nix setup:
+`nix develop -c nix shell nixpkgs#rust-cbindgen -c make -C bindings/c check`.
 
 `check` verifies that `include/syntaxmate.h` matches cbindgen output, then
 builds and runs [`tests/test_c.c`](tests/test_c.c) (shared library) and
@@ -190,8 +201,7 @@ fail one at a time to check that the wrapper still frees C results (under
 the sanitizers; valgrind replaces `operator new`, so it skips there). Other targets:
 
 - `make -C bindings/c header` regenerates the header after an API change.
-- `make -C bindings/c valgrind` runs both tests under valgrind instead
-  (`nix shell nixpkgs#valgrind`).
+- `make -C bindings/c valgrind` runs both tests under valgrind instead.
 - `make -C bindings/c check-install` installs to a scratch prefix, checks
   that the shared library exports only `sm_*` symbols, and builds the C test
   with pkg-config and with the CMake package

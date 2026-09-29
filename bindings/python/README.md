@@ -99,10 +99,22 @@ session from several threads are serialized.
 ### Errors
 
 Failures raise a `SyntaxmateError` subclass whose `kind` attribute is a stable
-category: `UnknownLanguageError` and `UnknownThemeError` (also `LookupError`);
-`InvalidGrammarError`, `InvalidThemeError`, `InvalidBundleError`, and
-`InvalidInputError` (also `ValueError`); `RenderError`; and `InternalError`,
-which includes Rust panics caught at the boundary. After such a panic, a
+category string:
+
+| Exception | `kind` | Also a |
+| --- | --- | --- |
+| `UnknownLanguageError` | `"unknown_language"` | `LookupError` |
+| `UnknownThemeError` | `"unknown_theme"` | `LookupError` |
+| `InvalidGrammarError` | `"invalid_grammar"` | `ValueError` |
+| `InvalidThemeError` | `"invalid_theme"` | `ValueError` |
+| `InvalidBundleError` | `"invalid_bundle"` | `ValueError` |
+| `InvalidInputError` | `"invalid_input"` | `ValueError` |
+| `RenderError` | `"render"` | |
+| `InternalError` | `"internal"` | |
+
+These are the same categories as the JavaScript `kind` values and C status
+codes, spelled in Python style. `InternalError` includes Rust panics caught at
+the boundary. After such a panic, a
 session raises `InternalError` until `reset()` is called.
 
 Text arguments must be encodable as UTF-8: a `str` containing a lone surrogate
@@ -122,9 +134,13 @@ A wheel built with `--no-default-features` omits the embedded catalog, so only
 
 ## Build from source
 
-Run from `bindings/python` with Rust and [maturin](https://www.maturin.rs/)
-1.9.4 or newer. On the repository's Nix setup, the flake provides Rust and
-Python, and maturin and pytest can come from a temporary shell or virtualenv.
+Run from `bindings/python` with Rust 1.88 or newer and
+[maturin](https://www.maturin.rs/) 1.9.4 or newer (for example
+`pip install "maturin>=1.9.4"` in a virtualenv). Inside this repository,
+`rust-toolchain.toml` selects the pinned Rust version. The sdist does not
+include that file, so `pip install` of the sdist uses your default toolchain;
+with rustup, make sure one is set (`rustup default stable`). On the
+repository's Nix setup, `nix develop` provides Rust and Python.
 
 ```sh
 maturin build --release --strip                        # wheel in bindings/target/wheels
@@ -133,8 +149,8 @@ maturin develop --release                              # install into the active
 python -m pytest                                       # needs pytest
 ```
 
-Measured on Linux x86-64 (2026-09-28, Rust 1.98.1, stripped release build): the
-default wheel is 2.9 MB (4.7 MB extension), and the wheel without embedded
+Measured on Linux x86-64 (2026-09-29, Rust 1.98.1, stripped release build): the
+default wheel is 2.9 MB (4.6 MB extension), and the wheel without embedded
 grammars is 1.0 MB.
 
 Wheels carry the license and provenance records of the bundled themes and

@@ -177,5 +177,5 @@ test('entry points export the declared API', () => {
     'TokenBuffer', 'UNDERLINE', 'createHighlighter', 'init', 'loadBundle', 'version',
   ]
   assert.deepEqual(Object.keys(browser).sort(), shared.sort())
-  assert.deepEqual(Object.keys(node).sort(), [...shared, 'loadBundleSync'].sort())
+  assert.deepEqual(Object.keys(node).sort(), [...shared, 'initSync', 'loadBundleSync'].sort())
 })
