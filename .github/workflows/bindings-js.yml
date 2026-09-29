@@ -134,7 +134,7 @@ jobs:
           mkdir consumer
           cd consumer
           echo '{ "name": "consumer", "private": true, "type": "module" }' > package.json
-          npm install --no-audit --no-fund ../package/*.tgz esbuild@0.25
+          npm install --no-audit --no-fund "$RUNNER_TEMP"/package/*.tgz esbuild@0.25
       - name: Use the installed package
         run: |
           cat > smoke.mjs <<'EOF'
