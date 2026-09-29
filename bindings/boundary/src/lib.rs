@@ -396,6 +396,10 @@ impl Engine {
 }
 
 /// Incremental highlighting: feed logical lines in order, without terminators.
+///
+/// Each line is tokenized as if a newline followed it, so the tokens of a
+/// document's final, unterminated line can differ from [`Engine::tokens`]
+/// (for example a trailing shell `\` line continuation). Terminated lines match.
 #[derive(Debug)]
 pub struct Session {
     inner: HighlightSession,
@@ -427,10 +431,16 @@ fn rendered(output: syntaxmate::RenderedOutput) -> Rendered {
     }
 }
 
+// Rejecting `u32::MAX` itself keeps the offset one past a final newline representable.
 fn check_len(text: &str) -> Result<()> {
-    u32::try_from(text.len()).map(drop).map_err(|_| {
-        BoundaryError::new(ErrorKind::InvalidInput, "input exceeds 4 GiB offset limit")
-    })
+    if text.len() < u32::MAX as usize {
+        Ok(())
+    } else {
+        Err(BoundaryError::new(
+            ErrorKind::InvalidInput,
+            "input exceeds 4 GiB offset limit",
+        ))
+    }
 }
 
 fn line_mismatch() -> BoundaryError {
