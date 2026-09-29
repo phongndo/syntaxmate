@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -47,6 +48,14 @@ def test_theme_from_json_forms():
     for form in (data, json.dumps(data), json.dumps(data).encode()):
         theme = Theme.from_json(form)
         assert theme.name == "T"
+    # Non-dict mappings are accepted at any depth.
+    settings = MappingProxyType({"foreground": "#ff0000"})
+    rule = MappingProxyType({"scope": "keyword", "settings": settings})
+    frozen = MappingProxyType({"name": "T", "tokenColors": (rule,)})
+    assert Theme.from_json(frozen).name == "T"
+    assert Theme.from_json(frozen).stylesheet("sm") == Theme.from_json(data).stylesheet("sm")
+    with pytest.raises(TypeError):
+        Theme.from_json({"name": "T", "tokenColors": [object()]})
     assert "sm-" in Theme.bundled("github-dark").stylesheet("sm")
     assert Theme.bundled("github-dark").default_style.background == 0x0D1117
 

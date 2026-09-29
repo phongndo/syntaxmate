@@ -57,7 +57,10 @@ class Theme:
     def bundled(name: str) -> Theme: ...
     @staticmethod
     def from_json(data: Union[str, bytes, bytearray, Mapping[str, Any]]) -> Theme:
-        """Parses a TextMate JSON theme from text, UTF-8 bytes, or a mapping."""
+        """Parses a TextMate JSON theme from text, UTF-8 bytes, or a mapping.
+
+        Any ``Mapping`` (at any nesting depth) serializes as a JSON object.
+        """
     @property
     def name(self) -> str: ...
     @property

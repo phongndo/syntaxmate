@@ -8,11 +8,11 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, PoisonError};
 
-use pyo3::exceptions::{PyIndexError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyBytes, PyMemoryView, PyString, PyTuple};
+use pyo3::types::{PyBytes, PyCFunction, PyDict, PyMemoryView, PyString, PyTuple};
 use syntaxmate_boundary as boundary;
 use syntaxmate_boundary::{
     AnsiOptions, BoundaryError, Engine, ErrorKind, HtmlOptions, NO_COLOR, OffsetUnit, PackedStyle,
@@ -174,6 +174,9 @@ impl Theme {
     }
 
     /// Parses a TextMate JSON theme from `str`, `bytes`, or a JSON-compatible mapping.
+    ///
+    /// Any `collections.abc.Mapping`, at any nesting depth, serializes as a
+    /// JSON object; `json.dumps` alone only accepts `dict`.
     #[staticmethod]
     fn from_json(py: Python<'_>, data: &Bound<'_, PyAny>) -> PyResult<Self> {
         let json: PyBackedStr = if data.is_instance_of::<PyString>() {
@@ -183,8 +186,10 @@ impl Theme {
                 .map_err(|error| PyValueError::new_err(format!("theme is not UTF-8: {error}")))?;
             PyString::new(py, text).extract()?
         } else {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("default", mapping_to_dict(py)?)?;
             py.import("json")?
-                .call_method1("dumps", (data,))?
+                .call_method("dumps", (data,), Some(&kwargs))?
                 .extract()?
         };
         let handle = detached(py, || ThemeHandle::from_json(&json))?;
@@ -213,6 +218,27 @@ impl Theme {
     fn __repr__(&self) -> String {
         format!("Theme({:?})", self.handle.name())
     }
+}
+
+/// A `json.dumps` `default` hook that serializes non-`dict` mappings as objects.
+fn mapping_to_dict(py: Python<'_>) -> PyResult<Bound<'_, PyCFunction>> {
+    let mapping = py.import("collections.abc")?.getattr("Mapping")?.unbind();
+    PyCFunction::new_closure(
+        py,
+        None,
+        None,
+        move |args, _kwargs| -> PyResult<Py<PyAny>> {
+            let py = args.py();
+            let value = args.get_item(0)?;
+            if value.is_instance(mapping.bind(py))? {
+                return Ok(py.get_type::<PyDict>().call1((value,))?.unbind());
+            }
+            Err(PyTypeError::new_err(format!(
+                "Object of type {} is not JSON serializable",
+                value.get_type().name()?
+            )))
+        },
+    )
 }
 
 /// One token from [`Tokens`] iteration.
