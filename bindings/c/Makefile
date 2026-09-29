@@ -5,6 +5,7 @@
 #   make valgrind         tests without sanitizers under valgrind
 #   make install PREFIX=/usr/local  install library, headers, pkg-config, CMake config
 #   make check-install    install to a scratch prefix and build the C test via pkg-config
+#                         (and, on Linux, check that the installed prefix can move)
 #   make PROFILE=release  use the release library
 #   make TARGET_DIR=/path  build in another Cargo target directory
 #
@@ -14,6 +15,7 @@ PROFILE ?= debug
 CARGO ?= cargo
 CBINDGEN ?= cbindgen
 VALGRIND ?= valgrind
+READELF ?= readelf
 CC ?= cc
 CXX ?= c++
 
@@ -89,11 +91,21 @@ install: lib
 		syntaxmate.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/syntaxmate.pc
 
 check-install:
-	rm -rf $(BUILD)/prefix
+	rm -rf $(BUILD)/prefix $(BUILD)/relocated
 	$(MAKE) --no-print-directory install PREFIX=$(BUILD)/prefix
 	PKG_CONFIG_PATH=$(BUILD)/prefix/lib/pkgconfig sh -c '$(CC) -std=c99 tests/test_c.c -o $(BUILD)/prefix/test_c \
 		$$(pkg-config --cflags --libs syntaxmate) -Wl,-rpath,$(BUILD)/prefix/lib -lpthread'
 	$(BUILD)/prefix/test_c
+ifeq ($(shell uname -s),Linux)
+	@# The SONAME keeps the install path out of consumers that link the
+	@# library by path, as CMake does; such a program must survive a move.
+	$(READELF) -d $(BUILD)/prefix/lib/libsyntaxmate.so | grep -q 'SONAME.*\[libsyntaxmate\.so\]'
+	mkdir -p $(BUILD)/prefix/bin
+	$(CC) -std=c99 -I$(BUILD)/prefix/include tests/test_c.c -o $(BUILD)/prefix/bin/test_c \
+		$(BUILD)/prefix/lib/libsyntaxmate.so '-Wl,-rpath,$$ORIGIN/../lib' -lpthread
+	mv $(BUILD)/prefix $(BUILD)/relocated
+	$(BUILD)/relocated/bin/test_c
+endif
 
 clean:
 	rm -rf $(TARGET_DIR)/c-tests $(TARGET_DIR)/syntaxmate.h.check

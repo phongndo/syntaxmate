@@ -34,6 +34,13 @@ libraries, both headers, a pkg-config file, and a CMake package.
 
 The C++ wrapper needs only `syntaxmate.hpp` and the same library.
 
+The shared library's SONAME is `libsyntaxmate.so` (install name
+`@rpath/libsyntaxmate.dylib` on macOS), so programs record that name rather
+than the install path and find the library through their rpath or the system
+search path. On macOS, link with an rpath such as `-Wl,-rpath,<prefix>/lib`.
+The name is unversioned because 0.x releases do not keep the ABI stable
+between minor versions.
+
 ## C API
 
 ```c
@@ -167,5 +174,8 @@ output with `expected.json`. Other targets:
 - `make -C bindings/c valgrind` runs both tests under valgrind instead
   (`nix shell nixpkgs#valgrind`).
 - `make -C bindings/c check-install` installs to a scratch prefix and builds
-  the C test with pkg-config.
+  the C test with pkg-config. On Linux it also checks the SONAME and runs a
+  test linked by path, as CMake links, after moving the prefix.
+- `TARGET_DIR=<dir>` (default `$CARGO_TARGET_DIR` or `bindings/target`)
+  builds and tests in another Cargo target directory.
 - `PROFILE=release` uses the release library.
