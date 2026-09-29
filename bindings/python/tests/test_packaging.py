@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from importlib import metadata
 
 import pytest
@@ -23,5 +24,12 @@ def test_distribution_ships_third_party_notices():
     licenses = f"syntaxmate-{dist.version}.dist-info/licenses/"
     missing = [notice for notice in NOTICES if licenses + notice not in shipped]
     assert not missing, f"wheel lacks license notices: {missing}"
-    theme = dist.locate_file(licenses + NOTICES[0]).read_text(encoding="utf-8")
-    assert "Copyright (c) 2020 Primer" in theme
+    # A symlink checked out as a plain file (Git without symlink support)
+    # would ship its target path instead of the notice.
+    def read(name: str) -> str:
+        return dist.locate_file(licenses + name).read_text(encoding="utf-8")
+
+    assert "Copyright (c) 2020 Primer" in read(NOTICES[0])
+    assert read("LICENSE").startswith("MIT License")
+    for manifest in NOTICES[1:3]:
+        assert json.loads(read(manifest))

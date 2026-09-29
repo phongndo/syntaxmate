@@ -149,3 +149,54 @@ def test_from_bundle_subset():
     assert html == Highlighter().html('{"a": 1}', "json")
     with pytest.raises(syntaxmate.UnknownLanguageError):
         subset.html("fn x() {}", "rust")
+
+
+def test_tokens_indexing_edge_cases(hl):
+    tokens = hl.tokens("let x = 1;", "rust")
+    assert tokens[-len(tokens)].start == 0
+    for index in (len(tokens), -len(tokens) - 1, 2**70, -(2**70)):
+        with pytest.raises(IndexError):
+            tokens[index]
+    with pytest.raises(TypeError):
+        tokens[0:1]
+    assert [t.start for t in reversed(tokens)] == tokens.starts.tolist()[::-1]
+    iterator = iter(tokens)
+    assert len(list(iterator)) == len(tokens) and next(iterator, None) is None
+    empty = hl.tokens("", "rust")
+    assert len(empty) == 0 and not empty and list(empty) == []
+    assert empty.line_token_ranges.tolist() == [0, 0]
+    assert repr(empty) == "<Tokens tokens=0 lines=1 unit='codepoint' complete=True>"
+
+
+def test_strings_must_be_utf8_encodable(hl):
+    # A lone surrogate cannot cross into Rust; it raises the standard
+    # UnicodeEncodeError (a ValueError) wherever a str is accepted.
+    lone = "a\ud800b"
+    calls = [
+        lambda: hl.html(lone, "rust"),
+        lambda: hl.ansi(lone, "rust"),
+        lambda: hl.tokens(lone, "rust"),
+        lambda: hl.html("x", lone),
+        lambda: hl.html("x", "rust", lone),
+        lambda: hl.session("rust").line(lone),
+        lambda: Theme.bundled(lone),
+        lambda: Theme.from_json(lone),
+    ]
+    for call in calls:
+        with pytest.raises(UnicodeEncodeError):
+            call()
+    with pytest.raises(TypeError):
+        hl.html(b"fn main() {}", "rust")
+
+
+def test_exceptions_pickle():
+    import pickle
+
+    try:
+        Highlighter().html("x", "no-such-language")
+    except syntaxmate.UnknownLanguageError as error:
+        copy = pickle.loads(pickle.dumps(error))
+        assert type(copy) is syntaxmate.UnknownLanguageError
+        assert copy.args == error.args and copy.kind == "unknown_language"
+    else:
+        pytest.fail("expected UnknownLanguageError")

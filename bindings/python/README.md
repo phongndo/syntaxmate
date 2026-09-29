@@ -4,7 +4,8 @@ Python bindings for [Syntaxmate](../../README.md), a fast Rust syntax
 highlighter powered by TextMate grammars. Highlight to HTML, 24-bit ANSI, or
 flat token arrays, with the full grammar catalog and GitHub themes embedded.
 
-- One `abi3` wheel per platform supports CPython 3.9 and newer.
+- One `abi3` wheel per platform supports CPython 3.9 and newer. Free-threaded
+  builds (such as 3.14t) cannot load `abi3` extensions.
 - Highlighting releases the GIL; a `Highlighter` is safe to share across threads.
 - Token offsets index Python `str` values directly (Unicode code points).
 
@@ -101,7 +102,11 @@ Failures raise a `SyntaxmateError` subclass whose `kind` attribute is a stable
 category: `UnknownLanguageError` and `UnknownThemeError` (also `LookupError`);
 `InvalidGrammarError`, `InvalidThemeError`, `InvalidBundleError`, and
 `InvalidInputError` (also `ValueError`); `RenderError`; and `InternalError`,
-which includes Rust panics caught at the boundary.
+which includes Rust panics caught at the boundary. After such a panic, a
+session raises `InternalError` until `reset()` is called.
+
+Text arguments must be encodable as UTF-8: a `str` containing a lone surrogate
+such as `"\ud800"` raises the standard `UnicodeEncodeError`, a `ValueError`.
 
 ### Subset bundles
 

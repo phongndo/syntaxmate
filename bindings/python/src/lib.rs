@@ -8,7 +8,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, PoisonError};
 
-use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyIndexError, PyOverflowError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::pybacked::{PyBackedBytes, PyBackedStr};
 use pyo3::sync::PyOnceLock;
@@ -20,6 +20,10 @@ use syntaxmate_boundary::{
 };
 
 const DEFAULT_THEME: &str = "github-dark";
+
+// Array views use the native `"I"` format (C `unsigned int`); the bytes are
+// written with `u32::to_ne_bytes`, so the two must agree in size.
+const _: () = assert!(size_of::<std::ffi::c_uint>() == size_of::<u32>());
 
 /// Converts a boundary error into the matching `syntaxmate` exception class.
 fn py_error(py: Python<'_>, error: BoundaryError) -> PyErr {
@@ -90,9 +94,13 @@ fn resolve_theme(theme: &Bound<'_, PyAny>) -> PyResult<ThemeHandle> {
     if let Ok(theme) = theme.cast::<Theme>() {
         return Ok(theme.get().handle.clone());
     }
-    let name: PyBackedStr = theme.extract().map_err(|_| {
-        pyo3::exceptions::PyTypeError::new_err("theme must be a bundled theme name or a Theme")
-    })?;
+    if !theme.is_instance_of::<PyString>() {
+        return Err(PyTypeError::new_err(
+            "theme must be a bundled theme name or a Theme",
+        ));
+    }
+    // A `str` that is not valid UTF-8 (a lone surrogate) raises `UnicodeEncodeError`.
+    let name: PyBackedStr = theme.extract()?;
     ThemeHandle::bundled(&name).map_err(|error| py_error(theme.py(), error))
 }
 
@@ -446,11 +454,20 @@ impl Tokens {
         self.buffer.token_starts.len()
     }
 
-    fn __getitem__(&self, py: Python<'_>, index: isize) -> PyResult<Token> {
+    fn __getitem__(&self, py: Python<'_>, index: &Bound<'_, PyAny>) -> PyResult<Token> {
+        let out_of_range = || PyIndexError::new_err("token index out of range");
+        // Like `list`, an integer too large for an index is out of range.
+        let index: isize = index.extract().map_err(|error: PyErr| {
+            if error.is_instance_of::<PyOverflowError>(py) {
+                out_of_range()
+            } else {
+                error
+            }
+        })?;
         let len = self.buffer.token_starts.len() as isize;
         let resolved = if index < 0 { index + len } else { index };
         if !(0..len).contains(&resolved) {
-            return Err(PyIndexError::new_err("token index out of range"));
+            return Err(out_of_range());
         }
         self.token(py, resolved as usize)
     }
@@ -464,7 +481,7 @@ impl Tokens {
 
     fn __repr__(&self) -> String {
         format!(
-            "<Tokens tokens={} lines={} unit={:?} complete={}>",
+            "<Tokens tokens={} lines={} unit='{}' complete={}>",
             self.buffer.token_starts.len(),
             self.buffer.line_starts.len(),
             unit_name(self.buffer.unit),
@@ -512,22 +529,32 @@ struct Session {
 #[pymethods]
 impl Session {
     /// Highlights the next line; offsets in the result are line-relative.
+    ///
+    /// After a caught panic, the carried line state is unreliable, so every
+    /// call raises `InternalError` until `reset()`.
     fn line(&self, py: Python<'_>, text: PyBackedStr) -> PyResult<Tokens> {
         let buffer = detached(py, || {
-            let mut session = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut session = self.inner.lock().map_err(|_| {
+                BoundaryError::new(
+                    ErrorKind::Internal,
+                    "session state was lost to an internal error; call reset()",
+                )
+            })?;
             session.line(&text)
         })?;
         Ok(Tokens::new(buffer))
     }
 
     /// Returns to the start-of-document state, keeping caches.
-    fn reset(&self, py: Python<'_>) {
-        py.detach(|| {
+    fn reset(&self, py: Python<'_>) -> PyResult<()> {
+        detached(py, || {
             self.inner
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .reset();
-        });
+            self.inner.clear_poison();
+            Ok(())
+        })
     }
 }
 
