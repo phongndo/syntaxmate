@@ -36,12 +36,18 @@ export class SyntaxmateError extends Error {
 }
 
 let ready = false
+let notReadyHint = 'call `await init()` first'
 
 export function markReady() {
   if (!ready) {
     raw.setErrorClass(SyntaxmateError)
     ready = true
   }
+}
+
+/** Replaces the advice in the "not initialized" error (used by the Node entry). */
+export function setNotReadyHint(hint) {
+  notReadyHint = hint
 }
 
 export function isReady() {
@@ -56,7 +62,7 @@ export function version() {
 
 function assertReady() {
   if (!ready) {
-    throw new Error('syntaxmate: WebAssembly is not initialized; call `await init()` first')
+    throw new Error(`syntaxmate: WebAssembly is not initialized; ${notReadyHint}`)
   }
 }
 

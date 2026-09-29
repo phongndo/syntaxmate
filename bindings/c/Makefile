@@ -145,6 +145,11 @@ ifeq ($(UNAME),Linux)
 	@# The SONAME keeps the install path out of consumers that link the
 	@# library by path, as CMake does; such a program must survive a move.
 	$(READELF) -d $(BUILD)/prefix/lib/libsyntaxmate.so | grep -q 'SONAME.*\[libsyntaxmate\.so\]'
+	@# The README's static recipe must not pull in the shared library.
+	$(CC) -std=c99 -I$(BUILD)/prefix/include tests/test_c.c -o $(BUILD)/prefix/test_c_static \
+		$(BUILD)/prefix/lib/libsyntaxmate.a -lpthread -ldl -lm
+	$(BUILD)/prefix/test_c_static
+	! $(READELF) -d $(BUILD)/prefix/test_c_static | grep -q 'libsyntaxmate'
 	mkdir -p $(BUILD)/prefix/bin
 	$(CC) -std=c99 -I$(BUILD)/prefix/include tests/test_c.c -o $(BUILD)/prefix/bin/test_c \
 		$(BUILD)/prefix/lib/libsyntaxmate.so '-Wl,-rpath,$$ORIGIN/../lib' -lpthread
