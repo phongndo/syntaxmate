@@ -215,6 +215,46 @@
     "sources": ["{ zz }\n}x", "{ a\nzz x\n} x", "x{zz}x"]
   },
   {
+    "name": "extended-mode-literal-whitespace",
+    "grammars": [{"scopeName": "source.extended-whitespace", "patterns": [
+      {"match": "(?x:a\u000bb)", "name": "literal.vertical-tab"},
+      {"match": "(?x:a\u0085b)", "name": "literal.next-line"},
+      {"match": "(?x:a\u00a0b)", "name": "literal.no-break-space"},
+      {"match": "(?x:a\ufeffb)", "name": "literal.bom"},
+      {"match": "(?x:a\\ b\\#c)", "name": "literal.escaped-space-hash"},
+      {"match": "(?x:a(?-x: )b)", "name": "literal.unset-space"},
+      {"match": "(?x:a b)", "name": "ignored.ascii-space"}
+    ]}],
+    "sources": ["a\u000bb a\u0085b a\u00a0b a\ufeffb ab\n", "a b#c a b ab\n"]
+  },
+  {
+    "name": "dynamic-end-literal-escaping",
+    "grammars": [{"scopeName": "source.dynamic-end", "patterns": [
+      {"begin": "^<<(.+)$", "end": "(?x)^\\1$", "name": "meta.block", "endCaptures": {"0": {"name": "punctuation.end"}}}
+    ]}],
+    "sources": [
+      "<<a b\na b\nafter\n",
+      "<<a#b\na#b\nafter\n",
+      "<<x\ty\nx\ty\nafter\n",
+      "<<😀é\ufeff#.+\n😀é\ufeff#.+\nafter\n",
+      "<<a\u0085b\na\u0085b\nafter\n"
+    ]
+  },
+  {
+    "name": "dynamic-while-literal-escaping",
+    "grammars": [{"scopeName": "source.dynamic-while", "patterns": [
+      {"begin": "^>(.+)$", "while": "(?x)^\\1>", "name": "meta.while", "whileCaptures": {"0": {"name": "punctuation.while"}}}
+    ]}],
+    "sources": [">a b\na b>inside\nstop\n", ">a#b\na#b>inside\nstop\n"]
+  },
+  {
+    "name": "dynamic-end-character-class-literal",
+    "grammars": [{"scopeName": "source.dynamic-class", "patterns": [
+      {"begin": "^<<(.+)$", "end": "[\\1]", "name": "meta.block", "endCaptures": {"0": {"name": "punctuation.end"}}}
+    ]}],
+    "sources": ["<<a-z\nm\nz\nafter\n"]
+  },
+  {
     "name": "injection-selector-literal-asterisks",
     "grammars": [
       {

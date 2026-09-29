@@ -55,6 +55,16 @@ for latency claims and report allocation measurements separately.
 sessions in `direct`, `prepared-total`, and `prepared-reuse` modes, also with a
 counting allocator.
 
+The separate bindings workspace has a
+[shared-boundary profiler](../../bindings/boundary/examples/profile-boundary.rs)
+for rendered strings, flat token buffers, offset conversion, and sequential
+sessions. Its usage describes timing boundaries and the separate instrumented
+build. Measure actual consumers as well: the binding READMEs link their
+[C/C++](../../bindings/c/README.md#consumer-measurements),
+[JavaScript](../../bindings/wasm/README.md#benchmark), and
+[Python](../../bindings/python/README.md#benchmark) profilers. Boundary timing
+excludes host-language conversion and ownership costs.
+
 [allocation-policy.json](allocation-policy.json) pins corpora and reviewed
 per-phase memory/call ceilings. The checker rejects stale inputs, degraded
 output, digest drift, and ceiling breaches. Raising a ceiling requires new

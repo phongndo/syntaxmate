@@ -103,6 +103,26 @@ def test_released_array_view_does_not_poison_later_access(hl):
     assert len(tokens.lengths) == len(tokens)
 
 
+def test_array_views_outlive_tokens_and_highlighter():
+    import gc
+
+    highlighter = Highlighter()
+    tokens = highlighter.tokens(SOURCE, "javascript", include_scopes=True)
+    views = [tokens.line_starts, tokens.line_token_ranges, tokens.starts,
+             tokens.lengths, tokens.style_ids, tokens.scope_ids]
+    expected = [view.tolist() for view in views]
+    del tokens, highlighter
+    gc.collect()
+    # Subsequent native buffers and Python allocations must not reuse storage
+    # still owned by a view, even after its original Tokens owner is gone.
+    for _ in range(20):
+        Highlighter().tokens("let replacement = 42;\n" * 100, "rust")
+    assert [view.tolist() for view in views] == expected
+    assert all(view.readonly and view.format == "I" for view in views)
+    with pytest.raises(TypeError):
+        views[2][0] = 1
+
+
 def test_tokens_without_scopes(hl):
     tokens = hl.tokens("fn main() {}", "rust")
     assert len(tokens.scope_ids) == 0 and tokens.scope_stacks == ()

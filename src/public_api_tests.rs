@@ -112,6 +112,78 @@ fn cached_budget_exhaustion_remains_degraded() {
 }
 
 #[test]
+fn dynamic_delimiter_limit_reports_degradation_across_replay_and_sessions() {
+    for kind in ["end", "while"] {
+        let grammar = serde_json::json!({
+            "scopeName": "source.delimiter-limit",
+            "patterns": [{"begin": "^<<(.+)$", kind: "(?x)^\\1$", "name": "meta.block"}]
+        });
+        let mut registry = GrammarRegistry::new();
+        let root = registry.add_json(&grammar.to_string()).unwrap();
+        let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+
+        // Escaping doubles spaces in the dynamic pattern. Both begin lines
+        // fit the default line budget; only the latter exceeds substitution's
+        // existing 4096-byte bound.
+        for (length, expected) in [
+            (2000, HighlightStatus::Complete),
+            (2050, HighlightStatus::Degraded),
+        ] {
+            let delimiter = " ".repeat(length);
+            let begin = format!("<<{delimiter}");
+            let source = format!("{begin}\n{delimiter}\nafter\n");
+            let first = tokenizer.tokenize(&source);
+            assert_eq!(first.status(), expected, "{kind}, {length}");
+            assert_eq!(first.lines()[0].status(), expected);
+            let cached = tokenizer.tokenize(&source);
+            assert_eq!(cached, first, "cached {kind}, {length}");
+
+            let mut state = tokenizer.initial_state();
+            let owned = tokenizer.tokenize_line(&begin, &mut state).unwrap();
+            assert_eq!(owned.status(), expected, "line {kind}, {length}");
+            let mut state = tokenizer.initial_state();
+            let mut buffer = Vec::new();
+            assert_eq!(
+                tokenizer
+                    .tokenize_line_into(&begin, &mut state, &mut buffer)
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(buffer, owned.tokens());
+            let mut state = tokenizer.initial_state();
+            let mut delivered = Vec::new();
+            assert_eq!(
+                tokenizer
+                    .tokenize_line_with(&begin, &mut state, |token| delivered.push(token))
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(delivered, owned.tokens());
+
+            let mut checkpoints = tokenizer.checkpoints(1);
+            for _ in 0..2 {
+                assert_eq!(
+                    tokenizer
+                        .tokenize_viewport(&source, 0..1, &mut checkpoints)
+                        .unwrap()
+                        .status(),
+                    expected
+                );
+            }
+            assert!(tokenizer.tokenize("plain").status().is_complete());
+            let mut fresh = tokenizer.initial_state();
+            assert!(
+                tokenizer
+                    .tokenize_line("plain", &mut fresh)
+                    .unwrap()
+                    .status()
+                    .is_complete()
+            );
+        }
+    }
+}
+
+#[test]
 fn capture_retokenization_budget_exhaustion_is_reported() {
     let mut registry = GrammarRegistry::new();
     let root = registry

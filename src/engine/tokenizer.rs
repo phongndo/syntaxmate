@@ -5555,7 +5555,7 @@ impl TextMateTokenizer {
     }
 
     fn substituted_pattern(
-        &self,
+        &mut self,
         grammar_id: GrammarId,
         pattern_id: PatternId,
         line: &str,
@@ -5566,9 +5566,19 @@ impl TextMateTokenizer {
         let capture_texts = (0..result.capture_count())
             .map(|group| result.capture(group).and_then(|range| line.get(range)))
             .collect::<Vec<_>>();
-        let substituted =
-            substitute_end_pattern(pattern, &capture_texts, MAX_SUBSTITUTED_END_PATTERN_LEN)
-                .unwrap_or_else(|_| pattern.to_owned());
+        let substituted = match substitute_end_pattern(
+            pattern,
+            &capture_texts,
+            MAX_SUBSTITUTED_END_PATTERN_LEN,
+        ) {
+            Ok(substituted) => substituted,
+            Err(_) => {
+                // Keep the bounded fallback, but report that the dynamic
+                // delimiter could not be represented faithfully.
+                self.line_degraded = true;
+                pattern.to_owned()
+            }
+        };
         let is_static = substituted == pattern;
         Some((substituted, is_static))
     }

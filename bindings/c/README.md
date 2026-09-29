@@ -241,3 +241,34 @@ about five bytes per line, and MB/s counts them. Compare the two tables with
 each other, not with the `profile-product` numbers, which run with the cache
 disabled on unmodified input. Pin the processes (for example `taskset`) and
 alternate runs on a busy machine.
+
+## Consumer measurements
+
+Build the uninstrumented release driver from the repository root:
+
+```sh
+nix develop -c make -C bindings/c profile
+bindings/target/c-tests/release/profile c tokens replay rust tests/fixtures/textmate/rust/stress.rs 100
+bindings/target/c-tests/release/profile cpp tokens replay rust tests/fixtures/textmate/rust/stress.rs 100
+```
+
+The first argument selects raw C ABI calls or the C++ wrapper, in the same
+C++17 executable and shared library. Output modes are `html`, `ansi`, `tokens`,
+and `scopes`. Phases are `first` (exactly one iteration), `replay` (unchanged
+input), `steady` (a unique fixed-width horizontal-whitespace suffix on every
+line per iteration), and `session` (prewarmed unchanged-input token/scopes
+replay, each line in order, reset between documents). One full session document
+is discarded before timing; reset is outside API timings and preserves caches.
+Documents larger than the line cache can still incur matching during replay.
+`make check` includes a deterministic regression for warm-up and accounting.
+Use `steady` only with grammars for which trailing
+horizontal whitespace is appropriate. Its input-byte count includes padding.
+
+Each invocation emits one JSON sample with engine/theme construction, session
+preparation, API calls, and output destruction timed separately. C++ rendered
+output timing includes the wrapper's string copy. Source loading/mutation,
+output hashing, and validation are outside those intervals. The driver rejects
+degraded output and hashes all rendered bytes or token ranges, styles, and
+ordered scopes. Compare digests and accounting before timing results. Measure
+process startup with an external timer; repeat separate processes and alternate
+build/API order as described in the [measurement guide](../../benchmarks/textmate/README.md).

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Escape captured dynamic end/while delimiters like TextMate, including spaces,
+  `#`, and hyphens. This fixes extended-mode delimiters being interpreted as
+  regex syntax and captured hyphens becoming character-class ranges.
+- Preserve vertical tabs and non-ASCII whitespace as literals in extended-mode
+  regexes, matching Oniguruma's separator rules.
+- Report degraded highlighting when a captured dynamic delimiter exceeds the
+  existing substitution limit, including cached and incremental results.
+- Release the source style table after C token-buffer conversion, reducing
+  memory retained by C and C++ results.
 - Add oracle-backed Unicode, mixed-line-ending, and truncated-input recovery
   checks for every B/C promotion-group language, covering bundled, cached, and
   uncached incremental tokenization.

@@ -496,8 +496,9 @@ static PLAIN_LITERAL_BYTE: [[bool; 256]; 2] = {
             byte as u8,
             b'(' | b'[' | b'.' | b'^' | b'$' | b'\\' | b')' | b'|' | b'*' | b'+' | b'?' | b'{'
         );
-        // `char::is_whitespace` for ASCII scalars.
-        let extended_syntax = matches!(byte as u8, b'\t'..=b'\r' | b' ' | b'#');
+        // Oniguruma's extended-mode separators exclude vertical tab and all
+        // non-ASCII whitespace. This is distinct from the \s character class.
+        let extended_syntax = matches!(byte as u8, b'\t' | b'\n' | b'\r' | b'\x0c' | b' ' | b'#');
         table[0][byte] = plain;
         table[1][byte] = plain && !extended_syntax;
         byte += 1;
@@ -644,7 +645,7 @@ impl<'a> Parser<'a> {
             if Some(ch) == terminator || ch == '|' {
                 break;
             }
-            if self.flags.ignore_whitespace && ch.is_whitespace() {
+            if self.flags.ignore_whitespace && matches!(ch, '\t' | '\n' | '\r' | '\x0c' | ' ') {
                 self.bump();
                 continue;
             }
@@ -870,9 +871,6 @@ impl<'a> Parser<'a> {
                 break;
             }
             let next = self.peek().expect("scalar boundary");
-            if extended && next.is_whitespace() {
-                break;
-            }
             let width = next.len_utf8();
             if self
                 .bytes
@@ -2109,12 +2107,13 @@ mod tests {
         assert_eq!(*node, Ast::Literal("🛰".into()));
         // Escaped punctuation still coalesces across multi-byte neighbours.
         assert_eq!(parse(r"é\.ß\-").ast, Ast::Literal("é.ß-".into()));
-        // Extended mode skips Unicode whitespace inside a literal run.
+        // Extended mode only skips Oniguruma's ASCII separators; NBSP stays
+        // literal even when adjacent ASCII space is ignored.
         let Ast::Flags { child, .. } = parse("(?x:a\u{a0}é b)").ast else {
             panic!("expected option scope");
         };
         assert!(matches!(child.as_ref(), Ast::Flags { child, .. }
-            if **child == Ast::Literal("aéb".into())));
+            if **child == Ast::Literal("a\u{a0}éb".into())));
         // Class ranges and POSIX names read whole scalars.
         let Ast::Class(class) = parse("[α-ω[:alpha:]é]").ast else {
             panic!("expected class");
