@@ -1,0 +1,100 @@
+name: Bindings (JavaScript)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: &paths
+      - "bindings/wasm/**"
+      - "bindings/boundary/**"
+      - "bindings/conformance/**"
+      - "bindings/Cargo.*"
+      - "src/**"
+      - "assets/**"
+      - "Cargo.toml"
+      - ".github/workflows/bindings-js.yml"
+  push:
+    branches: [main]
+    paths: *paths
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: syntaxmate-bindings-js-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: bindings/wasm
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: bindings
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          # Must match the wasm-bindgen crate version in bindings/Cargo.lock.
+          tool: wasm-bindgen@0.2.121
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
+      - run: cargo clippy -p syntaxmate-wasm --target wasm32-unknown-unknown --locked -- -D warnings
+      - run: npm run build
+      - name: Report package size
+        run: |
+          raw=$(stat -c %s dist/syntaxmate_bg.wasm)
+          gz=$(gzip -9c dist/syntaxmate_bg.wasm | wc -c)
+          {
+            echo "### syntaxmate npm package"
+            echo "- wasm: ${raw} bytes (${gz} gzipped)"
+            echo '```'
+            npm pack --dry-run 2>&1 | tail -n 6
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - run: npm pack
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package
+          path: |
+            bindings/wasm/*.tgz
+            bindings/wasm/dist/
+            bindings/wasm/grammars.bundle
+            bindings/wasm/third-party/
+            bindings/wasm/LICENSE
+          if-no-files-found: error
+
+  # The wasm is platform-independent; test the built package on every
+  # supported Node line and OS.
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20, 22, 24]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: bindings/wasm
+      - run: npm test
