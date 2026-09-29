@@ -6,6 +6,7 @@
 #   make install PREFIX=/usr/local  install library, headers, pkg-config, CMake config
 #   make check-install    install to a scratch prefix and build the C test via pkg-config
 #   make PROFILE=release  use the release library
+#   make TARGET_DIR=/path  build in another Cargo target directory
 #
 # Needs cargo, a C99 and C++17 compiler, and cbindgen for the header targets.
 
@@ -17,7 +18,9 @@ CC ?= cc
 CXX ?= c++
 
 WORKSPACE := $(abspath ..)
-TARGET_DIR ?= $(WORKSPACE)/target
+# Cargo builds here too; defaults to $CARGO_TARGET_DIR when that is set.
+TARGET_DIR ?= $(or $(CARGO_TARGET_DIR),$(WORKSPACE)/target)
+override TARGET_DIR := $(abspath $(TARGET_DIR))
 LIBDIR := $(TARGET_DIR)/$(PROFILE)
 BUILD := $(TARGET_DIR)/c-tests/$(PROFILE)
 CARGO_FLAGS := $(if $(filter release,$(PROFILE)),--release,)
@@ -43,7 +46,8 @@ VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' $(WORKSPACE)/Cargo.toml |
 check: check-header test
 
 lib:
-	$(CARGO) build -p syntaxmate-ffi $(CARGO_FLAGS) --manifest-path $(WORKSPACE)/Cargo.toml
+	$(CARGO) build -p syntaxmate-ffi $(CARGO_FLAGS) --manifest-path $(WORKSPACE)/Cargo.toml \
+		--target-dir $(TARGET_DIR)
 
 # The C test links the shared library; the C++ test links the static one.
 $(BUILD)/%/test_c: tests/test_c.c include/syntaxmate.h lib
