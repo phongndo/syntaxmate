@@ -13,7 +13,7 @@ repository = "https://github.com/phongndo/syntaxmate"
 publish = false
 
 [workspace.dependencies]
-syntaxmate = { path = ".." }
+syntaxmate = { path = "..", default-features = false, features = ["bundled-themes", "html", "ansi"] }
 syntaxmate-boundary = { path = "boundary" }
 
 # Bindings unwind so Python and C callers receive errors instead of an abort

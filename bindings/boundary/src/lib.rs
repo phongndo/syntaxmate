@@ -260,6 +260,7 @@ pub struct Engine {
 
 impl Engine {
     /// Creates an engine over the embedded grammar catalog.
+    #[cfg(feature = "bundled-grammars")]
     pub fn bundled() -> Result<Self> {
         Ok(Self::with_catalog(Catalog::bundled()))
     }

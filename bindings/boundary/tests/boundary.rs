@@ -1,3 +1,5 @@
+#![cfg(feature = "bundled-grammars")]
+
 use syntaxmate_boundary::{
     Engine, ErrorKind, HtmlOptions, NO_COLOR, OffsetUnit, ThemeHandle, TokenBuffer, TokenOptions,
 };

@@ -8,8 +8,17 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["bundled-grammars"]
+# Embeds the full grammar catalog; without it, load bundles with `Engine::from_bundle`.
+bundled-grammars = ["syntaxmate/bundled-grammars"]
+
 [dependencies]
 syntaxmate.workspace = true
+
+[[example]]
+name = "conformance"
+required-features = ["bundled-grammars"]
 
 [dev-dependencies]
 serde_json = "1"
