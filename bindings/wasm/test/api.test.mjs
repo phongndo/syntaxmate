@@ -111,3 +111,13 @@ test('free is idempotent and use-after-free throws', async () => {
   }
   assert.throws(() => escaped.name, /freed/)
 })
+
+test('SyntaxmateError can be constructed and subclassed by callers', () => {
+  const error = new SyntaxmateError('Invalid source', 6)
+  assert.equal(error.kind, 'InvalidInput')
+  assert.equal(error.code, 6)
+  assert.equal(error.name, 'SyntaxmateError')
+  assert.equal(new SyntaxmateError('x', 99).kind, 'Internal')
+  class AppError extends SyntaxmateError {}
+  assert.ok(new AppError('x', 1) instanceof SyntaxmateError)
+})

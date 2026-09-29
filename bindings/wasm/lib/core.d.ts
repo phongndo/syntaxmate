@@ -20,6 +20,8 @@ export type ErrorKind =
 
 /** Thrown for engine failures such as unknown languages or invalid themes. */
 export class SyntaxmateError extends Error {
+  /** `code` is a C ABI error number; unknown codes map to kind `'Internal'`. */
+  constructor(message: string, code: number)
   readonly name: 'SyntaxmateError'
   readonly kind: ErrorKind
   readonly code: number

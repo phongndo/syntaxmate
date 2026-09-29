@@ -50,5 +50,15 @@ export async function main(): Promise<void> {
   highlighter.html('x', { theme: 'github-dark' })
   // @ts-expect-error constructors are private.
   new TokenBuffer()
+  const custom = new SyntaxmateError('Invalid source', 6)
+  const customKind: ErrorKind = custom.kind
+  // @ts-expect-error the second argument is a numeric error code.
+  new SyntaxmateError('Invalid source', { cause: 'x' })
+  class AppError extends SyntaxmateError {
+    constructor() {
+      super('app', 8)
+    }
+  }
+  void [customKind, new AppError()]
   void [v, html, ansi, lang, line]
 }
