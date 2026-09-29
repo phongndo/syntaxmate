@@ -49,7 +49,18 @@ jobs:
         with:
           # Must match the wasm-bindgen crate version in bindings/Cargo.lock.
           tool: wasm-bindgen@0.2.121
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
+      # Ubuntu's binaryen cannot parse current rustc output; pin the release
+      # the wasm Nix shell uses.
+      - name: Install binaryen
+        env:
+          VERSION: "129"
+          SHA256: 50b9fa62b9abea752da92ec57e0c555fee578760cd237c40107957715d2976ba
+        run: |
+          archive="binaryen-version_${VERSION}-x86_64-linux.tar.gz"
+          curl -fsSLO "https://github.com/WebAssembly/binaryen/releases/download/version_${VERSION}/${archive}"
+          echo "${SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" -C "${RUNNER_TEMP}"
+          echo "${RUNNER_TEMP}/binaryen-version_${VERSION}/bin" >> "$GITHUB_PATH"
       - run: cargo clippy -p syntaxmate-wasm --target wasm32-unknown-unknown --locked -- -D warnings
       - run: npm run build
       - run: npm run typecheck
