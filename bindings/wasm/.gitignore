@@ -1,0 +1,6 @@
+/dist
+/node_modules
+/grammars.bundle
+/LICENSE
+/third-party
+*.tgz

@@ -1,0 +1,19 @@
+[package]
+name = "syntaxmate-wasm"
+description = "WebAssembly binding behind the `syntaxmate` npm package"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Grammars load at runtime from `grammars.bundle`, keeping the .wasm small.
+syntaxmate-boundary = { path = "../boundary", default-features = false }
+js-sys = "0.3"
+# Must equal the wasm-bindgen-cli version used by scripts/build.mjs.
+wasm-bindgen = "=0.2.121"
