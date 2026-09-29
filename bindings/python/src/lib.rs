@@ -248,11 +248,13 @@ impl Token {
 /// Highlighted tokens as flat arrays.
 ///
 /// Array properties return read-only `memoryview`s of unsigned 32-bit integers
-/// (format `"I"`), usable with `numpy.frombuffer` or indexed directly.
+/// (format `"I"`), usable with `numpy.frombuffer` or indexed directly. The
+/// backing `bytes` are built once and cached; each access returns a fresh view
+/// so releasing one (`with tokens.starts as s:`) cannot break later accesses.
 #[pyclass(frozen, sequence, module = "syntaxmate")]
 struct Tokens {
     buffer: TokenBuffer,
-    views: [PyOnceLock<Py<PyAny>>; 6],
+    arrays: [PyOnceLock<Py<PyBytes>>; 6],
     styles: PyOnceLock<Py<PyTuple>>,
     scope_stacks: PyOnceLock<Py<PyTuple>>,
 }
@@ -261,7 +263,7 @@ impl Tokens {
     fn new(buffer: TokenBuffer) -> Self {
         Self {
             buffer,
-            views: std::array::from_fn(|_| PyOnceLock::new()),
+            arrays: std::array::from_fn(|_| PyOnceLock::new()),
             styles: PyOnceLock::new(),
             scope_stacks: PyOnceLock::new(),
         }
@@ -277,18 +279,17 @@ impl Tokens {
             4 => &b.token_styles,
             _ => &b.token_scopes,
         };
-        self.views[index]
-            .get_or_try_init(py, || {
-                let bytes = PyBytes::new_with(py, data.len() * 4, |out| {
-                    for (chunk, value) in out.as_chunks_mut::<4>().0.iter_mut().zip(data) {
-                        *chunk = value.to_ne_bytes();
-                    }
-                    Ok(())
-                })?;
-                let view = PyMemoryView::from(bytes.as_any())?.call_method1("cast", ("I",))?;
-                Ok(view.unbind())
+        let bytes = self.arrays[index].get_or_try_init(py, || {
+            PyBytes::new_with(py, data.len() * 4, |out| {
+                for (chunk, value) in out.as_chunks_mut::<4>().0.iter_mut().zip(data) {
+                    *chunk = value.to_ne_bytes();
+                }
+                Ok(())
             })
-            .map(|view| view.clone_ref(py))
+            .map(Bound::unbind)
+        })?;
+        let view = PyMemoryView::from(bytes.bind(py).as_any())?.call_method1("cast", ("I",))?;
+        Ok(view.unbind())
     }
 
     fn style_objects<'py>(&self, py: Python<'py>) -> PyResult<&Bound<'py, PyTuple>> {

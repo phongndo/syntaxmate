@@ -80,7 +80,18 @@ def test_tokens_index_python_strings(hl):
     for line, start in enumerate(tokens.line_starts):
         assert SOURCE[start:].startswith(lines[line])
     assert tokens.styles[tokens.style_ids[0]] == tokens[0].style
-    assert tokens.starts is tokens.starts  # cached, not rebuilt per access
+    assert tokens.starts.obj is tokens.starts.obj  # backing bytes cached, not rebuilt
+
+
+def test_released_array_view_does_not_poison_later_access(hl):
+    tokens = hl.tokens("let x = 1;", "rust")
+    with tokens.starts as starts:
+        expected = starts.tolist()
+    assert tokens.starts.tolist() == expected
+    assert tokens.starts[0] == 0
+    view = tokens.lengths
+    view.release()
+    assert len(tokens.lengths) == len(tokens)
 
 
 def test_tokens_without_scopes(hl):
