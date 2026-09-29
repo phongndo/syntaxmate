@@ -12,6 +12,7 @@
 # Needs cargo, a C99 and C++17 compiler, and cbindgen for the header targets.
 
 PROFILE ?= debug
+UNAME := $(shell uname -s)
 CARGO ?= cargo
 CBINDGEN ?= cbindgen
 VALGRIND ?= valgrind
@@ -27,7 +28,7 @@ LIBDIR := $(TARGET_DIR)/$(PROFILE)
 BUILD := $(TARGET_DIR)/c-tests/$(PROFILE)
 CARGO_FLAGS := $(if $(filter release,$(PROFILE)),--release,)
 
-ifeq ($(shell uname -s),Darwin)
+ifeq ($(UNAME),Darwin)
 NATIVE_LIBS ?=
 else
 NATIVE_LIBS ?= -lpthread -ldl -lm
@@ -37,7 +38,12 @@ SANITIZE ?= -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-r
 WARNINGS := -Wall -Wextra -Wpedantic -Werror
 CFLAGS_TEST := -std=c99 $(WARNINGS) -g -Iinclude
 CXXFLAGS_TEST := -std=c++17 $(WARNINGS) -g -Iinclude
+# Apple's toolchain has no LeakSanitizer, and ASan aborts if asked for it.
+ifeq ($(UNAME),Darwin)
+export ASAN_OPTIONS ?= detect_leaks=0
+else
 export ASAN_OPTIONS ?= detect_leaks=1
+endif
 export UBSAN_OPTIONS ?= print_stacktrace=1
 
 PREFIX ?= /usr/local
@@ -101,7 +107,7 @@ check-install:
 	PKG_CONFIG_PATH=$(BUILD)/prefix/lib/pkgconfig sh -c '$(CC) -std=c99 tests/test_c.c -o $(BUILD)/prefix/test_c \
 		$$(pkg-config --cflags --libs syntaxmate) -Wl,-rpath,$(BUILD)/prefix/lib -lpthread'
 	$(BUILD)/prefix/test_c
-ifeq ($(shell uname -s),Linux)
+ifeq ($(UNAME),Linux)
 	@# The SONAME keeps the install path out of consumers that link the
 	@# library by path, as CMake does; such a program must survive a move.
 	$(READELF) -d $(BUILD)/prefix/lib/libsyntaxmate.so | grep -q 'SONAME.*\[libsyntaxmate\.so\]'
