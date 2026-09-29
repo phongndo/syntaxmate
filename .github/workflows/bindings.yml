@@ -1,0 +1,71 @@
+# Shared checks for the `bindings/` Cargo workspace. Each language binding has
+# its own workflow (bindings-<lang>.yml) for its toolchain, packaging, and tests.
+name: Bindings
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: &paths
+      - "bindings/**"
+      - "src/**"
+      - "assets/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/bindings.yml"
+  push:
+    branches: [main]
+    paths: *paths
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: syntaxmate-bindings-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: bindings
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: bindings
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # Every member must also build without the embedded grammar catalog.
+      - run: cargo clippy --workspace --exclude syntaxmate-wasm --no-default-features --locked -- -D warnings
+      - run: python3 tools/check-docs.py && python3 tools/test_docs.py
+        working-directory: .
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: bindings
+      # Includes the check that conformance/expected.json matches the engine,
+      # so every binding's reference output stays current.
+      - run: cargo test --workspace --exclude syntaxmate-wasm --locked
