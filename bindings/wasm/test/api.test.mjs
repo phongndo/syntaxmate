@@ -104,8 +104,10 @@ test('free is idempotent and use-after-free throws', async () => {
   own.free()
   own.free()
   assert.throws(() => own.languages(), /freed/)
-  // `using` is not syntax until Node 24, so dispose explicitly.
-  const theme = Theme.bundled('github-light')
-  theme[Symbol.dispose]()
-  assert.throws(() => theme.name, /freed/)
+  let escaped
+  {
+    using theme = Theme.bundled('github-light')
+    escaped = theme
+  }
+  assert.throws(() => escaped.name, /freed/)
 })

@@ -18,7 +18,7 @@ This package is not yet published; see [Build](#build) to produce it locally.
 
 ## Node
 
-Node 22 or later. Importing the package instantiates WebAssembly synchronously.
+Node 24 or later. Importing the package instantiates WebAssembly synchronously.
 
 ```js
 import { createHighlighter } from 'syntaxmate'
