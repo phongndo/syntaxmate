@@ -9,7 +9,7 @@ comparison, not an identical-output one.
 Modes (median of --samples):
   cold     fresh interpreter: import, construct, first highlight (in-process timer)
   first    fresh highlighter in a warm interpreter: grammar setup + one document
-  steady   warm highlighter, rotating document variants to defeat line caches
+  steady   warm highlighter, rotating variants to displace cached documents
   replay   warm highlighter, the same document again (syntaxmate's line cache hits)
 """
 
@@ -36,7 +36,8 @@ LANGUAGES = {
     "html": ("html/stress.html", "html"),
 }
 THEME = "github-dark"
-# More variant lines than syntaxmate's 1,024-entry line cache holds.
+# More variant lines than the cache holds for these stress fixtures; duplicate
+# lines within a document may still hit. This is not cache-disabled matching.
 VARIANTS = 8
 
 COLD_CHILD = r"""

@@ -110,6 +110,12 @@ fn escape_regex_literal(text: &str) -> String {
         if matches!(
             ch,
             '\\' | '.' | '+' | '*' | '?' | '(' | ')' | '|' | '[' | ']' | '{' | '}' | '^' | '$'
+                | '-' | ',' | '#'
+                // vscode-textmate uses JavaScript's \s here. Unlike Rust's
+                // is_whitespace, that includes BOM and excludes NEXT LINE.
+                | '\u{0009}'..='\u{000d}' | ' ' | '\u{00a0}' | '\u{1680}'
+                | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}'
+                | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}'
         ) {
             output.push('\\');
         }
