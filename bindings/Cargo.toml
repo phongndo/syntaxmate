@@ -4,7 +4,9 @@
 resolver = "3"
 members = [
     "boundary",
+    "c",
     "python",
+    "wasm",
 ]
 
 [workspace.package]
@@ -26,3 +28,10 @@ syntaxmate-boundary = { path = "boundary" }
 codegen-units = 1
 lto = "fat"
 panic = "unwind"
+
+# WebAssembly cannot unwind on stable Rust, and the .wasm ships to browsers,
+# so the JavaScript binding builds with its own profile.
+[profile.wasm-release]
+inherits = "release"
+lto = "fat"
+panic = "abort"
