@@ -10,7 +10,7 @@
   },
   "keywords": ["syntax-highlighting", "textmate", "highlighter", "wasm"],
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": ["./lib/node.js"],
   "exports": {
     ".": {
       "node": {
