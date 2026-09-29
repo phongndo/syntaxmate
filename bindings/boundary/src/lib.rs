@@ -8,12 +8,17 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
-use std::{collections::HashMap, fmt};
+use std::{
+    collections::HashMap,
+    fmt,
+    hash::{BuildHasherDefault, Hasher},
+    ops::Range,
+};
 
 pub use syntaxmate::{AnsiOptions, HtmlOptions};
 use syntaxmate::{
     Catalog, Error, HighlightSession, HighlightStatus, HighlightedToken, Highlighter, ScopeStackId,
-    Style, Theme, html_stylesheet, render_ansi, render_html,
+    Scopes, Style, Theme, Token, html_stylesheet, render_ansi, render_html,
 };
 
 /// Version of the underlying `syntaxmate` engine.
@@ -360,18 +365,22 @@ impl Engine {
         options: TokenOptions,
     ) -> Result<TokenBuffer> {
         check_len(source)?;
-        let document = self
-            .highlighter
-            .highlight_with_theme(language, source, &theme.theme)?;
-        let mut builder = BufferBuilder::new(options, theme.default_style());
-        let mut lines = source.split('\n');
+        // Styles are resolved here, once per distinct scope stack, instead of
+        // through `highlight_with_theme`, which styles and re-collects every token.
+        let document = self.highlighter.tokenize(language, source)?;
+        let lines = document.lines();
+        let mut interner = Interner::default();
+        let mut builder = BufferBuilder::new(options, theme.default_style(), &mut interner);
+        builder.reserve(lines.len(), lines.iter().map(|l| l.tokens().len()).sum());
+        let resolve = |token: &Token| theme.theme.resolve(token.scopes());
+        let mut texts = source.split('\n');
         let mut line_start = 0u32;
-        for line in document.lines() {
-            let text = lines.next().ok_or_else(line_mismatch)?;
-            builder.push_line(text, line_start, line.tokens());
-            line_start += units(text, options.unit) + 1;
+        for line in lines {
+            let text = texts.next().ok_or_else(line_mismatch)?;
+            // `check_len` keeps every line end, plus its newline, within `u32`.
+            line_start += builder.push_line(text, line_start, line.tokens(), resolve) + 1;
         }
-        if lines.next().is_some() {
+        if texts.next().is_some() {
             return Err(line_mismatch());
         }
         Ok(builder.finish(document.status()))
@@ -391,6 +400,7 @@ impl Engine {
             options,
             default_style: theme.default_style(),
             spans: Vec::new(),
+            interner: Interner::default(),
         })
     }
 }
@@ -406,6 +416,8 @@ pub struct Session {
     options: TokenOptions,
     default_style: PackedStyle,
     spans: Vec<HighlightedToken>,
+    // Reused across lines to avoid rebuilding its tables for every call.
+    interner: Interner,
 }
 
 impl Session {
@@ -413,8 +425,9 @@ impl Session {
     pub fn line(&mut self, line: &str) -> Result<TokenBuffer> {
         check_len(line)?;
         let status = self.inner.highlight_line_into(line, &mut self.spans)?;
-        let mut builder = BufferBuilder::new(self.options, self.default_style);
-        builder.push_line(line, 0, &self.spans);
+        let mut builder = BufferBuilder::new(self.options, self.default_style, &mut self.interner);
+        builder.reserve(1, self.spans.len());
+        builder.push_line(line, 0, &self.spans, HighlightedToken::style);
         Ok(builder.finish(status))
     }
 
@@ -495,15 +508,90 @@ impl<'a> LineCursor<'a> {
     }
 }
 
-struct BufferBuilder {
-    buffer: TokenBuffer,
-    include_scopes: bool,
-    styles: HashMap<PackedStyle, u32>,
-    scopes: HashMap<Option<ScopeStackId>, u32>,
+/// The token accessors [`BufferBuilder`] needs from both engine token types.
+trait EngineToken {
+    fn range(&self) -> Range<usize>;
+    fn scope_stack(&self) -> Option<ScopeStackId>;
+    fn scopes(&self) -> Scopes<'_>;
 }
 
-impl BufferBuilder {
-    fn new(options: TokenOptions, default_style: PackedStyle) -> Self {
+impl EngineToken for Token {
+    fn range(&self) -> Range<usize> {
+        self.range()
+    }
+    fn scope_stack(&self) -> Option<ScopeStackId> {
+        self.scope_stack()
+    }
+    fn scopes(&self) -> Scopes<'_> {
+        self.scopes()
+    }
+}
+
+impl EngineToken for HighlightedToken {
+    fn range(&self) -> Range<usize> {
+        self.range()
+    }
+    fn scope_stack(&self) -> Option<ScopeStackId> {
+        self.scope_stack()
+    }
+    fn scopes(&self) -> Scopes<'_> {
+        self.scopes()
+    }
+}
+
+/// FxHash-style hasher for the small integer-like keys interned per token;
+/// the default SipHash was a measurable share of buffer building.
+#[derive(Default)]
+struct KeyHasher(u64);
+
+impl Hasher for KeyHasher {
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.write_u64(u64::from(*byte));
+        }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write_u64(value.into());
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write_u64(value.into());
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = (self.0.rotate_left(5) ^ value).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+type KeyMap<K, V> = HashMap<K, V, BuildHasherDefault<KeyHasher>>;
+
+/// Sentinel scope index while scopes are not requested.
+const NO_SCOPES: u32 = u32::MAX;
+
+/// Per-buffer indices of the styles and scope stacks already emitted.
+#[derive(Debug, Default)]
+struct Interner {
+    // Stack IDs are only comparable within one document or session, and every
+    // buffer is built from one of those. Maps a stack to (style, scope) indices.
+    stacks: KeyMap<ScopeStackId, (u32, u32)>,
+    styles: KeyMap<PackedStyle, u32>,
+}
+
+struct BufferBuilder<'a> {
+    buffer: TokenBuffer,
+    include_scopes: bool,
+    interner: &'a mut Interner,
+}
+
+impl<'a> BufferBuilder<'a> {
+    fn new(options: TokenOptions, default_style: PackedStyle, interner: &'a mut Interner) -> Self {
+        interner.stacks.clear();
+        interner.styles.clear();
         Self {
             buffer: TokenBuffer {
                 unit: options.unit,
@@ -512,52 +600,83 @@ impl BufferBuilder {
                 ..TokenBuffer::default()
             },
             include_scopes: options.include_scopes,
-            styles: HashMap::new(),
-            scopes: HashMap::new(),
+            interner,
         }
     }
 
-    fn push_line(&mut self, text: &str, line_start: u32, tokens: &[HighlightedToken]) {
+    fn reserve(&mut self, lines: usize, tokens: usize) {
         let buffer = &mut self.buffer;
-        buffer.line_starts.push(line_start);
-        let mut cursor = LineCursor::new(text, buffer.unit);
+        buffer.line_starts.reserve_exact(lines);
+        buffer.line_token_ranges.reserve_exact(lines);
+        buffer.token_starts.reserve_exact(tokens);
+        buffer.token_lengths.reserve_exact(tokens);
+        buffer.token_styles.reserve_exact(tokens);
+        if self.include_scopes {
+            buffer.token_scopes.reserve_exact(tokens);
+        }
+    }
+
+    /// Appends one line's tokens and returns the line's length in units.
+    fn push_line<T: EngineToken>(
+        &mut self,
+        text: &str,
+        line_start: u32,
+        tokens: &[T],
+        resolve: impl Fn(&T) -> Style,
+    ) -> u32 {
+        self.buffer.line_starts.push(line_start);
+        let mut cursor = LineCursor::new(text, self.buffer.unit);
         for token in tokens {
             let range = token.range();
             let start = cursor.advance(range.start);
             let end = cursor.advance(range.end);
+            let (style, scopes) = match token.scope_stack() {
+                Some(stack) => match self.interner.stacks.get(&stack) {
+                    Some(indices) => *indices,
+                    None => {
+                        let indices = self.intern(token, &resolve);
+                        self.interner.stacks.insert(stack, indices);
+                        indices
+                    }
+                },
+                None => self.intern(token, &resolve),
+            };
+            let buffer = &mut self.buffer;
             buffer.token_starts.push(line_start + start);
             buffer.token_lengths.push(end - start);
-            let next = buffer.styles.len() as u32;
-            let style = *self
-                .styles
-                .entry(token.style().into())
-                .or_insert_with_key(|style| {
-                    buffer.styles.push(*style);
-                    next
-                });
             buffer.token_styles.push(style);
             if self.include_scopes {
-                let next = buffer.scope_stacks.len() as u32;
-                let stack = token.scope_stack();
-                // Unkeyed stacks cannot be deduplicated cheaply; give each its own entry.
-                let index = match stack.and_then(|key| self.scopes.get(&Some(key))) {
-                    Some(index) => *index,
-                    None => {
-                        buffer
-                            .scope_stacks
-                            .push(token.scopes().map(str::to_owned).collect());
-                        if stack.is_some() {
-                            self.scopes.insert(stack, next);
-                        }
-                        next
-                    }
-                };
-                buffer.token_scopes.push(index);
+                buffer.token_scopes.push(scopes);
             }
         }
+        let buffer = &mut self.buffer;
         buffer
             .line_token_ranges
             .push(buffer.token_starts.len() as u32);
+        cursor.advance(text.len())
+    }
+
+    /// Adds a token's style and, if requested, its scope stack; returns their indices.
+    fn intern<T: EngineToken>(&mut self, token: &T, resolve: impl Fn(&T) -> Style) -> (u32, u32) {
+        let buffer = &mut self.buffer;
+        let next = buffer.styles.len() as u32;
+        let style = *self
+            .interner
+            .styles
+            .entry(resolve(token).into())
+            .or_insert_with_key(|style| {
+                buffer.styles.push(*style);
+                next
+            });
+        let scopes = if self.include_scopes {
+            buffer
+                .scope_stacks
+                .push(token.scopes().map(str::to_owned).collect());
+            buffer.scope_stacks.len() as u32 - 1
+        } else {
+            NO_SCOPES
+        };
+        (style, scopes)
     }
 
     fn finish(mut self, status: HighlightStatus) -> TokenBuffer {
