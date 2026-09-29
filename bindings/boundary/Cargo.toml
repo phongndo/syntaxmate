@@ -20,5 +20,9 @@ syntaxmate.workspace = true
 name = "conformance"
 required-features = ["bundled-grammars"]
 
+[[example]]
+name = "bench"
+required-features = ["bundled-grammars"]
+
 [dev-dependencies]
 serde_json = "1"
