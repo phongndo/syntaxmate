@@ -10,6 +10,7 @@ on:
       - "src/**"
       - "assets/**"
       - "Cargo.toml"
+      - "rust-toolchain.toml"
       - "Cargo.lock"
       - ".github/workflows/bindings.yml"
   push:
