@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -108,11 +109,15 @@ inline void check(sm_status status) {
 
 inline std::string_view view(sm_str s) { return s.ptr ? std::string_view(s.ptr, s.len) : std::string_view(); }
 
+// Owners that free a C result even if copying it out throws.
+using string_owner = std::unique_ptr<sm_string, decltype(&sm_string_free)>;
+using string_list_owner = std::unique_ptr<sm_string_list, decltype(&sm_string_list_free)>;
+
 /// Takes ownership of an `sm_string` and copies it out.
 inline std::string take(sm_string* s) {
-    std::string result(sm_string_data(s) ? sm_string_data(s) : "", sm_string_len(s));
-    sm_string_free(s);
-    return result;
+    string_owner owner(s, sm_string_free);
+    const char* data = sm_string_data(s);
+    return std::string(data ? data : "", sm_string_len(s));
 }
 
 inline std::optional<std::string> take_optional(sm_string* s) {
@@ -121,12 +126,12 @@ inline std::optional<std::string> take_optional(sm_string* s) {
 }
 
 inline std::vector<std::string> take(sm_string_list* list) {
+    string_list_owner owner(list, sm_string_list_free);
     std::vector<std::string> result;
     result.reserve(sm_string_list_len(list));
     for (std::size_t i = 0; i < sm_string_list_len(list); ++i) {
         result.emplace_back(view(sm_string_list_get(list, i)));
     }
-    sm_string_list_free(list);
     return result;
 }
 

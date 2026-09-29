@@ -168,7 +168,10 @@ builds and runs [`tests/test_c.c`](tests/test_c.c) (shared library) and
 [`tests/test_cpp.cpp`](tests/test_cpp.cpp) (static library) under
 AddressSanitizer, LeakSanitizer, and UndefinedBehaviorSanitizer. The C++ test
 also runs every [conformance case](../conformance/README.md) and compares the
-output with `expected.json`. Other targets:
+output with `expected.json`.
+[`tests/test_cpp_alloc.cpp`](tests/test_cpp_alloc.cpp) makes C++ allocations
+fail one at a time to check that the wrapper still frees C results (under
+the sanitizers; valgrind replaces `operator new`, so it skips there). Other targets:
 
 - `make -C bindings/c header` regenerates the header after an API change.
 - `make -C bindings/c valgrind` runs both tests under valgrind instead

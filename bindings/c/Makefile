@@ -51,12 +51,16 @@ lib:
 	$(CARGO) build -p syntaxmate-ffi $(CARGO_FLAGS) --manifest-path $(WORKSPACE)/Cargo.toml \
 		--target-dir $(TARGET_DIR)
 
-# The C test links the shared library; the C++ test links the static one.
+# The C test links the shared library; the C++ tests link the static one.
 $(BUILD)/%/test_c: tests/test_c.c include/syntaxmate.h lib
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS_TEST) $(FLAGS) $< -o $@ -L$(LIBDIR) -lsyntaxmate -Wl,-rpath,$(LIBDIR) -lpthread
 
 $(BUILD)/%/test_cpp: tests/test_cpp.cpp include/syntaxmate.hpp include/syntaxmate.h lib
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS_TEST) $(FLAGS) $< -o $@ $(LIBDIR)/libsyntaxmate.a $(NATIVE_LIBS)
+
+$(BUILD)/%/test_cpp_alloc: tests/test_cpp_alloc.cpp include/syntaxmate.hpp include/syntaxmate.h lib
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS_TEST) $(FLAGS) $< -o $@ $(LIBDIR)/libsyntaxmate.a $(NATIVE_LIBS)
 
@@ -68,9 +72,10 @@ valgrind:
 		RUNNER="$(VALGRIND) --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite,indirect"
 
 .PHONY: run
-run: $(BUILD)/$(VARIANT)/test_c $(BUILD)/$(VARIANT)/test_cpp
+run: $(BUILD)/$(VARIANT)/test_c $(BUILD)/$(VARIANT)/test_cpp $(BUILD)/$(VARIANT)/test_cpp_alloc
 	$(RUNNER) $(BUILD)/$(VARIANT)/test_c
 	$(RUNNER) $(BUILD)/$(VARIANT)/test_cpp $(WORKSPACE)/conformance
+	$(RUNNER) $(BUILD)/$(VARIANT)/test_cpp_alloc
 
 header:
 	$(CBINDGEN) --config cbindgen.toml --output include/syntaxmate.h .
