@@ -9,8 +9,9 @@
 //
 // Phases, all with theme github-dark and default HTML options:
 // - cold:   import + WebAssembly/grammar setup + first codeToHtml/html call.
-// - steady: warm throughput over 16 variants of the fixture that differ only
-//           by trailing spaces, so Syntaxmate's per-line result cache cannot hit.
+// - steady: warm throughput over 16 trailing-space variants, displacing cached
+//           lines across these stress documents. Repeated lines within a
+//           document can still hit; short custom inputs may replay entirely.
 // - replay: warm throughput re-highlighting the identical document, which
 //           Syntaxmate's line cache serves; Shiki has no equivalent cache.
 

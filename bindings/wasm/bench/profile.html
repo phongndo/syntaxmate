@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>SyntaxMate browser phase profiler</title>
+<style>body { font: 16px system-ui; max-width: 1000px; margin: 3em auto; } pre { white-space: pre-wrap; } label { display: block; margin: 1em 0; } input { width: 70%; }</style>
+<h1>SyntaxMate browser phase profiler</h1>
+<p>Fresh workers run sequentially; package order alternates. Times include local fetches. workerColdMs includes worker creation; browserColdMs starts at package import inside the worker. HTTP and compiled-code caches may persist. Serve the repository over HTTP.</p>
+<label>Package URLs (comma separated) <input id="packages" value="../"></label>
+<label>Source URL <input id="source" value="../../../tests/fixtures/textmate/rust/stress.rs"></label>
+<label>Language <input id="language" value="rust"></label>
+<button id="run">Run 7 samples</button>
+<pre id="result">Ready</pre>
+<script type="module">
+const output = document.querySelector('#result')
+window.profilePackages = async ({ packages, sourceUrl, language = 'rust', samples = 7, iterations = 30 }) => {
+  const response = await fetch(new URL(sourceUrl, location.href))
+  if (!response.ok) throw new Error(`source fetch failed: ${response.status}`)
+  const source = await response.text()
+  const results = []
+  for (let sample = 0; sample < samples; sample++) {
+    for (const pkg of sample % 2 ? packages.toReversed() : packages) {
+      output.textContent = `Sample ${sample + 1}/${samples}: ${pkg}`
+      const startedAtMs = performance.timeOrigin + performance.now()
+      const worker = new Worker(new URL('./profile-browser.mjs', location.href), { type: 'module' })
+      try {
+        const result = await new Promise((resolve, reject) => {
+          worker.onmessage = ({ data }) => data.error ? reject(new Error(data.error)) : resolve(data)
+          worker.onerror = reject
+          worker.postMessage({ packageUrl: new URL(pkg, location.href).href, source, language, iterations })
+        })
+        results.push({ package: pkg, sample,
+          workerColdMs: result.firstTokensFinishedAtMs - startedAtMs, ...result })
+      } finally {
+        worker.terminate()
+      }
+    }
+  }
+  for (const result of results) {
+    if (JSON.stringify(result.outputs) !== JSON.stringify(results[0].outputs)) throw new Error('output mismatch')
+    for (const [phase, value] of Object.entries(result.phases)) {
+      if (value.outputDigest !== results[0].phases[phase].outputDigest) throw new Error(`${phase} output mismatch`)
+    }
+  }
+  const report = { userAgent: navigator.userAgent, sourceUrl, language, results }
+  output.textContent = JSON.stringify(report, null, 2)
+  return report
+}
+document.querySelector('#run').onclick = async () => {
+  try {
+    await window.profilePackages({ packages: document.querySelector('#packages').value.split(','),
+      sourceUrl: document.querySelector('#source').value, language: document.querySelector('#language').value })
+  } catch (error) {
+    output.textContent = String(error.stack ?? error)
+  }
+}
+</script>
+</html>

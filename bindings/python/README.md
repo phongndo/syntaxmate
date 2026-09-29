@@ -173,7 +173,21 @@ package and Pygments installed in the same interpreter:
 python bench/bench_html.py --samples 5 --json /tmp/bench.json
 ```
 
+For a Syntaxmate-only API sample, use [`bench/profile_api.py`](bench/profile_api.py):
+
+```sh
+python bench/profile_api.py ../../tests/fixtures/textmate/rust/stress.rs --operation tokens --scopes
+```
+
+It separates import, construction, first use, and warm calls, and can measure
+HTML, ANSI, flat-array access, convenience iteration, or sequential sessions.
+`--phase changed` pads every line uniquely and cycles beyond the line-cache
+capacity; the padding is part of that workload. Run fresh processes in
+alternating baseline/candidate order and compare output digests before timings.
+Allocation and memory profiling require separate measurements.
+
 Pygments uses its own lexers and emits different HTML, so this compares
 products, not identical output. Syntaxmate's `replay` mode benefits from its
 line-result cache on an unchanged document; `steady` rotates document variants
-to defeat that cache.
+to displace cached documents. Repeated lines within a document can still hit
+that cache; use `profile_api.py --phase changed` for unique line inputs.

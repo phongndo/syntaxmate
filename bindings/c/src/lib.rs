@@ -286,7 +286,12 @@ impl sm_string_list {
 
 impl sm_tokens {
     fn new(mut buffer: TokenBuffer) -> Self {
-        let styles = buffer.styles.drain(..).map(sm_style::from).collect();
+        // The C style table replaces this storage; don't retain the emptied
+        // source allocation for the lifetime of the returned token handle.
+        let styles = std::mem::take(&mut buffer.styles)
+            .into_iter()
+            .map(sm_style::from)
+            .collect();
         // One text allocation for all names instead of one per name.
         let stacks = std::mem::take(&mut buffer.scope_stacks);
         let mut text =

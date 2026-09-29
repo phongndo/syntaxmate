@@ -172,3 +172,94 @@ fn conformance_fixtures_are_current() {
         .unwrap();
     assert!(status.success(), "run the conformance example with --write");
 }
+
+#[test]
+fn offset_edges_preserve_text_scopes_and_session_continuation() {
+    let engine = Engine::bundled().unwrap();
+    let theme = ThemeHandle::bundled("github-dark").unwrap();
+    let sources = [
+        (String::new(), true),
+        ("\n\r\n\n".to_owned(), true),
+        (
+            "// 😀 e\u{301} \0\r\nconst s = `𝒳 ${1 + 2} café`;\n\n// fin\r\n".to_owned(),
+            true,
+        ),
+        ("/* 😀\0 e\u{301}\r\n𝒳 */ let x = '<&>';\n".to_owned(), true),
+        // This overlong line degrades, then the next line recovers normally.
+        (
+            format!("// {}\nlet recovered = 1;\n", "😀e\u{301}".repeat(2000)),
+            false,
+        ),
+    ];
+    for (source, expected_complete) in sources {
+        let mut expected = None;
+        for unit in [OffsetUnit::Utf8, OffsetUnit::Utf16, OffsetUnit::CodePoint] {
+            let options = TokenOptions {
+                unit,
+                include_scopes: true,
+            };
+            let document = engine
+                .tokens("javascript", &source, &theme, options)
+                .unwrap();
+            let unpack = |text: &str, buffer: &TokenBuffer, range: std::ops::Range<usize>| {
+                let utf16: Vec<u16> = text.encode_utf16().collect();
+                let chars: Vec<char> = text.chars().collect();
+                range
+                    .map(|i| {
+                        let start = buffer.token_starts[i] as usize;
+                        let end = start + buffer.token_lengths[i] as usize;
+                        let text = match unit {
+                            OffsetUnit::Utf8 => text[start..end].to_owned(),
+                            OffsetUnit::Utf16 => String::from_utf16(&utf16[start..end]).unwrap(),
+                            OffsetUnit::CodePoint => chars[start..end].iter().collect(),
+                        };
+                        (
+                            text,
+                            buffer.styles[buffer.token_styles[i] as usize],
+                            buffer.scope_stacks[buffer.token_scopes[i] as usize].clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let resolved = unpack(&source, &document, 0..document.token_starts.len());
+            if let Some(expected) = &expected {
+                assert_eq!(
+                    &resolved, expected,
+                    "offset conversion changed output: {unit:?}"
+                );
+            } else {
+                expected = Some(resolved);
+            }
+            let mut session = engine.session("javascript", &theme, options).unwrap();
+            // Reset keeps caches, but must restore the same continuation output.
+            for _ in 0..2 {
+                session.reset();
+                let mut complete = true;
+                let mut start = 0;
+                for (i, line) in source.split('\n').enumerate() {
+                    assert_eq!(document.line_starts[i], start);
+                    let actual = session.line(line).unwrap();
+                    complete &= actual.complete;
+                    if !expected_complete && i > 0 {
+                        assert!(actual.complete, "line after oversized input must recover");
+                    }
+                    let range = document.line_token_ranges[i] as usize
+                        ..document.line_token_ranges[i + 1] as usize;
+                    assert_eq!(
+                        unpack(line, &actual, 0..actual.token_starts.len()),
+                        unpack(&source, &document, range),
+                        "session line {i}, {unit:?}"
+                    );
+                    start += match unit {
+                        OffsetUnit::Utf8 => line.len(),
+                        OffsetUnit::Utf16 => line.encode_utf16().count(),
+                        OffsetUnit::CodePoint => line.chars().count(),
+                    } as u32
+                        + 1;
+                }
+                assert_eq!(complete, document.complete);
+            }
+            assert_eq!(document.complete, expected_complete);
+        }
+    }
+}

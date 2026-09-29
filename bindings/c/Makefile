@@ -60,7 +60,7 @@ VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' $(WORKSPACE)/Cargo.toml |
 
 .PHONY: check lib test valgrind header check-header install check-install bench clean
 
-check: check-header test
+check: check-header test check-profile
 
 lib:
 	$(CARGO) build -p syntaxmate-ffi $(CARGO_FLAGS) --manifest-path $(WORKSPACE)/Cargo.toml \
@@ -178,3 +178,21 @@ bench:
 
 clean:
 	rm -rf $(TARGET_DIR)/c-tests $(TARGET_DIR)/syntaxmate.h.check
+
+# Uninstrumented release consumer timing; see README.md for timing boundaries.
+.PHONY: profile check-profile
+profile:
+	$(MAKE) --no-print-directory PROFILE=release $(TARGET_DIR)/c-tests/release/profile
+
+$(TARGET_DIR)/c-tests/release/profile: bench/profile.cpp include/syntaxmate.hpp include/syntaxmate.h lib
+	@mkdir -p $(@D)
+	$(CXX) -std=c++17 $(WARNINGS) -O3 -DNDEBUG -Iinclude $< -o $@ \
+		-L$(LIBDIR) -lsyntaxmate -Wl,-rpath,$(LIBDIR) $(NATIVE_LIBS)
+
+check-profile: $(BUILD)/test_profile
+	$(BUILD)/test_profile
+
+$(BUILD)/test_profile: tests/test_profile.cpp bench/profile.cpp include/syntaxmate.hpp include/syntaxmate.h lib
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS_TEST) -O2 $< -o $@ \
+		-L$(LIBDIR) -lsyntaxmate -Wl,-rpath,$(LIBDIR) $(NATIVE_LIBS)

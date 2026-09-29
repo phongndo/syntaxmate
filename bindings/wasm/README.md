@@ -159,7 +159,10 @@ A Rust panic aborts the WebAssembly instance and surfaces as a
 `Highlighter`, `Theme`, and `Session` own WebAssembly memory. It is reclaimed
 at garbage collection, but you can release it deterministically with `free()`
 or a `using` declaration. `free()` is idempotent, and later use throws.
-`TokenBuffer`s are plain JavaScript and need no freeing.
+`TokenBuffer`s are plain JavaScript and need no freeing. Their arrays remain
+valid after later calls, WebAssembly memory growth, and handle disposal.
+Freeing handles makes their allocations reusable; WebAssembly's linear-memory
+capacity does not shrink, so its byte length is not a measure of live allocations.
 
 ```js
 {
@@ -220,9 +223,52 @@ npm run bench -- --samples 7 --out ../target/wasm-bench.json
 
 Each sample runs in a fresh process. `cold` covers import, setup, and the first
 call. `steady` rotates through 16 copies of each fixture that differ only in
-trailing spaces, so Syntaxmate's per-line result cache cannot hit. `replay`
-repeats one document, which that cache serves; Shiki has no equivalent. Results
-apply only to the machine and revisions measured.
+trailing spaces. These stress documents displace cached lines between copies,
+but repeated lines within a document can still hit the cache; sufficiently
+short custom inputs can replay entirely. `replay` repeats one document, which
+that cache serves; Shiki has no equivalent. Results apply only to the machine
+and revisions measured.
+
+For a Syntaxmate-only comparison that separates token conversion, rendering,
+sessions, startup, and replay, use [bench/profile-node.mjs](bench/profile-node.mjs):
+
+```sh
+node bench/profile-node.mjs --packages /path/to/baseline,/path/to/candidate \
+  --file ../../tests/fixtures/textmate/rust/stress.rs --language rust --samples 7
+```
+
+Each package must contain its built `dist/`, `lib/`, and `grammars.bundle`.
+The report includes individual samples and validates complete token output and
+matching digests before comparing packages. Matching workloads append a unique
+space/tab suffix to each line on every call, preventing line-result replay;
+source generation and output checking are outside measured intervals. This
+measures the public package, including conversion, rather than regex matching
+alone. WASM memory sizes describe capacity, not live or cumulative allocation.
+
+The `tokensConversion` and `scopesConversion` phases time the `TokenBuffer`
+constructor alone. Each sample records `rawTokenFormat` and `conversionMeaning`:
+current `packed` packages copy data from WASM before this interval, while older
+`legacy-handle` packages copy it inside the constructor. These phases therefore
+measure different work across formats; compare the public token phases for the
+complete API cost.
+
+`processColdMs` spans process launch through the first token result;
+`processBeforeImportMs` includes runtime, driver, and input-file setup before
+package import. `processTotalMs` covers the entire profiling child, including
+all warm measurements and validation, and is not a startup measurement.
+
+For real-browser measurements, serve the repository over HTTP and open
+[bench/profile.html](bench/profile.html). It uses the same phase profiler in
+fresh workers, sequentially alternating package order. Browser import, streamed
+WASM initialization, and bundle fetching are measured separately; HTTP and
+compiled-code caches can persist across workers. The normal `npm test` browser
+entry test runs under Node and does not substitute for this browser check.
+`workerColdMs` includes worker creation through first tokens, while
+`browserColdMs` begins at the worker's package import. Neither includes launching
+the browser application itself. Fresh workers do not clear browser WebAssembly
+code caches. For startup comparisons, control cache state with a fresh browser
+process and profile per package/sample; worker-only startup results can reflect
+different cache histories.
 
 ## License
 

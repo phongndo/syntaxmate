@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { initSync } from '../dist/syntaxmate.js'
 import {
   BOLD,
   createHighlighter,
@@ -120,4 +121,65 @@ test('SyntaxmateError can be constructed and subclassed by callers', () => {
   assert.equal(new SyntaxmateError('x', 99).kind, 'Internal')
   class AppError extends SyntaxmateError {}
   assert.ok(new AppError('x', 1) instanceof SyntaxmateError)
+})
+
+test('token buffers own their arrays across calls, memory growth, and disposal', async () => {
+  const own = Highlighter.fromBundle(await loadBundle())
+  const theme = Theme.bundled('github-dark')
+  const options = { lang: 'rust', theme, includeScopes: true }
+  const source = 'let s = "😀e\u0301\0";\r\nfn main() {}\n'
+  const tokens = own.tokens(source, options)
+  const session = own.session(options)
+  const line = session.line('/* 😀 comment')
+  const snapshot = structuredClone(tokens)
+  const lineSnapshot = structuredClone(line)
+  const { memory } = initSync()
+
+  for (const value of Object.values(tokens)) {
+    if (ArrayBuffer.isView(value)) assert.notEqual(value.buffer, memory.buffer)
+  }
+  own.tokens('fn later() {}', options)
+  own.free()
+  theme.free()
+  // Sessions retain their engine/theme state independently of the creator.
+  const continued = session.line('still comment */')
+  assert.ok(continued.scopeStacks.flat().includes('comment.block.rust'))
+  session.free()
+
+  const previous = memory.buffer
+  const bytes = previous.byteLength
+  memory.grow(1)
+  assert.equal(memory.buffer.byteLength, bytes + 65536)
+  assert.equal(previous.byteLength, 0, 'WASM growth detaches the old memory buffer')
+  assert.deepEqual(structuredClone(tokens), snapshot)
+  assert.deepEqual(structuredClone(line), lineSnapshot)
+  assert.equal(highlighter.tokens(source, { lang: 'rust', theme: 'github-dark' }).complete, true)
+})
+
+test('lone UTF-16 surrogates use replacement characters without shifting offsets', () => {
+  const source = 'let s = "\ud800\0😀e\u0301\udc00";\r\nfn main() {}\n'
+  const replacement = source.toWellFormed()
+  const options = { lang: 'rust', theme: 'github-dark', includeScopes: true }
+  const tokens = highlighter.tokens(source, options)
+  const normalized = highlighter.tokens(replacement, options)
+  assert.equal(tokens.complete, true)
+  assert.deepEqual(tokens, normalized)
+  assert.equal(tokens.lineStarts[1], source.indexOf('\n') + 1)
+  assert.equal(tokens.lineStarts[2], source.length)
+  assert.equal(highlighter.html(source, options), highlighter.html(replacement, options))
+  assert.equal(highlighter.ansi(source, options), highlighter.ansi(replacement, options))
+})
+
+test('oversized lines report degraded tokens and sessions recover after reset', () => {
+  const options = { lang: 'rust', theme: 'github-dark' }
+  const source = '😀'.repeat(8192)
+  assert.equal(highlighter.tokens(source, options).complete, false)
+  const session = highlighter.session(options)
+  try {
+    assert.equal(session.line(source).complete, false)
+    session.reset()
+    assert.deepEqual(session.line('fn main() {}'), highlighter.tokens('fn main() {}', options))
+  } finally {
+    session.free()
+  }
 })

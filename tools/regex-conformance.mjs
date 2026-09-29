@@ -80,7 +80,26 @@ function inventoryVariantCases() {
   return cases
 }
 
+// Oniguruma's (?x) lexer has five ASCII separators, unlike either JavaScript
+// \s or Rust char::is_whitespace. Check both retained literals and elision.
+function extendedWhitespaceCases() {
+  const ignored = new Set([9, 10, 12, 13, 32])
+  return [9, 10, 11, 12, 13, 32, 0x85, 0xa0, 0x1680, 0x2000, 0x200a,
+    0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff].flatMap(code => {
+    const char = String.fromCodePoint(code)
+    return [true, false].map(literal => ({
+      name: `extended-whitespace-${code.toString(16)}-${literal ? 'literal' : 'elided'}`,
+      pattern: `(?x)^a${char}b$`,
+      line: literal ? `a${char}b` : 'ab',
+      engine: 'auto',
+      constructs: ['inline-flags.global-set', 'inline-flags.extended-set', 'anchor.line-start'],
+      expectMiss: literal === ignored.has(code),
+    }))
+  })
+}
+
 export const conformanceCases = Object.freeze([
+  ...extendedWhitespaceCases(),
   { name: 'dfa-captures', pattern: String.raw`foo(\d+)`, line: 'xxfoo123', engine: 'auto', constructs: [] },
   { name: 'positive-lookahead', pattern: String.raw`foo(?=bar)`, line: 'xxfoobar', engine: 'fallback', constructs: ['lookahead.positive'] },
   { name: 'negative-lookahead', pattern: String.raw`foo(?!baz)`, line: 'xxfoobar', engine: 'fallback', constructs: ['lookahead.negative'] },
