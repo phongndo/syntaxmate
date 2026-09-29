@@ -1,0 +1,30 @@
+[build-system]
+requires = ["maturin>=1.9.4,<2"]
+build-backend = "maturin"
+
+[project]
+name = "syntaxmate"
+version = "0.2.0"
+description = "Fast TextMate syntax highlighting to HTML, ANSI, or token arrays"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["syntax-highlighting", "textmate", "html", "ansi"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Text Processing :: Markup",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Repository = "https://github.com/phongndo/syntaxmate"
+
+[tool.maturin]
+module-name = "syntaxmate._native"
+python-source = "python"
+exclude = ["**/__pycache__/**", "**/*.pyc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
