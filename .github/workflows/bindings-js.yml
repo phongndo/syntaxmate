@@ -36,11 +36,9 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
-        with:
-          toolchain: stable
-          components: clippy
-          targets: wasm32-unknown-unknown
+      # rust-toolchain.toml pins the compiler and overrides any toolchain an
+      # action selects, so add the wasm target to that pinned toolchain.
+      - run: rustup toolchain install && rustup target add wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: bindings
@@ -54,6 +52,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
       - run: cargo clippy -p syntaxmate-wasm --target wasm32-unknown-unknown --locked -- -D warnings
       - run: npm run build
+      - run: npm run typecheck
       - name: Report package size
         run: |
           raw=$(stat -c %s dist/syntaxmate_bg.wasm)
@@ -85,7 +84,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        node: [20, 22, 24]
+        node: [22, 24]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:

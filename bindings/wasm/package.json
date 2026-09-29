@@ -36,11 +36,12 @@
     "third-party/"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test \"test/*.test.mjs\"",
+    "typecheck": "npx -y --package=typescript@5.9 tsc -p test/types",
     "bench": "node bench/bench.mjs"
   }
 }
