@@ -35,7 +35,7 @@ toolchain and are untested there.
 | Shared | `-I<prefix>/include -L<prefix>/lib -lsyntaxmate` |
 | Static | `-I<prefix>/include <prefix>/lib/libsyntaxmate.a -lpthread -ldl -lm` on Linux; the archive alone on macOS |
 | pkg-config | `pkg-config --cflags --libs syntaxmate`; `--static` adds the archive's system libraries |
-| CMake | `find_package(syntaxmate REQUIRED)` and link `syntaxmate::syntaxmate` |
+| CMake | `find_package(syntaxmate 0.2 REQUIRED)` and link `syntaxmate::syntaxmate`; before 1.0 a version request matches only the same minor version |
 
 The C++ wrapper needs only `syntaxmate.hpp` and the same library.
 

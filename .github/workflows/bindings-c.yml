@@ -11,6 +11,7 @@ on:
       - "src/**"
       - "assets/**"
       - "Cargo.toml"
+      - "rust-toolchain.toml"
       - ".github/workflows/bindings-c.yml"
   push:
     branches: [main]

@@ -113,11 +113,13 @@ install: lib
 	install -m 644 $(LIBDIR)/libsyntaxmate.a $(DESTDIR)$(PREFIX)/lib/
 	install -m 755 $(LIBDIR)/$(SHARED_LIB) $(DESTDIR)$(PREFIX)/lib/
 	install -m 644 cmake/syntaxmateConfig.cmake $(DESTDIR)$(PREFIX)/lib/cmake/syntaxmate/
+	sed -e 's|@VERSION@|$(VERSION)|' cmake/syntaxmateConfigVersion.cmake.in \
+		> $(DESTDIR)$(PREFIX)/lib/cmake/syntaxmate/syntaxmateConfigVersion.cmake
 	sed -e 's|@PREFIX@|$(PREFIX)|' -e 's|@VERSION@|$(VERSION)|' -e 's|@NATIVE_LIBS@|$(NATIVE_LIBS)|' \
 		syntaxmate.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/syntaxmate.pc
 
 check-install:
-	rm -rf $(BUILD)/prefix $(BUILD)/relocated $(BUILD)/cmake
+	rm -rf $(BUILD)/prefix $(BUILD)/relocated $(BUILD)/cmake $(BUILD)/cmake-mismatch $(BUILD)/cmake-nolib $(BUILD)/nolib
 	$(MAKE) --no-print-directory install PREFIX=$(BUILD)/prefix
 	@# The shared library exports the C API and nothing else.
 	$(EXPORTS) $(BUILD)/prefix/lib/$(SHARED_LIB) | awk 'NF >= 3 { print $$3 }' > $(BUILD)/exports
@@ -126,9 +128,19 @@ check-install:
 	PKG_CONFIG_PATH=$(BUILD)/prefix/lib/pkgconfig sh -c '$(CC) -std=c99 tests/test_c.c -o $(BUILD)/prefix/test_c \
 		$$(pkg-config --cflags --libs syntaxmate) -Wl,-rpath,$(BUILD)/prefix/lib -lpthread'
 	$(BUILD)/prefix/test_c
-	$(CMAKE) -S tests/cmake -B $(BUILD)/cmake -DCMAKE_PREFIX_PATH=$(BUILD)/prefix -DCMAKE_C_COMPILER=$(CC)
+	$(CMAKE) -S tests/cmake -B $(BUILD)/cmake -DCMAKE_PREFIX_PATH=$(BUILD)/prefix -DCMAKE_C_COMPILER=$(CC) \
+		-DSYNTAXMATE_VERSION=$(basename $(VERSION))
 	$(CMAKE) --build $(BUILD)/cmake
 	$(BUILD)/cmake/test_c
+	@# A request for another minor version must be rejected before 1.0.
+	! $(CMAKE) -S tests/cmake -B $(BUILD)/cmake-mismatch -DCMAKE_PREFIX_PATH=$(BUILD)/prefix \
+		-DCMAKE_C_COMPILER=$(CC) -DSYNTAXMATE_VERSION=0.999 > $(BUILD)/cmake-mismatch.log 2>&1
+	grep -q 'version: $(VERSION)' $(BUILD)/cmake-mismatch.log
+	@# A prefix without the library must fail at configure time, not link time.
+	rm -rf $(BUILD)/nolib && cp -R $(BUILD)/prefix $(BUILD)/nolib && rm -f $(BUILD)/nolib/lib/libsyntaxmate.*
+	! $(CMAKE) -S tests/cmake -B $(BUILD)/cmake-nolib -DCMAKE_PREFIX_PATH=$(BUILD)/nolib \
+		-DCMAKE_C_COMPILER=$(CC) -DSYNTAXMATE_VERSION=$(basename $(VERSION)) > $(BUILD)/cmake-nolib.log 2>&1
+	grep -q 'libsyntaxmate was not found' $(BUILD)/cmake-nolib.log
 ifeq ($(UNAME),Linux)
 	@# The SONAME keeps the install path out of consumers that link the
 	@# library by path, as CMake does; such a program must survive a move.
