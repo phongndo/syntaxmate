@@ -1,0 +1,28 @@
+# Language bindings live in their own workspace so the published `syntaxmate`
+# crate, its lockfile, and its release tooling stay independent of them.
+[workspace]
+resolver = "3"
+members = [
+    "boundary",
+    "c",
+]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+repository = "https://github.com/phongndo/syntaxmate"
+publish = false
+
+[workspace.dependencies]
+syntaxmate = { path = "..", default-features = false, features = ["bundled-themes", "html", "ansi"] }
+syntaxmate-boundary = { path = "boundary" }
+
+# Bindings unwind so Python and C callers receive errors instead of an abort
+# when a Rust panic is caught at the boundary. Fat LTO trims the shared library
+# by about 80 KB and runs about 1% faster than thin LTO, at extra build time.
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic = "unwind"

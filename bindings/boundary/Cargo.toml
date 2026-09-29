@@ -1,0 +1,28 @@
+[package]
+name = "syntaxmate-boundary"
+description = "Coarse, binding-friendly Syntaxmate API shared by the language bindings"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[features]
+default = ["bundled-grammars"]
+# Embeds the full grammar catalog; without it, load bundles with `Engine::from_bundle`.
+bundled-grammars = ["syntaxmate/bundled-grammars"]
+
+[dependencies]
+syntaxmate.workspace = true
+
+[[example]]
+name = "conformance"
+required-features = ["bundled-grammars"]
+
+[[example]]
+name = "bench"
+required-features = ["bundled-grammars"]
+
+[dev-dependencies]
+serde_json = "1"
