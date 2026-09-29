@@ -1,0 +1,46 @@
+{
+  "name": "syntaxmate",
+  "version": "0.2.0",
+  "description": "Fast TextMate syntax highlighting to HTML, ANSI, or token arrays, compiled to WebAssembly",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phongndo/syntaxmate.git",
+    "directory": "bindings/wasm"
+  },
+  "keywords": ["syntax-highlighting", "textmate", "highlighter", "wasm"],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./lib/node.d.ts",
+        "default": "./lib/node.js"
+      },
+      "default": {
+        "types": "./lib/browser.d.ts",
+        "default": "./lib/browser.js"
+      }
+    },
+    "./grammars.bundle": "./grammars.bundle",
+    "./syntaxmate.wasm": "./dist/syntaxmate_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "types": "./lib/node.d.ts",
+  "files": [
+    "dist/syntaxmate.js",
+    "dist/syntaxmate_bg.wasm",
+    "lib/",
+    "grammars.bundle",
+    "LICENSE",
+    "third-party/"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "bench": "node bench/bench.mjs"
+  }
+}

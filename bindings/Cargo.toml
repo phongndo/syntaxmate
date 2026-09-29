@@ -2,7 +2,10 @@
 # crate, its lockfile, and its release tooling stay independent of them.
 [workspace]
 resolver = "3"
-members = ["boundary"]
+members = [
+    "boundary",
+    "wasm",
+]
 
 [workspace.package]
 version = "0.2.0"
@@ -22,3 +25,10 @@ syntaxmate-boundary = { path = "boundary" }
 codegen-units = 1
 lto = "thin"
 panic = "unwind"
+
+# WebAssembly cannot unwind on stable Rust, and the .wasm ships to browsers,
+# so the JavaScript binding builds with its own profile.
+[profile.wasm-release]
+inherits = "release"
+lto = "fat"
+panic = "abort"
