@@ -1,0 +1,19 @@
+{
+  "customTheme": {
+    "name": "Conformance",
+    "colors": { "editor.foreground": "#101010", "editor.background": "#fafafa" },
+    "tokenColors": [
+      { "scope": "keyword", "settings": { "foreground": "#aa0000", "fontStyle": "bold" } },
+      { "scope": "string", "settings": { "foreground": "#00aa00", "fontStyle": "italic underline" } },
+      { "scope": "comment", "settings": { "foreground": "#777777", "fontStyle": "strikethrough" } }
+    ]
+  },
+  "cases": [
+    { "name": "rust-basic", "language": "rust", "theme": "github-dark", "source": "fn main() {\n    println!(\"<hello> & bye\");\n}\n" },
+    { "name": "js-non-ascii", "language": "javascript", "theme": "github-light", "source": "// café ☕ 日本語\nconst s = \"😀 x 𝒳\"; let t = `é${s}`;" },
+    { "name": "python-crlf", "language": "py", "theme": "github-dark", "source": "def f(x):\r\n    return 'ü' * x\r\n" },
+    { "name": "markdown-mixed", "language": "markdown", "theme": "github-dark", "source": "# Título 🎉\n\n```rust\nlet x = \"ß\";\n```\n" },
+    { "name": "empty", "language": "rust", "theme": "github-dark", "source": "" },
+    { "name": "custom-theme", "language": "rust", "theme": null, "source": "// note ✓\nlet s = \"🦀\";\n" }
+  ]
+}

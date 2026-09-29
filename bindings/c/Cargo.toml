@@ -1,0 +1,28 @@
+[package]
+name = "syntaxmate-ffi"
+description = "C ABI for Syntaxmate"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "syntaxmate"
+crate-type = ["cdylib", "staticlib"]
+
+[features]
+default = ["bundled-grammars"]
+# Without it, `sm_engine_bundled` fails and engines load via `sm_engine_from_bundle`.
+bundled-grammars = ["syntaxmate-boundary/bundled-grammars"]
+
+[dependencies]
+# Not inherited: the workspace entry keeps default features on.
+syntaxmate-boundary = { path = "../boundary", default-features = false }
+
+# Native baseline for bench/bench.cpp; `make bench` runs both.
+[[example]]
+name = "bench-native"
+path = "bench/native.rs"
+required-features = ["bundled-grammars"]
