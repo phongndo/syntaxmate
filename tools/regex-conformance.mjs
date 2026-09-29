@@ -92,7 +92,7 @@ function extendedWhitespaceCases() {
       pattern: `(?x)^a${char}b$`,
       line: literal ? `a${char}b` : 'ab',
       engine: 'auto',
-      constructs: ['inline-flags.global-set', 'inline-flags.extended-set'],
+      constructs: ['inline-flags.global-set', 'inline-flags.extended-set', 'anchor.line-start'],
       expectMiss: literal === ignored.has(code),
     }))
   })
