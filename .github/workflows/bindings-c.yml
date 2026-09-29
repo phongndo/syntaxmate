@@ -1,0 +1,77 @@
+name: Bindings (C and C++)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: &paths
+      - "bindings/c/**"
+      - "bindings/boundary/**"
+      - "bindings/conformance/**"
+      - "bindings/Cargo.*"
+      - "src/**"
+      - "assets/**"
+      - "Cargo.toml"
+      - "rust-toolchain.toml"
+      - ".github/workflows/bindings-c.yml"
+  push:
+    branches: [main]
+    paths: *paths
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+concurrency:
+  group: syntaxmate-bindings-c-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [{ c: gcc, cxx: g++ }, { c: clang, cxx: clang++ }]
+    env:
+      CC: ${{ matrix.cc.c }}
+      CXX: ${{ matrix.cc.cxx }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: bindings
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          # Header output can shift between cbindgen releases; keep this pinned.
+          tool: cbindgen@0.29.4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends valgrind pkg-config cmake
+      # Header freshness, then C and C++ tests under ASan/LSan/UBSan.
+      - run: make -C bindings/c check
+      - run: make -C bindings/c check PROFILE=release
+      - run: make -C bindings/c valgrind
+      - run: make -C bindings/c check-install
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: bindings
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cbindgen@0.29.4
+      - run: brew install pkg-config
+      # Exercises the @rpath install name and dylib linking.
+      - run: make -C bindings/c check
+      - run: make -C bindings/c check-install

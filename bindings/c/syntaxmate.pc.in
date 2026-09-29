@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: syntaxmate
+Description: TextMate syntax highlighting (C API)
+Version: @VERSION@
+Libs: -L${libdir} -lsyntaxmate
+Libs.private: @NATIVE_LIBS@
+Cflags: -I${includedir}
