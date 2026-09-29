@@ -9,6 +9,7 @@
 #                         the installed prefix can move)
 #   make PROFILE=release  use the release library
 #   make TARGET_DIR=/path  build in another Cargo target directory
+#   make bench            C/C++ vs native Rust throughput (always release; see README.md)
 #
 # Needs cargo, a C99 and C++17 compiler, and cbindgen for the header targets.
 
@@ -55,7 +56,7 @@ export UBSAN_OPTIONS ?= print_stacktrace=1
 PREFIX ?= /usr/local
 VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' $(WORKSPACE)/Cargo.toml | head -n 1)
 
-.PHONY: check lib test valgrind header check-header install check-install clean
+.PHONY: check lib test valgrind header check-header install check-install bench clean
 
 check: check-header test
 
@@ -135,6 +136,25 @@ ifeq ($(UNAME),Linux)
 	mv $(BUILD)/prefix $(BUILD)/relocated
 	$(BUILD)/relocated/bin/test_c
 endif
+
+# Stress fixtures of the competitive benchmark's default languages.
+BENCH_LANGUAGES ?= bash cpp html java json markdown python rust typescript yaml
+BENCH_SAMPLES ?= 11
+BENCH_MIN_MS ?= 200
+BENCH_FIXTURES = $(foreach l,$(BENCH_LANGUAGES),$(l)=$(firstword $(filter-out %.jsonl,$(wildcard $(WORKSPACE)/../tests/fixtures/textmate/$(l)/stress.*))))
+BENCH_CXXFLAGS ?= -O2
+
+bench:
+	$(MAKE) --no-print-directory lib PROFILE=release
+	$(CARGO) build --release -p syntaxmate-ffi --example bench-native \
+		--manifest-path $(WORKSPACE)/Cargo.toml --target-dir $(TARGET_DIR)
+	@mkdir -p $(TARGET_DIR)/c-tests/bench
+	$(CXX) -std=c++17 $(BENCH_CXXFLAGS) -Iinclude bench/bench.cpp -o $(TARGET_DIR)/c-tests/bench/bench \
+		-L$(TARGET_DIR)/release -lsyntaxmate -Wl,-rpath,$(TARGET_DIR)/release -lpthread
+	@echo "== native Rust (syntaxmate-boundary)"
+	$(TARGET_DIR)/release/examples/bench-native $(BENCH_SAMPLES) $(BENCH_MIN_MS) $(BENCH_FIXTURES)
+	@echo "== C ABI and C++ wrapper (libsyntaxmate)"
+	$(TARGET_DIR)/c-tests/bench/bench $(BENCH_SAMPLES) $(BENCH_MIN_MS) $(BENCH_FIXTURES)
 
 clean:
 	rm -rf $(TARGET_DIR)/c-tests $(TARGET_DIR)/syntaxmate.h.check

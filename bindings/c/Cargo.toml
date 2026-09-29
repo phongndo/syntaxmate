@@ -20,3 +20,9 @@ bundled-grammars = ["syntaxmate-boundary/bundled-grammars"]
 [dependencies]
 # Not inherited: the workspace entry keeps default features on.
 syntaxmate-boundary = { path = "../boundary", default-features = false }
+
+# Native baseline for bench/bench.cpp; `make bench` runs both.
+[[example]]
+name = "bench-native"
+path = "bench/native.rs"
+required-features = ["bundled-grammars"]

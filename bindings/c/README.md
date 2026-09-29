@@ -196,3 +196,33 @@ the sanitizers; valgrind replaces `operator new`, so it skips there). Other targ
 - `TARGET_DIR=<dir>` (default `$CARGO_TARGET_DIR` or `bindings/target`)
   builds and tests in another Cargo target directory.
 - `PROFILE=release` uses the release library.
+
+## Benchmarks
+
+`make -C bindings/c bench` builds the release library and runs the same
+workloads through [`bench/native.rs`](bench/native.rs) (Rust calling
+`syntaxmate-boundary` directly) and [`bench/bench.cpp`](bench/bench.cpp)
+(`-O2`, through the shared library), so the difference between the two tables
+is the cost of the C ABI and the C++ wrapper. Inputs are the stress fixtures of
+the [competitive benchmark](../../benchmarks/competitors/README.md)'s default
+languages. Each row is the median ns per call over `BENCH_SAMPLES` samples of
+at least `BENCH_MIN_MS` each; `BENCH_LANGUAGES` and `BENCH_MODES` (comma-separated)
+narrow a run.
+
+| Mode | Measures |
+| --- | --- |
+| `html-cold` | new engine and theme, then one HTML render (grammar preparation included; process-wide catalog data is not) |
+| `html-steady`, `tokens-steady`, `scopes-steady` | render or tokenize (`scopes`: with scope stacks) with the line cache defeated |
+| `session-steady` | the document fed line by line through a session |
+| `html-replay` | the same document repeatedly, served from the line cache |
+| `*-c++` | the same through `syntaxmate.hpp` (`html` copies into `std::string`) |
+| `html-tiny` | one short line: the fixed cost per call |
+
+The engine caches tokenized lines per tokenizer, and the binding API cannot
+turn that off. Steady modes therefore cycle through variants of the fixture
+whose lines end in a few spaces and tabs that encode the variant number,
+enough variants that one cycle covers at least 4,096 distinct lines. This adds
+about five bytes per line, and MB/s counts them. Compare the two tables with
+each other, not with the `profile-product` numbers, which run with the cache
+disabled on unmodified input. Pin the processes (for example `taskset`) and
+alternate runs on a busy machine.
