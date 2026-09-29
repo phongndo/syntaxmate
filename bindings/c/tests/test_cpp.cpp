@@ -362,6 +362,12 @@ static void run_wrapper_tests() {
     // Moves transfer ownership; the moved-from buffer is empty.
     sm::tokens moved = std::move(tokens);
     CHECK(moved.token_count() > 0 && tokens.token_count() == 0 && tokens.token_starts().empty());
+    CHECK(tokens.line_count() == 0 && tokens.line_starts().empty() && tokens.line_token_ranges().empty());
+    CHECK(tokens.token_lengths().empty() && tokens.token_styles().empty() && tokens.token_scopes().empty());
+    CHECK(tokens.styles().empty() && tokens.scope_stack_count() == 0 && tokens.get() == nullptr);
+    std::size_t visited = 0;
+    for (std::uint32_t range : tokens.line_token_ranges()) visited += range + 1;
+    CHECK(visited == 0);
 
     // Sessions outlive the engine and theme that created them.
     std::optional<sm::session> session;

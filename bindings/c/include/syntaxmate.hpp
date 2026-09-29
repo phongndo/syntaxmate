@@ -223,10 +223,12 @@ public:
     std::size_t token_count() const noexcept { return view_.token_count; }
 
     span<std::uint32_t> line_starts() const noexcept { return {view_.line_starts, view_.line_count}; }
-    /// `line_count() + 1` boundaries; tokens of line `l` are
-    /// `[line_token_ranges()[l], line_token_ranges()[l + 1])`.
+    /// `line_count() + 1` boundaries (empty once moved from); tokens of line
+    /// `l` are `[line_token_ranges()[l], line_token_ranges()[l + 1])`.
     span<std::uint32_t> line_token_ranges() const noexcept {
-        return {view_.line_token_ranges, view_.line_count + 1};
+        return view_.line_token_ranges
+                   ? span<std::uint32_t>(view_.line_token_ranges, view_.line_count + 1)
+                   : span<std::uint32_t>();
     }
     span<std::uint32_t> token_starts() const noexcept { return {view_.token_starts, view_.token_count}; }
     span<std::uint32_t> token_lengths() const noexcept { return {view_.token_lengths, view_.token_count}; }
