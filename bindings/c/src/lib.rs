@@ -253,8 +253,14 @@ pub struct sm_session(Session);
 pub struct sm_tokens {
     buffer: TokenBuffer,
     styles: Vec<sm_style>,
-    // `names` borrow the heap text in `_owned`, which never moves.
-    scope_stacks: Vec<(Vec<CText>, Vec<sm_str>)>,
+    // Every scope name, each followed by a NUL. `scope_names` points into it;
+    // the heap text never moves or changes after construction.
+    _scope_text: Box<str>,
+    // The names of every stack, concatenated; stack `i` is
+    // `scope_names[scope_stack_starts[i]..scope_stack_starts[i + 1]]`.
+    // `scope_stack_starts` is empty when there are no stacks.
+    scope_names: Vec<sm_str>,
+    scope_stack_starts: Vec<usize>,
 }
 
 /// An owned UTF-8 string. It may contain interior NUL bytes (for example
@@ -281,20 +287,52 @@ impl sm_string_list {
 impl sm_tokens {
     fn new(mut buffer: TokenBuffer) -> Self {
         let styles = buffer.styles.drain(..).map(sm_style::from).collect();
-        let scope_stacks = buffer
-            .scope_stacks
-            .drain(..)
-            .map(|stack| {
-                let owned: Vec<CText> = stack.into_iter().map(CText::new).collect();
-                let names = owned.iter().map(CText::as_str).collect();
-                (owned, names)
+        // One text allocation for all names instead of one per name.
+        let stacks = std::mem::take(&mut buffer.scope_stacks);
+        let mut text =
+            String::with_capacity(stacks.iter().flatten().map(|name| name.len() + 1).sum());
+        let mut spans = Vec::with_capacity(stacks.iter().map(Vec::len).sum());
+        // Stays empty (no allocation) when scopes were not requested.
+        let mut scope_stack_starts = Vec::new();
+        if !stacks.is_empty() {
+            scope_stack_starts.reserve_exact(stacks.len() + 1);
+            scope_stack_starts.push(0);
+        }
+        for stack in &stacks {
+            for name in stack {
+                spans.push((text.len(), name.len()));
+                text.push_str(name);
+                text.push('\0');
+            }
+            scope_stack_starts.push(spans.len());
+        }
+        drop(stacks);
+        let text = text.into_boxed_str();
+        let scope_names = spans
+            .into_iter()
+            .map(|(start, len)| sm_str {
+                // In bounds: `start + len` is the NUL that follows the name.
+                ptr: text[start..].as_ptr().cast(),
+                len,
             })
             .collect();
         Self {
             buffer,
             styles,
-            scope_stacks,
+            _scope_text: text,
+            scope_names,
+            scope_stack_starts,
         }
+    }
+
+    fn scope_stack_count(&self) -> usize {
+        self.scope_stack_starts.len().saturating_sub(1)
+    }
+
+    fn scope_stack(&self, index: usize) -> Option<&[sm_str]> {
+        let start = *self.scope_stack_starts.get(index)?;
+        let end = *self.scope_stack_starts.get(index + 1)?;
+        Some(&self.scope_names[start..end])
     }
 }
 
@@ -1114,7 +1152,7 @@ pub unsafe extern "C" fn sm_tokens_view(
             },
             style_count: tokens.styles.len(),
             styles: tokens.styles.as_ptr(),
-            scope_stack_count: tokens.scope_stacks.len(),
+            scope_stack_count: tokens.scope_stack_count(),
             default_style: buffer.default_style.into(),
         };
         // SAFETY: non-null and writable per the caller.
@@ -1140,9 +1178,8 @@ pub unsafe extern "C" fn sm_tokens_scope_stack(
         let (names, len) = (out(names, "names")?, out(len, "len")?);
         // SAFETY: guaranteed by the caller.
         let tokens = unsafe { handle(tokens, "tokens") }?;
-        let (_, stack) = tokens
-            .scope_stacks
-            .get(index)
+        let stack = tokens
+            .scope_stack(index)
             .ok_or_else(|| invalid(format!("scope stack {index} is out of range")))?;
         // SAFETY: both non-null and writable per the caller.
         unsafe {
@@ -1184,6 +1221,39 @@ mod tests {
         assert_eq!(last_error().as_deref(), Some("internal panic: boom"));
         assert_eq!(guard(|| Ok(())), sm_status::SM_OK);
         assert_eq!(last_error(), None);
+    }
+
+    #[test]
+    fn scope_stacks_round_trip_through_the_name_arena() {
+        let stacks = vec![
+            vec!["source.rust".to_owned(), "comment.line".to_owned()],
+            vec![],
+            vec![String::new(), "é".to_owned()],
+        ];
+        let tokens = sm_tokens::new(TokenBuffer {
+            scope_stacks: stacks.clone(),
+            ..TokenBuffer::default()
+        });
+        assert_eq!(tokens.scope_stack_count(), stacks.len());
+        for (index, stack) in stacks.iter().enumerate() {
+            let names = tokens.scope_stack(index).expect("in range");
+            let names: Vec<&str> = names
+                .iter()
+                .map(|name| {
+                    // SAFETY: `ptr` is valid for `len + 1` bytes while `tokens` lives.
+                    let bytes =
+                        unsafe { std::slice::from_raw_parts(name.ptr.cast(), name.len + 1) };
+                    assert_eq!(bytes.last(), Some(&0));
+                    std::str::from_utf8(&bytes[..name.len]).expect("UTF-8")
+                })
+                .collect();
+            assert_eq!(names, *stack);
+        }
+        assert!(tokens.scope_stack(stacks.len()).is_none());
+
+        let empty = sm_tokens::new(TokenBuffer::default());
+        assert_eq!(empty.scope_stack_count(), 0);
+        assert!(empty.scope_stack(0).is_none());
     }
 
     #[test]
