@@ -111,7 +111,8 @@ export interface Token {
  * they index JavaScript strings directly. Token `i` covers
  * `source.slice(tokenStarts[i], tokenStarts[i] + tokenLengths[i])`. Line `l`
  * (split on `\n` only) owns tokens `lineTokenRanges[l] .. lineTokenRanges[l + 1]`.
- * Text outside every token uses `defaultStyle`.
+ * Text outside every token uses `defaultStyle`. The typed arrays are views of
+ * one JavaScript-owned buffer, not of WebAssembly memory, so they stay valid.
  */
 export class TokenBuffer implements Iterable<Token> {
   private constructor()
@@ -161,7 +162,7 @@ export class Highlighter implements Freeable {
   /** Resolves an ID or alias to its canonical ID. */
   canonicalLanguage(language: string): string | null
   /** Detects a language from a file path and/or the source's first line. */
-  detect(input: { path?: string | null; source?: string }): string | null
+  detect(input?: { path?: string | null; source?: string }): string | null
   html(code: string, options: HtmlOptions): string
   ansi(code: string, options: AnsiOptions): string
   tokens(code: string, options: TokenOptions): TokenBuffer

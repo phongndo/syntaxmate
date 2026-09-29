@@ -18,7 +18,7 @@ This package is not yet published; see [Build](#build) to produce it locally.
 
 ## Node
 
-Importing the package instantiates WebAssembly synchronously.
+Node 22 or later. Importing the package instantiates WebAssembly synchronously.
 
 ```js
 import { createHighlighter } from 'syntaxmate'
@@ -60,6 +60,11 @@ The files are exported as `syntaxmate/syntaxmate.wasm` and
 are also exported. The full bundle is about 2.5 MB; ship a subset when you
 need only a few languages.
 
+Decoding the bundle dominates startup. On one Ryzen 9 9950X with Node 24
+(2026-09-28), import plus the first `html()` call took about 45 ms with the full
+bundle, of which about 29 ms was `fromBundle`, and about 22 ms with a 65 KB
+bundle of `rust,typescript,javascript,json`.
+
 ## API
 
 The TypeScript declarations in [lib/core.d.ts](lib/core.d.ts) are the reference.
@@ -83,7 +88,10 @@ The TypeScript declarations in [lib/core.d.ts](lib/core.d.ts) are the reference.
 
 `tokens()` returns flat `Uint32Array`s rather than one object per token.
 Offsets and lengths are UTF-16 code units, so they index JavaScript strings
-directly. Lines split on `\n` only.
+directly, including strings with lone surrogates: those reach the engine, and
+HTML or ANSI output, as U+FFFD, which is also one code unit. Lines split on
+`\n` only. The arrays are views of one JavaScript-owned buffer copied out of
+WebAssembly, so they stay valid after later calls.
 
 ```js
 const t = highlighter.tokens(code, { lang: 'ts', theme: 'github-light' })
@@ -117,8 +125,8 @@ const css = Theme.bundled('github-light').stylesheet('sm')
 Engine failures throw `SyntaxmateError`, an `Error` with a stable `kind`
 (`UnknownLanguage`, `UnknownTheme`, `InvalidGrammar`, `InvalidTheme`,
 `InvalidBundle`, `InvalidInput`, `Render`, or `Internal`) and the matching
-numeric `code` shared with the other bindings. Missing required options throw
-`TypeError`.
+numeric `code` shared with the other bindings. Missing required options and
+non-string text arguments throw `TypeError`.
 
 A Rust panic aborts the WebAssembly instance and surfaces as a
 `WebAssembly.RuntimeError`; discard the module after one.
@@ -160,11 +168,14 @@ Without Nix, install the target (`rustup target add wasm32-unknown-unknown`),
 
 `npm run build` runs [scripts/build.mjs](scripts/build.mjs). It compiles with
 the `wasm-release` profile, generates `dist/` with `wasm-bindgen --target web`,
-optimizes with `wasm-opt -O3` when available, and copies `grammars.bundle` and
+optimizes with `wasm-opt -O3` when available (measured about 1% faster and
+18% smaller than unoptimized; `-O4` and SIMD gave no clear gain), and copies `grammars.bundle` and
 license files into the package. `npm pack` then produces the tarball.
 
 `npm test` runs the API tests and the shared
 [conformance cases](../conformance/README.md) with `node --test`.
+`npm run typecheck` checks the declarations under `tsc --strict` with a
+temporary TypeScript download.
 
 ## Benchmark
 

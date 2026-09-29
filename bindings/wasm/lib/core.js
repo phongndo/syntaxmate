@@ -84,6 +84,19 @@ export function toBytes(bytes) {
   throw new TypeError('syntaxmate: expected a Uint8Array, ArrayBuffer, or ArrayBufferView')
 }
 
+// wasm-bindgen does not type-check string arguments: a number or object
+// reaches Rust as a bogus pointer and traps with "memory access out of bounds".
+function string(value, name) {
+  if (typeof value !== 'string') {
+    throw new TypeError(`syntaxmate: ${name} must be a string, got ${value === null ? 'null' : typeof value}`)
+  }
+  return value
+}
+
+function optionalString(value, name) {
+  return value === undefined || value === null ? undefined : string(value, name)
+}
+
 // Owns one wasm-bindgen handle; `free()` is idempotent and use-after-free throws.
 class Handle {
   #raw
@@ -115,14 +128,14 @@ export class Theme extends Handle {
   /** Loads a bundled theme by name, such as `github-dark`. */
   static bundled(name) {
     assertReady()
-    return new Theme(raw.RawTheme.bundled(name))
+    return new Theme(raw.RawTheme.bundled(string(name, 'name')))
   }
 
   /** Parses a TextMate/VS Code JSON theme from a string or parsed object. */
   static fromJson(json) {
     assertReady()
     const text = typeof json === 'string' ? json : JSON.stringify(json)
-    return new Theme(raw.RawTheme.fromJson(text))
+    return new Theme(raw.RawTheme.fromJson(string(text, 'json')))
   }
 
   get name() {
@@ -136,7 +149,7 @@ export class Theme extends Handle {
 
   /** CSS for HTML rendered in class mode with the same `classPrefix`. */
   stylesheet(classPrefix) {
-    return this._raw.stylesheet(classPrefix)
+    return this._raw.stylesheet(string(classPrefix, 'classPrefix'))
   }
 }
 
@@ -147,31 +160,31 @@ export class Theme extends Handle {
  * `l` owns tokens `lineTokenRanges[l] .. lineTokenRanges[l + 1]`.
  */
 export class TokenBuffer {
-  constructor(handle) {
-    try {
-      this.complete = handle.complete()
-      this.lineStarts = handle.takeLineStarts()
-      this.lineTokenRanges = handle.takeLineTokenRanges()
-      this.tokenStarts = handle.takeTokenStarts()
-      this.tokenLengths = handle.takeTokenLengths()
-      this.tokenStyles = handle.takeTokenStyles()
-      this.tokenScopes = handle.takeTokenScopes()
-      const flat = handle.styles()
-      this.styles = []
-      for (let index = 0; index < flat.length; index += 3) {
-        this.styles.push(styleAt(flat, index))
-      }
-      this.defaultStyle = styleAt(handle.defaultStyle(), 0)
-      const lengths = handle.scopeStackLengths()
-      const names = handle.takeScopeNames()
-      this.scopeStacks = []
-      let offset = 0
-      for (const length of lengths) {
-        this.scopeStacks.push(names.slice(offset, offset + length))
-        offset += length
-      }
-    } finally {
-      handle.free()
+  // `packed` and `names` come from a single wasm call; `pack` in src/lib.rs
+  // documents the layout. The typed arrays are views of one JavaScript-owned
+  // buffer (a copy, not WebAssembly memory), so they stay valid indefinitely.
+  constructor(packed, names) {
+    const [complete, lines, tokens, scoped, styles, stacks] = packed
+    let offset = 6
+    const take = (length) => packed.subarray(offset, (offset += length))
+    this.complete = complete === 1
+    this.lineStarts = take(lines)
+    this.lineTokenRanges = take(lines + 1)
+    this.tokenStarts = take(tokens)
+    this.tokenLengths = take(tokens)
+    this.tokenStyles = take(tokens)
+    this.tokenScopes = take(scoped)
+    this.styles = new Array(styles)
+    for (let index = 0; index < styles; index++, offset += 3) {
+      this.styles[index] = styleAt(packed, offset)
+    }
+    this.defaultStyle = styleAt(packed, offset)
+    offset += 3
+    this.scopeStacks = new Array(stacks)
+    for (let index = 0; index < stacks; index++) {
+      const stack = new Array(packed[offset++])
+      for (let scope = 0; scope < stack.length; scope++) stack[scope] = names[packed[offset++]]
+      this.scopeStacks[index] = stack
     }
   }
 
@@ -208,7 +221,8 @@ export class TokenBuffer {
 export class Session extends Handle {
   /** Highlights the next line; pass it without its `\n`. Offsets are line-relative. */
   line(text) {
-    return new TokenBuffer(this._raw.line(text))
+    const names = []
+    return new TokenBuffer(this._raw.line(string(text, 'text'), names), names)
   }
 
   /** Returns to the start-of-document state. */
@@ -225,7 +239,11 @@ function required(options, name) {
   return value
 }
 
-/** A thread-safe highlighter over one grammar catalog. */
+function lang(options) {
+  return string(required(options, 'lang'), 'options.lang')
+}
+
+/** A highlighter over one grammar catalog. */
 export class Highlighter extends Handle {
   #themes = new Map()
 
@@ -239,6 +257,7 @@ export class Highlighter extends Handle {
     this._raw // Throw use-after-free before caching a theme.
     const theme = required(options, 'theme')
     if (theme instanceof Theme) return theme._raw
+    string(theme, 'options.theme')
     let handle = this.#themes.get(theme)
     if (handle === undefined) {
       handle = raw.RawTheme.bundled(theme)
@@ -259,25 +278,25 @@ export class Highlighter extends Handle {
 
   /** Resolves an ID or alias to its canonical ID, or `null`. */
   canonicalLanguage(language) {
-    return this._raw.canonicalLanguage(language) ?? null
+    return this._raw.canonicalLanguage(string(language, 'language')) ?? null
   }
 
   /** Detects a language from a file path and/or the source's first line, or `null`. */
   detect({ path, source = '' } = {}) {
-    return this._raw.detect(path ?? undefined, source) ?? null
+    return this._raw.detect(optionalString(path, 'path'), string(source, 'source')) ?? null
   }
 
   /** Highlights `code` to escaped HTML. */
   html(code, options) {
     const theme = this.#theme(options)
     return this._raw.html(
-      required(options, 'lang'),
-      code,
+      lang(options),
+      string(code, 'code'),
       theme,
       options.includeWrapper ?? true,
-      options.class === undefined ? 'syntaxmate' : options.class,
+      options.class === undefined ? 'syntaxmate' : optionalString(options.class, 'options.class'),
       options.includeScopes ?? false,
-      options.classPrefix ?? undefined,
+      optionalString(options.classPrefix, 'options.classPrefix'),
     )
   }
 
@@ -285,8 +304,8 @@ export class Highlighter extends Handle {
   ansi(code, options) {
     const theme = this.#theme(options)
     return this._raw.ansi(
-      required(options, 'lang'),
-      code,
+      lang(options),
+      string(code, 'code'),
       theme,
       options.colors ?? true,
       options.sanitizeControlCharacters ?? true,
@@ -297,16 +316,18 @@ export class Highlighter extends Handle {
   /** Highlights `code` into a {@link TokenBuffer}. */
   tokens(code, options) {
     const theme = this.#theme(options)
-    return new TokenBuffer(
-      this._raw.tokens(required(options, 'lang'), code, theme, options.includeScopes ?? false),
+    const names = []
+    const packed = this._raw.tokens(
+      lang(options), string(code, 'code'), theme, options.includeScopes ?? false, names,
     )
+    return new TokenBuffer(packed, names)
   }
 
   /** Starts an incremental {@link Session}. */
   session(options) {
     const theme = this.#theme(options)
     return new Session(
-      this._raw.session(required(options, 'lang'), theme, options.includeScopes ?? false),
+      this._raw.session(lang(options), theme, options.includeScopes ?? false),
     )
   }
 

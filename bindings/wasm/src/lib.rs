@@ -4,7 +4,7 @@
 //! wraps them in the public JavaScript API. Token offsets are always UTF-16
 //! code units, the unit JavaScript strings index by.
 
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
 use js_sys::{Array, Function, Reflect};
 use syntaxmate_boundary::{
@@ -138,17 +138,18 @@ impl RawEngine {
             .map_err(to_js)
     }
 
-    /// Highlights a document into UTF-16 token arrays.
+    /// Highlights a document into a packed UTF-16 token buffer (see [`pack`]).
     pub fn tokens(
         &self,
         language: &str,
         source: &str,
         theme: &RawTheme,
         include_scopes: bool,
-    ) -> Result<RawTokens, JsValue> {
+        names: &Array,
+    ) -> Result<Vec<u32>, JsValue> {
         self.0
             .tokens(language, source, &theme.0, options(include_scopes))
-            .map(RawTokens)
+            .map(|buffer| pack(buffer, names))
             .map_err(to_js)
     }
 
@@ -206,9 +207,12 @@ pub struct RawSession(Session);
 
 #[wasm_bindgen(js_class = RawSession)]
 impl RawSession {
-    /// Highlights the next line (without its terminator).
-    pub fn line(&mut self, line: &str) -> Result<RawTokens, JsValue> {
-        self.0.line(line).map(RawTokens).map_err(to_js)
+    /// Highlights the next line (without its terminator) into a packed buffer.
+    pub fn line(&mut self, line: &str, names: &Array) -> Result<Vec<u32>, JsValue> {
+        self.0
+            .line(line)
+            .map(|buffer| pack(buffer, names))
+            .map_err(to_js)
     }
 
     /// Returns to the start-of-document state.
@@ -217,80 +221,81 @@ impl RawSession {
     }
 }
 
-/// A token buffer whose arrays are moved out once each by the JS wrapper.
-#[wasm_bindgen(js_name = RawTokens)]
-pub struct RawTokens(TokenBuffer);
+/// Number of `u32` header fields at the start of a packed token buffer.
+const HEADER: usize = 6;
 
-#[wasm_bindgen(js_class = RawTokens)]
-impl RawTokens {
-    /// Whether tokenization finished within resource limits.
-    pub fn complete(&self) -> bool {
-        self.0.complete
+/// Packs `buffer` into one array so the JS wrapper copies it out in a single
+/// call; `TokenBuffer` in `lib/core.js` decodes this layout:
+///
+/// ```text
+/// header       complete, lines, tokens, scoped tokens, styles, stacks
+/// lineStarts         [lines]
+/// lineTokenRanges    [lines + 1]
+/// tokenStarts        [tokens]
+/// tokenLengths       [tokens]
+/// tokenStyles        [tokens]
+/// tokenScopes        [scoped tokens]
+/// styles             [styles * 3], then defaultStyle [3]
+/// per stack          length, then that many indices into `names`
+/// ```
+///
+/// Scope names are deduplicated and appended to `names`.
+fn pack(buffer: TokenBuffer, names: &Array) -> Vec<u32> {
+    let TokenBuffer {
+        complete,
+        line_starts,
+        line_token_ranges,
+        token_starts,
+        token_lengths,
+        token_styles,
+        token_scopes,
+        styles,
+        scope_stacks,
+        default_style,
+        ..
+    } = buffer;
+    let stack_words: usize = scope_stacks.iter().map(|stack| stack.len() + 1).sum();
+    let mut out = Vec::with_capacity(
+        HEADER
+            + line_starts.len()
+            + line_token_ranges.len()
+            + 3 * token_starts.len()
+            + token_scopes.len()
+            + 3 * (styles.len() + 1)
+            + stack_words,
+    );
+    // Lengths are bounded by the boundary's u32 offset limit.
+    out.extend([
+        u32::from(complete),
+        line_starts.len() as u32,
+        token_starts.len() as u32,
+        token_scopes.len() as u32,
+        styles.len() as u32,
+        scope_stacks.len() as u32,
+    ]);
+    for array in [
+        &line_starts,
+        &line_token_ranges,
+        &token_starts,
+        &token_lengths,
+        &token_styles,
+        &token_scopes,
+    ] {
+        out.extend_from_slice(array);
     }
-
-    /// Takes the line start offsets.
-    #[wasm_bindgen(js_name = takeLineStarts)]
-    pub fn take_line_starts(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.0.line_starts)
+    for packed in styles.iter().chain([&default_style]) {
+        out.extend(style(*packed));
     }
-
-    /// Takes the per-line token index boundaries.
-    #[wasm_bindgen(js_name = takeLineTokenRanges)]
-    pub fn take_line_token_ranges(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.0.line_token_ranges)
+    let mut seen = HashMap::<&str, u32>::new();
+    for stack in &scope_stacks {
+        out.push(stack.len() as u32);
+        for name in stack {
+            let index = *seen.entry(name).or_insert_with(|| {
+                names.push(&JsValue::from_str(name));
+                names.length() - 1
+            });
+            out.push(index);
+        }
     }
-
-    /// Takes the token start offsets.
-    #[wasm_bindgen(js_name = takeTokenStarts)]
-    pub fn take_token_starts(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.0.token_starts)
-    }
-
-    /// Takes the token lengths.
-    #[wasm_bindgen(js_name = takeTokenLengths)]
-    pub fn take_token_lengths(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.0.token_lengths)
-    }
-
-    /// Takes the per-token style indices.
-    #[wasm_bindgen(js_name = takeTokenStyles)]
-    pub fn take_token_styles(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.0.token_styles)
-    }
-
-    /// Takes the per-token scope-stack indices.
-    #[wasm_bindgen(js_name = takeTokenScopes)]
-    pub fn take_token_scopes(&mut self) -> Vec<u32> {
-        std::mem::take(&mut self.0.token_scopes)
-    }
-
-    /// Returns the style table flattened as `[foreground, background, modifiers]` triples.
-    pub fn styles(&self) -> Vec<u32> {
-        self.0.styles.iter().flat_map(|s| style(*s)).collect()
-    }
-
-    /// Returns `[foreground, background, modifiers]` for uncovered text.
-    #[wasm_bindgen(js_name = defaultStyle)]
-    pub fn default_style(&self) -> Vec<u32> {
-        style(self.0.default_style).to_vec()
-    }
-
-    /// Returns the number of scopes in each stack.
-    #[wasm_bindgen(js_name = scopeStackLengths)]
-    pub fn scope_stack_lengths(&self) -> Vec<u32> {
-        self.0
-            .scope_stacks
-            .iter()
-            .map(|stack| stack.len() as u32)
-            .collect()
-    }
-
-    /// Takes every stack's scopes, concatenated outermost first.
-    #[wasm_bindgen(js_name = takeScopeNames)]
-    pub fn take_scope_names(&mut self) -> Vec<String> {
-        std::mem::take(&mut self.0.scope_stacks)
-            .into_iter()
-            .flatten()
-            .collect()
-    }
+    out
 }
