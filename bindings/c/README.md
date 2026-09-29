@@ -23,6 +23,11 @@ loads grammar bundles through `sm_engine_from_bundle`.
 `make -C bindings/c install PREFIX=/usr/local PROFILE=release` installs the
 libraries, both headers, a pkg-config file, and a CMake package.
 
+Linux and macOS are tested. On Windows, Cargo builds `syntaxmate.dll` with the
+import library `syntaxmate.dll.lib`, and `syntaxmate.lib` as the static
+library, but the Makefile, the tests, and the CMake package assume a POSIX
+toolchain and are untested there.
+
 ## Link
 
 | Method | Flags |

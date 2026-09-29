@@ -33,9 +33,11 @@ CARGO_FLAGS := $(if $(filter release,$(PROFILE)),--release,)
 
 ifeq ($(UNAME),Darwin)
 NATIVE_LIBS ?=
+SHARED_LIB := libsyntaxmate.dylib
 EXPORTS ?= nm -gU
 else
 NATIVE_LIBS ?= -lpthread -ldl -lm
+SHARED_LIB := libsyntaxmate.so
 EXPORTS ?= nm -D --defined-only
 endif
 
@@ -109,7 +111,7 @@ install: lib
 	install -d $(DESTDIR)$(PREFIX)/lib/pkgconfig $(DESTDIR)$(PREFIX)/lib/cmake/syntaxmate $(DESTDIR)$(PREFIX)/include
 	install -m 644 include/syntaxmate.h include/syntaxmate.hpp $(DESTDIR)$(PREFIX)/include/
 	install -m 644 $(LIBDIR)/libsyntaxmate.a $(DESTDIR)$(PREFIX)/lib/
-	install -m 755 $(wildcard $(LIBDIR)/libsyntaxmate.so $(LIBDIR)/libsyntaxmate.dylib) $(DESTDIR)$(PREFIX)/lib/
+	install -m 755 $(LIBDIR)/$(SHARED_LIB) $(DESTDIR)$(PREFIX)/lib/
 	install -m 644 cmake/syntaxmateConfig.cmake $(DESTDIR)$(PREFIX)/lib/cmake/syntaxmate/
 	sed -e 's|@PREFIX@|$(PREFIX)|' -e 's|@VERSION@|$(VERSION)|' -e 's|@NATIVE_LIBS@|$(NATIVE_LIBS)|' \
 		syntaxmate.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/syntaxmate.pc
@@ -118,8 +120,9 @@ check-install:
 	rm -rf $(BUILD)/prefix $(BUILD)/relocated $(BUILD)/cmake
 	$(MAKE) --no-print-directory install PREFIX=$(BUILD)/prefix
 	@# The shared library exports the C API and nothing else.
-	$(EXPORTS) $(wildcard $(BUILD)/prefix/lib/libsyntaxmate.so $(BUILD)/prefix/lib/libsyntaxmate.dylib) \
-		| awk 'NF >= 3 { print $$3 }' | grep -v '^_\{0,1\}sm_' | { ! grep .; }
+	$(EXPORTS) $(BUILD)/prefix/lib/$(SHARED_LIB) | awk 'NF >= 3 { print $$3 }' > $(BUILD)/exports
+	grep -q '^_\{0,1\}sm_version$$' $(BUILD)/exports
+	! grep -v '^_\{0,1\}sm_' $(BUILD)/exports
 	PKG_CONFIG_PATH=$(BUILD)/prefix/lib/pkgconfig sh -c '$(CC) -std=c99 tests/test_c.c -o $(BUILD)/prefix/test_c \
 		$$(pkg-config --cflags --libs syntaxmate) -Wl,-rpath,$(BUILD)/prefix/lib -lpthread'
 	$(BUILD)/prefix/test_c
