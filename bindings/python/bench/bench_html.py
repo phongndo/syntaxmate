@@ -128,7 +128,8 @@ def run(args) -> dict:
                 "replay": lambda: pyg(source),
             },
         }
-        entry = {"fixture": fixture, "bytes": size}
+        # Steady mode highlights the padded variants, so it has its own size.
+        entry = {"fixture": fixture, "bytes": size, "steadyBytes": variant_size}
         for engine, modes in engines.items():
             row = {}
             cold = [
@@ -150,8 +151,8 @@ def run(args) -> dict:
                     for _ in range(args.samples)
                 ]
                 row[mode] = statistics.median(samples)
-            row["steadyMBps"] = variant_size / row["steady"] / 1e6
-            row["replayMBps"] = size / row["replay"] / 1e6
+            row["steadyMBps"] = entry["steadyBytes"] / row["steady"] / 1e6
+            row["replayMBps"] = entry["bytes"] / row["replay"] / 1e6
             entry[engine] = row
         results[language] = entry
     return {
@@ -184,8 +185,8 @@ def report(data: dict) -> None:
                 f"{language:<11}{entry['bytes']:>7}  {mode:<7}"
                 f"{ours * 1e3:>10.2f}ms{theirs * 1e3:>10.2f}ms{theirs / ours:>8.1f}x"
             )
-    total = sum(entry["bytes"] for entry in data["results"].values())
-    for mode in ("steady", "replay"):
+    for mode, size in (("steady", "steadyBytes"), ("replay", "bytes")):
+        total = sum(entry[size] for entry in data["results"].values())
         ours = sum(entry["syntaxmate"][mode] for entry in data["results"].values())
         theirs = sum(entry["pygments"][mode] for entry in data["results"].values())
         print(
