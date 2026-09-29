@@ -2,6 +2,8 @@
 #include "syntaxmate.h"
 
 #include <pthread.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -262,6 +264,25 @@ static void test_errors(const sm_engine *engine, const sm_theme *theme) {
                  SM_INVALID_INPUT);
     CHECK_STATUS(sm_theme_bundled(S(invalid_utf8), &bad_theme), SM_INVALID_INPUT);
     CHECK_STATUS(sm_engine_detect(engine, S(invalid_utf8), S("x"), &out), SM_INVALID_INPUT);
+
+    /* Lengths past PTRDIFF_MAX are rejected before the pointer is read. */
+    CHECK_STATUS(sm_engine_tokens(engine, S("rust"), "x", SIZE_MAX, theme, NULL, &tokens),
+                 SM_INVALID_INPUT);
+    CHECK_STATUS(sm_engine_html(engine, "rust", (size_t)PTRDIFF_MAX + 1, S("x"), theme, NULL,
+                                &out, NULL),
+                 SM_INVALID_INPUT);
+    CHECK(out == NULL);
+
+    /* The message survives calls that do not return a status. */
+    {
+        const char *message;
+        CHECK_STATUS(sm_theme_bundled(S("nope"), &bad_theme), SM_UNKNOWN_THEME);
+        message = sm_last_error_message();
+        CHECK(message != NULL && strstr(message, "nope") != NULL);
+        CHECK(sm_string_len(NULL) == 0 && sm_version() != NULL);
+        sm_string_free(NULL);
+        CHECK(sm_last_error_message() == message);
+    }
 
     options.unit = 7;
     CHECK_STATUS(sm_engine_tokens(engine, S("rust"), S("x"), theme, &options, &tokens),

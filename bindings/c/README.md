@@ -34,6 +34,11 @@ libraries, both headers, a pkg-config file, and a CMake package.
 
 The C++ wrapper needs only `syntaxmate.hpp` and the same library.
 
+The shared library exports only the `sm_*` functions. The static archive also
+carries the Rust standard library with global symbols, so linking two Rust
+static libraries into one program can fail with duplicate symbols; use the
+shared library in that case.
+
 The shared library's SONAME is `libsyntaxmate.so` (install name
 `@rpath/libsyntaxmate.dylib` on macOS), so programs record that name rather
 than the install path and find the library through their rpath or the system
@@ -166,9 +171,15 @@ nix develop -c nix shell nixpkgs#rust-cbindgen -c make -C bindings/c check
 `check` verifies that `include/syntaxmate.h` matches cbindgen output, then
 builds and runs [`tests/test_c.c`](tests/test_c.c) (shared library) and
 [`tests/test_cpp.cpp`](tests/test_cpp.cpp) (static library) under
-AddressSanitizer, LeakSanitizer, and UndefinedBehaviorSanitizer. The C++ test
+AddressSanitizer, LeakSanitizer (not on macOS, where Apple's toolchain lacks
+it), and UndefinedBehaviorSanitizer. The C++ test
 also runs every [conformance case](../conformance/README.md) and compares the
 output with `expected.json`.
+[`tests/test_fuzz.c`](tests/test_fuzz.c) feeds random byte sequences, invalid
+UTF-8, and random options through every text entry point and checks each
+result's invariants (status and out-handle, NUL-terminated UTF-8 output, token
+ordering and bounds in every offset unit). It prints its seed;
+`FUZZ_ITERATIONS="<count> <seed>"` replays or extends a run.
 [`tests/test_cpp_alloc.cpp`](tests/test_cpp_alloc.cpp) makes C++ allocations
 fail one at a time to check that the wrapper still frees C results (under
 the sanitizers; valgrind replaces `operator new`, so it skips there). Other targets:
@@ -176,9 +187,12 @@ the sanitizers; valgrind replaces `operator new`, so it skips there). Other targ
 - `make -C bindings/c header` regenerates the header after an API change.
 - `make -C bindings/c valgrind` runs both tests under valgrind instead
   (`nix shell nixpkgs#valgrind`).
-- `make -C bindings/c check-install` installs to a scratch prefix and builds
-  the C test with pkg-config. On Linux it also checks the SONAME and runs a
-  test linked by path, as CMake links, after moving the prefix.
+- `make -C bindings/c check-install` installs to a scratch prefix, checks
+  that the shared library exports only `sm_*` symbols, and builds the C test
+  with pkg-config and with the CMake package
+  ([`tests/cmake`](tests/cmake/CMakeLists.txt); needs `cmake`). On Linux it
+  also checks the SONAME and runs a test linked by path, as CMake links, after
+  moving the prefix.
 - `TARGET_DIR=<dir>` (default `$CARGO_TARGET_DIR` or `bindings/target`)
   builds and tests in another Cargo target directory.
 - `PROFILE=release` uses the release library.

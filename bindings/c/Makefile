@@ -4,8 +4,9 @@
 #   make header           regenerate include/syntaxmate.h (needs cbindgen)
 #   make valgrind         tests without sanitizers under valgrind
 #   make install PREFIX=/usr/local  install library, headers, pkg-config, CMake config
-#   make check-install    install to a scratch prefix and build the C test via pkg-config
-#                         (and, on Linux, check that the installed prefix can move)
+#   make check-install    install to a scratch prefix, check the exported symbols, and build
+#                         the C test via pkg-config and CMake (and, on Linux, check that
+#                         the installed prefix can move)
 #   make PROFILE=release  use the release library
 #   make TARGET_DIR=/path  build in another Cargo target directory
 #
@@ -17,6 +18,7 @@ CARGO ?= cargo
 CBINDGEN ?= cbindgen
 VALGRIND ?= valgrind
 READELF ?= readelf
+CMAKE ?= cmake
 CC ?= cc
 CXX ?= c++
 
@@ -30,10 +32,14 @@ CARGO_FLAGS := $(if $(filter release,$(PROFILE)),--release,)
 
 ifeq ($(UNAME),Darwin)
 NATIVE_LIBS ?=
+EXPORTS ?= nm -gU
 else
 NATIVE_LIBS ?= -lpthread -ldl -lm
+EXPORTS ?= nm -D --defined-only
 endif
 
+# Randomized test iterations per run; FUZZ_ITERATIONS="N SEED" replays a seed.
+FUZZ_ITERATIONS ?= 300
 SANITIZE ?= -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
 WARNINGS := -Wall -Wextra -Wpedantic -Werror
 CFLAGS_TEST := -std=c99 $(WARNINGS) -g -Iinclude
@@ -62,6 +68,10 @@ $(BUILD)/%/test_c: tests/test_c.c include/syntaxmate.h lib
 	@mkdir -p $(@D)
 	$(CC) $(CFLAGS_TEST) $(FLAGS) $< -o $@ -L$(LIBDIR) -lsyntaxmate -Wl,-rpath,$(LIBDIR) -lpthread
 
+$(BUILD)/%/test_fuzz: tests/test_fuzz.c include/syntaxmate.h lib
+	@mkdir -p $(@D)
+	$(CC) $(CFLAGS_TEST) $(FLAGS) $< -o $@ -L$(LIBDIR) -lsyntaxmate -Wl,-rpath,$(LIBDIR)
+
 $(BUILD)/%/test_cpp: tests/test_cpp.cpp include/syntaxmate.hpp include/syntaxmate.h lib
 	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS_TEST) $(FLAGS) $< -o $@ $(LIBDIR)/libsyntaxmate.a $(NATIVE_LIBS)
@@ -78,8 +88,10 @@ valgrind:
 		RUNNER="$(VALGRIND) --error-exitcode=1 --leak-check=full --errors-for-leak-kinds=definite,indirect"
 
 .PHONY: run
-run: $(BUILD)/$(VARIANT)/test_c $(BUILD)/$(VARIANT)/test_cpp $(BUILD)/$(VARIANT)/test_cpp_alloc
+run: $(BUILD)/$(VARIANT)/test_c $(BUILD)/$(VARIANT)/test_fuzz $(BUILD)/$(VARIANT)/test_cpp \
+		$(BUILD)/$(VARIANT)/test_cpp_alloc
 	$(RUNNER) $(BUILD)/$(VARIANT)/test_c
+	$(RUNNER) $(BUILD)/$(VARIANT)/test_fuzz $(FUZZ_ITERATIONS)
 	$(RUNNER) $(BUILD)/$(VARIANT)/test_cpp $(WORKSPACE)/conformance
 	$(RUNNER) $(BUILD)/$(VARIANT)/test_cpp_alloc
 
@@ -102,11 +114,17 @@ install: lib
 		syntaxmate.pc.in > $(DESTDIR)$(PREFIX)/lib/pkgconfig/syntaxmate.pc
 
 check-install:
-	rm -rf $(BUILD)/prefix $(BUILD)/relocated
+	rm -rf $(BUILD)/prefix $(BUILD)/relocated $(BUILD)/cmake
 	$(MAKE) --no-print-directory install PREFIX=$(BUILD)/prefix
+	@# The shared library exports the C API and nothing else.
+	$(EXPORTS) $(wildcard $(BUILD)/prefix/lib/libsyntaxmate.so $(BUILD)/prefix/lib/libsyntaxmate.dylib) \
+		| awk 'NF >= 3 { print $$3 }' | grep -v '^_\{0,1\}sm_' | { ! grep .; }
 	PKG_CONFIG_PATH=$(BUILD)/prefix/lib/pkgconfig sh -c '$(CC) -std=c99 tests/test_c.c -o $(BUILD)/prefix/test_c \
 		$$(pkg-config --cflags --libs syntaxmate) -Wl,-rpath,$(BUILD)/prefix/lib -lpthread'
 	$(BUILD)/prefix/test_c
+	$(CMAKE) -S tests/cmake -B $(BUILD)/cmake -DCMAKE_PREFIX_PATH=$(BUILD)/prefix -DCMAKE_C_COMPILER=$(CC)
+	$(CMAKE) --build $(BUILD)/cmake
+	$(BUILD)/cmake/test_c
 ifeq ($(UNAME),Linux)
 	@# The SONAME keeps the install path out of consumers that link the
 	@# library by path, as CMake does; such a program must survive a move.
