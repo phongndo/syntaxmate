@@ -21,6 +21,6 @@ default = ["bundled-grammars"]
 bundled-grammars = ["syntaxmate-boundary/bundled-grammars"]
 
 [dependencies]
-pyo3 = { version = "0.29", features = ["abi3-py39"] }
+pyo3 = { version = "0.29", features = ["abi3-py311"] }
 # Not `workspace = true`: the workspace entry enables default features.
 syntaxmate-boundary = { path = "../boundary", default-features = false }

@@ -7,7 +7,7 @@ name = "syntaxmate"
 version = "0.2.0"
 description = "Fast TextMate syntax highlighting to HTML, ANSI, or token arrays"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE", "third-party/**/*"]
 keywords = ["syntax-highlighting", "textmate", "html", "ansi"]

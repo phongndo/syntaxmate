@@ -4,7 +4,7 @@ Python bindings for [Syntaxmate](../../README.md), a fast Rust syntax
 highlighter powered by TextMate grammars. Highlight to HTML, 24-bit ANSI, or
 flat token arrays, with the full grammar catalog and GitHub themes embedded.
 
-- One `abi3` wheel per platform supports CPython 3.9 and newer. Free-threaded
+- One `abi3` wheel per platform supports CPython 3.11 and newer. Free-threaded
   builds (such as 3.14t) cannot load `abi3` extensions.
 - Highlighting releases the GIL; a `Highlighter` is safe to share across threads.
 - Token offsets index Python `str` values directly (Unicode code points).
