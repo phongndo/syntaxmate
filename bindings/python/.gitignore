@@ -1,0 +1,3 @@
+# Extension module installed in place by `maturin develop`.
+/python/syntaxmate/*.so
+/python/syntaxmate/*.pyd
