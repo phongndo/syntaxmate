@@ -40,6 +40,22 @@ checkout maintenance and expose implementation details outside the stable public
 contract. Nightly rustdoc labels feature-gated items through `doc(auto_cfg)`;
 ordinary stable documentation builds do not require unstable compiler features.
 
+## Language bindings
+
+The Python and JavaScript bindings share the crate's version. Bump
+[bindings/Cargo.toml](../bindings/Cargo.toml),
+[pyproject.toml](../bindings/python/pyproject.toml), and
+[package.json](../bindings/wasm/package.json) with [Cargo.toml](../Cargo.toml),
+then regenerate `bindings/Cargo.lock`.
+
+The same tag triggers the [bindings release workflow](../.github/workflows/release-bindings.yml).
+It runs the Python and JavaScript binding workflows at the tagged commit. It
+then publishes the manylinux, macOS, and Windows `abi3` wheels and the sdist to
+PyPI, and the packed tarball to npm. Versions already on a registry are skipped.
+Run it manually with a ref to retry, or to publish bindings for an already
+released version. The C and C++ binding ships only as source in the tagged
+repository.
+
 ## Publishing credentials
 
 The workflow uses crates.io OIDC trusted publishing through the `crates-io`
@@ -47,6 +63,11 @@ GitHub environment. The publisher configuration must match the repository,
 workflow, and environment. Protect that environment with reviewers and tag-only
 deployment rules; verify repository protections in GitHub rather than assuming
 this file configures them. Routine releases do not require a stored registry token.
+
+The bindings use the same arrangement: PyPI trusted publishing through the
+`pypi` environment and npm trusted publishing through the `npm` environment,
+both for `release-bindings.yml`. npm accepts a trusted publisher only for an
+existing package, so the first npm version must be published manually.
 
 ## Version policy
 
