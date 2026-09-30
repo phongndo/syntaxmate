@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 - 2026-09-30
 
 - Escape captured dynamic end/while delimiters like TextMate, including spaces,
   `#`, and hyphens. This fixes extended-mode delimiters being interpreted as
