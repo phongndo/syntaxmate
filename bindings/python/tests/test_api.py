@@ -23,7 +23,7 @@ def test_catalog(hl):
     assert syntaxmate.DEFAULT_THEME in hl.themes()
     assert hl.canonical_language("py") == "python"
     assert hl.canonical_language("no-such-language") is None
-    assert syntaxmate.__version__ == "0.2.0"
+    assert syntaxmate.__version__ == "0.2.1"
 
 
 def test_detect(hl):
