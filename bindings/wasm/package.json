@@ -1,6 +1,6 @@
 {
   "name": "syntaxmate",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Fast TextMate syntax highlighting to HTML, ANSI, or token arrays, compiled to WebAssembly",
   "license": "MIT",
   "repository": {

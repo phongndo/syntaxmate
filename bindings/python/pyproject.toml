@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "syntaxmate"
-version = "0.2.0"
+version = "0.2.1"
 description = "Fast TextMate syntax highlighting to HTML, ANSI, or token arrays"
 readme = "README.md"
 requires-python = ">=3.11"
