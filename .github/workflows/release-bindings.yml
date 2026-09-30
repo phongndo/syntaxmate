@@ -1,0 +1,127 @@
+# Publishes the Python and JavaScript bindings for a released crate version.
+# Tag pushes publish alongside the crate. Manual runs build a chosen ref, for a
+# first publication or a retry; the ref's package versions must match a
+# released `vX.Y.Z` tag. Versions already on a registry are skipped.
+name: Release bindings
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build and publish
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: syntaxmate-release-bindings
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ref: ${{ steps.release.outputs.ref }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+      - name: Verify package versions
+        id: release
+        shell: bash
+        env:
+          REF: ${{ inputs.ref || github.ref }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+          test -n "$version"
+          git rev-parse -q --verify "refs/tags/v${version}" >/dev/null
+          test "$(sed -n 's/^version = "\(.*\)"$/\1/p' bindings/Cargo.toml)" = "$version"
+          test "$(sed -n 's/^version = "\(.*\)"$/\1/p' bindings/python/pyproject.toml)" = "$version"
+          test "$(jq -r .version bindings/wasm/package.json)" = "$version"
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            test "${GITHUB_REF_NAME#v}" = "$version"
+          fi
+          echo "ref=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  python:
+    needs: verify
+    uses: ./.github/workflows/bindings-python.yml
+    with:
+      ref: ${{ needs.verify.outputs.ref }}
+
+  javascript:
+    needs: verify
+    uses: ./.github/workflows/bindings-js.yml
+    with:
+      ref: ${{ needs.verify.outputs.ref }}
+
+  publish-pypi:
+    needs: [verify, python]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: "{wheel-*,sdist}"
+          path: dist
+          merge-multiple: true
+      - name: Check distributions
+        shell: bash
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          wheels=(dist/*.whl)
+          test "${#wheels[@]}" -eq 5 # one per bindings-python.yml wheel runner
+          test -f "dist/syntaxmate-${VERSION}.tar.gz"
+          for file in dist/*; do
+            case "$(basename "$file")" in "syntaxmate-${VERSION}"[-.]*) ;; *) exit 1 ;; esac
+          done
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          skip-existing: true
+
+  publish-npm:
+    needs: [verify, javascript]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: npm
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: package
+      # Trusted publishing needs npm 11.5.1 or newer and adds provenance.
+      - run: npm install --global npm@11
+      - name: Publish to npm
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball="package/syntaxmate-${VERSION}.tgz"
+          test -f "$tarball"
+          if npm view "syntaxmate@${VERSION}" version >/dev/null 2>&1; then
+            echo "syntaxmate@${VERSION} is already on npm"
+            exit 0
+          fi
+          npm publish "$tarball" --access public

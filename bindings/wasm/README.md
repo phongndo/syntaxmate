@@ -1,7 +1,7 @@
 # syntaxmate for JavaScript
 
 TextMate syntax highlighting to HTML, ANSI, or flat token arrays, compiled from
-the Rust [Syntaxmate](../../README.md) engine to WebAssembly. It runs in Node
+the Rust [Syntaxmate](https://github.com/phongndo/syntaxmate/blob/main/README.md) engine to WebAssembly. It runs in Node
 and in browsers as an ES module.
 
 Grammars are not compiled into the `.wasm`. The package ships the full catalog
@@ -13,8 +13,6 @@ WebAssembly module small and lets you ship a smaller subset bundle instead.
 ```sh
 npm install syntaxmate
 ```
-
-This package is not yet published; see [Build](#build) to produce it locally.
 
 ## Node
 
@@ -90,7 +88,7 @@ bundle of `rust,typescript,javascript,json`.
 
 ## API
 
-The TypeScript declarations in [lib/core.d.ts](lib/core.d.ts) are the reference.
+The TypeScript declarations in [lib/core.d.ts](https://github.com/phongndo/syntaxmate/blob/main/bindings/wasm/lib/core.d.ts) are the reference.
 
 - `Highlighter.fromBundle(bytes)`: decodes a grammar bundle.
   - `html(code, { lang, theme, includeWrapper, class, includeScopes, classPrefix })`
@@ -174,7 +172,7 @@ capacity does not shrink, so its byte length is not a measure of live allocation
 ## Subset bundles
 
 Build a smaller bundle with the `syntaxmate-bundle` tool described in
-[asset docs](../../docs/assets.md#custom-and-subset-bundles), using the same
+[asset docs](https://github.com/phongndo/syntaxmate/blob/main/docs/assets.md#custom-and-subset-bundles), using the same
 Syntaxmate version, then pass its bytes, path, or URL as `bundle`.
 
 ## Build
@@ -185,7 +183,7 @@ layout is explicit. It needs:
 - Rust with the `wasm32-unknown-unknown` target
   (`rustup target add wasm32-unknown-unknown`);
 - `wasm-bindgen-cli` at exactly the `wasm-bindgen` version pinned in
-  [Cargo.toml](Cargo.toml)
+  [Cargo.toml](https://github.com/phongndo/syntaxmate/blob/main/bindings/wasm/Cargo.toml)
   (`cargo install wasm-bindgen-cli --version <version> --locked`);
 - Node 24 or later;
 - optionally binaryen's `wasm-opt`.
@@ -199,21 +197,21 @@ npm test
 On the repository's Nix setup, the `wasm` shell provides all of these:
 `nix develop .#wasm -c sh -c 'cd bindings/wasm && npm run build && npm test'`.
 
-`npm run build` runs [scripts/build.mjs](scripts/build.mjs). It compiles with
+`npm run build` runs [scripts/build.mjs](https://github.com/phongndo/syntaxmate/blob/main/bindings/wasm/scripts/build.mjs). It compiles with
 the `wasm-release` profile, generates `dist/` with `wasm-bindgen --target web`,
 optimizes with `wasm-opt -O3` when available (measured about 1% faster and
 18% smaller than unoptimized; `-O4` and SIMD gave no clear gain), and copies `grammars.bundle` and
 license files into the package. `npm pack` then produces the tarball.
 
 `npm test` runs the API tests and the shared
-[conformance cases](../conformance/README.md) with `node --test`.
+[conformance cases](https://github.com/phongndo/syntaxmate/blob/main/bindings/conformance/README.md) with `node --test`.
 `npm run typecheck` checks the declarations under `tsc --strict` with a
 temporary TypeScript download.
 
 ## Benchmark
 
-[bench/bench.mjs](bench/bench.mjs) compares HTML output against the pinned Shiki
-in [benchmarks/competitors](../../benchmarks/competitors/README.md), on the
+[bench/bench.mjs](https://github.com/phongndo/syntaxmate/blob/main/bindings/wasm/bench/bench.mjs) compares HTML output against the pinned Shiki
+in [benchmarks/competitors](https://github.com/phongndo/syntaxmate/blob/main/benchmarks/competitors/README.md), on the
 same stress fixtures and theme:
 
 ```sh
@@ -230,7 +228,7 @@ that cache serves; Shiki has no equivalent. Results apply only to the machine
 and revisions measured.
 
 For a Syntaxmate-only comparison that separates token conversion, rendering,
-sessions, startup, and replay, use [bench/profile-node.mjs](bench/profile-node.mjs):
+sessions, startup, and replay, use [bench/profile-node.mjs](https://github.com/phongndo/syntaxmate/blob/main/bindings/wasm/bench/profile-node.mjs):
 
 ```sh
 node bench/profile-node.mjs --packages /path/to/baseline,/path/to/candidate \
@@ -258,7 +256,7 @@ package import. `processTotalMs` covers the entire profiling child, including
 all warm measurements and validation, and is not a startup measurement.
 
 For real-browser measurements, serve the repository over HTTP and open
-[bench/profile.html](bench/profile.html). It uses the same phase profiler in
+[bench/profile.html](https://github.com/phongndo/syntaxmate/blob/main/bindings/wasm/bench/profile.html). It uses the same phase profiler in
 fresh workers, sequentially alternating package order. Browser import, streamed
 WASM initialization, and bundle fetching are measured separately; HTTP and
 compiled-code caches can persist across workers. The normal `npm test` browser
@@ -275,4 +273,4 @@ different cache histories.
 MIT. The grammars and themes in `grammars.bundle` come from upstream projects
 under their own licenses; the built package carries their source pins, license
 records, and notices in `third-party/`, copied from the repository's
-[third-party asset records](../../THIRD_PARTY_LICENSES.md).
+[third-party asset records](https://github.com/phongndo/syntaxmate/blob/main/THIRD_PARTY_LICENSES.md).

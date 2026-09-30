@@ -7,7 +7,9 @@ published versions through the public API and do not control release order.
 
 1. Add a dated `X.Y.Z` section to [CHANGELOG.md](../CHANGELOG.md), including
    migration notes and intentional scope/style changes.
-2. Update the version in [Cargo.toml](../Cargo.toml) and regenerate `Cargo.lock`.
+2. Update the version in [Cargo.toml](../Cargo.toml) and the bindings (see
+   [Language bindings](#language-bindings)), then run `cargo update --workspace`
+   for `Cargo.lock`, `bindings/Cargo.lock`, and `fuzz/Cargo.lock`.
 3. Review asset provenance and generated-file freshness using the
    [asset procedure](assets.md). Require the complete [CI matrix](../.github/workflows/ci.yml)
    to pass, including packaged consumers and performance policies.
@@ -40,6 +42,22 @@ checkout maintenance and expose implementation details outside the stable public
 contract. Nightly rustdoc labels feature-gated items through `doc(auto_cfg)`;
 ordinary stable documentation builds do not require unstable compiler features.
 
+## Language bindings
+
+The Python and JavaScript bindings share the crate's version. Bump
+[bindings/Cargo.toml](../bindings/Cargo.toml),
+[pyproject.toml](../bindings/python/pyproject.toml), and
+[package.json](../bindings/wasm/package.json) with [Cargo.toml](../Cargo.toml),
+along with the version check in the Python tests.
+
+The same tag triggers the [bindings release workflow](../.github/workflows/release-bindings.yml).
+It runs the Python and JavaScript binding workflows at the tagged commit. It
+then publishes the manylinux, macOS, and Windows `abi3` wheels and the sdist to
+PyPI, and the packed tarball to npm. Versions already on a registry are skipped.
+Run it manually with a ref to retry, or to publish bindings for an already
+released version. The C and C++ binding ships only as source in the tagged
+repository.
+
 ## Publishing credentials
 
 The workflow uses crates.io OIDC trusted publishing through the `crates-io`
@@ -47,6 +65,11 @@ GitHub environment. The publisher configuration must match the repository,
 workflow, and environment. Protect that environment with reviewers and tag-only
 deployment rules; verify repository protections in GitHub rather than assuming
 this file configures them. Routine releases do not require a stored registry token.
+
+The bindings use the same arrangement: PyPI trusted publishing through the
+`pypi` environment and npm trusted publishing through the `npm` environment,
+both for `release-bindings.yml`. npm accepts a trusted publisher only for an
+existing package, so the first npm version must be published manually.
 
 ## Version policy
 
