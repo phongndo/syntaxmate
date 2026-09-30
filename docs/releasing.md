@@ -7,7 +7,9 @@ published versions through the public API and do not control release order.
 
 1. Add a dated `X.Y.Z` section to [CHANGELOG.md](../CHANGELOG.md), including
    migration notes and intentional scope/style changes.
-2. Update the version in [Cargo.toml](../Cargo.toml) and regenerate `Cargo.lock`.
+2. Update the version in [Cargo.toml](../Cargo.toml) and the bindings (see
+   [Language bindings](#language-bindings)), then run `cargo update --workspace`
+   for `Cargo.lock`, `bindings/Cargo.lock`, and `fuzz/Cargo.lock`.
 3. Review asset provenance and generated-file freshness using the
    [asset procedure](assets.md). Require the complete [CI matrix](../.github/workflows/ci.yml)
    to pass, including packaged consumers and performance policies.
@@ -46,7 +48,7 @@ The Python and JavaScript bindings share the crate's version. Bump
 [bindings/Cargo.toml](../bindings/Cargo.toml),
 [pyproject.toml](../bindings/python/pyproject.toml), and
 [package.json](../bindings/wasm/package.json) with [Cargo.toml](../Cargo.toml),
-then regenerate `bindings/Cargo.lock`.
+along with the version check in the Python tests.
 
 The same tag triggers the [bindings release workflow](../.github/workflows/release-bindings.yml).
 It runs the Python and JavaScript binding workflows at the tagged commit. It
