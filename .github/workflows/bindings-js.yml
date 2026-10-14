@@ -2,6 +2,13 @@ name: Bindings (JavaScript)
 
 on:
   workflow_dispatch:
+  # The release workflow reuses these jobs and publishes the packed tarball.
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build
+        type: string
+        required: true
   pull_request:
     paths: &paths
       - "bindings/wasm/**"
@@ -24,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: syntaxmate-bindings-js-${{ github.event.pull_request.number || github.ref }}
+  group: syntaxmate-bindings-js-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 defaults:
@@ -37,6 +44,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       # rust-toolchain.toml pins the compiler and overrides any toolchain an
       # action selects, so add the wasm target to that pinned toolchain.
       - run: rustup toolchain install && rustup target add wasm32-unknown-unknown
@@ -102,6 +111,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}

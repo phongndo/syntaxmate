@@ -1,6 +1,6 @@
 # syntaxmate for Python
 
-Python bindings for [Syntaxmate](../../README.md), a fast Rust syntax
+Python bindings for [Syntaxmate](https://github.com/phongndo/syntaxmate/blob/main/README.md), a fast Rust syntax
 highlighter powered by TextMate grammars. Highlight to HTML, 24-bit ANSI, or
 flat token arrays, with the full grammar catalog and GitHub themes embedded.
 
@@ -11,12 +11,13 @@ flat token arrays, with the full grammar catalog and GitHub themes embedded.
 
 ## Install
 
-Wheels are not published yet. Build one from a checkout as described in
-[Build from source](#build-from-source), then install it:
-
 ```sh
-pip install bindings/target/wheels/syntaxmate-*.whl
+pip install syntaxmate
 ```
+
+Wheels are published for Linux (x86-64 and ARM64, manylinux), macOS (x86-64
+and ARM64), and Windows (x86-64). Elsewhere, pip builds the sdist, which needs
+Rust; see [Build from source](#build-from-source).
 
 ## Usage
 
@@ -54,7 +55,7 @@ HTML options (keyword-only) are `include_wrapper`, `wrapper_class`,
 `include_scopes` (adds `data-scopes`), and `class_prefix`. ANSI options are
 `colors`, `sanitize_control_characters` (on by default so untrusted source
 cannot inject escape sequences), and `include_default_background`. See
-[rendering](../../docs/rendering.md) for their exact behavior.
+[rendering](https://github.com/phongndo/syntaxmate/blob/main/docs/rendering.md) for their exact behavior.
 
 ### Tokens
 
@@ -123,7 +124,7 @@ such as `"\ud800"` raises the standard `UnicodeEncodeError`, a `ValueError`.
 ### Subset bundles
 
 To ship fewer grammars, build a bundle with the
-[subset-bundle command](../../docs/assets.md#custom-and-subset-bundles) and load it:
+[subset-bundle command](https://github.com/phongndo/syntaxmate/blob/main/docs/assets.md#custom-and-subset-bundles) and load it:
 
 ```python
 hl = syntaxmate.Highlighter.from_bundle(open("grammars-subset.bundle", "rb").read())
@@ -158,22 +159,22 @@ grammars under `*.dist-info/licenses/third-party/`. `third-party/` holds
 symlinks into `assets/` because maturin rejects `../` paths in `license-files`;
 the sdist stores their contents.
 
-The tests include the shared [conformance fixtures](../conformance/README.md):
+The tests include the shared [conformance fixtures](https://github.com/phongndo/syntaxmate/blob/main/bindings/conformance/README.md):
 every case must match the reference HTML, class-mode HTML, ANSI, token buffers
 in all three offset units, scopes, and session output exactly.
 
 ## Benchmark
 
-[`bench/bench_html.py`](bench/bench_html.py) compares HTML throughput with
+[`bench/bench_html.py`](https://github.com/phongndo/syntaxmate/blob/main/bindings/python/bench/bench_html.py) compares HTML throughput with
 Pygments on the stress fixtures used by the
-[competitive benchmarks](../../benchmarks/competitors/README.md). It needs this
+[competitive benchmarks](https://github.com/phongndo/syntaxmate/blob/main/benchmarks/competitors/README.md). It needs this
 package and Pygments installed in the same interpreter:
 
 ```sh
 python bench/bench_html.py --samples 5 --json /tmp/bench.json
 ```
 
-For a Syntaxmate-only API sample, use [`bench/profile_api.py`](bench/profile_api.py):
+For a Syntaxmate-only API sample, use [`bench/profile_api.py`](https://github.com/phongndo/syntaxmate/blob/main/bindings/python/bench/profile_api.py):
 
 ```sh
 python bench/profile_api.py ../../tests/fixtures/textmate/rust/stress.rs --operation tokens --scopes
