@@ -23,7 +23,11 @@ fuzz_target!(|data: &[u8]| {
     };
     if let Ok(mut tokenizer) = Tokenizer::new(&registry, root, options) {
         let document = tokenizer.tokenize(source);
-        let source_lines = source.split('\n').collect::<Vec<_>>();
+        // Logical lines: one `\r` at the end of a line is part of the terminator.
+        let source_lines = source
+            .split('\n')
+            .map(|line| line.strip_suffix('\r').unwrap_or(line))
+            .collect::<Vec<_>>();
         assert_eq!(document.lines().len(), source_lines.len());
         for (line, text) in document.lines().iter().zip(&source_lines) {
             for span in line.tokens() {
@@ -46,15 +50,6 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(incremental.status(), replay.status());
             assert_eq!(incremental.tokens(), replay.tokens());
             assert_eq!(state.depth(), replay_state.depth());
-
-            // `tokenize()` leaves the final line without a synthetic newline when
-            // the source has no trailing `\n`, while `tokenize_line()` always
-            // appends one. Skip complete↔incremental parity for that case.
-            let final_line_without_eol =
-                line_index + 1 == source_lines.len() && !source.ends_with('\n');
-            if final_line_without_eol {
-                continue;
-            }
 
             let complete = &document.lines()[line_index];
             let complete_scopes = complete

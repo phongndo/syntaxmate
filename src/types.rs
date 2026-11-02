@@ -1,5 +1,5 @@
 use std::sync::{
-    Arc, RwLock,
+    Arc, Mutex, MutexGuard, RwLock,
     atomic::{AtomicU64, AtomicUsize, Ordering, fence},
 };
 
@@ -66,6 +66,13 @@ const STYLE_CACHE_UPDATING_EPOCH: u64 = 1;
 pub(crate) struct HighlightScopeTable {
     atoms: Vec<Arc<str>>,
     stacks: Vec<Arc<[ScopeAtomId]>>,
+    /// Nearest earlier stack that is a strict prefix of each stack, or
+    /// `u32::MAX`. Theme resolution resumes from it instead of rescanning
+    /// every level, keeping deeply nested documents linear.
+    ancestors: Vec<u32>,
+    /// Per-level states of the last stack resolved on a cache miss, so a
+    /// sibling stack resumes from their longest common prefix.
+    style_cursor: Mutex<StyleCursor>,
     resolved_styles: Vec<[AtomicU64; STYLE_CACHE_SLOTS]>,
     style_cache_generations: [AtomicU64; STYLE_CACHE_SLOTS],
     style_cache_epochs: [AtomicU64; STYLE_CACHE_SLOTS],
@@ -76,11 +83,24 @@ pub(crate) struct HighlightScopeTable {
     style_cache_stats_enabled: bool,
 }
 
+/// Resolution states for every level of one stack under one theme.
+#[derive(Debug, Default)]
+pub(crate) struct StyleCursor {
+    /// Theme generation the states belong to; zero is never a generation.
+    pub(crate) theme: u64,
+    pub(crate) atoms: Vec<ScopeAtomId>,
+    /// `levels[i]` is the packed state after `base + i` levels.
+    pub(crate) base: usize,
+    pub(crate) levels: Vec<u64>,
+}
+
 impl Clone for HighlightScopeTable {
     fn clone(&self) -> Self {
         Self {
             atoms: self.atoms.clone(),
             stacks: self.stacks.clone(),
+            ancestors: self.ancestors.clone(),
+            style_cursor: Mutex::default(),
             resolved_styles: (0..self.stacks.len())
                 .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                 .collect(),
@@ -108,6 +128,8 @@ impl Default for HighlightScopeTable {
         Self {
             atoms: Vec::new(),
             stacks: vec![Arc::from([])],
+            ancestors: Vec::new(),
+            style_cursor: Mutex::default(),
             resolved_styles: vec![std::array::from_fn(|_| AtomicU64::new(0))],
             style_cache_generations: std::array::from_fn(|_| AtomicU64::new(0)),
             style_cache_epochs: std::array::from_fn(|_| AtomicU64::new(0)),
@@ -139,6 +161,8 @@ impl HighlightScopeTable {
             Self {
                 atoms,
                 stacks: vec![Arc::from([]), Arc::from(stack)],
+                ancestors: Vec::new(),
+                style_cursor: Mutex::default(),
                 resolved_styles: (0..2)
                     .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                     .collect(),
@@ -156,6 +180,20 @@ impl HighlightScopeTable {
 
     pub fn stack(&self, stack: ScopeStackId) -> Option<&[ScopeAtomId]> {
         self.stacks.get(stack.0 as usize).map(AsRef::as_ref)
+    }
+
+    pub(crate) fn style_cursor(&self) -> MutexGuard<'_, StyleCursor> {
+        self.style_cursor
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The nearest recorded strict-prefix stack of `stack`.
+    pub(crate) fn ancestor(&self, stack: ScopeStackId) -> Option<ScopeStackId> {
+        self.ancestors
+            .get(stack.0 as usize)
+            .filter(|ancestor| **ancestor != u32::MAX)
+            .map(|ancestor| ScopeStackId(*ancestor))
     }
 
     pub fn atom(&self, atom: ScopeAtomId) -> Option<&str> {
@@ -201,11 +239,20 @@ impl HighlightScopeTable {
         )
     }
 
-    pub(crate) fn from_parts(atoms: Vec<Arc<str>>, stacks: Vec<Arc<[ScopeAtomId]>>) -> Self {
+    /// `ancestors[i]` must name an earlier stack that is a strict prefix of
+    /// stack `i`, or be `u32::MAX`; an empty list records no ancestors.
+    pub(crate) fn from_parts(
+        atoms: Vec<Arc<str>>,
+        stacks: Vec<Arc<[ScopeAtomId]>>,
+        ancestors: Vec<u32>,
+    ) -> Self {
         let stack_count = stacks.len();
+        debug_assert!(ancestors.is_empty() || ancestors.len() == stack_count);
         Self {
             atoms,
             stacks,
+            ancestors,
+            style_cursor: Mutex::default(),
             resolved_styles: (0..stack_count)
                 .map(|_| std::array::from_fn(|_| AtomicU64::new(0)))
                 .collect(),

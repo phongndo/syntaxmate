@@ -287,7 +287,7 @@ fn main() {
         for _ in 0..5 {
             let started = Instant::now();
             let highlighter = Highlighter::bundled().unwrap();
-            black_box(highlighter.highlight_with_theme(language, &source, &theme)).unwrap();
+            let _ = black_box(highlighter.highlight_with_theme(language, &source, &theme)).unwrap();
             raw.push(started.elapsed().as_secs_f64() * 1e6);
             let started = Instant::now();
             let engine = Engine::bundled().unwrap();

@@ -17,6 +17,7 @@ use crate::theme::RgbColor;
 use crate::{Error, HighlightedDocument, Result, Style, theme::FontModifiers};
 
 /// A rendered string together with the tokenizer completion status.
+#[must_use = "highlighted output does nothing unless used"]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedOutput {
     content: String,
@@ -37,6 +38,13 @@ impl RenderedOutput {
     /// Reports whether tokenization completed without exhausting a safety budget.
     pub fn status(&self) -> HighlightStatus {
         self.status
+    }
+
+    /// Returns `self`, or [`Error::Incomplete`] when a resource limit degraded
+    /// highlighting. Use it to treat degraded output as a failure:
+    /// `highlighter.highlight_html(..)?.require_complete()?`.
+    pub fn require_complete(self) -> crate::Result<Self> {
+        self.status().require(self)
     }
 }
 
@@ -111,13 +119,7 @@ pub fn render_html_to(
     let prefix = options.class_prefix.as_deref().map(encode_class_prefix);
     write_html_start(document.default_style, options, prefix.as_deref(), output)
         .map_err(write_error)?;
-    for (index, (chunk, line)) in crate::engine::line::LineChunks::new(source)
-        .zip(document.lines())
-        .enumerate()
-    {
-        if index != 0 {
-            output.write_char('\n').map_err(write_error)?;
-        }
+    for (chunk, line) in crate::engine::line::LineChunks::new(source).zip(document.lines()) {
         let spans = line
             .tokens()
             .iter()
@@ -131,6 +133,7 @@ pub fn render_html_to(
             output,
         )
         .map_err(write_error)?;
+        output.write_str(chunk.terminator).map_err(write_error)?;
     }
     write_html_end(options, output).map_err(write_error)?;
     Ok(document.status())
@@ -150,11 +153,8 @@ pub(crate) fn render_html_compact(
     let prefix = options.class_prefix.as_deref().map(encode_class_prefix);
     write_html_start(defaults, options, prefix.as_deref(), &mut output).map_err(write_error)?;
     let mut chunks = crate::engine::line::LineChunks::new(source);
-    for (index, line) in tokens.lines.iter().enumerate() {
+    for line in &tokens.lines {
         let chunk = chunks.next().ok_or_else(compact_line_count_error)?;
-        if index != 0 {
-            output.push('\n');
-        }
         let spans = line.segments.iter().map(|span| {
             (
                 span.byte_start..span.byte_end,
@@ -171,6 +171,7 @@ pub(crate) fn render_html_compact(
             &mut output,
         )
         .map_err(write_error)?;
+        output.push_str(chunk.terminator);
     }
     if chunks.next().is_some() {
         return Err(compact_line_count_error());
@@ -181,6 +182,11 @@ pub(crate) fn render_html_compact(
         status,
     })
 }
+
+#[cfg(feature = "html")]
+mod themes;
+#[cfg(feature = "html")]
+pub use themes::render_html_themes;
 
 #[cfg(feature = "html")]
 fn write_html_start(
@@ -667,19 +673,14 @@ pub fn render_ansi_to(
     output: &mut dyn Write,
 ) -> Result<HighlightStatus> {
     validate_document(source, document)?;
-    for (index, (chunk, line)) in crate::engine::line::LineChunks::new(source)
-        .zip(document.lines())
-        .enumerate()
-    {
-        if index != 0 {
-            output.write_char('\n').map_err(write_error)?;
-        }
+    for (chunk, line) in crate::engine::line::LineChunks::new(source).zip(document.lines()) {
         let spans = line
             .tokens()
             .iter()
             .map(|span| (span.range(), span.style()));
         render_ansi_line(chunk.text, spans, document.default_style, options, output)
             .map_err(write_error)?;
+        output.write_str(chunk.terminator).map_err(write_error)?;
     }
     Ok(document.status())
 }
@@ -696,11 +697,8 @@ pub(crate) fn render_ansi_compact(
     let mut output = String::with_capacity(source.len().saturating_mul(2));
     let defaults = theme.resolve_scope_names(&[]);
     let mut chunks = crate::engine::line::LineChunks::new(source);
-    for (index, line) in tokens.lines.iter().enumerate() {
+    for line in &tokens.lines {
         let chunk = chunks.next().ok_or_else(compact_line_count_error)?;
-        if index != 0 {
-            output.push('\n');
-        }
         let spans = line.segments.iter().map(|span| {
             (
                 span.byte_start..span.byte_end,
@@ -708,6 +706,7 @@ pub(crate) fn render_ansi_compact(
             )
         });
         render_ansi_line(chunk.text, spans, defaults, options, &mut output).map_err(write_error)?;
+        output.push_str(chunk.terminator);
     }
     if chunks.next().is_some() {
         return Err(compact_line_count_error());
@@ -858,22 +857,36 @@ fn write_error(error: fmt::Error) -> Error {
 
 #[cfg(any(feature = "ansi", feature = "html"))]
 fn validate_document(source: &str, document: &HighlightedDocument) -> Result<()> {
+    validate_lines(
+        source,
+        document
+            .lines()
+            .iter()
+            .map(|line| line.tokens().iter().map(crate::HighlightedToken::range)),
+    )
+}
+
+/// Checks that a document's line count and token byte ranges fit `source`.
+#[cfg(any(feature = "ansi", feature = "html"))]
+fn validate_lines<R: Iterator<Item = Range<usize>>>(
+    source: &str,
+    lines: impl ExactSizeIterator<Item = R>,
+) -> Result<()> {
     let line_count = crate::engine::line::LineChunks::new(source).count();
-    if line_count != document.lines().len() {
+    if line_count != lines.len() {
         return Err(Error::Render(crate::RenderError::mismatch(format!(
             "source has {} logical lines but the highlighted document has {}",
             line_count,
-            document.lines().len()
+            lines.len()
         ))));
     }
-    for (line_index, (chunk, line)) in crate::engine::line::LineChunks::new(source)
-        .zip(document.lines())
+    for (line_index, (chunk, ranges)) in crate::engine::line::LineChunks::new(source)
+        .zip(lines)
         .enumerate()
     {
         let text = chunk.text;
         let mut cursor = 0;
-        for span in line.tokens() {
-            let range = span.range();
+        for range in ranges {
             if range.start < cursor
                 || range.start > range.end
                 || range.end > text.len()

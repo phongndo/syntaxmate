@@ -1,7 +1,34 @@
+/// One logical line of a document.
+///
+/// Lines end at `\n` or the end of input; one `\r` right before that end
+/// belongs to the terminator, so CRLF input tokenizes exactly like LF input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct LineChunk<'a> {
+    /// Line content without its terminator.
     pub(crate) text: &'a str,
-    pub(crate) parse_text: &'a str,
+    /// Content plus its `\n` for LF lines; use [`Self::parse_text`] instead.
+    raw_parse_text: &'a str,
+    /// The original terminator: `"\n"`, `"\r\n"`, or for the last line `"\r"` or empty.
+    pub(crate) terminator: &'a str,
+}
+
+impl<'a> LineChunk<'a> {
+    /// The text the tokenizer parses: the content plus `\n`, as TextMate
+    /// parses every line. LF lines borrow the source; CRLF and unterminated
+    /// final lines are copied into `buffer` with a synthetic LF.
+    pub(crate) fn parse_text<'b>(&self, buffer: &'b mut String) -> &'b str
+    where
+        'a: 'b,
+    {
+        if self.terminator == "\n" {
+            self.raw_parse_text
+        } else {
+            buffer.clear();
+            buffer.push_str(self.text);
+            buffer.push('\n');
+            buffer
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,7 +66,8 @@ impl<'a> Iterator for LineChunks<'a> {
                 self.final_empty_line = FinalEmptyLine::Complete;
                 return Some(LineChunk {
                     text: "",
-                    parse_text: "",
+                    raw_parse_text: "",
+                    terminator: "",
                 });
             }
             return None;
@@ -48,15 +76,25 @@ impl<'a> Iterator for LineChunks<'a> {
         let rest = &self.source[self.offset..];
         if let Some(newline) = rest.find('\n') {
             let end = self.offset + newline + 1;
-            let parse_text = &self.source[self.offset..end];
-            let text = &parse_text[..parse_text.len() - 1];
+            let raw_parse_text = &self.source[self.offset..end];
+            let line = &raw_parse_text[..raw_parse_text.len() - 1];
+            let (text, terminator) = match line.strip_suffix('\r') {
+                Some(text) => (text, &raw_parse_text[text.len()..]),
+                None => (line, &raw_parse_text[line.len()..]),
+            };
             self.offset = end;
-            Some(LineChunk { text, parse_text })
+            Some(LineChunk {
+                text,
+                raw_parse_text,
+                terminator,
+            })
         } else {
             self.offset = self.source.len();
+            let text = rest.strip_suffix('\r').unwrap_or(rest);
             Some(LineChunk {
-                text: rest,
-                parse_text: rest,
+                text,
+                raw_parse_text: rest,
+                terminator: &rest[text.len()..],
             })
         }
     }
@@ -82,7 +120,21 @@ mod tests {
         let chunks = LineChunks::new("a\n").collect::<Vec<_>>();
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].text, "a");
-        assert_eq!(chunks[0].parse_text, "a\n");
+        assert_eq!(chunks[0].parse_text(&mut String::new()), "a\n");
         assert_eq!(chunks[1].text, "");
+    }
+
+    #[test]
+    fn crlf_terminators_parse_like_lf() {
+        let chunks = LineChunks::new("a\r\nb\n\rc\r").collect::<Vec<_>>();
+        let mut buffer = String::new();
+        assert_eq!(chunks.len(), 3);
+        assert_eq!((chunks[0].text, chunks[0].terminator), ("a", "\r\n"));
+        assert_eq!(chunks[0].parse_text(&mut buffer), "a\n");
+        assert_eq!((chunks[1].text, chunks[1].terminator), ("b", "\n"));
+        assert_eq!(chunks[1].parse_text(&mut buffer), "b\n");
+        // A `\r` inside a line is content; one at the end is a terminator.
+        assert_eq!((chunks[2].text, chunks[2].terminator), ("\rc", "\r"));
+        assert_eq!(chunks[2].parse_text(&mut buffer), "\rc\n");
     }
 }

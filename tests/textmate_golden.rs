@@ -491,7 +491,13 @@ fn manifest_golden_cases_edge_inputs_match_bundled_and_incremental_output() {
         )
         .unwrap();
         let mut state = incremental.initial_state();
-        for (index, line) in golden.source.split('\n').enumerate() {
+        // Incremental calls take logical lines; a CRLF terminator is not content.
+        for (index, line) in golden
+            .source
+            .split('\n')
+            .map(|line| line.strip_suffix('\r').unwrap_or(line))
+            .enumerate()
+        {
             let mut replay_state = state.clone();
             let output = incremental.tokenize_line(line, &mut state).unwrap();
             let replay = incremental.tokenize_line(line, &mut replay_state).unwrap();

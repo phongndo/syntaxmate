@@ -4,6 +4,7 @@
 import fs from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { splitLogicalLines } from './textmate-oracle.mjs'
 
 const require = createRequire(new URL('./golden-oracle/package.json', import.meta.url))
 const onig = require('vscode-oniguruma')
@@ -26,7 +27,7 @@ for (const testCase of cases) {
       const grammar = await registry.loadGrammar(testCase.grammars[0].scopeName)
       let state = textmate.INITIAL
       const lines = []
-      for (const line of source.split('\n')) {
+      for (const line of splitLogicalLines(source)) {
         const result = grammar.tokenizeLine(line, state, 0)
         if (result.stoppedEarly) throw new Error(`oracle stopped: ${testCase.name}`)
         state = result.ruleStack

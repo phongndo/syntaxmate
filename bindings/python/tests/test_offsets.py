@@ -46,8 +46,8 @@ def check(text: str, tokens: syntaxmate.Tokens) -> None:
         offset += size(line) + 1
     assert tokens.line_starts.tolist() == expected_starts
 
-    # Each line's tokens are ordered, contiguous, and cover exactly its text
-    # (a "\r" before "\n" belongs to the line).
+    # Each line's tokens are ordered, contiguous, and cover exactly its text;
+    # one "\r" at the end of a line belongs to the terminator, so no token covers it.
     ranges = tokens.line_token_ranges.tolist()
     assert len(ranges) == len(lines) + 1 and ranges[0] == 0 and ranges[-1] == len(tokens)
     texts = slices(text, tokens)
@@ -57,7 +57,7 @@ def check(text: str, tokens: syntaxmate.Tokens) -> None:
         for i in range(ranges[number], ranges[number + 1]):
             assert starts[i] == position
             position += lengths[i]
-        assert "".join(texts[ranges[number] : ranges[number + 1]]) == line
+        assert "".join(texts[ranges[number] : ranges[number + 1]]) == line.removesuffix("\r")
 
 
 @pytest.mark.parametrize("seed", range(40))
@@ -77,7 +77,8 @@ def test_session_offsets_match_line_slices(seed):
     for line in text.split("\n"):
         tokens = session.line(line)
         assert tokens.line_starts.tolist() == [0]
-        assert "".join(line[t.start : t.end] for t in tokens) == line
+        # Sessions treat one trailing "\r" as part of the terminator too.
+        assert "".join(line[t.start : t.end] for t in tokens) == line.removesuffix("\r")
 
 
 def test_views_are_native_uint32():

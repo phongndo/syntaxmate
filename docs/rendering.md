@@ -101,6 +101,53 @@ and prints fidelity and uncompressed byte sizes:
 cargo test --all-features --locked bundled_css_fidelity_and_size -- --nocapture
 ```
 
+### Multiple themes
+
+Use `render_html_themes` to render light and dark (or any number of) themes in
+one pass, with each theme resolved exactly. The first theme renders as normal
+inline styles. Each additional theme adds inherited custom properties per run:
+`--sm-{name}` (color), `--sm-{name}-bg` (background), and `--sm-{name}-fw`,
+`-fs`, and `-td` (weight, style, and decoration):
+
+```rust
+use syntaxmate::{Highlighter, HtmlOptions, Theme, render_html_themes};
+
+let source = "fn main() {}";
+let highlighter = Highlighter::bundled()?;
+let document = highlighter.tokenize("rust", source)?;
+let light = Theme::bundled("github-light")?;
+let dark = Theme::bundled("github-dark")?;
+let html = render_html_themes(
+    source,
+    &document,
+    &[("light", &light), ("dark", &dark)],
+    &HtmlOptions::default(),
+)?;
+assert!(html.as_str().contains("--sm-dark:#"));
+# Ok::<(), syntaxmate::Error>(())
+```
+
+Switch themes with CSS alone, here following the system color scheme:
+
+```css
+@media (prefers-color-scheme: dark) {
+  .syntaxmate,
+  .syntaxmate span {
+    color: var(--sm-dark) !important;
+    background-color: var(--sm-dark-bg) !important;
+    font-weight: var(--sm-dark-fw) !important;
+    font-style: var(--sm-dark-fs) !important;
+    text-decoration: var(--sm-dark-td) !important;
+  }
+}
+```
+
+With the wrapper, runs omit values equal to a theme's defaults and inherit
+them from `<pre>`, which also resets each theme's font properties. Without the
+wrapper, every run carries every value. Unlike class mode, no stylesheet
+approximates the theme selectors, so custom themes render exactly. The output
+grows with each extra theme and does not support `class_prefix`.
+
 ## ANSI
 
 ```rust

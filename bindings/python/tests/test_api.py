@@ -80,7 +80,7 @@ def test_tokens_index_python_strings(hl):
     assert len(tokens) == len(tokens.starts) == len(tokens.lengths) == len(tokens.scope_ids)
     assert tokens.starts.format == "I" and tokens.starts.readonly
     text = "".join(SOURCE[t.start : t.end] for t in tokens)
-    assert text == SOURCE.replace("\n", "")
+    assert text == SOURCE.replace("\r\n", "\n").replace("\n", "")
     assert all(t.scopes and t.scopes[0] == "source.js" for t in tokens)
     assert tokens[-1].end == tokens.starts[-1] + tokens.lengths[-1]
     with pytest.raises(IndexError):

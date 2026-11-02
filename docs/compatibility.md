@@ -15,7 +15,10 @@ injections, and cross-line continuation. Exact ordered scope stacks are public
 output; themes are optional.
 
 Public ranges are UTF-8 byte offsets on character boundaries, relative to their
-logical line. The JavaScript oracle uses UTF-16 offsets, which the tests convert
+logical line. Lines end at `\n` or the end of input, and one `\r` at the end of
+a line belongs to the terminator, so CRLF input tokenizes like LF input.
+Renderers keep the original terminators; a `\r` elsewhere is line content.
+Incremental calls apply the same rule to a trailing `\r`. The JavaScript oracle uses UTF-16 offsets, which the tests convert
 before comparison. Incremental calls accept one logical line without its newline
 terminator and apply TextMate line-termination semantics internally. Consult
 [Tokenizer rustdoc](https://docs.rs/syntaxmate/latest/syntaxmate/struct.Tokenizer.html)

@@ -101,11 +101,10 @@ fn line_scopes_incremental(
 }
 
 #[test]
-fn final_line_without_trailing_newline_can_differ_from_tokenize_line() {
-    // Lookahead class includes `\s`, so the synthetic newline that
-    // `tokenize_line` always appends changes the match at EOF.
-    // The fuzz harness therefore skips complete↔incremental parity for the
-    // final line when the source has no trailing newline.
+fn final_line_without_trailing_newline_matches_tokenize_line() {
+    // Lookahead class includes `\s`, so the match at EOF depends on the
+    // synthetic newline. vscode-textmate appends it to every line, including
+    // an unterminated final line, and so do complete and incremental calls.
     let grammar = r#"{
         "scopeName": "source.seed.eol",
         "patterns": [
@@ -119,9 +118,13 @@ fn final_line_without_trailing_newline_can_differ_from_tokenize_line() {
 
     let complete = line_scopes_complete(source, grammar);
     let incremental = line_scopes_incremental(source, grammar);
-    assert_ne!(
-        complete, incremental,
-        "complete tokenize and tokenize_line intentionally disagree without a trailing newline"
+    assert_eq!(complete, incremental);
+    assert_eq!(
+        complete,
+        vec![vec![(
+            0..9,
+            vec!["source.seed.eol".to_owned(), "meta.word".to_owned()]
+        )]]
     );
 }
 

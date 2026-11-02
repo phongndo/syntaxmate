@@ -175,7 +175,8 @@ impl From<Style> for PackedStyle {
 
 /// Styled tokens as struct-of-arrays.
 ///
-/// Lines are split on `\n` only; a `\r` before it belongs to the line text.
+/// Lines are split on `\n`; one `\r` at the end of a line belongs to the
+/// terminator, so no token covers it and it uses [`Self::default_style`].
 /// Token `i` spans `token_starts[i] .. token_starts[i] + token_lengths[i]`,
 /// relative to the whole input (for a session, the input is one line). Tokens
 /// of line `l` are indices `line_token_ranges[l] .. line_token_ranges[l + 1]`,
@@ -422,6 +423,9 @@ pub struct Session {
 
 impl Session {
     /// Highlights the next line; returns a one-line buffer with line-relative offsets.
+    ///
+    /// One trailing `\r` is treated as the rest of a CRLF terminator, as in
+    /// whole documents: it is not tokenized, and no token covers it.
     pub fn line(&mut self, line: &str) -> Result<TokenBuffer> {
         check_len(line)?;
         let status = self.inner.highlight_line_into(line, &mut self.spans)?;

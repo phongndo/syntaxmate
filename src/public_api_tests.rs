@@ -241,6 +241,9 @@ fn public_runtime_types_are_send() {
     assert_send::<Tokenizer>();
     assert_send::<crate::TokenizerState>();
     assert_send::<Theme>();
+    fn assert_sync<T: Sync>() {}
+    assert_sync::<Highlighter>();
+    assert_sync::<Theme>();
 }
 
 #[test]
@@ -726,5 +729,152 @@ fn theme_diagnostics_accept_the_same_scope_view() {
             let _: crate::ThemeSelectorScore = score;
             assert!(matched.selector.is_some());
         }
+    }
+}
+
+#[test]
+fn deeply_nested_styles_resume_exactly() {
+    // Unclosed JSX elements nest one level per line; bracket runs nest on one
+    // line with a punctuation leaf, so no bare prefix is emitted. Both resume
+    // resolution from earlier stacks instead of rescanning every level.
+    let jsx = "<a b=\"c\">{ x: [1, 'y'] }\n".repeat(250);
+    let brackets = format!("{}{}\n", "([{".repeat(250), "}])".repeat(250));
+    let highlighter = Highlighter::bundled().unwrap();
+    for (language, source) in [("jsx", jsx.as_str()), ("smalltalk", brackets.as_str())] {
+        let document = highlighter.tokenize(language, source).unwrap();
+        let depth = document
+            .lines()
+            .iter()
+            .flat_map(|line| line.tokens())
+            .map(|token| token.scopes().count())
+            .max()
+            .unwrap();
+        assert!(depth > 250, "{language} nests {depth} scopes");
+        for name in ["github-light", "github-dark"] {
+            let theme = Theme::bundled(name).unwrap();
+            for token in document.lines().iter().flat_map(|line| line.tokens()) {
+                let names = token.scopes().collect::<Vec<_>>();
+                assert_eq!(
+                    theme.resolve(token.scopes()),
+                    theme.resolve_scope_names(&names),
+                    "{language} {name} {:?}",
+                    token.range()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn require_complete_turns_degraded_output_into_an_error() {
+    let source = "fn long_line() {}";
+    let complete = Highlighter::bundled().unwrap();
+    let html = complete
+        .highlight_html("rust", source, "github-dark")
+        .unwrap()
+        .require_complete()
+        .unwrap();
+    assert!(html.as_str().contains("<pre"));
+    let tight = Highlighter::with_options(TokenizerOptions {
+        max_line_bytes: 4,
+        ..TokenizerOptions::default()
+    })
+    .unwrap();
+    let degraded = [
+        tight
+            .highlight_html("rust", source, "github-dark")
+            .unwrap()
+            .require_complete()
+            .map(drop),
+        tight
+            .highlight("rust", source, "github-dark")
+            .unwrap()
+            .require_complete()
+            .map(drop),
+        tight
+            .tokenize("rust", source)
+            .unwrap()
+            .require_complete()
+            .map(drop),
+        tight
+            .session("rust", "github-dark")
+            .unwrap()
+            .highlight_line(source)
+            .unwrap()
+            .require_complete()
+            .map(drop),
+    ];
+    for result in degraded {
+        assert_eq!(result, Err(Error::Incomplete));
+    }
+    let mut tokenizer = Tokenizer::for_bundled_language(
+        "rust",
+        TokenizerOptions {
+            max_line_bytes: 4,
+            ..TokenizerOptions::default()
+        },
+    )
+    .unwrap();
+    let mut state = tokenizer.initial_state();
+    let line = tokenizer.tokenize_line(source, &mut state).unwrap();
+    assert_eq!(line.require_complete().map(drop), Err(Error::Incomplete));
+}
+
+#[test]
+fn a_trailing_carriage_return_is_part_of_the_terminator_everywhere() {
+    let highlighter = Highlighter::bundled().unwrap();
+    let names = |line: &crate::HighlightedLine| {
+        line.tokens()
+            .iter()
+            .map(|token| {
+                (
+                    token.range(),
+                    token.scopes().map(str::to_owned).collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    for source in ["let a = 1;\r\nlet b = 2;\r", "x\r\n\r\n// c\r"] {
+        let document = highlighter
+            .highlight("rust", source, "github-dark")
+            .unwrap();
+        let lf = highlighter
+            .highlight("rust", &source.replace('\r', ""), "github-dark")
+            .unwrap();
+        let mut session = highlighter.session("rust", "github-dark").unwrap();
+        for ((line, plain), text) in document
+            .lines()
+            .iter()
+            .zip(lf.lines())
+            .zip(source.split('\n'))
+        {
+            assert_eq!(names(line), names(plain), "{source:?}");
+            assert_eq!(
+                names(&session.highlight_line(text).unwrap()),
+                names(line),
+                "{text:?}"
+            );
+        }
+        let ansi = highlighter
+            .highlight_ansi_with_options(
+                "rust",
+                source,
+                "github-dark",
+                &crate::AnsiOptions {
+                    colors: false,
+                    sanitize_control_characters: false,
+                    ..crate::AnsiOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(ansi.as_str(), source);
+    }
+}
+
+#[test]
+fn theme_constants_match_the_bundled_catalog() {
+    assert_eq!(crate::themes::ALL, Catalog::bundled().themes().as_slice());
+    for name in crate::themes::ALL {
+        Theme::bundled(name).unwrap();
     }
 }

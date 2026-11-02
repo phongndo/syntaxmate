@@ -373,3 +373,56 @@ fn preparation_limits_keep_the_known_root_scope() {
 fn error_stays_small() {
     assert!(std::mem::size_of::<Error>() <= 32);
 }
+
+#[test]
+#[cfg(all(feature = "bundled-grammars", feature = "bundled-themes"))]
+fn unknown_names_suggest_the_closest_catalog_name() {
+    let highlighter = crate::Highlighter::bundled().unwrap();
+    let Err(Error::UnknownLanguage(language)) = highlighter.tokenize("rsut", "x") else {
+        panic!("expected an unknown language");
+    };
+    assert_eq!(language, "rsut");
+    assert_eq!(language.suggestion(), Some("rust"));
+    assert!(
+        Error::UnknownLanguage(language.clone())
+            .to_string()
+            .ends_with("did you mean `rust`?")
+    );
+    // Aliases are candidates, and case is ignored.
+    let Err(Error::UnknownLanguage(alias)) = highlighter.tokenize("TSX2", "x") else {
+        panic!("expected an unknown language");
+    };
+    assert_eq!(alias.suggestion(), Some("tsx"));
+    let Err(Error::UnknownLanguage(far)) = highlighter.tokenize("zzzzzzzz", "x") else {
+        panic!("expected an unknown language");
+    };
+    assert_eq!(far.suggestion(), None);
+    assert_eq!(
+        Error::UnknownLanguage(far).to_string(),
+        "unknown TextMate language `zzzzzzzz`"
+    );
+
+    let Err(Error::UnknownTheme(theme)) = Theme::bundled("Github-Drak") else {
+        panic!("expected an unknown theme");
+    };
+    assert_eq!(theme.suggestion(), Some("github-dark"));
+    assert!(
+        Error::UnknownTheme(theme)
+            .to_string()
+            .contains("github-light-high-contrast")
+    );
+}
+
+#[test]
+fn custom_catalogs_only_suggest_their_own_languages() {
+    let catalog =
+        crate::Catalog::from_static(include_bytes!("../../tests/fixtures/bundles/json.bundle"))
+            .unwrap();
+    let highlighter = crate::Highlighter::new(&catalog);
+    for (typo, suggestion) in [("jsno", Some("json")), ("rsut", None)] {
+        let Err(Error::UnknownLanguage(name)) = highlighter.tokenize(typo, "x") else {
+            panic!("expected an unknown language");
+        };
+        assert_eq!(name.suggestion(), suggestion, "{typo}");
+    }
+}

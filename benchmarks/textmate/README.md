@@ -42,7 +42,7 @@ python3 tools/check-allocation-performance.py \
   --write-report target/textmate-performance/allocation-report.json
 ```
 
-[profile-alloc](../../examples/profile-alloc.rs) measures construction,
+[profile-alloc](../../tools/profiling/profile-alloc.rs) measures construction,
 whole-document and incremental first/warm phases, styling, and prepared-language
 creation/reuse. It reports allocation/reallocation calls, cumulative bytes,
 boundary retention, peak additional live bytes, completion, and output digests.
@@ -51,7 +51,7 @@ again. Digest work stays outside timed API intervals.
 
 The counting allocator changes costs. Use uninstrumented engine/product drivers
 for latency claims and report allocation measurements separately.
-[profile-prepared](../../examples/profile-prepared.rs) compares independent
+[profile-prepared](../../tools/profiling/profile-prepared.rs) compares independent
 sessions in `direct`, `prepared-total`, and `prepared-reuse` modes, also with a
 counting allocator.
 

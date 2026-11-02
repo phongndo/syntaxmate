@@ -36,10 +36,10 @@ impl BuiltinTextMateTheme {
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Dark => "github-dark",
-            Self::DarkHighContrast => "github-dark-high-contrast",
-            Self::Light => "github-light",
-            Self::LightHighContrast => "github-light-high-contrast",
+            Self::Dark => crate::themes::GITHUB_DARK,
+            Self::DarkHighContrast => crate::themes::GITHUB_DARK_HIGH_CONTRAST,
+            Self::Light => crate::themes::GITHUB_LIGHT,
+            Self::LightHighContrast => crate::themes::GITHUB_LIGHT_HIGH_CONTRAST,
         }
     }
 
@@ -97,7 +97,7 @@ impl FontModifiers {
         self.0 == 0
     }
 
-    fn insert(&mut self, other: Self) {
+    pub(crate) fn insert(&mut self, other: Self) {
         self.0 |= other.0;
     }
 }
@@ -248,9 +248,118 @@ struct RawTheme {
     #[serde(default)]
     name: String,
     #[serde(default)]
-    colors: HashMap<String, serde_json::Value>,
+    colors: RawColors,
     #[serde(default)]
     token_colors: Vec<RawRule>,
+}
+
+/// Workbench colors in document order. Non-string values are kept as `None`
+/// so a later duplicate key still overrides an earlier one, as with a map.
+#[derive(Debug, Default)]
+struct RawColors(Vec<(String, Option<String>)>);
+
+impl RawColors {
+    /// The last value recorded for `name`, if it is a string.
+    fn get(&self, name: &str) -> Option<&str> {
+        self.0
+            .iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .and_then(|(_, value)| value.as_deref())
+    }
+}
+
+impl<'de> Deserialize<'de> for RawColors {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ColorsVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ColorsVisitor {
+            type Value = RawColors;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a map of workbench colors")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut colors = Vec::with_capacity(map.size_hint().unwrap_or(0));
+                while let Some((key, value)) = map.next_entry::<String, MaybeString>()? {
+                    colors.push((key, value.0));
+                }
+                Ok(RawColors(colors))
+            }
+        }
+
+        deserializer.deserialize_map(ColorsVisitor)
+    }
+}
+
+/// Any JSON value, keeping only strings.
+struct MaybeString(Option<String>);
+
+impl<'de> Deserialize<'de> for MaybeString {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct MaybeStringVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for MaybeStringVisitor {
+            type Value = MaybeString;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("any JSON value")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(MaybeString(Some(value.to_owned())))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(MaybeString(Some(value)))
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(MaybeString(None))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(MaybeString(None))
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(MaybeString(None))
+            }
+
+            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(MaybeString(None))
+            }
+
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Ok(MaybeString(None))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(MaybeString(None))
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                while map
+                    .next_entry::<serde::de::IgnoredAny, serde::de::IgnoredAny>()?
+                    .is_some()
+                {}
+                Ok(MaybeString(None))
+            }
+        }
+
+        deserializer.deserialize_any(MaybeStringVisitor)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,11 +369,45 @@ struct RawRule {
     settings: RawSettings,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug)]
 enum RawScopes {
     One(String),
     Many(Vec<String>),
+}
+
+impl<'de> Deserialize<'de> for RawScopes {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ScopesVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ScopesVisitor {
+            type Value = RawScopes;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a scope selector string or a list of them")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                Ok(RawScopes::One(value.to_owned()))
+            }
+
+            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
+                Ok(RawScopes::One(value))
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut scopes = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+                while let Some(scope) = seq.next_element::<String>()? {
+                    scopes.push(scope);
+                }
+                Ok(RawScopes::Many(scopes))
+            }
+        }
+
+        deserializer.deserialize_any(ScopesVisitor)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -284,24 +427,27 @@ impl TextMateTheme {
         let editor_background = raw
             .colors
             .get("editor.background")
-            .and_then(|value| value.as_str())
             .map(parse_editor_background)
             .transpose()?;
-        let colors = raw
-            .colors
-            .iter()
-            .filter_map(|(name, value)| {
-                value
-                    .as_str()
-                    .and_then(|value| parse_color(value, editor_background).ok())
-                    .map(|color| (name.clone(), color))
-            })
-            .collect();
+        let mut colors = HashMap::with_capacity(raw.colors.0.len());
+        for (name, value) in &raw.colors.0 {
+            // The last value for a key wins; one that is not a valid color
+            // removes the key, as the final map value would be skipped.
+            match value
+                .as_deref()
+                .and_then(|value| parse_color(value, editor_background).ok())
+            {
+                Some(color) => {
+                    colors.insert(name.clone(), color);
+                }
+                None => {
+                    colors.remove(name);
+                }
+            }
+        }
         let default_style = Style {
             foreground: parse_optional_color(
-                raw.colors
-                    .get("editor.foreground")
-                    .and_then(|value| value.as_str()),
+                raw.colors.get("editor.foreground"),
                 editor_background,
             )?,
             background: editor_background,
@@ -502,18 +648,89 @@ impl TextMateTheme {
         if let Some(style) = cached {
             return unpack_style(style);
         }
-        let scopes = TableScopeStack {
-            table,
-            atoms: table.stack(stack).unwrap_or_default(),
+        // Resolution at each level depends only on the levels above it, so a
+        // stack resumes from its nearest resolved ancestor. Collect uncached
+        // ancestors iteratively, then resolve them outermost first.
+        let mut pending = vec![(stack, slot)];
+        let mut base = None;
+        let mut cursor = stack;
+        while let Some(ancestor) = table.ancestor(cursor) {
+            let (slot, cached) = table.cached_style(self.generation, ancestor);
+            if let Some(style) = cached {
+                base = Some((ancestor, unpack_style(style)));
+                break;
+            }
+            pending.push((ancestor, slot));
+            cursor = ancestor;
+        }
+        let (mut start, mut resolved) = match base {
+            Some((ancestor, style)) => (table.stack(ancestor).unwrap_or_default().len(), style),
+            None => (
+                0,
+                ResolvedThemeStyle {
+                    style: self.default_style,
+                    ..ResolvedThemeStyle::default()
+                },
+            ),
         };
-        let matched = self.resolve_scope_stack(&scopes);
-        let resolved = ResolvedThemeStyle {
-            foreground_matched: matched.foreground_matched,
-            background_matched: matched.background_matched,
-            modifiers_matched: matched.modifiers_matched,
-            style: matched.style,
-        };
-        table.cache_style(self.generation, stack, slot, pack_style(resolved));
+        // Stacks emitted in document order usually share a long prefix with
+        // the previous miss even when no shared prefix was emitted on its own
+        // (for example `[...openers, punctuation]`), so also resume from the
+        // per-level states of the last resolved stack.
+        let mut cursor = table.style_cursor();
+        for (pending_stack, slot) in pending.into_iter().rev() {
+            let atoms = table.stack(pending_stack).unwrap_or_default();
+            if atoms.len() - start <= DIRECT_RESOLUTION_LEVELS {
+                // Comparing against the cursor costs more than a few levels.
+                let scopes = TableScopeStack { table, atoms };
+                let matched = self.resolve_scope_levels(&scopes, start, resolved, None);
+                resolved = ResolvedThemeStyle {
+                    foreground_matched: matched.foreground_matched,
+                    background_matched: matched.background_matched,
+                    modifiers_matched: matched.modifiers_matched,
+                    style: matched.style,
+                };
+                table.cache_style(self.generation, pending_stack, slot, pack_style(resolved));
+                start = atoms.len();
+                continue;
+            }
+            let shared = if cursor.theme == self.generation {
+                cursor
+                    .atoms
+                    .iter()
+                    .zip(atoms)
+                    .take_while(|(a, b)| a == b)
+                    .count()
+            } else {
+                0
+            };
+            if shared > start && shared >= cursor.base {
+                resolved = unpack_style(cursor.levels[shared - cursor.base]);
+                start = shared;
+            }
+            if cursor.theme == self.generation && shared >= start && start >= cursor.base {
+                let keep = start - cursor.base + 1;
+                cursor.levels.truncate(keep);
+            } else {
+                cursor.theme = self.generation;
+                cursor.base = start;
+                cursor.levels.clear();
+                cursor.levels.push(pack_style(resolved));
+            }
+            cursor.atoms.truncate(shared);
+            cursor.atoms.extend_from_slice(&atoms[shared..]);
+            let scopes = TableScopeStack { table, atoms };
+            let matched =
+                self.resolve_scope_levels(&scopes, start, resolved, Some(&mut cursor.levels));
+            resolved = ResolvedThemeStyle {
+                foreground_matched: matched.foreground_matched,
+                background_matched: matched.background_matched,
+                modifiers_matched: matched.modifiers_matched,
+                style: matched.style,
+            };
+            table.cache_style(self.generation, pending_stack, slot, pack_style(resolved));
+            start = atoms.len();
+        }
         resolved
     }
 
@@ -550,17 +767,40 @@ impl TextMateTheme {
     where
         S: ThemeScopeStack + ?Sized,
     {
+        let initial = ResolvedThemeStyle {
+            style: self.default_style,
+            ..ResolvedThemeStyle::default()
+        };
+        self.resolve_scope_levels(scopes, 0, initial, None)
+    }
+
+    /// Applies levels `start + 1..=scopes.len()` on top of `initial`, the
+    /// resolution of the first `start` levels. Selectors only inspect the
+    /// matched level and its ancestors, so a prefix resolves independently of
+    /// deeper levels. A resumed resolution has no representative for the
+    /// skipped levels; only diagnostics read it, and they start at zero.
+    /// `levels` receives the packed state after each applied level.
+    fn resolve_scope_levels<'a, S>(
+        &'a self,
+        scopes: &S,
+        start: usize,
+        initial: ResolvedThemeStyle,
+        mut levels: Option<&mut Vec<u64>>,
+    ) -> ScopeResolution<'a>
+    where
+        S: ThemeScopeStack + ?Sized,
+    {
         // vscode-textmate applies theme attributes every time a scope is
         // pushed, merging only properties set by the new scope into the
         // attributes inherited from its parent. Resolving only the innermost
         // scope incorrectly turns punctuation nested in support.function back
         // to the editor default, which was the remaining LaTeX discrepancy.
-        let mut style = self.default_style;
+        let mut style = initial.style;
         let mut representative: Option<&CompiledThemeRule> = None;
-        let mut foreground_matched = false;
-        let mut background_matched = false;
-        let mut modifiers_matched = false;
-        for depth in 1..=scopes.len() {
+        let mut foreground_matched = initial.foreground_matched;
+        let mut background_matched = initial.background_matched;
+        let mut modifiers_matched = initial.modifiers_matched;
+        for depth in start + 1..=scopes.len() {
             let Some(scope) = scopes.scope_name(depth - 1) else {
                 continue;
             };
@@ -597,6 +837,14 @@ impl TextMateTheme {
             }
             if level_representative.is_some() {
                 representative = level_representative;
+            }
+            if let Some(levels) = levels.as_deref_mut() {
+                levels.push(pack_style(ResolvedThemeStyle {
+                    foreground_matched,
+                    background_matched,
+                    modifiers_matched,
+                    style,
+                }));
             }
         }
         ScopeResolution {
@@ -657,6 +905,10 @@ fn selector_score(rule: &CompiledThemeRule) -> ThemeSelectorScore {
         source_order: rule.source_order,
     }
 }
+
+/// Levels a style-cache miss applies directly before consulting the
+/// resolution cursor.
+const DIRECT_RESOLUTION_LEVELS: usize = 8;
 
 fn next_theme_generation() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(1);
