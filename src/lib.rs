@@ -55,7 +55,7 @@ pub use catalog::{AssetLicense, Catalog, CatalogSummary, LanguageInfo};
 pub use error::{
     BundleError, BundleErrorKind, DiagnosticError, DiagnosticErrorKind, Error, GrammarError,
     GrammarErrorKind, GrammarResource, JsonError, LimitExceeded, MissingInclude, RegexError,
-    RenderError, RenderErrorKind, Result, ThemeError, ThemeErrorKind,
+    RenderError, RenderErrorKind, Result, ThemeError, ThemeErrorKind, UnknownName,
 };
 pub use highlighter::{HighlightSession, Highlighter, HighlighterOptions};
 pub use highlighter::{
@@ -65,7 +65,7 @@ pub use render::RenderedOutput;
 #[cfg(feature = "ansi")]
 pub use render::{AnsiOptions, render_ansi, render_ansi_to};
 #[cfg(feature = "html")]
-pub use render::{HtmlOptions, html_stylesheet, render_html, render_html_to};
+pub use render::{HtmlOptions, html_stylesheet, render_html, render_html_themes, render_html_to};
 pub use theme::{FontModifiers, RgbColor, Style};
 #[cfg(feature = "diagnostics")]
 pub use theme::{ResolvedThemeStyle, ThemeMatch, ThemeSelectorScore};
@@ -97,6 +97,34 @@ mod textmate_golden;
 #[cfg(test)]
 #[path = "../tests/theme_golden.rs"]
 mod theme_golden;
+
+/// Names of the bundled themes, for compile-time checked theme arguments.
+///
+/// ```
+/// use syntaxmate::{Highlighter, themes};
+///
+/// let highlighter = Highlighter::bundled()?;
+/// let html = highlighter.highlight_html("rust", "fn main() {}", themes::GITHUB_DARK)?;
+/// # Ok::<(), syntaxmate::Error>(())
+/// ```
+#[cfg(feature = "bundled-themes")]
+pub mod themes {
+    /// GitHub Dark.
+    pub const GITHUB_DARK: &str = "github-dark";
+    /// GitHub Dark High Contrast.
+    pub const GITHUB_DARK_HIGH_CONTRAST: &str = "github-dark-high-contrast";
+    /// GitHub Light.
+    pub const GITHUB_LIGHT: &str = "github-light";
+    /// GitHub Light High Contrast.
+    pub const GITHUB_LIGHT_HIGH_CONTRAST: &str = "github-light-high-contrast";
+    /// Every bundled theme name, in catalog order.
+    pub const ALL: &[&str] = &[
+        GITHUB_DARK,
+        GITHUB_DARK_HIGH_CONTRAST,
+        GITHUB_LIGHT,
+        GITHUB_LIGHT_HIGH_CONTRAST,
+    ];
+}
 
 /// Feature-gated engine inspection APIs, outside the stable compatibility contract.
 #[cfg(feature = "diagnostics")]

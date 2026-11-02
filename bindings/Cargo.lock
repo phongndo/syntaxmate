@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "syntaxmate"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "memchr",
  "miniz_oxide",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "syntaxmate-boundary"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "syntaxmate",
@@ -283,14 +283,14 @@ dependencies = [
 
 [[package]]
 name = "syntaxmate-ffi"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "syntaxmate-boundary",
 ]
 
 [[package]]
 name = "syntaxmate-python"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "pyo3",
  "syntaxmate-boundary",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "syntaxmate-wasm"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "js-sys",
  "syntaxmate-boundary",

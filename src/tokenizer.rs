@@ -279,7 +279,7 @@ impl PreparedLanguage {
     pub fn from_catalog(catalog: &crate::Catalog, language: &str) -> Result<Self> {
         let canonical = catalog
             .canonical_language(language)
-            .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
+            .ok_or_else(|| catalog.unknown_language(language))?;
         let (grammars, root) =
             crate::engine::load_catalog_grammar_set(catalog.bundle(), canonical)?;
         let scope = grammars
@@ -425,7 +425,7 @@ impl Tokenizer {
     #[cfg(feature = "bundled-grammars")]
     pub fn for_bundled_language(language: &str, options: TokenizerOptions) -> Result<Self> {
         let canonical = crate::grammars::canonical_language(language)
-            .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
+            .ok_or_else(|| crate::Catalog::bundled().unknown_language(language))?;
         let (grammars, root) = crate::engine::load_grammar_set(&canonical)?;
         Ok(Self::from_engine(
             TextMateTokenizer::new(grammars, root),
@@ -460,6 +460,8 @@ impl Tokenizer {
     }
 
     /// Tokenizes one logical line. `line` must not include a newline terminator.
+    /// One trailing `\r` is treated as the rest of a CRLF terminator, as in
+    /// whole documents: it is not tokenized, and no token covers it.
     ///
     /// `\A` matches only while `state` is this tokenizer's initial
     /// document-start state, matching [`Tokenizer::tokenize`]. After a
@@ -486,6 +488,7 @@ impl Tokenizer {
         tokens: &mut Vec<Token>,
     ) -> Result<HighlightStatus> {
         self.validate_line(line, state)?;
+        let line = line_content(line);
         tokens.clear();
         let mut sink = ScopedTokenVecSink { line, tokens };
         Ok(self.tokenize_line_with_validated(line, state, &mut sink))
@@ -503,6 +506,7 @@ impl Tokenizer {
         sink: impl FnMut(Token),
     ) -> Result<HighlightStatus> {
         self.validate_line(line, state)?;
+        let line = line_content(line);
         let mut sink = ScopedTokenCallbackSink {
             line,
             callback: sink,
@@ -525,6 +529,7 @@ impl Tokenizer {
         mut interrupt: impl FnMut() -> bool,
     ) -> Result<HighlightStatus> {
         self.validate_line(line, state)?;
+        let line = line_content(line);
         let mut sink = ScopedTokenCallbackSink {
             line,
             callback: sink,
@@ -551,16 +556,6 @@ impl Tokenizer {
         };
         state.finish_line(next_state);
         Ok(self.take_status())
-    }
-
-    pub(crate) fn tokenize_line_shared_with(
-        &mut self,
-        line: &str,
-        state: &mut TokenizerState,
-        sink: &mut impl SharedScopeSink,
-    ) -> Result<HighlightStatus> {
-        self.validate_line(line, state)?;
-        Ok(self.tokenize_line_shared_with_validated(line, state, sink))
     }
 
     pub(crate) fn tokenize_line_shared_with_validated(
@@ -813,6 +808,15 @@ impl HighlightStatus {
     pub fn is_complete(self) -> bool {
         self == Self::Complete
     }
+
+    /// Returns `value` when complete, or [`Error::Incomplete`].
+    pub(crate) fn require<T>(self, value: T) -> Result<T> {
+        if self.is_complete() {
+            Ok(value)
+        } else {
+            Err(Error::Incomplete)
+        }
+    }
 }
 
 /// Owned scope storage; each token keeps its scopes alive independently of its line.
@@ -945,6 +949,13 @@ impl TokenizedLine {
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
+
+    /// Returns `self`, or [`Error::Incomplete`] when a resource limit degraded
+    /// tokenization. Use it to treat degraded output as a failure:
+    /// `highlighter.highlight_html(..)?.require_complete()?`.
+    pub fn require_complete(self) -> Result<Self> {
+        self.status().require(self)
+    }
 }
 
 impl crate::engine::tokenizer::DocumentOutputLine for TokenizedLine {
@@ -986,7 +997,13 @@ impl crate::engine::tokenizer::DocumentOutputLine for TokenizedLine {
     }
 }
 
+/// A line without the `\r` of a CRLF terminator.
+pub(crate) fn line_content(line: &str) -> &str {
+    line.strip_suffix('\r').unwrap_or(line)
+}
+
 /// Tokenized logical lines and their aggregate completion status.
+#[must_use = "highlighted output does nothing unless used"]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenizedDocument {
     pub(crate) lines: Vec<TokenizedLine>,
@@ -1002,6 +1019,13 @@ impl TokenizedDocument {
     /// Reports whether the entire tokenization operation completed within limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
+    }
+
+    /// Returns `self`, or [`Error::Incomplete`] when a resource limit degraded
+    /// tokenization. Use it to treat degraded output as a failure:
+    /// `highlighter.highlight_html(..)?.require_complete()?`.
+    pub fn require_complete(self) -> Result<Self> {
+        self.status().require(self)
     }
 }
 

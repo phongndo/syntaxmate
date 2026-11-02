@@ -6,7 +6,7 @@ fn main() -> syntaxmate::Result<()> {
     let catalog = Catalog::bundled();
     let language = catalog
         .detect_path(path)
-        .ok_or_else(|| syntaxmate::Error::UnknownLanguage(path.to_owned()))?;
+        .ok_or_else(|| syntaxmate::Error::UnknownLanguage(path.into()))?;
 
     let highlighter = Highlighter::bundled()?;
     let document = highlighter.highlight_path(path, source, "github-dark")?;

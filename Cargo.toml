@@ -1,6 +1,6 @@
 [package]
 name = "syntaxmate"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT"
@@ -92,39 +92,45 @@ name = "syntaxmate-bundle"
 path = "tools/build-bundle.rs"
 required-features = ["bundle-tools"]
 
+# Profiling and diagnostic programs live outside `examples/`, which holds only
+# user-facing examples; they keep `cargo run --example <name>` names.
+[[example]]
+name = "profile-cold"
+path = "tools/profiling/profile-cold.rs"
+
 [[example]]
 name = "profile-alloc"
-path = "examples/profile-alloc.rs"
+path = "tools/profiling/profile-alloc.rs"
 required-features = ["bundled-grammars", "bundled-themes"]
 
 [[example]]
 name = "profile-prepared"
-path = "examples/profile-prepared.rs"
+path = "tools/profiling/profile-prepared.rs"
 required-features = ["bundled-grammars"]
 
 [[example]]
 name = "profile-engine"
-path = "examples/profile-engine.rs"
+path = "tools/profiling/profile-engine.rs"
 required-features = ["bundled-grammars"]
 
 [[example]]
 name = "profile-product"
-path = "examples/profile-product.rs"
+path = "tools/profiling/profile-product.rs"
 required-features = ["bundled-grammars", "bundled-themes", "html", "ansi"]
 
 [[example]]
 name = "regex-parse"
-path = "examples/regex-parse.rs"
+path = "tools/profiling/regex-parse.rs"
 required-features = ["diagnostics"]
 
 [[example]]
 name = "regex-replay"
-path = "examples/regex-replay.rs"
+path = "tools/profiling/regex-replay.rs"
 required-features = ["diagnostics"]
 
 [[example]]
 name = "theme-resolve"
-path = "examples/theme-resolve.rs"
+path = "tools/profiling/theme-resolve.rs"
 required-features = ["bundled-themes"]
 
 [[example]]
@@ -143,10 +149,15 @@ path = "tests/custom_bundle.rs"
 
 [[example]]
 name = "bundle-measure"
-path = "examples/bundle-measure.rs"
+path = "tools/profiling/bundle-measure.rs"
 required-features = ["bundled-grammars"]
 
 [[example]]
 name = "profile-shared"
-path = "examples/profile-shared.rs"
+path = "tools/profiling/profile-shared.rs"
 required-features = ["bundled-grammars"]
+
+[[test]]
+name = "invariants"
+path = "tests/invariants.rs"
+required-features = ["bundled-grammars", "bundled-themes", "html", "ansi"]

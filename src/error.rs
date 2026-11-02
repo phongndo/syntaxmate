@@ -1,5 +1,132 @@
 use std::{fmt, sync::Arc};
 
+/// A language or theme name that is not in the catalog.
+///
+/// Dereferences to the requested name and compares equal to it. When a known
+/// name is within a small edit distance, [`Self::suggestion`] returns it and
+/// the error message asks "did you mean".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownName(Box<UnknownNameInner>);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnknownNameInner {
+    name: String,
+    suggestion: Option<String>,
+}
+
+impl UnknownName {
+    /// Records `name` and the closest of `known`, ignoring ASCII case.
+    pub(crate) fn new<'a>(name: &str, known: impl IntoIterator<Item = &'a str>) -> Self {
+        let lowered = name.trim().to_ascii_lowercase();
+        let length = lowered.chars().count();
+        // Allow one edit per three characters, and at least one. Among equally
+        // close names, prefer the one closest in length (`rsut` -> `rust`).
+        let limit = (length / 3).max(1);
+        let suggestion = known
+            .into_iter()
+            .filter_map(|candidate| {
+                let distance = edit_distance(&lowered, &candidate.to_ascii_lowercase());
+                let skew = length.abs_diff(candidate.chars().count());
+                (distance <= limit).then_some(((distance, skew), candidate))
+            })
+            .min_by_key(|(rank, _)| *rank)
+            .map(|(_, candidate)| candidate.to_owned());
+        Self(Box::new(UnknownNameInner {
+            name: name.to_owned(),
+            suggestion,
+        }))
+    }
+
+    /// The requested name.
+    pub fn name(&self) -> &str {
+        &self.0.name
+    }
+
+    /// The closest known name, if one is near enough to suggest.
+    pub fn suggestion(&self) -> Option<&str> {
+        self.0.suggestion.as_deref()
+    }
+
+    fn write_suggestion(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0.suggestion {
+            Some(suggestion) => write!(f, "; did you mean `{suggestion}`?"),
+            None => Ok(()),
+        }
+    }
+}
+
+impl From<String> for UnknownName {
+    fn from(name: String) -> Self {
+        Self(Box::new(UnknownNameInner {
+            name,
+            suggestion: None,
+        }))
+    }
+}
+
+impl From<&str> for UnknownName {
+    fn from(name: &str) -> Self {
+        name.to_owned().into()
+    }
+}
+
+impl std::ops::Deref for UnknownName {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.0.name
+    }
+}
+
+impl PartialEq<str> for UnknownName {
+    fn eq(&self, other: &str) -> bool {
+        self.0.name == other
+    }
+}
+
+impl PartialEq<&str> for UnknownName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0.name == *other
+    }
+}
+
+impl PartialEq<String> for UnknownName {
+    fn eq(&self, other: &String) -> bool {
+        &self.0.name == other
+    }
+}
+
+impl fmt::Display for UnknownName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0.name)
+    }
+}
+
+/// Optimal string alignment distance: insertions, deletions, substitutions,
+/// and adjacent transpositions each cost one.
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a = a.chars().collect::<Vec<_>>();
+    let b = b.chars().collect::<Vec<_>>();
+    let mut previous2 = vec![0; b.len() + 1];
+    let mut previous = (0..=b.len()).collect::<Vec<_>>();
+    let mut current = vec![0; b.len() + 1];
+    for i in 1..=a.len() {
+        current[0] = i;
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            current[j] = (previous[j] + 1)
+                .min(current[j - 1] + 1)
+                .min(previous[j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                current[j] = current[j].min(previous2[j - 2] + 1);
+            }
+        }
+        std::mem::swap(&mut previous2, &mut previous);
+        std::mem::swap(&mut previous, &mut current);
+    }
+    previous[b.len()]
+}
+
 /// Error returned by a fallible Syntaxmate operation.
 ///
 /// Match the payload's kind to select recovery without parsing display text.
@@ -9,9 +136,9 @@ use std::{fmt, sync::Arc};
 #[non_exhaustive]
 pub enum Error {
     /// The requested language ID or alias is not present in the catalog.
-    UnknownLanguage(String),
+    UnknownLanguage(UnknownName),
     /// The requested bundled theme is not present in the catalog.
-    UnknownTheme(String),
+    UnknownTheme(UnknownName),
     /// A grammar could not be parsed, validated, or prepared.
     Grammar(GrammarError),
     /// A theme could not be parsed or compiled.
@@ -26,6 +153,9 @@ pub enum Error {
     StateMismatch,
     /// Incremental input contained more than one logical line.
     InvalidLine,
+    /// A resource limit degraded highlighting; see [`HighlightStatus`](crate::HighlightStatus).
+    /// Returned only by the `require_complete` methods.
+    Incomplete,
     /// The caller's interrupt stopped tokenizing a line.
     Interrupted,
 }
@@ -33,8 +163,30 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownLanguage(value) => write!(f, "unknown TextMate language `{value}`"),
-            Self::UnknownTheme(value) => write!(f, "unknown TextMate theme `{value}`"),
+            Self::UnknownLanguage(value) => {
+                write!(f, "unknown TextMate language `{value}`")?;
+                value.write_suggestion(f)
+            }
+            Self::UnknownTheme(value) => {
+                write!(f, "unknown TextMate theme `{value}`")?;
+                value.write_suggestion(f)?;
+                #[cfg(feature = "bundled-themes")]
+                {
+                    f.write_str(if value.suggestion().is_some() {
+                        " Bundled themes: "
+                    } else {
+                        "; bundled themes: "
+                    })?;
+                    let names = crate::theme::BuiltinTextMateTheme::all();
+                    for (index, theme) in names.iter().enumerate() {
+                        if index != 0 {
+                            f.write_str(", ")?;
+                        }
+                        f.write_str(theme.name())?;
+                    }
+                }
+                Ok(())
+            }
             Self::Grammar(error) => error.fmt(f),
             Self::Theme(error) => error.fmt(f),
             Self::Bundle(error) => error.fmt(f),
@@ -45,6 +197,9 @@ impl fmt::Display for Error {
             }
             Self::InvalidLine => {
                 f.write_str("tokenize_line expects one logical line without a newline terminator")
+            }
+            Self::Incomplete => {
+                f.write_str("highlighting stopped at a resource limit, so the output is degraded")
             }
             Self::Interrupted => f.write_str("tokenizing the line was interrupted"),
         }
@@ -478,6 +633,8 @@ pub enum RenderErrorKind {
     SourceMismatch,
     /// The output writer returned [`fmt::Error`]; output may be partial.
     Writer,
+    /// Render options or theme names are invalid; nothing was rendered.
+    InvalidOptions,
 }
 
 /// Render validation or writer failure.
@@ -506,6 +663,14 @@ impl RenderError {
             kind: RenderErrorKind::Writer,
             message: "render output writer failed".to_owned(),
             source: Some(error),
+        }))
+    }
+    #[cfg(feature = "html")]
+    pub(crate) fn invalid_options(message: String) -> Self {
+        Self(Box::new(RenderErrorInner {
+            kind: RenderErrorKind::InvalidOptions,
+            message,
+            source: None,
         }))
     }
     /// Matchable failure cause.

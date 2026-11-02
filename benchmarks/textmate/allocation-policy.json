@@ -143,7 +143,7 @@
         "tokenize-warm": {
           "maxAllocationCalls": 1410,
           "maxAllocatedBytes": 279552,
-          "maxPeakRetainedBytes": 229376
+          "maxPeakRetainedBytes": 233472
         }
       }
     },

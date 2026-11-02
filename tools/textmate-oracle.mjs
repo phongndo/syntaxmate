@@ -57,6 +57,12 @@ async function readJson(filePath) {
   return value
 }
 
+// Logical lines as Syntaxmate defines them: `\n` ends a line, and one `\r` at
+// the end of a line belongs to the terminator, so CRLF tokenizes like LF.
+export function splitLogicalLines(source) {
+  return source.split('\n').map(line => (line.endsWith('\r') ? line.slice(0, -1) : line))
+}
+
 export async function generateTextMateGolden(options) {
   const {
     grammarPath,
@@ -142,7 +148,7 @@ export async function generateTextMateGolden(options) {
     if (!grammar) throw new Error(`failed to load grammar ${scopeName}`)
 
     const source = await fs.readFile(sourcePath, 'utf8')
-    const lines = source.split('\n')
+    const lines = splitLogicalLines(source)
     let ruleStack = vsctm.INITIAL
     const records = []
     const colorMap = registry.getColorMap()

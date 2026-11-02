@@ -24,9 +24,42 @@ struct CatalogInner {
     bytes: usize,
     version: String,
     canonical: HashMap<String, usize>,
+    /// Built on first path detection; highlighting by language ID never needs it.
+    paths: OnceLock<PathIndex>,
+    first_lines: Vec<OnceLock<FallbackMatcher>>,
+}
+
+/// Lowercase basename and extension lookup tables for path detection.
+#[derive(Debug, Default)]
+struct PathIndex {
     basenames: HashMap<String, usize>,
     extensions: HashMap<String, usize>,
-    first_lines: Vec<OnceLock<FallbackMatcher>>,
+}
+
+impl PathIndex {
+    fn new(bundle: &Bundle) -> Self {
+        let mut index = Self::default();
+        for (language_index, language) in bundle.languages.iter().enumerate() {
+            for basename in &language.basenames {
+                index
+                    .basenames
+                    .insert(basename.to_ascii_lowercase(), language_index);
+                if basename.contains('.') {
+                    index.extensions.insert(
+                        basename.trim_start_matches('.').to_ascii_lowercase(),
+                        language_index,
+                    );
+                }
+            }
+            for extension in &language.extensions {
+                index.extensions.insert(
+                    extension.trim_start_matches('.').to_ascii_lowercase(),
+                    language_index,
+                );
+            }
+        }
+        index
+    }
 }
 
 /// Borrowed metadata for one public language in a [`Catalog`].
@@ -125,26 +158,12 @@ impl Catalog {
 
     fn from_bundle(bundle: Arc<Bundle>, bytes: usize) -> Self {
         let mut canonical = HashMap::new();
-        let mut basenames = HashMap::new();
-        let mut extensions = HashMap::new();
         for (index, language) in bundle.languages.iter().enumerate() {
             canonical.insert(language.canonical.clone(), index);
         }
         for (index, language) in bundle.languages.iter().enumerate() {
             for alias in &language.aliases {
                 canonical.entry(alias.clone()).or_insert(index);
-            }
-            for basename in &language.basenames {
-                basenames.insert(basename.to_ascii_lowercase(), index);
-                if basename.contains('.') {
-                    extensions.insert(basename.trim_start_matches('.').to_ascii_lowercase(), index);
-                }
-            }
-            for extension in &language.extensions {
-                extensions.insert(
-                    extension.trim_start_matches('.').to_ascii_lowercase(),
-                    index,
-                );
             }
         }
         let first_lines = bundle.languages.iter().map(|_| OnceLock::new()).collect();
@@ -153,8 +172,7 @@ impl Catalog {
             bundle,
             bytes,
             canonical,
-            basenames,
-            extensions,
+            paths: OnceLock::new(),
             first_lines,
         }))
     }
@@ -186,6 +204,15 @@ impl Catalog {
         })
     }
 
+    /// An unknown-language error naming the closest public ID or alias.
+    pub(crate) fn unknown_language(&self, language: &str) -> crate::Error {
+        let known = self.0.bundle.languages.iter().flat_map(|entry| {
+            std::iter::once(entry.canonical.as_str())
+                .chain(entry.aliases.iter().map(String::as_str))
+        });
+        crate::Error::UnknownLanguage(crate::UnknownName::new(language, known))
+    }
+
     /// Resolves a public ID or alias to its borrowed canonical ID.
     pub fn canonical_language(&self, language: &str) -> Option<&str> {
         self.language(language).map(LanguageInfo::id)
@@ -205,9 +232,10 @@ impl Catalog {
     /// Matching ignores ASCII case; catalog order breaks metadata ties (last wins).
     pub fn detect_path(&self, path: impl AsRef<Path>) -> Option<&str> {
         let name = path.as_ref().file_name()?.to_str()?.to_ascii_lowercase();
-        let index = self.0.basenames.get(&name).copied().or_else(|| {
+        let paths = self.0.paths.get_or_init(|| PathIndex::new(&self.0.bundle));
+        let index = paths.basenames.get(&name).copied().or_else(|| {
             name.match_indices('.')
-                .find_map(|(dot, _)| self.0.extensions.get(&name[dot + 1..]).copied())
+                .find_map(|(dot, _)| paths.extensions.get(&name[dot + 1..]).copied())
         })?;
         Some(&self.0.bundle.languages[index].canonical)
     }

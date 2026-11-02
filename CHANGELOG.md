@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-11-01
+
+Breaking: `Error::UnknownLanguage` and `Error::UnknownTheme` now carry an
+`UnknownName` instead of a `String`. It dereferences to the requested name and
+compares equal to `&str` and `String`, so most matches compile unchanged; use
+`UnknownName::name()` where a `&str` binding is required and `.into()` to
+construct one from a string.
 
 Scope-output fixes found by comparing 850 real-world files across 187
 languages, and the 264-language catalog-repeated corpus, against the pinned
@@ -37,6 +43,73 @@ to 0 respectively.
   caller with a deadline can abandon a pathological line. The per-line step
   budgets bound work but not time: a 20,000-byte line of nested brackets took
   1-8 s.
+- Suggest the closest language or theme in unknown-name errors
+  (``unknown TextMate language `rsut`; did you mean `rust`?``), using the
+  aliases of the catalog that was searched; unknown-theme errors also list the
+  bundled themes. `UnknownName::suggestion()` exposes the match.
+- Add `require_complete()` to `RenderedOutput`, `HighlightedDocument`,
+  `HighlightedLine`, `TokenizedDocument`, and `TokenizedLine`. It returns the
+  value, or the new `Error::Incomplete` when a resource limit degraded output,
+  so `highlighter.highlight_html(..)?.require_complete()?` replaces a manual
+  status check.
+- Mark `RenderedOutput`, `HighlightedDocument`, and `TokenizedDocument`
+  `#[must_use]`.
+- Add `syntaxmate::themes` constants (`GITHUB_DARK`, …, `ALL`) for
+  compile-time checked theme names, and
+  `Highlighter::highlight_html_themes` for one-call light/dark HTML with
+  bundled themes.
+- Move profiling and diagnostic programs from `examples/` to
+  `tools/profiling/`; `examples/` now holds only user-facing examples. Their
+  `cargo run --example` names are unchanged. The README gains a "Choosing an
+  API" guide.
+- Add `render_html_themes`, which renders several themes in one pass. The
+  first theme uses ordinary inline styles; each other theme adds inherited
+  `--sm-{name}` custom properties, so CSS alone (for example
+  `prefers-color-scheme`) switches themes without re-rendering, and every
+  theme resolves exactly. For GitHub light and dark on the Rust, TSX,
+  Markdown, and C++ stress fixtures, the output is 29–32% smaller than two
+  single-theme renders and 2.7–4.5× smaller than class-mode HTML plus two
+  stylesheets. Invalid theme names or `class_prefix` return the new
+  `RenderErrorKind::InvalidOptions`.
+- Treat `\r\n` as a line terminator in document APIs. CRLF sources now
+  tokenize exactly like LF sources: line text and token ranges exclude the
+  `\r`, and patterns such as `$` no longer see it. HTML and ANSI renderers
+  write each line's original terminator, so rendered text still matches the
+  source. Incremental calls and the bindings' sessions also treat one trailing
+  `\r` as part of the terminator; a `\r` elsewhere remains line content. The
+  oracle now splits lines the same way, and the edge-input goldens were
+  regenerated.
+- Parse an unterminated final line with TextMate's synthetic newline, as
+  vscode-textmate and `Tokenizer::tokenize_line` already do. Documents without
+  a trailing newline previously could highlight their last line differently
+  (for example in Desktop Entry and Fortran fixtures); `tokenize` and
+  `tokenize_line` now agree, and the fuzz target checks that parity on every
+  line.
+- Add an invariant suite (`tests/invariants.rs`) that runs every bundled
+  fixture through nine properties: tokens tile each line, renderers preserve
+  the source text, the single-call and document HTML paths agree, sessions
+  and checkpointed viewports match whole documents, CRLF matches LF, a final
+  newline is optional, cached theme styles match full resolution, and
+  earlier inputs cannot change later output.
+- Resolve theme styles for deeply nested scopes in linear rather than
+  quadratic time. A style-cache miss now resumes from the nearest resolved
+  ancestor stack, or from the previous miss's per-level states when they
+  share a prefix, instead of rescanning every level. Styling 2,000 unclosed
+  JSX lines dropped from 3.2 s to 17 ms, and a 4,000-deep bracket line in
+  Smalltalk from 829 to 4 ms. Across every bundled language on four
+  adversarial inputs, total highlighting time dropped from 35.9 to 4.1 s
+  (worst case 3.8 → 0.5 s). Steady-state HTML on the nine benchmark corpora
+  is 7% faster with byte-identical output, and a new invariant checks
+  cached resolution against full resolution for every fixture token.
+- Reduce process-cold startup. Embedded grammar blobs are borrowed instead of
+  copied (about 2.4 MB at catalog initialization), the static string table is
+  validated once, path-detection indexes are built on first use, and bundled
+  themes parse without an intermediate JSON value map. Bundled catalog
+  initialization dropped from about 500 to 190 µs. Together with faster
+  theme resolution, the geometric-mean process-cold HTML latency across the
+  nine end-to-end corpora dropped from 4.32 to 3.86 ms (−11%) and steady-state
+  latency from 0.871 to 0.797 ms (−8.5%), with byte-identical output (41
+  interleaved samples per binary on a Ryzen 9 9950X).
 
 ## 0.2.1 - 2026-09-30
 

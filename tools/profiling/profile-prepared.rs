@@ -141,7 +141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-        black_box(document);
+        let _ = black_box(document);
     }
     let elapsed = started.elapsed();
     let stats = Stats::now().since(before);

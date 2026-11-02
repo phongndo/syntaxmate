@@ -53,8 +53,10 @@ impl Theme {
     /// Loads a bundled theme by name, returning an error for an unknown name.
     #[cfg(feature = "bundled-themes")]
     pub fn bundled(name: &str) -> Result<Self> {
-        let theme = BuiltinTextMateTheme::from_name(name)
-            .ok_or_else(|| Error::UnknownTheme(name.to_owned()))?;
+        let theme = BuiltinTextMateTheme::from_name(name).ok_or_else(|| {
+            let known = BuiltinTextMateTheme::all().iter().map(|theme| theme.name());
+            Error::UnknownTheme(crate::UnknownName::new(name, known))
+        })?;
         Ok(Self {
             inner: ThemeInner::Bundled(theme.get()),
         })
@@ -242,7 +244,7 @@ impl Highlighter {
             .inner
             .catalog
             .canonical_language(language)
-            .ok_or_else(|| Error::UnknownLanguage(language.to_owned()))?;
+            .ok_or_else(|| self.inner.catalog.unknown_language(language))?;
         let mut cache = self
             .inner
             .cache
@@ -343,6 +345,44 @@ impl Highlighter {
         crate::render::render_html_compact(source, &tokens, status, &theme, options)
     }
 
+    /// Highlights once and renders several bundled themes as one HTML document.
+    ///
+    /// Each entry pairs a CSS name with a bundled theme. See
+    /// [`render_html_themes`](crate::render_html_themes) for the output and
+    /// the CSS that switches themes; use it directly for custom themes.
+    ///
+    /// ```
+    /// use syntaxmate::{Highlighter, HtmlOptions, themes};
+    ///
+    /// let html = Highlighter::bundled()?.highlight_html_themes(
+    ///     "rust",
+    ///     "fn main() {}",
+    ///     &[("light", themes::GITHUB_LIGHT), ("dark", themes::GITHUB_DARK)],
+    ///     &HtmlOptions::default(),
+    /// )?;
+    /// assert!(html.as_str().contains("--sm-dark:#"));
+    /// # Ok::<(), syntaxmate::Error>(())
+    /// ```
+    #[cfg(all(feature = "bundled-themes", feature = "html"))]
+    pub fn highlight_html_themes(
+        &self,
+        language: &str,
+        source: &str,
+        themes: &[(&str, &str)],
+        options: &crate::HtmlOptions,
+    ) -> Result<crate::RenderedOutput> {
+        let loaded = themes
+            .iter()
+            .map(|(name, theme)| Ok((*name, Theme::bundled(theme)?)))
+            .collect::<Result<Vec<_>>>()?;
+        let named = loaded
+            .iter()
+            .map(|(name, theme)| (*name, theme))
+            .collect::<Vec<_>>();
+        let document = self.tokenize(language, source)?;
+        crate::render_html_themes(source, &document, &named, options)
+    }
+
     /// Highlights source and renders 24-bit ANSI output with control sanitization.
     #[cfg(all(feature = "bundled-themes", feature = "ansi"))]
     pub fn highlight_ansi(
@@ -392,7 +432,7 @@ impl Highlighter {
             .inner
             .catalog
             .detect(Some(std::path::Path::new(path.as_ref())), source)
-            .ok_or_else(|| Error::UnknownLanguage(path.into_owned()))?;
+            .ok_or_else(|| Error::UnknownLanguage(path.into_owned().into()))?;
         self.highlight(language, source, theme)
     }
 
@@ -592,6 +632,7 @@ impl HighlightSession {
         spans: &mut Vec<HighlightedToken>,
     ) -> Result<HighlightStatus> {
         self.tokenizer.validate_line(line, &self.state)?;
+        let line = crate::tokenizer::line_content(line);
         spans.clear();
         let mut sink = IncrementalSpanVecSink {
             line,
@@ -613,14 +654,17 @@ impl HighlightSession {
         line: &str,
         sink: impl FnMut(HighlightedToken),
     ) -> Result<HighlightStatus> {
+        self.tokenizer.validate_line(line, &self.state)?;
+        let line = crate::tokenizer::line_content(line);
         let mut sink = IncrementalSpanCallbackSink {
             line,
             theme: &self.theme,
             style_cache: &mut self.style_cache,
             callback: sink,
         };
-        self.tokenizer
-            .tokenize_line_shared_with(line, &mut self.state, &mut sink)
+        Ok(self
+            .tokenizer
+            .tokenize_line_shared_with_validated(line, &mut self.state, &mut sink))
     }
 
     /// Resets continuation state to the start of a document.
@@ -683,9 +727,17 @@ impl HighlightedLine {
     pub fn status(&self) -> HighlightStatus {
         self.status
     }
+
+    /// Returns `self`, or [`Error::Incomplete`] when a resource limit degraded
+    /// highlighting. Use it to treat degraded output as a failure:
+    /// `highlighter.highlight_html(..)?.require_complete()?`.
+    pub fn require_complete(self) -> Result<Self> {
+        self.status().require(self)
+    }
 }
 
 /// Styled logical lines and their aggregate completion status.
+#[must_use = "highlighted output does nothing unless used"]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HighlightedDocument {
     lines: Vec<HighlightedLine>,
@@ -702,6 +754,13 @@ impl HighlightedDocument {
     /// Reports whether the entire tokenization operation completed within limits.
     pub fn status(&self) -> HighlightStatus {
         self.status
+    }
+
+    /// Returns `self`, or [`Error::Incomplete`] when a resource limit degraded
+    /// highlighting. Use it to treat degraded output as a failure:
+    /// `highlighter.highlight_html(..)?.require_complete()?`.
+    pub fn require_complete(self) -> Result<Self> {
+        self.status().require(self)
     }
 }
 
@@ -812,11 +871,11 @@ mod cache_tests {
         assert!(Arc::ptr_eq(&first, &second));
         let theme = Theme::from_json(r#"{"tokenColors":[]}"#).unwrap();
         let mut session = highlighter.session_with_theme("rust", &theme).unwrap();
-        highlighter.tokenize("rust", "fn main() {}").unwrap();
+        let _ = highlighter.tokenize("rust", "fn main() {}").unwrap();
         let (prepared, tokenizer) = highlighter.checkout("rust", true).unwrap();
         assert!(tokenizer.is_some());
         assert!(Arc::ptr_eq(&first, &prepared));
-        highlighter.tokenize("json", "{}").unwrap();
+        let _ = highlighter.tokenize("json", "{}").unwrap();
         let cache = highlighter.inner.cache.lock().unwrap();
         assert_eq!(cache.len(), 1);
         assert_eq!(cache[0].id, "json");
@@ -832,7 +891,7 @@ mod cache_tests {
         );
         highlighter
             .with_tokenizer("json", |_| {
-                highlighter.tokenize("json", "[]").unwrap();
+                let _ = highlighter.tokenize("json", "[]").unwrap();
             })
             .unwrap();
         assert_eq!(highlighter.inner.cache.lock().unwrap()[0].idle.len(), 1);
@@ -847,7 +906,7 @@ mod cache_tests {
                 ..HighlighterOptions::default()
             },
         );
-        highlighter.tokenize("json", "{}").unwrap();
+        let _ = highlighter.tokenize("json", "{}").unwrap();
         assert!(highlighter.inner.cache.lock().unwrap().is_empty());
         let first = highlighter.checkout("json", false).unwrap().0;
         let second = highlighter.checkout("json", false).unwrap().0;

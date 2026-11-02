@@ -98,7 +98,13 @@ fn custom_oracle_regressions_across_sessions_sinks_and_checkpoints() {
             let mut buffer_state = buffered.initial_state();
             let mut callback_state = callback.initial_state();
             let mut buffer = Vec::new();
-            for (index, line) in golden.source.split('\n').enumerate() {
+            // Incremental calls take logical lines; a CRLF terminator is not content.
+            for (index, line) in golden
+                .source
+                .split('\n')
+                .map(|line| line.strip_suffix('\r').unwrap_or(line))
+                .enumerate()
+            {
                 let owned = tokenizer.tokenize_line(line, &mut state).unwrap();
                 assert_eq!(owned.status(), HighlightStatus::Complete);
                 assert_eq!(
@@ -130,7 +136,7 @@ fn custom_oracle_regressions_across_sessions_sinks_and_checkpoints() {
             }
         }
         let mut checkpoints = tokenizer.checkpoints(1);
-        tokenizer
+        let _ = tokenizer
             .tokenize_viewport(&golden.source, 0..expected.len(), &mut checkpoints)
             .unwrap();
         for start in 0..expected.len() {

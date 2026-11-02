@@ -201,6 +201,7 @@ impl OutputScopeTableBuilder {
         let mut atom_ids = vec![u32::MAX; scope_names.len()];
         let mut suffix = Vec::new();
         let mut stack_atoms = Vec::new();
+        let mut ancestors = Vec::with_capacity(self.output_stacks.len());
         for (output_index, engine_stack) in self.output_stacks.iter().enumerate() {
             // Deeply nested documents produce many stacks that differ from an
             // already-emitted ancestor by one or two scopes. Walk only up to
@@ -227,6 +228,7 @@ impl OutputScopeTableBuilder {
             if let Some(prefix) = prefix {
                 stack_atoms.extend_from_slice(&stacks[prefix]);
             }
+            ancestors.push(prefix.map_or(u32::MAX, |prefix| prefix as u32));
             for &scope in suffix.iter().rev() {
                 let slot = &mut atom_ids[scope.0 as usize];
                 if *slot == u32::MAX {
@@ -240,7 +242,7 @@ impl OutputScopeTableBuilder {
             }
             stacks.push(Arc::from(stack_atoms.as_slice()));
         }
-        let table = Arc::new(HighlightScopeTable::from_parts(atoms, stacks));
+        let table = Arc::new(HighlightScopeTable::from_parts(atoms, stacks, ancestors));
         if cache.tables.len() >= MAX_OUTPUT_SCOPE_TABLES {
             cache.tables.clear();
         }
@@ -2868,14 +2870,12 @@ impl TextMateTokenizer {
         let mut lines =
             Vec::with_capacity(memchr::memchr_iter(b'\n', source.as_bytes()).count() + 1);
         let mut scope_table = OutputScopeTableBuilder::new();
+        let mut parse_buffer = String::new();
         for (line_index, chunk) in LineChunks::new(source).enumerate() {
-            let tokenized = self.tokenize_line_compact_at_line(chunk.parse_text, state, line_index);
+            let parse_text = chunk.parse_text(&mut parse_buffer);
+            let tokenized = self.tokenize_line_compact_at_line(parse_text, state, line_index);
             state = tokenized.state;
-            let fingerprint = if chunk.parse_text.ends_with('\n') {
-                tokenized.parse_fingerprint.without_trailing_byte(b'\n')
-            } else {
-                tokenized.parse_fingerprint
-            };
+            let fingerprint = tokenized.parse_fingerprint.without_trailing_byte(b'\n');
             let line: L = self.build_output_line(
                 chunk.text,
                 fingerprint,
@@ -2922,12 +2922,14 @@ impl TextMateTokenizer {
         self.record_checkpoint_replay_lines(visible.start.saturating_sub(resume_line));
 
         let mut visible_lines = Vec::new();
+        let mut parse_buffer = String::new();
         for (line_index, chunk) in LineChunks::new(source)
             .enumerate()
             .take(visible_end)
             .skip(resume_line)
         {
-            let tokenized = self.tokenize_line_compact_at_line(chunk.parse_text, state, line_index);
+            let parse_text = chunk.parse_text(&mut parse_buffer);
+            let tokenized = self.tokenize_line_compact_at_line(parse_text, state, line_index);
             state = tokenized.state.clone();
             checkpoints.record_if_boundary(line_index + 1, tokenized.exit_state_id);
             if line_index >= visible.start {
@@ -2977,11 +2979,7 @@ impl TextMateTokenizer {
             .iter()
             .zip(LineChunks::new(source).skip(visible_start))
             .map(|(tokenized, chunk)| {
-                let fingerprint = if chunk.parse_text.ends_with('\n') {
-                    tokenized.parse_fingerprint.without_trailing_byte(b'\n')
-                } else {
-                    tokenized.parse_fingerprint
-                };
+                let fingerprint = tokenized.parse_fingerprint.without_trailing_byte(b'\n');
                 self.build_output_line::<L>(
                     chunk.text,
                     fingerprint,
@@ -9349,7 +9347,8 @@ mod tests {
         let mut state = TokenizerState::default();
         let mut full_lines = Vec::new();
         for (line_index, chunk) in LineChunks::new(&source).enumerate() {
-            let tokenized = full.tokenize_line_scopes_at_line(chunk.parse_text, state, line_index);
+            let parse_text = chunk.parse_text(&mut String::new()).to_owned();
+            let tokenized = full.tokenize_line_scopes_at_line(&parse_text, state, line_index);
             state = tokenized.state.clone();
             full_lines.push(tokenized);
         }
@@ -9410,7 +9409,8 @@ mod tests {
         let mut state = TokenizerState::default();
         let mut full_lines = Vec::new();
         for (line_index, chunk) in LineChunks::new(&source).enumerate() {
-            let tokenized = full.tokenize_line_scopes_at_line(chunk.parse_text, state, line_index);
+            let parse_text = chunk.parse_text(&mut String::new()).to_owned();
+            let tokenized = full.tokenize_line_scopes_at_line(&parse_text, state, line_index);
             state = tokenized.state.clone();
             full_lines.push(tokenized);
         }

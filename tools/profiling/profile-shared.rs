@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     for _ in 0..iterations {
                         let document = highlighter.tokenize(language, &source).unwrap();
                         assert!(document.status().is_complete());
-                        black_box(document);
+                        let _ = black_box(document);
                     }
                     start.elapsed()
                 })

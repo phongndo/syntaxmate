@@ -69,10 +69,21 @@ pub struct Bundle {
 }
 
 /// Validated UTF-8 strings and their little-endian offset index, borrowed when embedded.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct StringTable {
     bytes: Cow<'static, [u8]>,
+    /// Payload validated once when the table borrows static storage, so
+    /// lookups slice it instead of revalidating every string.
+    static_payload: Option<&'static str>,
 }
+
+impl PartialEq for StringTable {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+    }
+}
+
+impl Eq for StringTable {}
 
 impl StringTable {
     fn len(&self) -> usize {
@@ -94,6 +105,9 @@ impl StringTable {
         } else {
             read_u32_at(&self.bytes, 8 + (index + 1) * 4).expect("validated offset") as usize
         };
+        if let Some(payload) = self.static_payload {
+            return Some(&payload[start..end]);
+        }
         Some(
             std::str::from_utf8(&self.bytes[payload_start + start..payload_start + end])
                 .expect("validated string"),
@@ -164,7 +178,8 @@ pub struct GrammarBlob {
     pub codec: u32,
     pub flags: u32,
     pub raw_len: u32,
-    pub bytes: Vec<u8>,
+    /// Encoded grammar bytes; embedded bundles borrow them from static storage.
+    pub bytes: Cow<'static, [u8]>,
     pub pattern_count: u32,
     pub dfa_count: u32,
     pub fallback_count: u32,
@@ -285,7 +300,7 @@ impl GrammarBlob {
                 let mut bytes = vec![0; self.raw_len as usize];
                 let len = miniz_oxide::inflate::decompress_slice_iter_to_slice(
                     &mut bytes,
-                    std::iter::once(self.bytes.as_slice()),
+                    std::iter::once(&self.bytes[..]),
                     true,
                     false,
                 )
@@ -328,8 +343,11 @@ impl Bundle {
         )?;
         let languages =
             decode_language_table(section(bytes, &sections, SECTION_LANGUAGES)?, &strings)?;
-        let grammar_blobs =
-            decode_grammar_blobs(section(bytes, &sections, SECTION_GRAMMAR_BLOBS)?, &strings)?;
+        let grammar_blobs = decode_grammar_blobs(
+            section(bytes, &sections, SECTION_GRAMMAR_BLOBS)?,
+            &strings,
+            &store_bytes,
+        )?;
         let licenses =
             decode_license_table(section(bytes, &sections, SECTION_LICENSES)?, &strings)?;
         let grammar_graphs = decode_grammar_graphs(
@@ -720,7 +738,18 @@ fn decode_string_table(bytes: Cow<'static, [u8]>) -> Result<StringTable, BundleE
     let offsets = cursor.bytes(index_len)?;
     let payload = cursor.bytes(payload_len)?;
     cursor.finish()?;
-    let text = std::str::from_utf8(payload).map_err(|_| BundleError::BadUtf8)?;
+    // The payload ends the section; a static section keeps its validated text.
+    let static_payload = match &bytes {
+        Cow::Borrowed(section) => Some(
+            std::str::from_utf8(&section[section.len() - payload_len..])
+                .map_err(|_| BundleError::BadUtf8)?,
+        ),
+        Cow::Owned(_) => None,
+    };
+    let text = match static_payload {
+        Some(text) => text,
+        None => std::str::from_utf8(payload).map_err(|_| BundleError::BadUtf8)?,
+    };
     let mut previous = 0;
     for index in 0..count {
         let offset = read_u32_at(offsets, index * 4)? as usize;
@@ -735,7 +764,10 @@ fn decode_string_table(bytes: Cow<'static, [u8]>) -> Result<StringTable, BundleE
     if count == 0 && payload_len != 0 {
         return Err(BundleError::TrailingBytes("string table payload"));
     }
-    Ok(StringTable { bytes })
+    Ok(StringTable {
+        bytes,
+        static_payload,
+    })
 }
 
 fn encode_scope_table(scopes: &ScopeTable, source: &StringTable, strings: &[String]) -> Vec<u8> {
@@ -836,9 +868,10 @@ fn encode_grammar_blobs(blobs: &[GrammarBlob], strings: &[String]) -> Vec<u8> {
     records
 }
 
-fn decode_grammar_blobs(
-    bytes: &[u8],
+fn decode_grammar_blobs<'a>(
+    bytes: &'a [u8],
     strings: &StringTable,
+    store_bytes: impl Fn(&'a [u8]) -> Cow<'static, [u8]>,
 ) -> Result<Vec<GrammarBlob>, BundleError> {
     let mut cursor = Cursor::new(bytes, "grammar blobs");
     let count = cursor.count(48)?;
@@ -880,7 +913,7 @@ fn decode_grammar_blobs(
             codec,
             flags,
             raw_len,
-            bytes: bytes[offset..offset + len].to_vec(),
+            bytes: store_bytes(&bytes[offset..offset + len]),
             pattern_count,
             dfa_count,
             fallback_count,
@@ -1231,7 +1264,7 @@ mod tests {
                 codec: CODEC_NONE,
                 flags: GRAMMAR_BLOB_COMPILED_IR,
                 raw_len: grammar_bytes.len() as u32,
-                bytes: grammar_bytes,
+                bytes: grammar_bytes.into(),
                 pattern_count: 0,
                 dfa_count: 0,
                 fallback_count: 0,
@@ -1345,7 +1378,7 @@ mod tests {
         bundle.languages[0].aliases = vec!["fx".to_owned()];
         bundle.grammar_blobs[0].language = "fixture".to_owned();
         bundle.grammar_blobs[0].scope_name = "source.fixture".to_owned();
-        bundle.grammar_blobs[0].bytes = grammar_ir("source.fixture", "true");
+        bundle.grammar_blobs[0].bytes = grammar_ir("source.fixture", "true").into();
         bundle.grammar_blobs[0].raw_len = bundle.grammar_blobs[0].bytes.len() as u32;
         let parsed = Bundle::parse(&bundle.to_bytes()).unwrap();
         let mut registry = BundleGrammarRegistry::new(parsed);
@@ -1357,7 +1390,7 @@ mod tests {
     #[test]
     fn registry_rejects_truncated_compiled_grammar_ir() {
         let mut bundle = sample_bundle();
-        bundle.grammar_blobs[0].bytes.pop();
+        bundle.grammar_blobs[0].bytes.to_mut().pop();
         bundle.grammar_blobs[0].raw_len = bundle.grammar_blobs[0].bytes.len() as u32;
         let parsed = Bundle::parse(&bundle.to_bytes()).unwrap();
         let mut registry = BundleGrammarRegistry::new(parsed);
@@ -1405,8 +1438,8 @@ mod tests {
         let mut blob = sample_bundle().grammar_blobs.remove(0);
         let raw = blob.bytes.clone();
         blob.codec = CODEC_DEFLATE_ZLIB;
-        blob.bytes = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6);
-        assert_eq!(blob.decoded_bytes().unwrap().as_ref(), raw.as_slice());
+        blob.bytes = miniz_oxide::deflate::compress_to_vec_zlib(&raw, 6).into();
+        assert_eq!(blob.decoded_bytes().unwrap().as_ref(), &raw[..]);
         assert_eq!(
             blob.compiled_grammar(GrammarId(0)).unwrap().scope_name,
             "source.rust"

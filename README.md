@@ -21,27 +21,40 @@ ANSI output, and no native Oniguruma dependency.
 
 ```toml
 [dependencies]
-syntaxmate = "0.2"
+syntaxmate = "0.3"
 ```
 
 ```rust
-use syntaxmate::Highlighter;
+use syntaxmate::{Highlighter, themes};
 
 let highlighter = Highlighter::bundled()?;
-let output = highlighter.highlight_html(
-    "rust",
-    "fn main() { println!(\"<hello>\"); }",
-    "github-dark",
-)?;
-
-assert!(output.status().is_complete());
-println!("{}", output.as_str());
+let html = highlighter
+    .highlight_html("rust", "fn main() { println!(\"<hello>\"); }", themes::GITHUB_DARK)?
+    // Resource limits degrade output instead of failing; make that an error.
+    .require_complete()?;
+println!("{}", html.as_str());
 # Ok::<(), syntaxmate::Error>(())
 ```
 
 For custom grammars, themes, and incremental use, start with the
 [compiled examples](examples). See [rendering](docs/rendering.md) for output
-options and source/document pairing requirements.
+options, light/dark output, and source/document pairing requirements.
+
+## Choosing an API
+
+| You want to… | Use |
+| --- | --- |
+| Highlight a string to HTML, ANSI, or styled tokens | `Highlighter` (`highlight_html`, `highlight_ansi`, `highlight`) |
+| Render light and dark themes in one document | `Highlighter::highlight_html_themes` |
+| Pick the language from a file name or shebang | `Highlighter::highlight_path`, or `Catalog::detect` |
+| Re-highlight an editor buffer line by line | `HighlightSession`, from `Highlighter::session` |
+| Use your own theme | `Theme::from_json`, then `highlight_with_theme` or `session_with_theme`; `render_html` for HTML |
+| Get scopes without a theme, or bring your own grammars | `Tokenizer`, with `GrammarRegistry` for custom grammars |
+| Ship only some languages, or load a bundle at runtime | `Catalog::from_static` / `Catalog::from_bytes`, then `Highlighter::new` |
+| Render a document you already have | `render_html`, `render_html_themes`, `render_ansi` |
+
+`Highlighter` is cheap to clone and safe to share across threads; it caches
+prepared languages, so create one and reuse it.
 
 For structured output, document and incremental APIs share the same token types:
 
@@ -56,7 +69,7 @@ assert_eq!(token.range(), 0..3);
 # Ok::<(), syntaxmate::Error>(())
 ```
 
-See [Migrating from 0.1](CHANGELOG.md#migrating-from-01) for the upcoming 0.2 API changes.
+See the [changelog](CHANGELOG.md#030---2026-11-01) for the 0.3 migration note.
 
 ## Binary size
 
