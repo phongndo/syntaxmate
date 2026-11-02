@@ -956,7 +956,7 @@ fn zero_width_match_stops_line_without_looping() {
     let grammar = r##"{
         "scopeName": "source.zero-width",
         "patterns": [
-            {"match":"", "name":"meta.empty.zero-width"},
+            {"match":"(?=)", "name":"meta.empty.zero-width"},
             {"match":"λ|🚀|[A-Za-z]+", "name":"keyword.visible.zero-width"}
         ]
     }"##;
@@ -970,6 +970,29 @@ fn zero_width_match_stops_line_without_looping() {
             .scopes
             .iter()
             .any(|scope| scope == "keyword.visible.zero-width")
+    }));
+}
+
+#[test]
+fn empty_match_string_is_an_inert_rule() {
+    // vscode-textmate tests `match` for truthiness, so `""` never matches
+    // and later rules still apply.
+    let grammar = r##"{
+        "scopeName": "source.empty-match",
+        "patterns": [
+            {"match":"", "name":"meta.empty.empty-match"},
+            {"match":"[A-Za-z]+", "name":"keyword.visible.empty-match"}
+        ]
+    }"##;
+    let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+    let line = "abc";
+    let tokenized = tokenizer.tokenize_line_scopes(line, TokenizerState::default());
+    assert_token_invariants(line, &tokenized);
+    assert!(tokenized.tokens.iter().any(|token| {
+        token
+            .scopes
+            .iter()
+            .any(|scope| scope == "keyword.visible.empty-match")
     }));
 }
 

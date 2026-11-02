@@ -831,7 +831,16 @@ impl DevCompiler {
         RuleRef::Rule(id)
     }
 
-    fn compile_rule(&mut self, raw: RawPattern) -> RuleRef {
+    fn compile_rule(&mut self, mut raw: RawPattern) -> RuleRef {
+        // RuleFactory tests `match` and `while` for truthiness, so an empty
+        // string is absent: Haxe's `{"match": ""}` string rule is inert in
+        // vscode-textmate rather than an always-matching empty pattern.
+        if raw.match_pattern.as_deref() == Some("") {
+            raw.match_pattern = None;
+        }
+        if raw.while_pattern.as_deref() == Some("") {
+            raw.while_pattern = None;
+        }
         if let Some(include) = raw.include.as_deref() {
             return self.include_ref(include);
         }
@@ -1163,6 +1172,39 @@ mod tests {
         assert_eq!(grammar.scope_name, "source.fixture");
         assert_eq!(grammar.top_level.len(), 2);
         assert_eq!(grammar.pattern(PatternId(0)), Some("\\btrue\\b"));
+    }
+
+    #[test]
+    fn dev_loader_treats_empty_match_and_while_as_absent() {
+        let grammar = load_dev_grammar_from_str(
+            GrammarId(0),
+            r##"{
+                "scopeName": "source.fixture",
+                "patterns": [
+                    { "match": "", "name": "constant.character.escape.fixture" },
+                    { "begin": "<", "while": "", "end": ">" }
+                ]
+            }"##,
+        )
+        .unwrap();
+        let bodies = grammar
+            .top_level
+            .iter()
+            .map(|rule| match rule {
+                RuleRef::Rule(id) => &grammar.rule(*id).unwrap().body,
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            matches!(bodies[0], RuleBody::IncludeOnly { .. }),
+            "{:?}",
+            bodies[0]
+        );
+        assert!(
+            matches!(bodies[1], RuleBody::BeginEnd { .. }),
+            "{:?}",
+            bodies[1]
+        );
     }
 
     #[test]
