@@ -26,6 +26,8 @@ pub enum Error {
     StateMismatch,
     /// Incremental input contained more than one logical line.
     InvalidLine,
+    /// The caller's interrupt stopped tokenizing a line.
+    Interrupted,
 }
 
 impl fmt::Display for Error {
@@ -44,6 +46,7 @@ impl fmt::Display for Error {
             Self::InvalidLine => {
                 f.write_str("tokenize_line expects one logical line without a newline terminator")
             }
+            Self::Interrupted => f.write_str("tokenizing the line was interrupted"),
         }
     }
 }

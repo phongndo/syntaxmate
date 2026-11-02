@@ -46,6 +46,8 @@ const MAX_PREPARED_GRAMMAR_WALK_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PREPARED_GRAMMAR_PENDING_REFS: usize = 262_144;
 const MAX_PREPARED_GRAMMAR_PENDING_BYTES: usize = 32 * 1024 * 1024;
 const MAX_TOKENIZER_STEPS_PER_LINE: usize = 20_000;
+/// How many matching steps pass between polls of a caller's interrupt.
+const INTERRUPT_POLL_STEPS: usize = 16;
 const MAX_FALLBACK_STEPS_PER_LINE: u64 = 2_000_000;
 const MIN_FALLBACK_STEPS_PER_CALL: u64 = 10_000_000;
 const FALLBACK_STEPS_PER_SOURCE_BYTE: u64 = 512;
@@ -2725,6 +2727,9 @@ pub struct TextMateTokenizer {
     // paths run inside a logical line and must not lose their status on cache
     // insertion or at the public boundary.
     line_degraded: bool,
+    // The caller's interrupt stopped the current line (see
+    // `tokenize_line_shared_scopes_interruptible_with`).
+    line_interrupted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2821,6 +2826,7 @@ impl TextMateTokenizer {
             hot_counters_enabled: false,
             degraded_since_last: false,
             line_degraded: false,
+            line_interrupted: false,
         }
     }
 
@@ -3031,7 +3037,13 @@ impl TextMateTokenizer {
         state: TokenizerState,
         line_index: usize,
     ) -> SharedTokenizedLine {
-        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, true);
+        let compact = self.tokenize_line_compact_at_line_inner(
+            parse_text,
+            state,
+            line_index,
+            true,
+            &mut || false,
+        );
         self.resolve_shared_compact_line(compact)
     }
 
@@ -3070,7 +3082,13 @@ impl TextMateTokenizer {
         line_index: usize,
         sink: &mut impl SharedScopeSink,
     ) -> TokenizerState {
-        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, true);
+        let compact = self.tokenize_line_compact_at_line_inner(
+            parse_text,
+            state,
+            line_index,
+            true,
+            &mut || false,
+        );
         self.resolve_shared_compact_line_with(compact, sink)
     }
 
@@ -3096,7 +3114,41 @@ impl TextMateTokenizer {
         state: TokenizerState,
         line_index: usize,
     ) -> CompactTokenizedLine {
-        self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, false)
+        self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, false, &mut || {
+            false
+        })
+    }
+
+    /// `tokenize_line_shared_scopes_with`, polling `interrupt` between
+    /// matching steps and while resolving tokens for `sink` (each new scope
+    /// stack costs its depth, which a deeply nested line pays per token).
+    /// Once it returns true the line is abandoned and this returns `None`;
+    /// nothing is cached, though `sink` may have received some tokens.
+    pub(crate) fn tokenize_line_shared_scopes_interruptible_with(
+        &mut self,
+        parse_text: &str,
+        state: TokenizerState,
+        line_index: usize,
+        sink: &mut impl SharedScopeSink,
+        interrupt: &mut dyn FnMut() -> bool,
+    ) -> Option<TokenizerState> {
+        let compact = self
+            .tokenize_line_compact_at_line_inner(parse_text, state, line_index, false, interrupt);
+        if std::mem::take(&mut self.line_interrupted) {
+            return None;
+        }
+        sink.reserve(compact.tokens.len());
+        for (index, token) in compact.tokens.iter().enumerate() {
+            if index > 0 && index.is_multiple_of(INTERRUPT_POLL_STEPS) && interrupt() {
+                return None;
+            }
+            sink.push(
+                token.range.clone(),
+                token.stack,
+                self.resolve_scope_stack_cached(token.stack),
+            );
+        }
+        Some(compact.state)
     }
 
     fn tokenize_line_compact_at_line_inner(
@@ -3105,9 +3157,11 @@ impl TextMateTokenizer {
         mut state: TokenizerState,
         line_index: usize,
         force_degraded: bool,
+        interrupt: &mut dyn FnMut() -> bool,
     ) -> CompactTokenizedLine {
         let is_first_line = line_index == 0;
         self.line_degraded = false;
+        self.line_interrupted = false;
         self.record_line_tokenized();
         let parse_fingerprint = LineTextFingerprint::from_text(parse_text);
         let entry_state_id = self.intern_state(&state);
@@ -3203,6 +3257,12 @@ impl TextMateTokenizer {
             && steps < MAX_TOKENIZER_STEPS_PER_LINE
         {
             steps += 1;
+            // Often enough to stop a pathological line promptly, rarely
+            // enough that an ordinary line doesn't notice.
+            if steps.is_multiple_of(INTERRUPT_POLL_STEPS) && interrupt() {
+                self.line_interrupted = true;
+                break;
+            }
             if loop_candidates.is_none() {
                 loop_candidates = Some(self.cached_candidates_for_state(&state));
             }
@@ -3335,6 +3395,16 @@ impl TextMateTokenizer {
             }
         }
 
+        if self.line_interrupted {
+            return CompactTokenizedLine {
+                degraded: false,
+                tokens: tokens.into(),
+                state,
+                entry_state_id,
+                exit_state_id: entry_state_id,
+                parse_fingerprint,
+            };
+        }
         if steps >= MAX_TOKENIZER_STEPS_PER_LINE && cursor < parse_text.len() {
             self.line_degraded = true;
             let stack = self.current_scope_stack_id(&state, true, None);

@@ -510,6 +510,49 @@ impl Tokenizer {
         Ok(self.tokenize_line_with_validated(line, state, &mut sink))
     }
 
+    /// [`Self::tokenize_line_with`], polling `interrupt` while the line is
+    /// matched and its tokens are sent, and abandoning it once `interrupt`
+    /// returns true: then `state` is left as it was, `sink` may have received
+    /// some of the line's tokens (discard them), and the result is
+    /// [`Error::Interrupted`]. This bounds the time a caller waits on one
+    /// pathological line. A line at or over `max_line_bytes` is skipped as
+    /// usual without polling.
+    pub fn tokenize_line_with_interrupt(
+        &mut self,
+        line: &str,
+        state: &mut TokenizerState,
+        sink: impl FnMut(Token),
+        mut interrupt: impl FnMut() -> bool,
+    ) -> Result<HighlightStatus> {
+        self.validate_line(line, state)?;
+        let mut sink = ScopedTokenCallbackSink {
+            line,
+            callback: sink,
+        };
+        if self
+            .inner
+            .max_line_bytes()
+            .is_some_and(|max_line_bytes| line.len() >= max_line_bytes)
+        {
+            return Ok(self.tokenize_line_with_validated(line, state, &mut sink));
+        }
+        let line_index = state.anchor_line_index();
+        self.parse_line_buffer.clear();
+        self.parse_line_buffer.push_str(line);
+        self.parse_line_buffer.push('\n');
+        let Some(next_state) = self.inner.tokenize_line_shared_scopes_interruptible_with(
+            &self.parse_line_buffer,
+            state.inner.clone(),
+            line_index,
+            &mut sink,
+            &mut interrupt,
+        ) else {
+            return Err(Error::Interrupted);
+        };
+        state.finish_line(next_state);
+        Ok(self.take_status())
+    }
+
     pub(crate) fn tokenize_line_shared_with(
         &mut self,
         line: &str,

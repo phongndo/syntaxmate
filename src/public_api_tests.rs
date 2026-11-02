@@ -728,3 +728,53 @@ fn theme_diagnostics_accept_the_same_scope_view() {
         }
     }
 }
+
+#[test]
+fn an_interrupted_line_keeps_its_state() {
+    let mut registry = GrammarRegistry::new();
+    let root = registry
+        .add_json(
+            r#"{"scopeName":"source.interrupt","patterns":[
+                {"begin":"\\(","end":"\\)","name":"meta.parens.interrupt","patterns":[{"include":"$self"}]},
+                {"match":"a","name":"keyword.a.interrupt"}]}"#,
+        )
+        .unwrap();
+    let mut tokenizer = Tokenizer::new(&registry, root, TokenizerOptions::default()).unwrap();
+    let line = format!("({}", "a ".repeat(64));
+    let collect = |tokenizer: &mut Tokenizer, state: &mut crate::TokenizerState| {
+        let mut tokens = Vec::new();
+        let status = tokenizer.tokenize_line_with_interrupt(
+            &line,
+            state,
+            |token| {
+                tokens.push((
+                    token.range(),
+                    token.scopes().map(str::to_owned).collect::<Vec<_>>(),
+                ))
+            },
+            || false,
+        );
+        (status, tokens)
+    };
+
+    let mut state = tokenizer.initial_state();
+    let (mut polls, mut sent) = (0, 0);
+    let result = tokenizer.tokenize_line_with_interrupt(
+        &line,
+        &mut state,
+        |_| sent += 1,
+        || {
+            polls += 1;
+            true
+        },
+    );
+    assert_eq!(result, Err(Error::Interrupted));
+    assert_eq!((polls, sent), (1, 0));
+
+    // The interrupted state tokenizes the line as a fresh one does.
+    let mut fresh = tokenizer.initial_state();
+    let expected = collect(&mut tokenizer, &mut fresh);
+    assert_eq!(expected.0, Ok(HighlightStatus::Complete));
+    assert!(expected.1.len() > 1);
+    assert_eq!(collect(&mut tokenizer, &mut state), expected);
+}

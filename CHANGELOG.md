@@ -33,6 +33,10 @@ to 0 respectively.
   line: vscode-textmate resets anchors at each line. A YAML block scalar
   (`end: ^(?=\S)|(?!\G)`) stayed open past its content, so the next key read
   as `string.unquoted.block.yaml`.
+- Add `Tokenizer::tokenize_line_with_interrupt` and `Error::Interrupted`, so a
+  caller with a deadline can abandon a pathological line. The per-line step
+  budgets bound work but not time: a 20,000-byte line of nested brackets took
+  1-8 s.
 
 ## 0.2.1 - 2026-09-30
 
