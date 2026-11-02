@@ -8,6 +8,41 @@ compares equal to `&str` and `String`, so most matches compile unchanged; use
 `UnknownName::name()` where a `&str` binding is required and `.into()` to
 construct one from a string.
 
+Scope-output fixes found by comparing 850 real-world files across 187
+languages, and the 264-language catalog-repeated corpus, against the pinned
+vscode-textmate oracle. Mismatched lines dropped from 87 to 0 and from 7,389
+to 0 respectively.
+
+- Read reversed regex intervals (`{n,m}` with n > m) as Oniguruma does: a
+  possessive `{m,n}`. They previously never matched, which lost C++ `///` doc
+  comments and left YAML front matter unclosed in Handlebars and MDC. Correct
+  front matter makes those two catalog fixtures about 3× and 1.6× slower,
+  because the rest of each file is now tokenized as HTML or Markdown instead of
+  being swallowed by YAML.
+- Keep case-insensitive `(?i:...)` keyword inventories case-insensitive on the
+  separator-bounded symbol-set fast path (Batch commands such as `SHIFT`).
+- Keep group captures inside word-bounded keyword alternatives (Fortran
+  `format`) and respect nested case scopes in word sets.
+- Stop lookbehind possessive repeats such as `(?<=^-{3,}\s*+)` from consuming
+  past the lookbehind position.
+- Allow `\G` in begin/while conditions only at vscode-textmate's anchor
+  position, closing Berry f-string continuations. While conditions now search
+  from the line position instead of requiring a match there, as in MDX block
+  quotes.
+- Start capture retokenization without a `\G` anchor, so Swift operators such
+  as `=` get vscode-textmate's `keyword.operator.custom.infix` scope.
+- Treat an empty `match` or `while` string as absent, as vscode-textmate does,
+  fixing Haxe single-quoted strings (and HXML macros).
+- Keep a zero-width rule re-entered after an earlier pop at the same position,
+  matching vscode-textmate's loop guard (Stylus declarations after `;`).
+- Give `\G` no anchor after an end match pops a frame entered on an earlier
+  line: vscode-textmate resets anchors at each line. A YAML block scalar
+  (`end: ^(?=\S)|(?!\G)`) stayed open past its content, so the next key read
+  as `string.unquoted.block.yaml`.
+- Add `Tokenizer::tokenize_line_with_interrupt` and `Error::Interrupted`, so a
+  caller with a deadline can abandon a pathological line. The per-line step
+  budgets bound work but not time: a 20,000-byte line of nested brackets took
+  1-8 s.
 - Suggest the closest language or theme in unknown-name errors
   (``unknown TextMate language `rsut`; did you mean `rust`?``), using the
   aliases of the catalog that was searched; unknown-theme errors also list the
@@ -27,7 +62,6 @@ construct one from a string.
   `tools/profiling/`; `examples/` now holds only user-facing examples. Their
   `cargo run --example` names are unchanged. The README gains a "Choosing an
   API" guide.
-
 - Add `render_html_themes`, which renders several themes in one pass. The
   first theme uses ordinary inline styles; each other theme adds inherited
   `--sm-{name}` custom properties, so CSS alone (for example
@@ -42,8 +76,9 @@ construct one from a string.
   `\r`, and patterns such as `$` no longer see it. HTML and ANSI renderers
   write each line's original terminator, so rendered text still matches the
   source. Incremental calls and the bindings' sessions also treat one trailing
-  `\r` as part of the terminator; a `\r` elsewhere remains line content. The oracle now splits lines the
-  same way, and the edge-input goldens were regenerated.
+  `\r` as part of the terminator; a `\r` elsewhere remains line content. The
+  oracle now splits lines the same way, and the edge-input goldens were
+  regenerated.
 - Parse an unterminated final line with TextMate's synthetic newline, as
   vscode-textmate and `Tokenizer::tokenize_line` already do. Documents without
   a trailing newline previously could highlight their last line differently

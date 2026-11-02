@@ -156,6 +156,8 @@ pub enum Error {
     /// A resource limit degraded highlighting; see [`HighlightStatus`](crate::HighlightStatus).
     /// Returned only by the `require_complete` methods.
     Incomplete,
+    /// The caller's interrupt stopped tokenizing a line.
+    Interrupted,
 }
 
 impl fmt::Display for Error {
@@ -199,6 +201,7 @@ impl fmt::Display for Error {
             Self::Incomplete => {
                 f.write_str("highlighting stopped at a resource limit, so the output is degraded")
             }
+            Self::Interrupted => f.write_str("tokenizing the line was interrupted"),
         }
     }
 }

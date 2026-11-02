@@ -46,6 +46,8 @@ const MAX_PREPARED_GRAMMAR_WALK_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PREPARED_GRAMMAR_PENDING_REFS: usize = 262_144;
 const MAX_PREPARED_GRAMMAR_PENDING_BYTES: usize = 32 * 1024 * 1024;
 const MAX_TOKENIZER_STEPS_PER_LINE: usize = 20_000;
+/// How many matching steps pass between polls of a caller's interrupt.
+const INTERRUPT_POLL_STEPS: usize = 16;
 const MAX_FALLBACK_STEPS_PER_LINE: u64 = 2_000_000;
 const MIN_FALLBACK_STEPS_PER_CALL: u64 = 10_000_000;
 const FALLBACK_STEPS_PER_SOURCE_BYTE: u64 = 512;
@@ -2727,6 +2729,9 @@ pub struct TextMateTokenizer {
     // paths run inside a logical line and must not lose their status on cache
     // insertion or at the public boundary.
     line_degraded: bool,
+    // The caller's interrupt stopped the current line (see
+    // `tokenize_line_shared_scopes_interruptible_with`).
+    line_interrupted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -2823,6 +2828,7 @@ impl TextMateTokenizer {
             hot_counters_enabled: false,
             degraded_since_last: false,
             line_degraded: false,
+            line_interrupted: false,
         }
     }
 
@@ -3029,7 +3035,13 @@ impl TextMateTokenizer {
         state: TokenizerState,
         line_index: usize,
     ) -> SharedTokenizedLine {
-        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, true);
+        let compact = self.tokenize_line_compact_at_line_inner(
+            parse_text,
+            state,
+            line_index,
+            true,
+            &mut || false,
+        );
         self.resolve_shared_compact_line(compact)
     }
 
@@ -3068,7 +3080,13 @@ impl TextMateTokenizer {
         line_index: usize,
         sink: &mut impl SharedScopeSink,
     ) -> TokenizerState {
-        let compact = self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, true);
+        let compact = self.tokenize_line_compact_at_line_inner(
+            parse_text,
+            state,
+            line_index,
+            true,
+            &mut || false,
+        );
         self.resolve_shared_compact_line_with(compact, sink)
     }
 
@@ -3094,7 +3112,41 @@ impl TextMateTokenizer {
         state: TokenizerState,
         line_index: usize,
     ) -> CompactTokenizedLine {
-        self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, false)
+        self.tokenize_line_compact_at_line_inner(parse_text, state, line_index, false, &mut || {
+            false
+        })
+    }
+
+    /// `tokenize_line_shared_scopes_with`, polling `interrupt` between
+    /// matching steps and while resolving tokens for `sink` (each new scope
+    /// stack costs its depth, which a deeply nested line pays per token).
+    /// Once it returns true the line is abandoned and this returns `None`;
+    /// nothing is cached, though `sink` may have received some tokens.
+    pub(crate) fn tokenize_line_shared_scopes_interruptible_with(
+        &mut self,
+        parse_text: &str,
+        state: TokenizerState,
+        line_index: usize,
+        sink: &mut impl SharedScopeSink,
+        interrupt: &mut dyn FnMut() -> bool,
+    ) -> Option<TokenizerState> {
+        let compact = self
+            .tokenize_line_compact_at_line_inner(parse_text, state, line_index, false, interrupt);
+        if std::mem::take(&mut self.line_interrupted) {
+            return None;
+        }
+        sink.reserve(compact.tokens.len());
+        for (index, token) in compact.tokens.iter().enumerate() {
+            if index > 0 && index.is_multiple_of(INTERRUPT_POLL_STEPS) && interrupt() {
+                return None;
+            }
+            sink.push(
+                token.range.clone(),
+                token.stack,
+                self.resolve_scope_stack_cached(token.stack),
+            );
+        }
+        Some(compact.state)
     }
 
     fn tokenize_line_compact_at_line_inner(
@@ -3103,9 +3155,11 @@ impl TextMateTokenizer {
         mut state: TokenizerState,
         line_index: usize,
         force_degraded: bool,
+        interrupt: &mut dyn FnMut() -> bool,
     ) -> CompactTokenizedLine {
         let is_first_line = line_index == 0;
         self.line_degraded = false;
+        self.line_interrupted = false;
         self.record_line_tokenized();
         let parse_fingerprint = LineTextFingerprint::from_text(parse_text);
         let entry_state_id = self.intern_state(&state);
@@ -3193,7 +3247,6 @@ impl TextMateTokenizer {
         let line_entry_depth = state.depth();
         let mut frame_anchor_positions = Vec::new();
         let mut loop_candidates = None;
-        let mut zero_width_states = HashSet::new();
         let mut line_pushes = LinePushes::default();
         // End rules such as `$` are zero-width at the logical line end. Keep
         // evaluating while frames remain so line-scoped rules close even when
@@ -3202,6 +3255,12 @@ impl TextMateTokenizer {
             && steps < MAX_TOKENIZER_STEPS_PER_LINE
         {
             steps += 1;
+            // Often enough to stop a pathological line promptly, rarely
+            // enough that an ordinary line doesn't notice.
+            if steps.is_multiple_of(INTERRUPT_POLL_STEPS) && interrupt() {
+                self.line_interrupted = true;
+                break;
+            }
             if loop_candidates.is_none() {
                 loop_candidates = Some(self.cached_candidates_for_state(&state));
             }
@@ -3256,7 +3315,6 @@ impl TextMateTokenizer {
             }
 
             let depth_before = state.depth();
-            let stack_before = state.frames.interned_id();
             let zero_width_state_before =
                 (result_start == result_end && state_changes).then(|| state.clone());
             let zero_width_match_rule = result_start == result_end
@@ -3277,6 +3335,9 @@ impl TextMateTokenizer {
                 candidates.active_stack_id,
                 candidates.end_stack_id,
             );
+            let pops_frame_entered_here = state.depth() < depth_before
+                && result_end <= cursor
+                && line_pushes.top_entered_at(cursor);
             if line_pushes.repeats_push(&state, depth_before, cursor, result_end) {
                 // vscode-textmate stops the line when a begin rule that did
                 // not advance re-enters a rule already entered at this scan
@@ -3304,25 +3365,22 @@ impl TextMateTokenizer {
                 cursor = parse_text.len();
                 break;
             }
+            if pops_frame_entered_here {
+                // vscode-textmate stops the line when an end match without
+                // advancing pops a rule entered at this same scan position,
+                // keeping that rule on the stack. Rules entered at another
+                // position (or on an earlier line) pop normally, even when
+                // the resulting stack equals one seen before at this position.
+                if let Some(previous_state) = zero_width_state_before {
+                    state = previous_state;
+                }
+                let stack = self.current_scope_stack_id(&state, true, None);
+                self.push_token(&mut tokens, result_start..parse_text.len(), stack);
+                cursor = parse_text.len();
+                break;
+            }
             let zero_width_state_change =
                 next_cursor == result_start && state.depth() != depth_before;
-            if zero_width_state_change {
-                zero_width_states.insert((result_start, stack_before));
-                if !zero_width_states.insert((result_start, state.frames.interned_id())) {
-                    // A zero-width begin/end pair can return to an already
-                    // visited state without consuming input. vscode-textmate
-                    // stops on the state before the operation that completed
-                    // the cycle (for an immediate zero-width end, that means
-                    // retaining the frame it just tried to pop).
-                    if let Some(previous_state) = zero_width_state_before {
-                        state = previous_state;
-                    }
-                    let stack = self.current_scope_stack_id(&state, true, None);
-                    self.push_token(&mut tokens, result_start..parse_text.len(), stack);
-                    cursor = parse_text.len();
-                    break;
-                }
-            }
             cursor = if zero_width_state_change {
                 next_cursor
             } else if next_cursor <= result_start {
@@ -3335,6 +3393,16 @@ impl TextMateTokenizer {
             }
         }
 
+        if self.line_interrupted {
+            return CompactTokenizedLine {
+                degraded: false,
+                tokens: tokens.into(),
+                state,
+                entry_state_id,
+                exit_state_id: entry_state_id,
+                parse_fingerprint,
+            };
+        }
         if steps >= MAX_TOKENIZER_STEPS_PER_LINE && cursor < parse_text.len() {
             self.line_degraded = true;
             let stack = self.current_scope_stack_id(&state, true, None);
@@ -3733,6 +3801,14 @@ impl TextMateTokenizer {
             return (suppressed, None);
         }
         let mut anchor_pos = None;
+        // vscode-textmate allows `\G` in a while condition only at its anchor
+        // position: line start when the innermost frame's begin captured the
+        // end of line, then the end of each successful while match.
+        let mut g_anchor = state
+            .frames
+            .last()
+            .is_some_and(|frame| frame.begin_captured_eol)
+            .then_some(0);
         let mut while_frames = Vec::new();
         state.frames.for_each(|index, frame| {
             if frame.while_pattern.is_some() {
@@ -3746,7 +3822,11 @@ impl TextMateTokenizer {
             let Some(pattern) = frame.while_pattern.clone() else {
                 continue;
             };
-            let ctx = AnchorContext::continuation(*cursor);
+            let ctx = if g_anchor == Some(*cursor) {
+                AnchorContext::continuation(*cursor)
+            } else {
+                AnchorContext::line_start()
+            };
             let result = self.find_pattern(
                 &pattern,
                 frame
@@ -3757,9 +3837,14 @@ impl TextMateTokenizer {
                 ctx,
             );
             match result {
-                Some(result) if result.start == *cursor => {
+                // vscode-textmate searches for the while condition from the
+                // line position rather than anchoring it there; text it skips
+                // keeps the while rule's scopes. MDX block quotes continue on
+                // any later `>` with the unanchored `(>) ?`.
+                Some(result) => {
                     let frame_state = state.prefix(index + 1);
                     let stack = self.current_scope_stack_id(&frame_state, true, None);
+                    self.push_token(tokens, *cursor..result.start, stack);
                     self.emit_match(
                         tokens,
                         line,
@@ -3777,6 +3862,7 @@ impl TextMateTokenizer {
                     // match as the line-local `\G` anchor. Nested begin/end
                     // rules can rely on that anchor to close at line start.
                     anchor_pos = Some(result.end);
+                    g_anchor = Some(result.end);
                 }
                 _ => {
                     // A failed ancestor while condition also removes every
@@ -5520,14 +5606,13 @@ impl TextMateTokenizer {
                 );
                 let depth_before_pop = state.depth();
                 state.pop_frame();
+                // vscode-textmate restores the anchor position the popped
+                // frame was pushed with. Frames from earlier lines are reset
+                // to -1 at each line start, so `\G` cannot match after them.
                 *anchor_pos = if depth_before_pop > line_entry_depth {
                     frame_anchor_positions.pop().flatten()
                 } else {
-                    state
-                        .frames
-                        .last()
-                        .is_some_and(|frame| frame.begin_captured_eol)
-                        .then_some(0)
+                    None
                 };
                 consumed_end
             }
@@ -5731,10 +5816,11 @@ impl TextMateTokenizer {
         let mut cursor = range.start;
         let mut steps = 0usize;
         let mut fallback_steps = 0u64;
-        let mut anchor_pos = Some(range.start);
+        // vscode-textmate starts capture retokenization without a `\G`
+        // anchor; the capture start is not a search anchor.
+        let mut anchor_pos = None;
         let mut frame_anchor_positions = Vec::new();
         let mut line_pushes = LinePushes::default();
-        let mut zero_width_states = HashSet::new();
         // Capture retokenization is bounded by the capture. Let lookbehind see
         // the original prefix, but do not let a greedy child consume text
         // after the capture (for example the closing `]` after a TOML key).
@@ -5876,7 +5962,6 @@ impl TextMateTokenizer {
                 continue;
             }
             let depth_before = state.depth();
-            let stack_before = state.frames.interned_id();
             let zero_width_state_before = (result_start == result_end
                 && !matches!(candidate.kind, CandidateKind::Match { .. }))
             .then(|| state.clone());
@@ -5893,6 +5978,9 @@ impl TextMateTokenizer {
                 candidate_set.active_stack_id,
                 candidate_set.end_stack_id,
             );
+            let pops_frame_entered_here = state.depth() < depth_before
+                && result_end <= cursor
+                && line_pushes.top_entered_at(cursor);
             if line_pushes.repeats_push(&state, depth_before, cursor, result_end) {
                 if let Some(previous_state) = zero_width_state_before {
                     state = previous_state;
@@ -5910,19 +5998,18 @@ impl TextMateTokenizer {
                 self.push_token(tokens, result_start..range.end, stack);
                 return;
             }
+            if pops_frame_entered_here {
+                // See `tokenize_line`: a rule pushed and popped without
+                // advancing stays on the stack and stops tokenization.
+                if let Some(previous_state) = zero_width_state_before {
+                    state = previous_state;
+                }
+                let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
+                self.push_token(tokens, result_start..range.end, stack);
+                return;
+            }
             let zero_width_state_change =
                 next_cursor == result_start && state.depth() != depth_before;
-            if zero_width_state_change {
-                zero_width_states.insert((result_start, stack_before));
-                if !zero_width_states.insert((result_start, state.frames.interned_id())) {
-                    if let Some(previous_state) = zero_width_state_before {
-                        state = previous_state;
-                    }
-                    let stack = self.current_scope_stack_id(&state, true, Some(base_stack_id));
-                    self.push_token(tokens, result_start..range.end, stack);
-                    return;
-                }
-            }
             cursor = if zero_width_state_change {
                 next_cursor
             } else if next_cursor <= result_start {
@@ -7895,6 +7982,13 @@ fn fallback_call_budget(source_bytes: usize) -> u64 {
 struct LinePushes(Vec<(usize, GrammarId, RuleId)>);
 
 impl LinePushes {
+    /// Whether the innermost frame was pushed on this line at `position`.
+    fn top_entered_at(&self, position: usize) -> bool {
+        self.0
+            .last()
+            .is_some_and(|(entered, _, _)| *entered == position)
+    }
+
     /// Records the step that changed `state` from `depth_before` frames and
     /// reports whether it pushed, without advancing past `cursor`, a rule
     /// already entered at `cursor` (vscode-textmate's `hasSameRuleAs`).
@@ -10247,6 +10341,39 @@ mod tests {
     }
 
     #[test]
+    fn zero_width_reentry_after_popping_same_rule_keeps_new_frame() {
+        // Stylus declarations end at `;` and may begin again, zero-width,
+        // right after it; their `(?=\n)` end then fires at the same position.
+        // vscode-textmate keeps that newly entered frame (it was pushed and
+        // popped without advancing), even though the stack equals the one
+        // before the earlier `;` pop.
+        let grammar = r##"{
+            "scopeName": "source.decl-reentry",
+            "patterns": [{
+                "begin": "((?<=^)[^\\n\\S]+)|((?<=;)[^\\n\\S]*)",
+                "end": "(?=\\n)|(;)",
+                "name": "meta.decl.decl-reentry",
+                "patterns": [{
+                    "begin": "\\G\\s*(\\w+)(?=:)",
+                    "beginCaptures": {"1": {"name": "entity.prop.decl-reentry"}},
+                    "end": "(;)|(?=\\n)"
+                }]
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let first =
+            tokenizer.tokenize_line_scopes_at_line("  x: 1;\n", TokenizerState::default(), 0);
+        assert_eq!(first.state.depth(), 1, "{:#?}", first.state);
+        let second = tokenizer.tokenize_line_scopes_at_line("  y: 1;\n", first.state, 1);
+        assert!(line_has_scope(&second, "meta.decl.decl-reentry"));
+        assert!(
+            !line_has_scope(&second, "entity.prop.decl-reentry"),
+            "{:#?}",
+            second.tokens
+        );
+    }
+
+    #[test]
     fn zero_width_begin_end_cycle_stops_without_degrading_line() {
         let grammar = r##"{
             "scopeName": "source.zero-width-cycle",
@@ -10796,6 +10923,61 @@ mod tests {
     }
 
     #[test]
+    fn unanchored_while_condition_is_searched_from_line_start() {
+        let grammar = r##"{
+            "scopeName": "source.while-search",
+            "patterns": [{
+                "begin": "^>",
+                "while": "(>)",
+                "whileCaptures": {"1": {"name": "punctuation.quote.while-search"}},
+                "name": "markup.quote.while-search"
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let first =
+            tokenizer.tokenize_line_scopes_at_line("> quote\n", TokenizerState::default(), 0);
+        let second = tokenizer.tokenize_line_scopes_at_line("</div>\n", first.state, 1);
+
+        let skipped = &second.tokens[0];
+        assert_eq!(skipped.range, 0..5, "{:#?}", second.tokens);
+        assert!(
+            skipped
+                .scopes
+                .iter()
+                .any(|scope| scope == "markup.quote.while-search")
+        );
+        assert!(line_has_scope(&second, "punctuation.quote.while-search"));
+    }
+
+    #[test]
+    fn while_condition_g_anchor_requires_begin_to_capture_end_of_line() {
+        // Berry's f-string wrapper continues with `\G|^[\t ]*(?=["'])`. Its
+        // begin stops before the quote, so `\G` must not hold on the next
+        // line and the wrapper closes there.
+        let grammar = r##"{
+            "scopeName": "source.while-g-eol",
+            "patterns": [{
+                "begin": "f(?=\")",
+                "while": "\\G|^[\\t ]*(?=\")",
+                "patterns": [{"begin": "\"", "end": "\"", "name": "string.while-g-eol"}]
+            }, {
+                "match": "#.*",
+                "name": "comment.while-g-eol"
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let first =
+            tokenizer.tokenize_line_scopes_at_line("f\"x\"\n", TokenizerState::default(), 0);
+        let second = tokenizer.tokenize_line_scopes_at_line("# note\n", first.state, 1);
+
+        assert!(
+            line_has_scope(&second, "comment.while-g-eol"),
+            "{:#?}",
+            second.tokens
+        );
+    }
+
+    #[test]
     fn applies_capture_zero_scope() {
         let grammar = r##"{
             "scopeName": "source.fixture",
@@ -10843,6 +11025,36 @@ mod tests {
         assert!(tokenized.tokens.iter().all(|token| {
             line.is_char_boundary(token.range.start) && line.is_char_boundary(token.range.end)
         }));
+    }
+
+    #[test]
+    fn retokenized_capture_starts_without_g_anchor() {
+        // Swift classifies operators with capture patterns such as `\G=$`;
+        // vscode-textmate gives capture retokenization no `\G` anchor, so
+        // these fall through to the trailing `.+` rule.
+        let grammar = r##"{
+            "scopeName": "source.capture-g",
+            "patterns": [{
+                "match": "\\s(=)\\s",
+                "captures": {
+                    "1": {"patterns": [
+                        {"match": "\\G=$", "name": "keyword.operator.assignment.capture-g"},
+                        {"match": ".+", "name": "keyword.operator.custom.capture-g"}
+                    ]}
+                }
+            }]
+        }"##;
+        let mut tokenizer = TextMateTokenizer::from_grammar(grammar).unwrap();
+        let line = tokenizer.tokenize_line_scopes("a = b", TokenizerState::default());
+        assert!(
+            line_has_scope(&line, "keyword.operator.custom.capture-g"),
+            "{:#?}",
+            line.tokens
+        );
+        assert!(!line_has_scope(
+            &line,
+            "keyword.operator.assignment.capture-g"
+        ));
     }
 
     #[test]

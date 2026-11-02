@@ -568,10 +568,15 @@ fn symbol_variants(ast: &Ast, limit: usize) -> Option<Vec<String>> {
     match ast {
         Ast::Empty => Some(vec![String::new()]),
         Ast::Literal(literal) => Some(vec![literal.as_str().to_owned()]),
+        // Captures inside a branch would be lost by a symbol set.
         Ast::Group {
-            child, name: None, ..
-        }
-        | Ast::Flags { child, .. } => symbol_variants(child, limit),
+            child,
+            name: None,
+            index: None,
+        } => symbol_variants(child, limit),
+        // Variants are matched byte-for-byte, so a scoped `(?i:...)` cannot
+        // be expanded here.
+        Ast::Flags { flags, child } if !flags.case_insensitive => symbol_variants(child, limit),
         Ast::Class(class) if !class.negated && class.intersections.is_empty() => class
             .atoms
             .iter()
@@ -1203,7 +1208,7 @@ fn word_set_spec_from_concat<'a>(
     };
     let mut words = Vec::with_capacity(branches.len());
     for branch in branches {
-        let variants = word_variants(branch)?;
+        let variants = word_variants(branch, effective_flags.case_insensitive)?;
         for word in variants {
             if word.is_empty() || !word.bytes().all(is_ascii_word_byte) {
                 return None;
@@ -1302,18 +1307,25 @@ fn is_perl_space_class(ast: &Ast) -> bool {
         )
 }
 
-fn word_variants(ast: &Ast) -> Option<Vec<String>> {
+/// Words a set branch spells under the set-wide case mode. Capturing groups
+/// inside a branch and nested scopes with another case mode cannot be
+/// represented by a word set.
+fn word_variants(ast: &Ast, case_insensitive: bool) -> Option<Vec<String>> {
     match ast {
         Ast::Empty => Some(vec![String::new()]),
         Ast::Literal(literal) => Some(vec![literal.as_str().to_owned()]),
         Ast::Group {
-            child, name: None, ..
-        } => word_variants(child),
-        Ast::Flags { child, .. } => word_variants(child),
+            child,
+            name: None,
+            index: None,
+        } => word_variants(child, case_insensitive),
+        Ast::Flags { flags, child } if flags.case_insensitive == case_insensitive => {
+            word_variants(child, case_insensitive)
+        }
         Ast::Concat(nodes) => {
             let mut variants = vec![String::new()];
             for node in nodes {
-                let part = word_variants(node)?;
+                let part = word_variants(node, case_insensitive)?;
                 if variants.len().saturating_mul(part.len()) > 8 {
                     return None;
                 }
@@ -1338,7 +1350,7 @@ fn word_variants(ast: &Ast) -> Option<Vec<String>> {
             ..
         } => {
             let mut variants = vec![String::new()];
-            variants.extend(word_variants(node)?);
+            variants.extend(word_variants(node, case_insensitive)?);
             Some(variants)
         }
         _ => None,
@@ -3598,6 +3610,33 @@ mod tests {
         let result = matcher.find(" dashboard-face-7 ", 0, ctx()).unwrap();
         assert_eq!(result.start..result.end, 1..17);
         assert_eq!(result.captures, vec![Some(1..17)]);
+    }
+
+    #[test]
+    fn word_set_keeps_captures_inside_branches() {
+        // Fortran I/O keywords capture each alternative separately.
+        let pattern = r"(?i)\b(?:(backspace)|(endfile)|(format)|(print)|(read)|(rewind))\b";
+        let matcher = AutomataMatcher::new(pattern).unwrap();
+        assert!(!matches!(matcher.engine, NativeEngine::WordSet(_)));
+        let result = matcher.find("  FORMAT x", 0, ctx()).unwrap();
+        assert_eq!(result.captures[3], Some(2..8));
+        assert_eq!(result.captures[1], None);
+    }
+
+    #[test]
+    fn separator_bounded_scoped_case_insensitive_symbols_fold_case() {
+        // Batch-file command inventories wrap 300+ keywords in `(?i:...)`.
+        let symbols = (0..40)
+            .map(|index| format!("command{index}"))
+            .chain(["shift".to_owned()])
+            .collect::<Vec<_>>()
+            .join("|");
+        let pattern = format!(r"(?<=^|[@\s])(?i:{symbols})(?=$|\s)");
+        let matcher = AutomataMatcher::new(&pattern).unwrap();
+        assert!(!matches!(matcher.engine, NativeEngine::SymbolSet(_)));
+        for line in ["SHIFT", "Shift", "shift", "x COMMAND7 y"] {
+            assert!(matcher.find(line, 0, ctx()).is_some(), "{line:?}");
+        }
     }
 
     fn summarize_match((idx, result): (usize, MatchResult)) -> (usize, usize, usize) {
