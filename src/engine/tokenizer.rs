@@ -5538,14 +5538,13 @@ impl TextMateTokenizer {
                 );
                 let depth_before_pop = state.depth();
                 state.pop_frame();
+                // vscode-textmate restores the anchor position the popped
+                // frame was pushed with. Frames from earlier lines are reset
+                // to -1 at each line start, so `\G` cannot match after them.
                 *anchor_pos = if depth_before_pop > line_entry_depth {
                     frame_anchor_positions.pop().flatten()
                 } else {
-                    state
-                        .frames
-                        .last()
-                        .is_some_and(|frame| frame.begin_captured_eol)
-                        .then_some(0)
+                    None
                 };
                 consumed_end
             }

@@ -29,6 +29,10 @@ to 0 respectively.
   fixing Haxe single-quoted strings (and HXML macros).
 - Keep a zero-width rule re-entered after an earlier pop at the same position,
   matching vscode-textmate's loop guard (Stylus declarations after `;`).
+- Give `\G` no anchor after an end match pops a frame entered on an earlier
+  line: vscode-textmate resets anchors at each line. A YAML block scalar
+  (`end: ^(?=\S)|(?!\G)`) stayed open past its content, so the next key read
+  as `string.unquoted.block.yaml`.
 
 ## 0.2.1 - 2026-09-30
 

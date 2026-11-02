@@ -296,5 +296,40 @@
       "<xy>\n",
       "<x\n y>\n"
     ]
+  },
+  {
+    "name": "pop-of-earlier-line-frame-clears-continuation-anchor",
+    "grammars": [
+      {
+        "scopeName": "source.pop-anchor",
+        "patterns": [
+          {
+            "begin": "\\|\\n?",
+            "end": "^(?=\\S)|(?!\\G)",
+            "name": "meta.block",
+            "beginCaptures": {
+              "0": {
+                "name": "punctuation.begin"
+              }
+            },
+            "patterns": [
+              {
+                "begin": "^( +)(?! )",
+                "end": "^(?!\\1|\\s*$)",
+                "name": "string.block"
+              }
+            ]
+          },
+          {
+            "match": "\\w+",
+            "name": "entity.word"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      "a |\n    x\n  b\n",
+      "a |\n    x\n    y\nb\n"
+    ]
   }
 ]
