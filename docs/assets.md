@@ -56,7 +56,7 @@ Build from the same Syntaxmate version that consumes the bundle.
 Disable `bundled-grammars` to omit the embedded bundle entirely:
 
 ```toml
-syntaxmate = { version = "0.2", default-features = false }
+syntaxmate = { version = "0.3", default-features = false }
 ```
 
 ```rust,ignore

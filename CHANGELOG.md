@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-11-01
 
 Breaking: `Error::UnknownLanguage` and `Error::UnknownTheme` now carry an
 `UnknownName` instead of a `String`. It dereferences to the requested name and

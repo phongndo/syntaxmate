@@ -21,7 +21,7 @@ ANSI output, and no native Oniguruma dependency.
 
 ```toml
 [dependencies]
-syntaxmate = "0.2"
+syntaxmate = "0.3"
 ```
 
 ```rust
@@ -69,7 +69,7 @@ assert_eq!(token.range(), 0..3);
 # Ok::<(), syntaxmate::Error>(())
 ```
 
-See [Migrating from 0.1](CHANGELOG.md#migrating-from-01) for the upcoming 0.2 API changes.
+See the [changelog](CHANGELOG.md#030---2026-11-01) for the 0.3 migration note.
 
 ## Binary size
 
