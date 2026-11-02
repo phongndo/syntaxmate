@@ -542,6 +542,10 @@ struct Parser<'a> {
     diagnostics: Vec<String>,
     first_diagnostic_position: Option<usize>,
     depth: usize,
+    /// Set once a reversed interval (`{n,m}`, n > m) has been read; only
+    /// such patterns have their possessive repeats relaxed, leaving the
+    /// shapes that dedicated possessive fast paths recognize untouched.
+    reversed_interval: bool,
 }
 
 /// Bounds recursive-descent nesting so hostile grammar patterns cannot
@@ -569,6 +573,7 @@ impl<'a> Parser<'a> {
             diagnostics: Vec::new(),
             first_diagnostic_position: None,
             depth: 0,
+            reversed_interval: false,
         }
     }
 
@@ -582,6 +587,17 @@ impl<'a> Parser<'a> {
             let mut paths = BTreeMap::new();
             collect_group_paths(&ast, &mut Vec::new(), &mut paths);
             resolve_subroutine_paths(&mut ast, &self.named_captures, &paths);
+        }
+        // A subroutine call re-enters a group with a different continuation,
+        // so tails are only known to end the match without subroutines.
+        if self.features.possessive_or_atomic && !self.features.subroutine {
+            if self.reversed_interval {
+                relax_tail(&mut ast, TailRelaxation::Any);
+            }
+            relax_lookaround_tails(&mut ast, self.reversed_interval);
+            // Possessive repeats relaxed to greedy ones no longer need the
+            // backtracking-only engines.
+            self.features.possessive_or_atomic = has_possessive_or_atomic(&ast);
         }
         ParsedRegex {
             source: self.source.to_owned(),
@@ -657,6 +673,9 @@ impl<'a> Parser<'a> {
             }
             let node = self.parse_repeat();
             push_concat_node(&mut self.nodes, base, node);
+        }
+        if self.reversed_interval {
+            relax_disjoint_possessive_repeats(&mut self.nodes[base..]);
         }
         match self.nodes.len() - base {
             0 => Ast::Empty,
@@ -744,6 +763,23 @@ impl<'a> Parser<'a> {
             let Some((min, max, is_braced_exact)) = quantifier else {
                 break;
             };
+            // Oniguruma reads a reversed interval `{n,m}` (n > m) as the
+            // possessive `{m,n}`; a following `?` or `+` is another
+            // quantifier, not a modifier. C++ documentation comments rely on
+            // `^\s+{1,0}(//[!/]+)` matching at column zero.
+            if let Some(upper) = max.filter(|upper| *upper < min) {
+                node = Ast::Repeat {
+                    node: Box::new(node),
+                    min: upper,
+                    max: Some(min),
+                    greedy: true,
+                    possessive: true,
+                    atomic: false,
+                };
+                self.features.possessive_or_atomic = true;
+                self.reversed_interval = true;
+                continue;
+            }
             // Oniguruma keeps the historical Ruby interpretation of `{n}?`:
             // the exact repetition is optional (zero or exactly n copies),
             // rather than a lazily evaluated exact repetition. TextMate
@@ -1752,6 +1788,262 @@ fn alternation_ast(mut branches: Vec<Ast>) -> Ast {
     }
 }
 
+/// Possessive and greedy repeats differ only when giving characters back
+/// lets the continuation match. When the next sibling must begin with a
+/// character the repeated body can never consume, nothing given back can
+/// help, so the repeat is relaxed to its greedy form, which the automata
+/// engines accept.
+fn relax_disjoint_possessive_repeats(nodes: &mut [Ast]) {
+    for index in 1..nodes.len() {
+        let (before, after) = nodes.split_at_mut(index);
+        let Ast::Repeat {
+            node,
+            greedy: true,
+            possessive: possessive @ true,
+            atomic: false,
+            ..
+        } = &mut before[index - 1]
+        else {
+            continue;
+        };
+        if let (Some(consumed), Some(first)) = (consumed_chars(node), first_chars(&after[0]))
+            && consumed.is_disjoint(first)
+        {
+            *possessive = false;
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TailRelaxation {
+    /// Nothing follows the tail of a pattern or lookahead body, so its first
+    /// successful path is final either way: an atomic group or possessive
+    /// repeat there behaves like its plain form.
+    Any,
+    /// Oniguruma stops lookbehind consumption at the lookbehind position,
+    /// while the VM lets a possessive repeat run past it and then rejects the
+    /// overshoot. For a single-character body such as `\s*+`, the run capped
+    /// at that position reaches it exactly when the greedy form can end
+    /// there, so the greedy form is the faithful one.
+    SingleCharLookbehind,
+}
+
+fn relax_tail(ast: &mut Ast, mode: TailRelaxation) {
+    match ast {
+        Ast::Concat(nodes) => {
+            if let Some(last) = nodes.last_mut() {
+                relax_tail(last, mode);
+            }
+        }
+        Ast::Alternation(branches) => {
+            for branch in branches {
+                relax_tail(branch, mode);
+            }
+        }
+        Ast::Group { child, .. } | Ast::Flags { child, .. } => relax_tail(child, mode),
+        Ast::Repeat {
+            node,
+            min,
+            max,
+            greedy,
+            possessive,
+            atomic,
+        } => {
+            match mode {
+                TailRelaxation::Any if *atomic || (*possessive && *greedy) => {
+                    *possessive = false;
+                    *atomic = false;
+                }
+                TailRelaxation::SingleCharLookbehind
+                    if *possessive && *greedy && !*atomic && consumed_chars(node).is_some() =>
+                {
+                    *possessive = false;
+                }
+                _ => {}
+            }
+            // A single plain iteration's tail is the repeat's tail.
+            if *min == 1 && *max == Some(1) && !*atomic {
+                relax_tail(node, mode);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Relaxes lookbehind tails, and lookahead tails too when `lookahead`.
+fn relax_lookaround_tails(ast: &mut Ast, lookahead: bool) {
+    match ast {
+        Ast::Look { kind, child } => {
+            match kind {
+                LookKind::Behind | LookKind::NotBehind => {
+                    relax_tail(child, TailRelaxation::SingleCharLookbehind);
+                }
+                LookKind::Ahead | LookKind::NotAhead if lookahead => {
+                    relax_tail(child, TailRelaxation::Any);
+                }
+                LookKind::Ahead | LookKind::NotAhead => {}
+            }
+            relax_lookaround_tails(child, lookahead);
+        }
+        Ast::Concat(nodes) | Ast::Alternation(nodes) => {
+            for node in nodes {
+                relax_lookaround_tails(node, lookahead);
+            }
+        }
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => {
+            relax_lookaround_tails(matched, lookahead);
+            relax_lookaround_tails(unmatched, lookahead);
+        }
+        Ast::Repeat { node: child, .. } | Ast::Group { child, .. } | Ast::Flags { child, .. } => {
+            relax_lookaround_tails(child, lookahead)
+        }
+        _ => {}
+    }
+}
+
+fn has_possessive_or_atomic(ast: &Ast) -> bool {
+    match ast {
+        Ast::Repeat {
+            node,
+            possessive,
+            atomic,
+            ..
+        } => *possessive || *atomic || has_possessive_or_atomic(node),
+        Ast::Concat(nodes) | Ast::Alternation(nodes) => nodes.iter().any(has_possessive_or_atomic),
+        Ast::Conditional {
+            matched, unmatched, ..
+        } => has_possessive_or_atomic(matched) || has_possessive_or_atomic(unmatched),
+        Ast::Group { child, .. } | Ast::Look { child, .. } | Ast::Flags { child, .. } => {
+            has_possessive_or_atomic(child)
+        }
+        Ast::Empty
+        | Ast::Literal(_)
+        | Ast::Dot
+        | Ast::Grapheme
+        | Ast::Class(_)
+        | Ast::Anchor(_)
+        | Ast::Backref(_)
+        | Ast::Subroutine(_)
+        | Ast::Unsupported(_) => false,
+    }
+}
+
+/// Exact ASCII membership plus a conservative non-ASCII bit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CharSet {
+    ascii: u128,
+    non_ascii: bool,
+}
+
+impl CharSet {
+    fn from_predicate(predicate: impl Fn(char) -> bool) -> Self {
+        let ascii = (0u8..128)
+            .filter(|byte| predicate(char::from(*byte)))
+            .fold(0, |bits, byte| bits | 1u128 << byte);
+        Self {
+            ascii,
+            non_ascii: true,
+        }
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            ascii: self.ascii | other.ascii,
+            non_ascii: self.non_ascii || other.non_ascii,
+        }
+    }
+
+    fn is_disjoint(self, other: Self) -> bool {
+        self.ascii & other.ascii == 0 && !(self.non_ascii && other.non_ascii)
+    }
+}
+
+fn literal_chars(text: &str) -> CharSet {
+    text.chars().fold(CharSet::default(), |set, ch| {
+        if ch.is_ascii() {
+            CharSet {
+                ascii: set.ascii | 1u128 << ch as u32,
+                ..set
+            }
+        } else {
+            CharSet {
+                non_ascii: true,
+                ..set
+            }
+        }
+    })
+}
+
+/// Characters a possessive repeat body can consume, when every alternative
+/// path through the body ends no later than its first-choice path: a single
+/// character matcher, or an unbounded greedy repeat of one (such as `\s+`).
+/// Bodies such as `(?:a|ab)` can backtrack into a longer match and are
+/// rejected, as are case-folding scopes.
+fn consumed_chars(ast: &Ast) -> Option<CharSet> {
+    match ast {
+        Ast::Repeat {
+            node,
+            min: 0 | 1,
+            max: None,
+            greedy: true,
+            possessive: false,
+            atomic: false,
+        } => single_char_set(node),
+        Ast::Group { child, .. } => consumed_chars(child),
+        _ => single_char_set(ast),
+    }
+}
+
+fn single_char_set(ast: &Ast) -> Option<CharSet> {
+    match ast {
+        Ast::Literal(literal) => {
+            let mut chars = literal.as_str().chars();
+            let ch = chars.next()?;
+            chars
+                .next()
+                .is_none()
+                .then(|| literal_chars(ch.encode_utf8(&mut [0; 4])))
+        }
+        Ast::Class(class) => Some(CharSet::from_predicate(|ch| {
+            super::backtrack::class_contains(class, ch, RegexFlags::default())
+        })),
+        Ast::Group { child, .. } => single_char_set(child),
+        Ast::Flags { flags, child } if !flags.case_insensitive => single_char_set(child),
+        _ => None,
+    }
+}
+
+/// Characters a match of `ast` can begin with, or `None` when unknown or
+/// when `ast` may match without consuming a character.
+fn first_chars(ast: &Ast) -> Option<CharSet> {
+    match ast {
+        Ast::Literal(literal) => literal
+            .as_str()
+            .chars()
+            .next()
+            .map(|ch| literal_chars(ch.encode_utf8(&mut [0; 4]))),
+        Ast::Class(_) => single_char_set(ast),
+        // Directly after a given-back character, `$` and `\Z` hold only
+        // before a final newline and `\z` never holds.
+        Ast::Anchor(AnchorKind::LineEnd | AnchorKind::TextEndOrFinalNewline) => {
+            Some(literal_chars("\n"))
+        }
+        Ast::Anchor(AnchorKind::TextEnd) => Some(CharSet::default()),
+        Ast::Repeat { node, min, .. } if *min > 0 => first_chars(node),
+        Ast::Group { child, .. } => first_chars(child),
+        Ast::Flags { flags, child } if !flags.case_insensitive => first_chars(child),
+        Ast::Concat(nodes) => first_chars(nodes.first()?),
+        Ast::Alternation(branches) => {
+            branches.iter().try_fold(CharSet::default(), |set, branch| {
+                Some(set.union(first_chars(branch)?))
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Appends `node` to the sequence occupying `nodes[base..]`, coalescing
 /// adjacent literals (and adjacent literals under identical option
 /// snapshots) with the sequence's last node.
@@ -2179,6 +2471,62 @@ mod tests {
         assert_eq!(nodes.get(2), Some(&Ast::Literal("c".into())));
         assert!(matches!(nodes.get(3), Some(Ast::Group { .. })));
         assert_eq!(nodes.get(4), Some(&Ast::Literal("e".into())));
+    }
+
+    #[test]
+    fn parses_oniguruma_reversed_interval_as_possessive() {
+        let parsed = parse("a{3,1}?");
+        let Ast::Repeat {
+            node,
+            min: 0,
+            max: Some(1),
+            possessive: false,
+            ..
+        } = parsed.ast
+        else {
+            panic!(
+                "trailing `?` must be an optional quantifier: {:?}",
+                parsed.ast
+            );
+        };
+        assert!(matches!(
+            *node,
+            Ast::Repeat {
+                min: 1,
+                max: Some(3),
+                possessive: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn relaxes_possessive_repeats_only_when_giving_back_cannot_help() {
+        for pattern in [
+            r"^\s+{1,0}(//[!/]+)",
+            r"^ {3,0}-{3,}",
+            r"[a-c]{2,0}d",
+            r"\w{9,1}\.",
+            r"[ \t]{9,0}$",
+            r"%[^\r\n\t ]{2,0}",
+            r#"\\(?>x[^"]{2,0}|.)"#,
+            r"(?! {3,0}-{3,}[ \t]*+$)a",
+        ] {
+            assert!(!parse(pattern).features.possessive_or_atomic, "{pattern}");
+        }
+        // `(?:a|ab)` can backtrack into a longer match; `a*+a` and
+        // case-folding scopes overlap the continuation.
+        for pattern in [
+            r"(?:a|ab){1,0}c",
+            r"a{9,0}a",
+            r"(?i)a{9,0}A",
+            r"(?>a|ab)c{2,1}",
+            r"(a{9,0})\g<1>b",
+            // Ordinary possessive repeats keep their shape for fast paths.
+            r"[a-c]*+d",
+        ] {
+            assert!(parse(pattern).features.possessive_or_atomic, "{pattern}");
+        }
     }
 
     #[test]

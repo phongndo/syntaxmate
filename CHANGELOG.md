@@ -1,5 +1,35 @@
 # Changelog
 
+## Unreleased
+
+Scope-output fixes found by comparing 850 real-world files across 187
+languages, and the 264-language catalog-repeated corpus, against the pinned
+vscode-textmate oracle. Mismatched lines dropped from 87 to 0 and from 7,389
+to 0 respectively.
+
+- Read reversed regex intervals (`{n,m}` with n > m) as Oniguruma does: a
+  possessive `{m,n}`. They previously never matched, which lost C++ `///` doc
+  comments and left YAML front matter unclosed in Handlebars and MDC. Correct
+  front matter makes those two catalog fixtures about 3× and 1.6× slower,
+  because the rest of each file is now tokenized as HTML or Markdown instead of
+  being swallowed by YAML.
+- Keep case-insensitive `(?i:...)` keyword inventories case-insensitive on the
+  separator-bounded symbol-set fast path (Batch commands such as `SHIFT`).
+- Keep group captures inside word-bounded keyword alternatives (Fortran
+  `format`) and respect nested case scopes in word sets.
+- Stop lookbehind possessive repeats such as `(?<=^-{3,}\s*+)` from consuming
+  past the lookbehind position.
+- Allow `\G` in begin/while conditions only at vscode-textmate's anchor
+  position, closing Berry f-string continuations. While conditions now search
+  from the line position instead of requiring a match there, as in MDX block
+  quotes.
+- Start capture retokenization without a `\G` anchor, so Swift operators such
+  as `=` get vscode-textmate's `keyword.operator.custom.infix` scope.
+- Treat an empty `match` or `while` string as absent, as vscode-textmate does,
+  fixing Haxe single-quoted strings (and HXML macros).
+- Keep a zero-width rule re-entered after an earlier pop at the same position,
+  matching vscode-textmate's loop guard (Stylus declarations after `;`).
+
 ## 0.2.1 - 2026-09-30
 
 - Escape captured dynamic end/while delimiters like TextMate, including spaces,
