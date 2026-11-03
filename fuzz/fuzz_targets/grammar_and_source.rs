@@ -23,9 +23,11 @@ fuzz_target!(|data: &[u8]| {
     };
     if let Ok(mut tokenizer) = Tokenizer::new(&registry, root, options) {
         let document = tokenizer.tokenize(source);
+        // `tokenize_line` takes raw lines and drops one trailing `\r` itself.
+        let raw_lines = source.split('\n').collect::<Vec<_>>();
         // Logical lines: one `\r` at the end of a line is part of the terminator.
-        let source_lines = source
-            .split('\n')
+        let source_lines = raw_lines
+            .iter()
             .map(|line| line.strip_suffix('\r').unwrap_or(line))
             .collect::<Vec<_>>();
         assert_eq!(document.lines().len(), source_lines.len());
@@ -42,7 +44,7 @@ fuzz_target!(|data: &[u8]| {
 
         let mut state = tokenizer.initial_state();
         let mut replay_state = tokenizer.initial_state();
-        for (line_index, text) in source_lines.iter().enumerate() {
+        for (line_index, text) in raw_lines.iter().enumerate() {
             let incremental = tokenizer.tokenize_line(text, &mut state).unwrap();
             let replay = tokenizer.tokenize_line(text, &mut replay_state).unwrap();
             // Cache hits must preserve completion status as well as tokens:

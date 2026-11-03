@@ -118,7 +118,8 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
-          tarball="package/syntaxmate-${VERSION}.tgz"
+          # The ./ keeps npm from reading `package/x.tgz` as a GitHub shorthand.
+          tarball="./package/syntaxmate-${VERSION}.tgz"
           test -f "$tarball"
           if npm view "syntaxmate@${VERSION}" version >/dev/null 2>&1; then
             echo "syntaxmate@${VERSION} is already on npm"
